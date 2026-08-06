@@ -167,6 +167,18 @@ let reconnectFlushTimer: ReturnType<typeof setTimeout> | null = null;
 let reconnectFlushInFlight = false;
 const RECONNECT_FLUSH_DEBOUNCE_MS = 1500;
 
+/** After a pass syncs deps, chain another flush so dependent ops (TIME_ENTRY → RUN_COMPLETE → signatures) run without waiting for user action. */
+let chainFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const CHAIN_FLUSH_DELAY_MS = 100;
+
+function scheduleChainFlush(): void {
+  if (chainFlushTimer) clearTimeout(chainFlushTimer);
+  chainFlushTimer = setTimeout(() => {
+    chainFlushTimer = null;
+    void flushRef.current?.();
+  }, CHAIN_FLUSH_DELAY_MS);
+}
+
 function scheduleReconnectFlush(): void {
   if (reconnectFlushTimer) clearTimeout(reconnectFlushTimer);
   reconnectFlushTimer = setTimeout(() => {
@@ -907,6 +919,15 @@ export function useSyncEngine(): SyncState {
       window.dispatchEvent(new CustomEvent("sync-engine:flush-complete", {
         detail: { syncedAny, pendingRemaining, anyError },
       }));
+      if (
+        syncedAny
+        && pendingRemaining > 0
+        && hasNetworkSignal()
+        && connectivityRef.current !== "token-expired"
+        && !isOfflineModeActive()
+      ) {
+        scheduleChainFlush();
+      }
     }
   }, [refreshPending, setConnectivityState]);
 

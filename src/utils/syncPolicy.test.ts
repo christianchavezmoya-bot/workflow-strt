@@ -6,6 +6,10 @@ describe("getSyncOpTimeoutMs", () => {
     expect(getSyncOpTimeoutMs("SIGNATURE_SUBMIT")).toBe(RUN_MUTATION_TIMEOUT_MS);
   });
 
+  it("uses extended timeout for time-entry sync on slow links", () => {
+    expect(getSyncOpTimeoutMs("TIME_ENTRY")).toBe(RUN_MUTATION_TIMEOUT_MS);
+  });
+
   it("keeps default timeout for lightweight ops", () => {
     expect(getSyncOpTimeoutMs("ASSET_UPDATE")).toBe(10_000);
   });

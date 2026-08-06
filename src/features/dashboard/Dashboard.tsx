@@ -273,7 +273,14 @@ function myJobsCardHelperTextFromDisplayState(displayState: WorkflowDisplayState
   return displayState.status.label;
 }
 
-function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState): MyJobsCardAction {
+function compactNativeActionLabel(label: string): string {
+  if (label === "Add Missing Photos") return "Add Photos";
+  if (label === "Resolve Blocking Issue") return "Resolve Issue";
+  if (label.startsWith("Resolve ") && label.includes("Blocking Issues")) return "Resolve Issues";
+  return label;
+}
+
+function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState, compact = false): MyJobsCardAction {
   const actionKind = displayState.action?.kind ?? "run-details";
   const widgets = myJobsCardWidgetsFromDisplayState(displayState);
   const chip = myJobsCardChipFromDisplayState(displayState);
@@ -288,7 +295,9 @@ function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState): M
     actionKind: resolvedActionKind,
     chipLabel: chip.label,
     chipColor: chip.color,
-    buttonLabel: displayState.action?.label ?? "Run Details",
+    buttonLabel: compact
+      ? compactNativeActionLabel(displayState.action?.label ?? "Run Details")
+      : (displayState.action?.label ?? "Run Details"),
     buttonColor:
       actionKind === "add-missing-photos" || actionKind === "installer-sign" || actionKind === "customer-sign"
         ? "warning"
@@ -2150,7 +2159,7 @@ const Dashboard = () => {
             || !!nativeContext.asset.workflowTemplateId
             || !!nativeContext.asset.workflowSummary?.hasWorkflow,
         });
-        return myJobsCardActionFromDisplayState(displayState);
+        return myJobsCardActionFromDisplayState(displayState, true);
       }
     }
 
@@ -2181,7 +2190,7 @@ const Dashboard = () => {
         actionKind: "missing-media",
         chipLabel: "Missing captures",
         chipColor: "warning",
-        buttonLabel: "Add Missing Photos",
+        buttonLabel: isNativePlatform ? "Add Photos" : "Add Missing Photos",
         buttonColor: "warning",
         helperText: effectiveMissingCount > 0
           ? `${effectiveMissingCount} missing photo${effectiveMissingCount === 1 ? "" : "s"}`
@@ -2420,8 +2429,8 @@ const Dashboard = () => {
     try {
       const { assignments, runs, resolvedProductWorkflow } = await loadQuickActionContext(asset);
 
-      // Authoritative refresh in background — reconciles resume-vs-start without blocking UI.
-      void assetWorkflowRunService.listByAssetFresh(asset.id).catch(() => []);
+      // Reconcile resume-vs-start in background without blocking the tap path.
+      assetWorkflowRunService.refreshByAssetInBackground(asset.id);
 
       const attention = getQuickActionAttentionForAsset(asset, runs);
       if (attention.activeRun && !attention.activeRun.isLocked) {
@@ -2557,7 +2566,7 @@ const Dashboard = () => {
 
     if (quickActionAttention.missingMedia) {
       return {
-        label: "Add Missing Photos",
+        label: isNativePlatform ? "Add Photos" : "Add Missing Photos",
         color: "warning" as const,
         onClick: () => {
           setPhotoUploadMode("installer");
@@ -2577,7 +2586,7 @@ const Dashboard = () => {
 
     if (quickActionAttention.blockingIssues.length > 0) {
       return {
-        label: "Resolve Blocking Issue",
+        label: isNativePlatform ? "Resolve Issue" : "Resolve Blocking Issue",
         color: "error" as const,
         onClick: () => {
           closeQuickActionDialog();
@@ -2626,7 +2635,7 @@ const Dashboard = () => {
     }
 
     return null;
-  }, [openIssueRepair, openSignatureRepair, productWorkflow, quickActionAsset, quickActionAssignments, quickActionAttention, quickActionRuns]);
+  }, [isNativePlatform, openIssueRepair, openSignatureRepair, productWorkflow, quickActionAsset, quickActionAssignments, quickActionAttention, quickActionRuns]);
 
   function checkAssignmentThenStartFromDashboard(asset: QuickActionAsset, assignment?: WorkflowAssignment) {
     if (!asset.assignedUserId) {
@@ -5133,7 +5142,16 @@ const Dashboard = () => {
                                 }
                                 void openQuickActionOrStart(a);
                               }}
-                              sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}>
+                              sx={{
+                                alignSelf: "flex-start",
+                                height: 22,
+                                fontSize: "0.68rem",
+                                py: 0,
+                                maxWidth: isNativePlatform ? "100%" : undefined,
+                                whiteSpace: "nowrap",
+                                overflow: "hidden",
+                                textOverflow: "ellipsis",
+                              }}>
                               {cardAction.buttonLabel}
                             </Button>
                           </Stack>
@@ -6227,8 +6245,8 @@ const Dashboard = () => {
                     variant="contained"
                     color={quickActionPrimaryAction.color}
                     startIcon={
-                      quickActionPrimaryAction.label === "Resolve Blocking Issue" ? <WarningAmberOutlined fontSize="small" /> :
-                      quickActionPrimaryAction.label === "Add Missing Photos" ? <PhotoCameraOutlined fontSize="small" /> :
+                      quickActionPrimaryAction.label === "Resolve Blocking Issue" || quickActionPrimaryAction.label === "Resolve Issue" ? <WarningAmberOutlined fontSize="small" /> :
+                      quickActionPrimaryAction.label === "Add Missing Photos" || quickActionPrimaryAction.label === "Add Photos" ? <PhotoCameraOutlined fontSize="small" /> :
                       quickActionPrimaryAction.label === "Complete Sign-off" ? <PendingActionsOutlined fontSize="small" /> :
                       quickActionPrimaryAction.label === "Review High Observation" ? <ReportOutlined fontSize="small" /> :
                       <PlayArrowOutlined fontSize="small" />
