@@ -1413,7 +1413,9 @@ public record PendingSignatureDto(
     string CustomerName,
     string CompletedAt,
     string CompletedBy,
-    string SignatureStatus
+    string SignatureStatus,
+    string? CustomerLinkSentAt,
+    string? ProjectTimeZoneId
 );
 
 /// <summary>

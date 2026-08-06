@@ -2260,13 +2260,27 @@ public class AssetWorkflowRunsController : ControllerBase
             var projects = await _db.Projects
                 .AsNoTracking()
                 .Where(p => projectIds.Contains(p.Id))
-                .Select(p => new { p.Id, p.JobNumber, p.CustomerName })
+                .Select(p => new { p.Id, p.JobNumber, p.CustomerName, p.TimeZoneId })
                 .ToListAsync();
+
+            var pendingCustomerRunIds = runs
+                .Where(r => string.Equals(r.SignatureStatus, "PendingCustomer", StringComparison.OrdinalIgnoreCase))
+                .Select(r => r.Id)
+                .ToList();
+            var customerLinkSentByRun = pendingCustomerRunIds.Count == 0
+                ? new Dictionary<string, DateTime>()
+                : await _db.SignatureTokens
+                    .AsNoTracking()
+                    .Where(t => pendingCustomerRunIds.Contains(t.RunId) && !t.IsRevoked)
+                    .GroupBy(t => t.RunId)
+                    .Select(g => new { RunId = g.Key, SentAt = g.Max(t => t.CreatedAtUtc) })
+                    .ToDictionaryAsync(x => x.RunId, x => x.SentAt);
 
             var result = runs.Select(r =>
             {
                 var asset   = assets.FirstOrDefault(a => a.Id == r.AssetId);
                 var project = asset is null ? null : projects.FirstOrDefault(p => p.Id == asset.ProjectId);
+                customerLinkSentByRun.TryGetValue(r.Id, out var linkSentAt);
                 return new PendingSignatureDto(
                     RunId:        r.Id,
                     AssetId:      r.AssetId,
@@ -2277,7 +2291,9 @@ public class AssetWorkflowRunsController : ControllerBase
                     CustomerName: project?.CustomerName ?? "",
                     CompletedAt:  r.CompletedAt?.ToString("O") ?? "",
                     CompletedBy:  r.CompletedByName ?? "",
-                    SignatureStatus: r.SignatureStatus ?? "None"
+                    SignatureStatus: r.SignatureStatus ?? "None",
+                    CustomerLinkSentAt: linkSentAt == default ? null : linkSentAt.ToString("O"),
+                    ProjectTimeZoneId: project?.TimeZoneId
                 );
             });
 
