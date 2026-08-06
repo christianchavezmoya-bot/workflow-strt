@@ -28,7 +28,7 @@ import type { SignatureEvent } from "../../types/signature";
 import { projectContactService } from "../../services/projectContactService";
 import { resolvePublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import type { ProjectContact } from "../../types/projectContact";
-import { formatInstant } from "../../utils/datetime";
+import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
 import {
   Alert,
   Box,
@@ -218,6 +218,33 @@ function formatStepResultValue(input?: StepInput, captureLabel?: string, inputId
   return value;
 }
 
+function RunHistorySection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <Paper variant="outlined" sx={{ p: 1.5, bgcolor: "rgba(255,255,255,0.02)" }}>
+      <Typography
+        variant="caption"
+        fontWeight={700}
+        color="text.secondary"
+        sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}
+      >
+        {title}
+      </Typography>
+      {children}
+    </Paper>
+  );
+}
+
+function formatSiteInstant(iso: string | null | undefined, timeZoneId?: string | null): string {
+  if (!iso) return "—";
+  return formatInstant(iso, timeZoneId, { withZone: true });
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function WorkflowRunHistoryDialog({
@@ -240,7 +267,7 @@ export default function WorkflowRunHistoryDialog({
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
   const fetchedTimeZone = useProjectTimeZone(asset.projectId);
-  const resolvedTimeZone = fetchedTimeZone ?? project?.timeZoneId;
+  const resolvedTimeZone = fetchedTimeZone ?? resolveReportTimeZone(project);
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
   const [loading, setLoading] = useState(false);
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
@@ -603,11 +630,11 @@ export default function WorkflowRunHistoryDialog({
                   <Box key={run.id}>
                     {idx > 0 && <Divider />}
 
-                    {/* ── Run summary row ── */}
+                    {/* ── Run header (click to expand) ── */}
                     <Stack
-                      direction={isPhone ? "column" : "row"}
-                      alignItems={isPhone ? "stretch" : "center"}
-                      spacing={1.5}
+                      direction="row"
+                      alignItems="center"
+                      spacing={1}
                       sx={{
                         px: isPhone ? 1.5 : 3,
                         py: 1.25,
@@ -616,301 +643,227 @@ export default function WorkflowRunHistoryDialog({
                       }}
                       onClick={() => setExpandedRunId(isExpanded ? null : run.id)}
                     >
-                      <Stack direction="row" spacing={1} alignItems="flex-start" sx={{ width: "100%" }}>
-                        <IconButton size="small" sx={{ flexShrink: 0, mt: isPhone ? 0.25 : 0 }}>
-                          {isExpanded ? (
-                            <ExpandLessOutlined fontSize="small" />
-                          ) : (
-                            <ExpandMoreOutlined fontSize="small" />
-                          )}
-                        </IconButton>
-
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
-                            <Typography variant="body2" fontWeight={700}>
-                              Run #{run.runNumber ?? idx + 1}
-                            </Typography>
-                            <Typography variant="caption" color="text.disabled">
-                              v{run.workflowVersion}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary">
-                              {formatInstant(run.startedAt, resolvedTimeZone, { withZone: true })}
-                            </Typography>
-                            {run.completedByName && (
-                              <Typography variant="caption" color="text.secondary">
-                                {isPhone ? `Completed by ${run.completedByName}` : `· Completed by ${run.completedByName}`}
-                              </Typography>
-                            )}
-                            {signatureActionBlocked && (
-                              <Chip
-                                size="small"
-                                label={`Superseded by Run #${latestRunNumber}`}
-                                color="default"
-                                variant="outlined"
-                                sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.6 } }}
-                              />
-                            )}
-                          </Stack>
-                          <Stack
-                            direction="row"
-                            alignItems="center"
-                            spacing={0.75}
-                            mt={0.5}
-                            flexWrap="wrap"
-                            useFlexGap
-                          >
-                            <Typography variant="caption" color="text.secondary">
-                              {stepResults.length} step
-                              {stepResults.length !== 1 ? "s" : ""} captured
-                            </Typography>
-                            <Chip
-                              size="small"
-                              label={`Productive ${formatDuration(run.productiveSeconds)}`}
-                              color="success"
-                              variant="outlined"
-                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
-                            />
-                            <Chip
-                              size="small"
-                              label={`Downtime ${formatDuration(run.downtimeSeconds)}`}
-                              color={run.downtimeSeconds > 0 ? "warning" : "default"}
-                              variant="outlined"
-                              sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
-                            />
-                            {openIssues > 0 && (
-                              <Chip
-                                size="small"
-                                icon={
-                                  <ReportProblemOutlined
-                                    sx={{ fontSize: "0.75rem !important" }}
-                                  />
-                                }
-                                label={`${openIssues} issue${openIssues !== 1 ? "s" : ""}`}
-                                color="error"
-                                variant="outlined"
-                                sx={{
-                                  height: 18,
-                                  fontSize: 10,
-                                  "& .MuiChip-label": { px: 0.5 },
-                                }}
-                              />
-                            )}
-                            {missingMedia > 0 && (
-                              <Chip
-                                size="small"
-                                icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
-                                label={`${missingMedia} missing items`}
-                                color="warning"
-                                variant="outlined"
-                                sx={{ height: 18, fontSize: 10, "& .MuiChip-label": { px: 0.5 } }}
-                              />
-                            )}
-                          </Stack>
-                        </Box>
-                      </Stack>
-
-                      <Stack
-                        direction={isPhone ? "column" : "row"}
-                        alignItems={isPhone ? "stretch" : "center"}
-                        spacing={0.75}
-                        useFlexGap
-                        flexWrap="wrap"
-                        sx={{ flexShrink: 0, width: isPhone ? "100%" : "auto", pl: isPhone ? 5 : 0 }}
-                      >
-                        <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
-                          <Chip
-                            size="small"
-                            label={run.status === "InProgress" ? "In Progress" : run.status}
-                            color={STATUS_COLOR[run.status] ?? "default"}
-                            icon={
-                              (STATUS_ICON[run.status] as React.ReactElement) ?? undefined
-                            }
-                          />
-                          {run.isLocked && (
-                            <SignatureBadge status={run.signatureStatus ?? "None"} />
-                          )}
-                          {run.isLocked && (
-                            <Tooltip title="Run is locked (completed)">
-                              <LockOutlined
-                                sx={{ fontSize: "0.9rem", color: "text.secondary" }}
-                              />
-                            </Tooltip>
-                          )}
-                        </Stack>
-                        <Stack
-                          direction="row"
-                          spacing={0.75}
-                          useFlexGap
-                          flexWrap="wrap"
-                          alignItems="center"
-                          sx={{ width: isPhone ? "100%" : "auto" }}
-                        >
-                        <Tooltip title={canEditRun(run, user.role).time ? "Edit / correct time entries" : "View time entries"}>
-                          <IconButton
-                            size="small"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setTimeEditorRun(run);
-                            }}
-                          >
-                            <AccessTimeOutlined fontSize="small" />
-                          </IconButton>
-                        </Tooltip>
-                        {run.isLocked && (
-                          <Tooltip title="Download standard PDF report (completed steps only)">
-                            <IconButton
-                              size="small"
-                              disabled={reportGenerating === run.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleDownloadReport(run, false);
-                              }}
-                            >
-                              {reportGenerating === run.id
-                                ? <CircularProgress size={14} />
-                                : <DownloadOutlined fontSize="small" />}
-                            </IconButton>
-                          </Tooltip>
+                      <IconButton size="small" sx={{ flexShrink: 0 }}>
+                        {isExpanded ? (
+                          <ExpandLessOutlined fontSize="small" />
+                        ) : (
+                          <ExpandMoreOutlined fontSize="small" />
                         )}
-                        <Chip
-                          size="small"
-                          label={run.status === "InProgress" ? "In Progress" : run.status}
-                          color={STATUS_COLOR[run.status] ?? "default"}
-                          icon={
-                            (STATUS_ICON[run.status] as React.ReactElement) ?? undefined
-                          }
-                        />
-                        {run.isLocked && (
-                          <SignatureBadge status={run.signatureStatus ?? "None"} />
-                        )}
-                        {run.isLocked && missingMedia > 0 && onAddMissingMedia && (
-                          <Tooltip title={`Add missing photos or videos (${missingMedia} missing item${missingMedia === 1 ? "" : "s"})`}>
-                            <Button
-                              size="small"
-                              variant="outlined"
-                              color="warning"
-                              startIcon={<PhotoCameraOutlined />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onAddMissingMedia(run);
-                              }}
-                              sx={{ py: 0, minHeight: 30, width: isPhone ? "100%" : "auto" }}
-                            >
-                              Add Missing Photos
-                            </Button>
-                          </Tooltip>
-                        )}
-                        {run.isLocked && run.signatureStatus === "PendingInstaller" && (
-                          <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : "Sign as installer"}>
-                            <span>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="primary"
-                                startIcon={<DrawOutlined />}
-                                disabled={signatureActionBlocked}
-                                onClick={(e) => { e.stopPropagation(); setSignDialogRun(run); }}
-                                sx={{ py: 0, minHeight: 30, width: isPhone ? "100%" : "auto" }}
-                              >
-                                Sign
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {run.isLocked && run.signatureStatus === "PendingCustomer" && (
-                          <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : !canRequestCustomerSignature ? "Only an Admin or Project Manager can request a customer signature by email" : "Generate secure link for customer signature"}>
-                            <span>
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="info"
-                                startIcon={<LinkOutlined />}
-                                disabled={signatureActionBlocked}
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  void openTokenDialog(run);
-                                }}
-                                sx={{ py: 0, minHeight: 30, width: isPhone ? "100%" : "auto" }}
-                              >
-                                Send to customer
-                              </Button>
-                            </span>
-                          </Tooltip>
-                        )}
-                        {!run.isLocked && run.status === "InProgress" && onContinue && (
-                          <Tooltip title="Resume this run">
-                            <Button
-                              size="small"
-                              variant="contained"
-                              color="primary"
-                              startIcon={<PlayArrowOutlined />}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                onContinue(run);
-                                onClose();
-                              }}
-                              sx={{ ml: isPhone ? 0 : 0.5, width: isPhone ? "100%" : "auto" }}
-                            >
-                              Resume Run
-                            </Button>
-                          </Tooltip>
-                        )}
-                        </Stack>
-                      </Stack>
+                      </IconButton>
+                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                        <Typography variant="body2" fontWeight={700} noWrap>
+                          Run #{run.runNumber ?? idx + 1}
+                          <Typography component="span" variant="caption" color="text.disabled" sx={{ ml: 0.75 }}>
+                            v{run.workflowVersion}
+                          </Typography>
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" display="block" noWrap>
+                          {formatSiteInstant(run.startedAt, resolvedTimeZone)}
+                          {run.completedByName ? ` · ${run.completedByName}` : ""}
+                          {` · ${stepResults.length} step${stepResults.length !== 1 ? "s" : ""}`}
+                        </Typography>
+                      </Box>
                     </Stack>
 
-                    {/* ── Expanded details ── */}
+                    {/* ── Expanded panels ── */}
                     <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-                      <Box sx={{ px: isPhone ? 2 : 4, pb: 2, bgcolor: "rgba(255,255,255,0.02)" }}>
+                      <Stack spacing={1.25} sx={{ px: isPhone ? 1.5 : 3, pb: 2, pt: 0.5 }}>
                         {signatureActionBlocked && (
-                          <Alert severity="info" sx={{ mt: 1.25, mb: 1.5 }}>
+                          <Alert severity="info">
                             This run has been superseded by Run #{latestRunNumber}. Signature actions are disabled for this older run.
                           </Alert>
                         )}
-                        {/* Download report CTA inside expanded section */}
-                        {run.isLocked && (
-                          <Stack
-                            direction={isPhone ? "column" : "row"}
-                            spacing={1}
-                            sx={{ mt: 1.25, mb: 1.5 }}
-                            flexWrap="wrap"
-                            useFlexGap
-                          >
-                            <Tooltip title="Completed steps only">
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
-                                disabled={reportGenerating === run.id}
-                                onClick={() => void handleDownloadReport(run, false)}
-                                fullWidth={isPhone}
-                              >
-                                {reportGenerating === run.id ? "Generating…" : "Standard Report"}
-                              </Button>
-                            </Tooltip>
-                            <Tooltip title="All workflow steps including uncompleted ones">
-                              <Button
-                                size="small"
-                                variant="outlined"
-                                color="secondary"
-                                startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
-                                disabled={reportGenerating === run.id}
-                                onClick={() => void handleDownloadReport(run, true)}
-                                fullWidth={isPhone}
-                              >
-                                Full Report (all steps)
-                              </Button>
-                            </Tooltip>
+
+                        <RunHistorySection title="Overview">
+                          <Stack spacing={0.75}>
+                            <Typography variant="body2">
+                              <Typography component="span" variant="caption" color="text.secondary">Started: </Typography>
+                              {formatSiteInstant(run.startedAt, resolvedTimeZone)}
+                            </Typography>
+                            {run.completedAt && (
+                              <Typography variant="body2">
+                                <Typography component="span" variant="caption" color="text.secondary">Completed: </Typography>
+                                {formatSiteInstant(run.completedAt, resolvedTimeZone)}
+                              </Typography>
+                            )}
+                            {run.completedByName && (
+                              <Typography variant="body2">
+                                <Typography component="span" variant="caption" color="text.secondary">Completed by: </Typography>
+                                {run.completedByName}
+                              </Typography>
+                            )}
+                            <Typography variant="body2">
+                              <Typography component="span" variant="caption" color="text.secondary">Steps captured: </Typography>
+                              {stepResults.length}
+                            </Typography>
+                            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                              {openIssues > 0 && (
+                                <Chip
+                                  size="small"
+                                  icon={<ReportProblemOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                  label={`${openIssues} open issue${openIssues !== 1 ? "s" : ""}`}
+                                  color="error"
+                                  variant="outlined"
+                                />
+                              )}
+                              {missingMedia > 0 && (
+                                <Chip
+                                  size="small"
+                                  icon={<WarningAmberOutlined sx={{ fontSize: "0.75rem !important" }} />}
+                                  label={`${missingMedia} missing item${missingMedia !== 1 ? "s" : ""}`}
+                                  color="warning"
+                                  variant="outlined"
+                                />
+                              )}
+                              {signatureActionBlocked && (
+                                <Chip
+                                  size="small"
+                                  label={`Superseded by Run #${latestRunNumber}`}
+                                  variant="outlined"
+                                />
+                              )}
+                            </Stack>
+                            {issues.length > 0 && (
+                              <Box sx={{ mt: 1 }}>
+                                <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ display: "block", mb: 0.75 }}>
+                                  Issues ({openIssues} open)
+                                </Typography>
+                                <Stack spacing={0.5}>
+                                  {issues.map((issue) => (
+                                    <Stack
+                                      key={issue.id}
+                                      direction="row"
+                                      alignItems="flex-start"
+                                      spacing={1}
+                                      sx={{
+                                        p: 0.75,
+                                        borderRadius: 1,
+                                        border: "1px solid",
+                                        borderColor: "divider",
+                                        opacity: issue.resolved ? 0.5 : 1,
+                                        bgcolor: issue.isBlocking && !issue.resolved ? "rgba(244,67,54,0.04)" : undefined,
+                                      }}
+                                    >
+                                      <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: SEVERITY_COLOR[issue.severity] ?? "#999", mt: 0.6, flexShrink: 0 }} />
+                                      <Box sx={{ flex: 1, minWidth: 0 }}>
+                                        <Stack direction="row" alignItems="center" spacing={0.5}>
+                                          <Typography variant="caption" sx={{ textDecoration: issue.resolved ? "line-through" : "none" }}>
+                                            {issue.description}
+                                          </Typography>
+                                          {issue.isBlocking && (
+                                            <Chip size="small" label="Blocking" color="error" sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.4 } }} />
+                                          )}
+                                        </Stack>
+                                        {issue.stepTitle && (
+                                          <Typography variant="caption" color="text.secondary" display="block">Step: {issue.stepTitle}</Typography>
+                                        )}
+                                        <Typography variant="caption" color="text.disabled" display="block">
+                                          {formatSiteInstant(issue.reportedAt, resolvedTimeZone)} · {issue.severity}
+                                          {issue.resolved ? " · resolved" : ""}
+                                        </Typography>
+                                      </Box>
+                                    </Stack>
+                                  ))}
+                                </Stack>
+                              </Box>
+                            )}
                           </Stack>
-                        )}
+                        </RunHistorySection>
 
-                        <Stack direction="row" spacing={1} sx={{ mb: 1.25 }} useFlexGap flexWrap="wrap">
-                          <Chip size="small" color="success" variant="outlined" label={`Productive: ${formatDuration(run.productiveSeconds)}`} />
-                          <Chip size="small" color={run.downtimeSeconds > 0 ? "warning" : "default"} variant="outlined" label={`Downtime: ${formatDuration(run.downtimeSeconds)}`} />
-                          <Chip size="small" variant="outlined" label={`Downtime events: ${run.downtimeEvents ?? 0}`} />
-                        </Stack>
+                        <RunHistorySection title="Actions / Status">
+                          <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
+                            <Chip
+                              size="small"
+                              label={run.status === "InProgress" ? "In Progress" : run.status}
+                              color={STATUS_COLOR[run.status] ?? "default"}
+                              icon={(STATUS_ICON[run.status] as React.ReactElement) ?? undefined}
+                            />
+                            {run.isLocked && (
+                              <SignatureBadge status={run.signatureStatus ?? "None"} />
+                            )}
+                            {run.isLocked && (
+                              <Tooltip title="Run is locked (completed)">
+                                <LockOutlined sx={{ fontSize: "0.9rem", color: "text.secondary" }} />
+                              </Tooltip>
+                            )}
+                            {run.isLocked && missingMedia > 0 && onAddMissingMedia && (
+                              <Button
+                                size="small"
+                                variant="outlined"
+                                color="warning"
+                                startIcon={<PhotoCameraOutlined />}
+                                onClick={() => onAddMissingMedia(run)}
+                                sx={{ py: 0, minHeight: 30 }}
+                              >
+                                Add Missing Photos
+                              </Button>
+                            )}
+                            {run.isLocked && run.signatureStatus === "PendingInstaller" && (
+                              <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : "Sign as installer"}>
+                                <span>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="primary"
+                                    startIcon={<DrawOutlined />}
+                                    disabled={signatureActionBlocked}
+                                    onClick={() => setSignDialogRun(run)}
+                                    sx={{ py: 0, minHeight: 30 }}
+                                  >
+                                    Sign
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            )}
+                            {run.isLocked && run.signatureStatus === "PendingCustomer" && (
+                              <Tooltip title={signatureActionBlocked ? `Run superseded by Run #${latestRunNumber}` : !canRequestCustomerSignature ? "Only an Admin or Project Manager can request a customer signature by email" : "Generate secure link for customer signature"}>
+                                <span>
+                                  <Button
+                                    size="small"
+                                    variant="outlined"
+                                    color="info"
+                                    startIcon={<LinkOutlined />}
+                                    disabled={signatureActionBlocked}
+                                    onClick={() => { void openTokenDialog(run); }}
+                                    sx={{ py: 0, minHeight: 30 }}
+                                  >
+                                    Send to customer
+                                  </Button>
+                                </span>
+                              </Tooltip>
+                            )}
+                            {!run.isLocked && run.status === "InProgress" && onContinue && (
+                              <Button
+                                size="small"
+                                variant="contained"
+                                color="primary"
+                                startIcon={<PlayArrowOutlined />}
+                                onClick={() => { onContinue(run); onClose(); }}
+                              >
+                                Resume Run
+                              </Button>
+                            )}
+                          </Stack>
+                        </RunHistorySection>
 
-                        {/* Downtime event breakdown */}
+                        <RunHistorySection title="Time tracker">
+                          <Stack spacing={1}>
+                            <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap" alignItems="center">
+                              <Chip size="small" color="success" variant="outlined" label={`Productive: ${formatDuration(run.productiveSeconds)}`} />
+                              <Chip size="small" color={run.downtimeSeconds > 0 ? "warning" : "default"} variant="outlined" label={`Downtime: ${formatDuration(run.downtimeSeconds)}`} />
+                              <Chip size="small" variant="outlined" label={`Downtime events: ${run.downtimeEvents ?? 0}`} />
+                              <Tooltip title={canEditRun(run, user.role).time ? "Edit / correct time entries" : "View time entries"}>
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={<AccessTimeOutlined />}
+                                  onClick={() => setTimeEditorRun(run)}
+                                  sx={{ py: 0, minHeight: 30 }}
+                                >
+                                  Adjust time
+                                </Button>
+                              </Tooltip>
+                            </Stack>
                         {(() => {
                           const entries = parseTimeEntries(run.timeTrackingJson ?? "[]");
                           const downtimeEntries = entries.filter((e) => e.category === "downtime");
@@ -996,6 +949,45 @@ export default function WorkflowRunHistoryDialog({
                             </>
                           );
                         })()}
+                          </Stack>
+                        </RunHistorySection>
+
+                        <RunHistorySection title="Reports">
+                          {run.isLocked && (
+                            <Stack
+                              direction={isPhone ? "column" : "row"}
+                              spacing={1}
+                              sx={{ mb: 1.25 }}
+                              flexWrap="wrap"
+                              useFlexGap
+                            >
+                              <Tooltip title="Completed steps only">
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
+                                  disabled={reportGenerating === run.id}
+                                  onClick={() => void handleDownloadReport(run, false)}
+                                  fullWidth={isPhone}
+                                >
+                                  {reportGenerating === run.id ? "Generating…" : "Standard Report"}
+                                </Button>
+                              </Tooltip>
+                              <Tooltip title="All workflow steps including uncompleted ones">
+                                <Button
+                                  size="small"
+                                  variant="outlined"
+                                  color="secondary"
+                                  startIcon={reportGenerating === run.id ? <CircularProgress size={13} /> : <DownloadOutlined />}
+                                  disabled={reportGenerating === run.id}
+                                  onClick={() => void handleDownloadReport(run, true)}
+                                  fullWidth={isPhone}
+                                >
+                                  Full Report (all steps)
+                                </Button>
+                              </Tooltip>
+                            </Stack>
+                          )}
 
                         {/* Step results */}
                         {stepResults.length > 0 ? (
@@ -1213,106 +1205,8 @@ export default function WorkflowRunHistoryDialog({
                           </Typography>
                         )}
 
-                        {/* Issues */}
-                        {issues.length > 0 && (
-                          <>
-                            <Typography
-                              variant="caption"
-                              fontWeight={700}
-                              color="text.secondary"
-                              sx={{
-                                textTransform: "uppercase",
-                                letterSpacing: 0.5,
-                                display: "block",
-                                mb: 0.75,
-                              }}
-                            >
-                              Issues ({openIssues} open)
-                            </Typography>
-                            <Stack spacing={0.5}>
-                              {issues.map((issue) => (
-                                <Stack
-                                  key={issue.id}
-                                  direction="row"
-                                  alignItems="flex-start"
-                                  spacing={1}
-                                  sx={{
-                                    p: 0.75,
-                                    borderRadius: 1,
-                                    border: "1px solid",
-                                    borderColor: "divider",
-                                    opacity: issue.resolved ? 0.5 : 1,
-                                    bgcolor:
-                                      issue.isBlocking && !issue.resolved
-                                        ? "rgba(244,67,54,0.04)"
-                                        : undefined,
-                                  }}
-                                >
-                                  <Box
-                                    sx={{
-                                      width: 7,
-                                      height: 7,
-                                      borderRadius: "50%",
-                                      bgcolor:
-                                        SEVERITY_COLOR[issue.severity] ?? "#999",
-                                      mt: 0.6,
-                                      flexShrink: 0,
-                                    }}
-                                  />
-                                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                                    <Stack
-                                      direction="row"
-                                      alignItems="center"
-                                      spacing={0.5}
-                                    >
-                                      <Typography
-                                        variant="caption"
-                                        sx={{
-                                          textDecoration: issue.resolved
-                                            ? "line-through"
-                                            : "none",
-                                        }}
-                                      >
-                                        {issue.description}
-                                      </Typography>
-                                      {issue.isBlocking && (
-                                        <Chip
-                                          size="small"
-                                          label="Blocking"
-                                          color="error"
-                                          sx={{
-                                            height: 14,
-                                            fontSize: 9,
-                                            "& .MuiChip-label": { px: 0.4 },
-                                          }}
-                                        />
-                                      )}
-                                    </Stack>
-                                    {issue.stepTitle && (
-                                      <Typography
-                                        variant="caption"
-                                        color="text.secondary"
-                                        display="block"
-                                      >
-                                        Step: {issue.stepTitle}
-                                      </Typography>
-                                    )}
-                                    <Typography
-                                      variant="caption"
-                                      color="text.disabled"
-                                      display="block"
-                                    >
-                                      {formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: true })} ·{" "}
-                                      {issue.severity}
-                                      {issue.resolved ? " · resolved" : ""}
-                                    </Typography>
-                                  </Box>
-                                </Stack>
-                              ))}
-                            </Stack>
-                          </>
-                        )}
-                      </Box>
+                        </RunHistorySection>
+                      </Stack>
                     </Collapse>
                   </Box>
                 );

@@ -55,6 +55,8 @@ export interface PendingSignatureRecord {
   completedAt:  string;
   completedBy:  string;
   signatureStatus: string;
+  customerLinkSentAt?: string | null;
+  projectTimeZoneId?: string | null;
 }
 
 export interface OpenIssueRecord {

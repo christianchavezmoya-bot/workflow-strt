@@ -3,7 +3,7 @@ import {
   IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
-  AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CloseOutlined,
+  AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CheckCircleOutlined, CloseOutlined,
   EditOutlined, ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
   FactCheckOutlined, FolderOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
   PhotoCameraOutlined, PlayArrowOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
@@ -25,6 +25,7 @@ import { officesService } from "../../services/officesService";
 import {
   assetWorkflowRunService,
   isAssetSignatureStatusFinalized,
+  isPendingCustomerSignature,
   isPendingInstallerSignature,
   type OpenIssueRecord,
   type PendingSignatureRecord,
@@ -54,6 +55,7 @@ import {
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
+import { formatInstant } from "../../utils/datetime";
 import { randomId } from "../../utils/randomId";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
@@ -3325,11 +3327,15 @@ const Dashboard = () => {
     sub,
     onClick,
     actionLabel,
+    customerLinkSentAt,
+    projectTimeZoneId,
   }: {
     label: string;
     sub?: string;
     onClick: () => void;
     actionLabel?: string;
+    customerLinkSentAt?: string | null;
+    projectTimeZoneId?: string | null;
   }) => (
     <Stack
       direction="row"
@@ -3349,13 +3355,26 @@ const Dashboard = () => {
         {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
       </Box>
       {actionLabel && (
-        <Chip
-          label={actionLabel}
-          size="small"
-          color="info"
-          variant="outlined"
-          sx={{ height: 18, fontSize: "0.6rem", flexShrink: 0 }}
-        />
+        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+          {customerLinkSentAt && (
+            <Tooltip
+              title={`Link sent ${formatInstant(customerLinkSentAt, projectTimeZoneId, { withZone: true })}`}
+              arrow
+            >
+              <CheckCircleOutlined
+                sx={{ fontSize: 16, color: "success.main" }}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Tooltip>
+          )}
+          <Chip
+            label={actionLabel}
+            size="small"
+            color="info"
+            variant="outlined"
+            sx={{ height: 18, fontSize: "0.6rem" }}
+          />
+        </Stack>
       )}
     </Stack>
   );
@@ -3463,6 +3482,9 @@ const Dashboard = () => {
                     label={`${s.jobNumber}: ${s.assetTag}`}
                     sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                     actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                    {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
+                      ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
+                      : {})}
                     onClick={() => openSignatureRepair(s)} />
                 ))}
                 {myInspectionPendingSigs.length > 3 && (
@@ -3637,6 +3659,9 @@ const Dashboard = () => {
                             : `${s.jobNumber}: ${s.assetTag}`}
                           sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                           actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                          {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
+                            ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
+                            : {})}
                           onClick={() => openSignatureRepair(s)} />
                 ))}
                 {visiblePendingSigs.length > 4 && (
@@ -5333,6 +5358,9 @@ const Dashboard = () => {
                           label={`${s.jobNumber}: ${s.assetTag}`}
                           sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                           actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                          {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
+                            ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
+                            : {})}
                           onClick={() => openSignatureRepair(s)} />
                       ))}
                       {myInstallPendingSigs.length > 3 && (
@@ -5540,6 +5568,9 @@ const Dashboard = () => {
                         label={`${s.jobNumber}: ${s.assetTag}`}
                         sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                         actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                        {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
+                          ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
+                          : {})}
                         onClick={() => openSignatureRepair(s)} />
                     ))}
                     {myInstallPendingSigs.length > 5 && (
