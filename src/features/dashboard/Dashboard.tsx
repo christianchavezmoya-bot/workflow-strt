@@ -537,6 +537,7 @@ const Dashboard = () => {
     runId?: string;
     source: "asset" | "run";
   } | null>(null);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [resolvingDashboardIssueId, setResolvingDashboardIssueId] = useState<string | null>(null);
   // Per-asset, not a shared boolean: with one flag every "View" button in Job
   // History span and disabled at once, so pressing one row looked like the app
@@ -1722,6 +1723,22 @@ const Dashboard = () => {
     }
   }, [navigate, projects, user.fullName]);
 
+  function issueFromOpenRecord(record: OpenIssueRecord): AssetIssue | RunIssue {
+    return {
+      id: record.issueId,
+      description: record.description,
+      issueType: record.issueType,
+      severity: record.severity,
+      isBlocking: record.isBlocking,
+      reportedAt: record.reportedAt,
+      createdBy: record.createdBy ?? undefined,
+      stepTitle: record.stepTitle ?? undefined,
+      resolved: false,
+      reportMedia: [],
+      resolutionMedia: [],
+    };
+  }
+
   const openIssueRepair = useCallback(async (issue: OpenIssueRecord) => {
     setQuickActionOpen(false);
 
@@ -1730,49 +1747,47 @@ const Dashboard = () => {
       if (asset) {
         let issues: AssetIssue[] = [];
         try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
-        const matchedIssue = issues.find((item) => item.id === issue.issueId);
-        if (matchedIssue) {
-          setIssueDetailTarget({
-            issue: matchedIssue,
-            assetId: asset.id,
-            source: "asset",
-          });
-          return;
-        }
+        const matchedIssue = issues.find((item) => item.id === issue.issueId) ?? issueFromOpenRecord(issue) as AssetIssue;
+        setIssueDetailTarget({
+          issue: matchedIssue,
+          assetId: asset.id,
+          source: "asset",
+        });
+        return;
       }
     }
 
     if (issue.source === "run") {
-      const run = await assetWorkflowRunService.getById(issue.runId);
+      const run = await assetWorkflowRunService.getByIdLocalFirst(issue.runId)
+        ?? await assetWorkflowRunService.getById(issue.runId);
       if (run) {
         let issues: RunIssue[] = [];
         try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
-        const matchedIssue = issues.find((item) => item.id === issue.issueId);
-        if (matchedIssue) {
-          setIssueDetailTarget({
-            issue: matchedIssue,
-            assetId: issue.assetId,
-            runId: run.id,
-            source: "run",
-          });
-          return;
-        }
+        const matchedIssue = issues.find((item) => item.id === issue.issueId) ?? issueFromOpenRecord(issue) as RunIssue;
+        setIssueDetailTarget({
+          issue: matchedIssue,
+          assetId: issue.assetId,
+          runId: run.id,
+          source: "run",
+        });
+        return;
       }
     }
 
-    navigate(buildAssetRepairPath({
-      projectId: issue.projectId,
+    // Last resort: open dialog from the attention index alone (offline when entity
+    // blob is missing but the issue row was bootstrapped into IndexedDB).
+    setIssueDetailTarget({
+      issue: issueFromOpenRecord(issue),
       assetId: issue.assetId,
-      action: "issue",
-      runId: issue.runId,
-      issueId: issue.issueId,
-      issueSource: issue.source,
-    }));
-  }, [buildAssetRepairPath, navigate]);
+      runId: issue.source === "run" ? issue.runId : undefined,
+      source: issue.source,
+    });
+  }, []);
 
   const handleDashboardIssueSave = useCallback(async (updatedIssue: AssetIssue | RunIssue) => {
     if (!issueDetailTarget) return;
     const shouldCloseDialog = Boolean(updatedIssue.resolved);
+    const openIssuesBeforeClose = openIssues;
     if (shouldCloseDialog) {
       setResolvingDashboardIssueId(updatedIssue.id);
       setOpenIssues((prev) => prev.filter((issue) => issue.issueId !== updatedIssue.id));
@@ -1781,11 +1796,16 @@ const Dashboard = () => {
     try {
       if (issueDetailTarget.source === "asset") {
         const asset = await projectAssetService.getById(issueDetailTarget.assetId);
-        if (!asset) return;
         let issues: AssetIssue[] = [];
-        try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
-        issues = issues.map((item) => item.id === updatedIssue.id ? updatedIssue as AssetIssue : item);
-        const refreshedAsset = await projectAssetService.patchIssues(asset.id, JSON.stringify(issues));
+        if (asset) {
+          try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
+        }
+        if (issues.some((item) => item.id === updatedIssue.id)) {
+          issues = issues.map((item) => item.id === updatedIssue.id ? updatedIssue as AssetIssue : item);
+        } else {
+          issues = [...issues, updatedIssue as AssetIssue];
+        }
+        const refreshedAsset = await projectAssetService.patchIssues(issueDetailTarget.assetId, JSON.stringify(issues));
         let refreshedIssues: AssetIssue[] = [];
         try { refreshedIssues = JSON.parse(refreshedAsset.issuesJson || "[]"); } catch {}
         const refreshedIssue = refreshedIssues.find((item) => item.id === updatedIssue.id);
@@ -1797,11 +1817,17 @@ const Dashboard = () => {
           });
         }
       } else if (issueDetailTarget.runId) {
-        const run = await assetWorkflowRunService.getById(issueDetailTarget.runId);
-        if (!run) return;
+        const run = await assetWorkflowRunService.getByIdLocalFirst(issueDetailTarget.runId)
+          ?? await assetWorkflowRunService.getById(issueDetailTarget.runId);
         let issues: RunIssue[] = [];
-        try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
-        issues = issues.map((item) => item.id === updatedIssue.id ? updatedIssue as RunIssue : item);
+        if (run) {
+          try { issues = JSON.parse(run.issuesJson || "[]"); } catch {}
+        }
+        if (issues.some((item) => item.id === updatedIssue.id)) {
+          issues = issues.map((item) => item.id === updatedIssue.id ? updatedIssue as RunIssue : item);
+        } else {
+          issues = [...issues, updatedIssue as RunIssue];
+        }
         const refreshedRun = await assetWorkflowRunService.patchIssues(issueDetailTarget.runId, JSON.stringify(issues));
         let refreshedIssues: RunIssue[] = [];
         try { refreshedIssues = JSON.parse(refreshedRun.issuesJson || "[]"); } catch {}
@@ -1820,12 +1846,18 @@ const Dashboard = () => {
       if (shouldCloseDialog) {
         setIssueDetailTarget(null);
       }
+    } catch (err) {
+      if (shouldCloseDialog) {
+        setOpenIssues(openIssuesBeforeClose);
+      }
+      setDashboardError(err instanceof Error ? err.message : "Failed to save issue. Try again when back online.");
+      throw err;
     } finally {
       if (shouldCloseDialog) {
         setResolvingDashboardIssueId(null);
       }
     }
-  }, [issueDetailTarget, refreshDashboardAfterIssueUpdate]);
+  }, [issueDetailTarget, openIssues, refreshDashboardAfterIssueUpdate]);
 
   const openSignatureRepair = useCallback((sig: PendingSignatureRecord) => {
     navigate(buildAssetRepairPath({
@@ -2059,7 +2091,6 @@ const Dashboard = () => {
   // Surfaced when a take-over/self-assign fails to persist (see
   // confirmAutoAssignAndStartFromDashboard) — the run is deliberately NOT started in
   // that case, so the user must be told rather than left with a silently-missing job.
-  const [dashboardError, setDashboardError] = useState<string | null>(null);
   // Inspection import dialog
   const [importDialogAsset, setImportDialogAsset] = useState<{ id: string; assetTag?: string; assetName?: string; projectId: string } | null>(null);
   // Inspection import dialog open state

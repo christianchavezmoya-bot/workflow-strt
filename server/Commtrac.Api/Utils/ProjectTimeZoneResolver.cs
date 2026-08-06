@@ -86,6 +86,15 @@ public static class ProjectTimeZoneResolver
         if (c.Contains("singapore")) return "Asia/Singapore";
         if (c.Contains("japan")) return "Asia/Tokyo";
         if (c.Contains("new zealand")) return "Pacific/Auckland";
+        if (c.Contains("canada") || c == "ca")
+        {
+            if (RegexMatch(s, @"(pacific|bc|british columbia|yukon)")) return "America/Vancouver";
+            if (RegexMatch(s, @"(mountain|ab|alberta)")) return "America/Edmonton";
+            if (RegexMatch(s, @"(central|mb|manitoba|sk|saskatchewan)")) return "America/Winnipeg";
+            if (RegexMatch(s, @"(atlantic|nb|new brunswick|ns|nova scotia|pe|prince edward)")) return "America/Halifax";
+            if (RegexMatch(s, @"(newfoundland|nl|labrador)")) return "America/St_Johns";
+            return "America/Toronto";
+        }
 
         return null;
     }

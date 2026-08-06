@@ -934,7 +934,17 @@ const AssetInstallationPage = () => {
     if (deepLinkHandledRef.current === key) return;
 
     const asset = assets.find((item) => item.id === assetIdFromUrl);
-    if (!asset) return;
+    if (!asset) {
+      void projectAssetService.getById(assetIdFromUrl).then((fetched) => {
+        if (!fetched) return;
+        setAssets((prev) => (prev.some((item) => item.id === fetched.id) ? prev : [...prev, fetched]));
+        const projectIdFromUrl = searchParams.get("project");
+        if (projectIdFromUrl && selectedProjectId !== projectIdFromUrl) {
+          handleProjectChange(projectIdFromUrl);
+        }
+      });
+      return;
+    }
 
     setExpandedAssetId(asset.id);
 
@@ -2698,20 +2708,16 @@ const AssetInstallationPage = () => {
     issues = issues.map((i) => i.id === updatedIssue.id ? updatedIssue : i);
     const issuesJson = JSON.stringify(issues);
     try {
-      const updated = await projectAssetService.update(issueDetailAsset.id, { issuesJson });
+      const updated = await projectAssetService.patchIssues(issueDetailAsset.id, issuesJson);
       setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
-      // Keep the dialog open with refreshed asset so the user sees the saved state
       setIssueDetailAsset(updated);
-    } catch {
-      const optimisticAsset = { ...issueDetailAsset, issuesJson };
-      setAssets((prev) => prev.map((a) => (a.id === issueDetailAsset.id ? optimisticAsset : a)));
-      setIssueDetailAsset(optimisticAsset);
-      if (isMobileNativePlatform()) {
-        await entityReplaceIssuesForAsset(optimisticAsset.id, deriveOpenIssuesFromAsset(optimisticAsset));
-        window.dispatchEvent(new Event("repo:issues:updated"));
+      if (updatedIssue.resolved) {
+        setIssueDetailIssueId(null);
+        setIssueDetailAsset(null);
       }
-      window.dispatchEvent(new Event("notifications:run-state-changed"));
-      window.dispatchEvent(new Event("notifications:refresh"));
+    } catch (err) {
+      console.error("[AssetInstallationPage] Failed to save asset issue", err);
+      alert(err instanceof Error ? err.message : "Failed to save issue offline.");
     }
   }
 
@@ -5806,7 +5812,18 @@ ${words.slice(midpoint).join(" ")}`;
           Select a project above to view assets, or choose &quot;All projects&quot; to browse every product.
         </Alert>
       ) : assetLoadError && assets.length === 0 ? (
-        null
+        <Alert
+          severity="warning"
+          action={
+            <Button color="inherit" size="small" onClick={() => { setAssetLoadError(null); void refreshAssets(); }}>
+              Retry
+            </Button>
+          }
+        >
+          {isNativePlatform
+            ? "Could not load assets — you may be offline. Open this project once while online, or pull down to refresh."
+            : assetLoadError}
+        </Alert>
       ) : mobileAssets.length === 0 ? (
         <Alert severity="info">
           {assets.length === 0

@@ -290,7 +290,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   const issues      = parseIssues(run.issuesJson);
   const openIssues  = issues.filter((i) => !i.resolved);
 
-  const generated = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  const generated = formatInstant(new Date().toISOString(), reportTz, { time: false, withZone: false });
 
   // â”€â”€ Footer helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   function drawFooter(pageNum: number) {

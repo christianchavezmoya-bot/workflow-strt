@@ -262,6 +262,9 @@ export default function WorkOrderRunner({
   const [values, setValues] = useState<Record<string, Record<string, string>>>(prefillValues ?? {});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [minimized, setMinimized] = useState(false);
+  const sheetDragStartY = useRef(0);
+  const [sheetDragOffset, setSheetDragOffset] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [validationDialogOpen, setValidationDialogOpen] = useState(false);
   const [validationDialogMode, setValidationDialogMode] = useState<ValidationDialogMode>("blocking");
@@ -316,11 +319,37 @@ export default function WorkOrderRunner({
       .catch(() => {});
   }, [open, productId]);
 
+  useEffect(() => {
+    if (!open) {
+      setMinimized(false);
+      setSheetDragOffset(0);
+    }
+  }, [open]);
+
   // Run tracking
   const { user } = useAuth();
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
   const [activeRun, setActiveRun] = useState<AssetWorkflowRun | null>(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+
+  function handleSheetTouchStart(clientY: number) {
+    if (!isMobileNativePlatform() || !activeRunId || stage !== "running") return;
+    sheetDragStartY.current = clientY;
+  }
+
+  function handleSheetTouchMove(clientY: number) {
+    if (!isMobileNativePlatform() || !activeRunId || stage !== "running") return;
+    const delta = clientY - sheetDragStartY.current;
+    if (delta > 0) setSheetDragOffset(Math.min(delta, 160));
+  }
+
+  function handleSheetTouchEnd() {
+    if (sheetDragOffset > 72) {
+      setMinimized(true);
+    }
+    setSheetDragOffset(0);
+  }
+
   const runEditPerms = useMemo(
     () => (activeRun && user ? canEditRun(activeRun, user.role) : { time: true, data: true, finalized: false }),
     [activeRun, user],
@@ -1688,6 +1717,19 @@ export default function WorkOrderRunner({
 
     return (
       <>
+        {isMobileNativePlatform() && activeRunId && (
+          <Box
+            sx={{ pt: 0.75, display: "flex", flexDirection: "column", alignItems: "center", gap: 0.25 }}
+            onTouchStart={(e) => handleSheetTouchStart(e.touches[0]?.clientY ?? 0)}
+            onTouchMove={(e) => handleSheetTouchMove(e.touches[0]?.clientY ?? 0)}
+            onTouchEnd={handleSheetTouchEnd}
+          >
+            <Box sx={{ width: 36, height: 4, borderRadius: 99, bgcolor: "action.disabled" }} />
+            <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem" }}>
+              Swipe down to minimize
+            </Typography>
+          </Box>
+        )}
         <DialogTitle>
           <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
             <Typography variant="subtitle1" fontWeight={600}>
@@ -3334,7 +3376,19 @@ export default function WorkOrderRunner({
 
   return (
     <>
-      <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth PaperProps={{ sx: { maxHeight: "90vh" } }}>
+      <Dialog
+        open={open && !minimized}
+        onClose={handleClose}
+        maxWidth="sm"
+        fullWidth
+        PaperProps={{
+          sx: {
+            maxHeight: "90vh",
+            transform: sheetDragOffset > 0 ? `translateY(${sheetDragOffset}px)` : undefined,
+            transition: sheetDragOffset > 0 ? "none" : "transform 0.18s ease-out",
+          },
+        }}
+      >
         {stage === "setup"          && renderSetup()}
         {stage === "running"        && renderRunning()}
         {stage === "summary"        && renderSummary()}
@@ -3368,6 +3422,42 @@ export default function WorkOrderRunner({
           </Box>
         )}
       </Dialog>
+      {open && minimized && isMobileNativePlatform() && (
+        <Box
+          role="button"
+          tabIndex={0}
+          onClick={() => setMinimized(false)}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setMinimized(false); }}
+          sx={{
+            position: "fixed",
+            left: 12,
+            right: 12,
+            bottom: 72,
+            zIndex: (theme) => theme.zIndex.modal + 2,
+            px: 1.5,
+            py: 1,
+            borderRadius: 2,
+            border: "1px solid",
+            borderColor: "primary.main",
+            bgcolor: "background.paper",
+            boxShadow: 6,
+            display: "flex",
+            alignItems: "center",
+            gap: 1,
+            cursor: "pointer",
+          }}
+        >
+          <PlayArrowOutlined color="primary" fontSize="small" />
+          <Box sx={{ minWidth: 0, flex: 1 }}>
+            <Typography variant="body2" fontWeight={700} noWrap>
+              {assetTag ? `${assetTag} · Run in progress` : "Run in progress"}
+            </Typography>
+            <Typography variant="caption" color="text.secondary" noWrap>
+              Tap to resume — run stays active
+            </Typography>
+          </Box>
+        </Box>
+      )}
       {issueForDetail && (
         <IssueDetailDialog
           open={Boolean(issueDetailId)}
