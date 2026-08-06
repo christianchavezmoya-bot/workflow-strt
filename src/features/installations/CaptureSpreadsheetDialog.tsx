@@ -142,7 +142,12 @@ function solidFieldHeaderBg(group: ProjectCaptureGroup): string {
 function loadHiddenGroups(): Set<string> {
   try {
     const raw = localStorage.getItem(LS_HIDDEN_KEY);
-    if (raw) return new Set(JSON.parse(raw) as string[]);
+    if (raw) {
+      const keys = (JSON.parse(raw) as string[]).filter(
+        (key) => key !== "asset-job:dateCreated" && key !== "asset-job:dateClosed",
+      );
+      return new Set(keys);
+    }
   } catch {
     // ignore
   }

@@ -1,4 +1,5 @@
 import { isMobileNativePlatform } from "../utils/platform";
+import { isOfflineModeActive } from "./offlineModeState";
 import { secureGet } from "./secureStorage";
 import { waitForActiveUploadDrain } from "./bootstrapUploadGate";
 import { syncMetaGet, syncMetaSet, CACHE_SOFT_LIMIT_MS } from "./localDB";
@@ -181,6 +182,7 @@ export const offlineBootstrapService = {
   async runAfterUploadDrain(options?: BootstrapRunOptions): Promise<void> {
     if (!isMobileNativePlatform()) return;
     if (_running) return;
+    if (isOfflineModeActive()) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
     await waitForActiveUploadDrain();
     if (_running) return;
@@ -194,6 +196,7 @@ export const offlineBootstrapService = {
   async run(options?: BootstrapRunOptions): Promise<void> {
     if (!isMobileNativePlatform()) return;
     if (_running) return;
+    if (isOfflineModeActive()) return;
     if (typeof navigator !== "undefined" && !navigator.onLine) return;
 
     const scope = options?.scope ?? "all";

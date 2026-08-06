@@ -75,6 +75,7 @@ import {
 } from "../utils/syncDiagnostics";
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { markOfflinePerf } from "../utils/offlinePerf";
+import { isOfflineModeActive } from "../services/offlineModeState";
 import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
 import {
   fromWorkInstructionDto,
@@ -619,9 +620,7 @@ export function useSyncEngine(): SyncState {
   const flush = useCallback(async () => {
     const conn = connectivityRef.current;
     if (_flushing || conn === "token-expired") return;
-    // Allow flush when the device has radio — don't block on a stale
-    // server-unreachable flag from a background read or health ping.
-    if (!hasNetworkSignal()) return;
+    if (isOfflineModeActive() || !hasNetworkSignal()) return;
 
     _flushing = true;
     setSyncFlushing(true);
@@ -1174,12 +1173,12 @@ export function useSyncEngine(): SyncState {
   }, []);
 
   // ── Derived status ────────────────────────────────────────────────────────
-  const isOnline = connectivity !== "offline";
+  const isOnline = connectivity !== "offline" && !isOfflineModeActive();
 
   const status: SyncStatus =
-    connectivity === "offline" || connectivity === "server-unreachable" ? "offline" :
+    connectivity === "offline" || connectivity === "server-unreachable" || isOfflineModeActive() ? "offline" :
     connectivity === "token-expired" ? "error" :
-    syncing    ? "syncing"  :
+    syncing && isOnline ? "syncing"  :
     conflicts > 0 || hasError ? "error"    :
     pending > 0 ? "pending"  :
                   "synced";

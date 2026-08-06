@@ -410,7 +410,6 @@ const Topbar = () => {
                 flexShrink: 0,
               }}
             />
-            <DiagnosticClockBar variant="compact" officeOnly />
           </Stack>
         ) : (
           <>

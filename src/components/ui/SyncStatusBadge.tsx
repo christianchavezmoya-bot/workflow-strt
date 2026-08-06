@@ -21,6 +21,7 @@ import {
 } from "@mui/icons-material";
 
 import { useCallback, useEffect, useState } from "react";
+import { isOfflineModeActive } from "../../services/offlineModeState";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { pendingGetByEntityId } from "../../services/localDB";
 import SyncCenterPage from "../../features/sync/SyncCenterPage";
@@ -52,7 +53,7 @@ export default function SyncStatusBadge() {
       );
     }
 
-    if (status === "syncing") {
+    if (status === "syncing" && !isOfflineModeActive()) {
       return (
         <Stack direction="row" alignItems="center" spacing={0.5}>
           <CircularProgress size={11} thickness={5} />

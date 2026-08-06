@@ -8,6 +8,7 @@ import {
   CheckBoxOutlineBlankOutlined,
   CheckBoxOutlined,
   CheckCircleOutlined,
+  CloseOutlined,
   DeleteForeverOutlined,
   DeleteOutline,
   DrawOutlined,
@@ -218,8 +219,9 @@ const CONFIGURABLE_COLUMNS: ColumnDef[] = [
 ];
 
 const DEFAULT_COL_ORDER = CONFIGURABLE_COLUMNS.map((c) => c.id);
-const LS_COL_KEY = "asset_installation_columns_v1";
+const LS_COL_KEY = "asset_installation_columns_v2";
 const CAPTURE_HIDDEN_GROUPS_KEY = "capture_spreadsheet_hidden_groups_v1";
+const FORCE_VISIBLE_COL_IDS = ["dateCreated", "dateClosed"] as const;
 const ARCHIVE_COL_IDS = ["serialNumber", "assetModel", "manufacturer", "project", "siteName", "configType", "status"];
 
 function loadColumnConfig(): { order: string[]; hidden: string[] } {
@@ -232,7 +234,9 @@ function loadColumnConfig(): { order: string[]; hidden: string[] } {
       const missingIds = DEFAULT_COL_ORDER.filter((id) => !savedOrder.includes(id));
       return {
         order: [...savedOrder, ...missingIds],
-        hidden: Array.isArray(parsed.hidden) ? parsed.hidden.filter((id) => knownIds.has(id)) : [],
+        hidden: Array.isArray(parsed.hidden)
+          ? parsed.hidden.filter((id) => knownIds.has(id) && !FORCE_VISIBLE_COL_IDS.includes(id as typeof FORCE_VISIBLE_COL_IDS[number]))
+          : [],
       };
     }
   } catch {}
@@ -5242,6 +5246,18 @@ ${words.slice(midpoint).join(" ")}`;
             >
               <SearchOutlined sx={{ fontSize: 20 }} />
             </IconButton>
+            {search.trim() && (
+              <Button
+                size="small"
+                variant="outlined"
+                color="inherit"
+                startIcon={<CloseOutlined sx={{ fontSize: 16 }} />}
+                onClick={() => setSearch("")}
+                sx={{ flexShrink: 0, fontSize: 11, whiteSpace: "nowrap", height: 34 }}
+              >
+                Clear search
+              </Button>
+            )}
             {canViewCaptureMatrix && activeProduct && (
               <Button
                 size="small"
@@ -5254,6 +5270,16 @@ ${words.slice(midpoint).join(" ")}`;
               </Button>
             )}
           </Stack>
+          {search.trim() && (
+            <Chip
+              size="small"
+              color="primary"
+              variant="outlined"
+              label={`Filter: ${search}`}
+              onDelete={() => setSearch("")}
+              sx={{ alignSelf: "flex-start", maxWidth: "100%" }}
+            />
+          )}
           {/* Row 2: My/All scope toggle */}
           <ToggleButtonGroup
             value={mobileScope}
@@ -5365,6 +5391,18 @@ ${words.slice(midpoint).join(" ")}`;
               <SearchOutlined sx={{ fontSize: 20 }} />
             </IconButton>
           </Tooltip>
+          {search.trim() && (
+            <Button
+              size="small"
+              variant="outlined"
+              color="inherit"
+              startIcon={<CloseOutlined sx={{ fontSize: 16 }} />}
+              onClick={() => setSearch("")}
+              sx={{ whiteSpace: "nowrap", height: 40 }}
+            >
+              Clear search
+            </Button>
+          )}
           {canViewCaptureMatrix && selectedProjectId && (
             // Plain link so ctrl/cmd-click opens the standalone matrix in its own tab.
             <Tooltip title="Open the full-job capture table. Ctrl/Cmd-click for a new tab.">
@@ -5385,6 +5423,17 @@ ${words.slice(midpoint).join(" ")}`;
             </Tooltip>
           )}
         </Stack>
+      )}
+
+      {search.trim() && !isNativePlatform && (
+        <Chip
+          size="small"
+          color="primary"
+          variant="outlined"
+          label={`Search filter: ${search}`}
+          onDelete={() => setSearch("")}
+          sx={{ alignSelf: "flex-start" }}
+        />
       )}
 
       {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
