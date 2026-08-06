@@ -18,6 +18,7 @@ import {
   setOfflineModeActive,
 } from "../services/offlineModeState";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldSuppressUnreachableOffline } from "../utils/syncConnectivityGuard";
 
 interface OfflineModeContextType {
   isOfflineMode: boolean;
@@ -87,7 +88,9 @@ export function OfflineModeProvider({ children }: { children: ReactNode }) {
   }, [manualOffline, nativeConnected, serverReachable]);
 
   const isOfflineMode =
-    manualOffline || nativeConnected === false || serverReachable === false;
+    manualOffline
+    || nativeConnected === false
+    || (serverReachable === false && !shouldSuppressUnreachableOffline());
 
   useEffect(() => {
     const wasOffline = offlineRef.current;

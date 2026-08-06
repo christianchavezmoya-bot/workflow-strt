@@ -47,6 +47,14 @@ describe("mergeDashboardWorkspaceItems", () => {
     expect(merged.completedSteps).toBe(3);
     expect(merged.totalSteps).toBe(10);
   });
+
+  it("does not regress step progress when both snapshots have signals", () => {
+    const previous = [{ ...item("a1"), completedSteps: 63, totalSteps: 100 }];
+    const next = [{ ...item("a1"), completedSteps: 33, totalSteps: 100 }];
+    const merged = mergeDashboardWorkspaceItems(previous, next)[0];
+    expect(merged.completedSteps).toBe(63);
+    expect(merged.totalSteps).toBe(100);
+  });
 });
 
 describe("stabilizeDashboardWorkspace", () => {
@@ -106,6 +114,25 @@ describe("dedupeDashboardWorkspace", () => {
     const deduped = dedupeDashboardWorkspace(workspace, authoritative);
     expect(deduped.currentInstalls.map((row) => row.id)).toEqual(["a1"]);
     expect(deduped.installHistory).toHaveLength(0);
+  });
+
+  it("drops stale local-only ids when authoritative workspace has rows", () => {
+    const staleLocal = item("a1");
+    const serverOnly = item("a2");
+    const workspace = {
+      currentInstalls: [staleLocal, serverOnly],
+      currentInspections: [],
+      installHistory: [],
+      inspectionHistory: [],
+    };
+    const authoritative = {
+      currentInstalls: [serverOnly],
+      currentInspections: [],
+      installHistory: [],
+      inspectionHistory: [],
+    };
+    const deduped = dedupeDashboardWorkspace(workspace, authoritative);
+    expect(deduped.currentInstalls.map((row) => row.id)).toEqual(["a2"]);
   });
 });
 

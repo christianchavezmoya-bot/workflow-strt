@@ -87,6 +87,12 @@ import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignment
 import type { WorkflowAssignment } from "../types/workflowType";
 import type { WorkInstruction } from "../types/workInstruction";
 import { setSyncFlushing } from "../utils/syncFlushLock";
+import {
+  setSyncConnectivityPendingCount,
+  setSyncConnectivitySyncing,
+  shouldSuppressUnreachableOffline,
+} from "../utils/syncConnectivityGuard";
+import { isManualOfflineModeActive } from "../services/offlineModeState";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -607,7 +613,9 @@ export function useSyncEngine(): SyncState {
 
   // Refresh badge count and conflict count from IndexedDB
   const refreshPending = useCallback(async () => {
-    setPending(await pendingCount());
+    const count = await pendingCount();
+    setPending(count);
+    setSyncConnectivityPendingCount(count);
     const conflicted = await pendingGetConflicted();
     setConflicts(conflicted.length);
   }, []);
@@ -641,6 +649,7 @@ export function useSyncEngine(): SyncState {
 
       setSyncing(true);
       dispatchSyncEngineSyncing(true);
+      setSyncConnectivitySyncing(true);
       setHasError(false);
 
       let authExpired = false;
@@ -890,6 +899,7 @@ export function useSyncEngine(): SyncState {
     } finally {
       setSyncing(false);
       dispatchSyncEngineSyncing(false);
+      setSyncConnectivitySyncing(false);
       markOfflinePerf("queue_flush_end");
       _flushing = false;
       setSyncFlushing(false);
@@ -1175,13 +1185,23 @@ export function useSyncEngine(): SyncState {
   // ── Derived status ────────────────────────────────────────────────────────
   const isOnline = connectivity !== "offline" && !isOfflineModeActive();
 
+  const suppressOfflineBadge =
+    shouldSuppressUnreachableOffline()
+    && hasNetworkSignal()
+    && !isManualOfflineModeActive();
+
+  const wouldShowOffline =
+    connectivity === "offline"
+    || connectivity === "server-unreachable"
+    || isOfflineModeActive();
+
   const status: SyncStatus =
-    connectivity === "offline" || connectivity === "server-unreachable" || isOfflineModeActive() ? "offline" :
     connectivity === "token-expired" ? "error" :
-    syncing && isOnline ? "syncing"  :
-    conflicts > 0 || hasError ? "error"    :
-    pending > 0 ? "pending"  :
-                  "synced";
+    syncing ? "syncing" :
+    pending > 0 ? "pending" :
+    wouldShowOffline && !suppressOfflineBadge ? "offline" :
+    conflicts > 0 || hasError ? "error" :
+    "synced";
 
   return {
     status,

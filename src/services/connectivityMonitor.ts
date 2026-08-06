@@ -25,6 +25,7 @@ import { isManualOfflineModeActive } from "./offlineModeState";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isCircuitOpen, resetCircuitBreaker, tripCircuitBreaker } from "../utils/circuitBreaker";
 import { hadRecentApiSuccess } from "./apiReachabilitySignals";
+import { shouldSuppressUnreachableOffline } from "../utils/syncConnectivityGuard";
 
 const PING_INTERVAL_MS = 30_000;
 const UNREACHABLE_SIGNAL_THRESHOLD = 2;
@@ -172,6 +173,8 @@ export function startConnectivityMonitor(): void {
       const detail = (event as CustomEvent<{ isTimeout?: boolean }>).detail;
       // A slow endpoint timing out while other calls succeed is not "server down".
       if (detail?.isTimeout && hadRecentApiSuccess()) return;
+      // During an active upload burst, timeouts usually mean a busy LAN server — not offline.
+      if (shouldSuppressUnreachableOffline()) return;
       unreachableSignals += 1;
       if (unreachableSignals < UNREACHABLE_SIGNAL_THRESHOLD) return;
       tripCircuitBreaker();

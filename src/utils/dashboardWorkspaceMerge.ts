@@ -19,6 +19,40 @@ function dashboardWorkspaceItemHasCardSignals(item: DashboardWorkspaceAssetItem)
     || item.hasOpenIssues;
 }
 
+function mergeWorkspaceItemCardSignalsMonotonic(
+  incoming: DashboardWorkspaceAssetItem,
+  previous?: DashboardWorkspaceAssetItem,
+): DashboardWorkspaceAssetItem {
+  if (!previous) return incoming;
+
+  const incomingRich = dashboardWorkspaceItemHasCardSignals(incoming);
+  const previousRich = dashboardWorkspaceItemHasCardSignals(previous);
+
+  if (!previousRich) return incoming;
+  if (!incomingRich) {
+    return {
+      ...incoming,
+      completedSteps: previous.completedSteps,
+      totalSteps: previous.totalSteps,
+      missingItems: previous.missingItems,
+      evidenceStatus: previous.evidenceStatus,
+      signatureStatus: previous.signatureStatus,
+      hasOpenIssues: previous.hasOpenIssues,
+    };
+  }
+
+  // Both snapshots have signals — never regress step progress (prevents 63% ↔ 33% flicker).
+  return {
+    ...incoming,
+    completedSteps: Math.max(incoming.completedSteps, previous.completedSteps),
+    totalSteps: Math.max(incoming.totalSteps, previous.totalSteps),
+    missingItems: Math.min(incoming.missingItems, previous.missingItems),
+    evidenceStatus: incoming.evidenceStatus || previous.evidenceStatus,
+    signatureStatus: incoming.signatureStatus || previous.signatureStatus,
+    hasOpenIssues: incoming.hasOpenIssues || previous.hasOpenIssues,
+  };
+}
+
 export function mergeDashboardWorkspaceItems(
   previousItems: DashboardWorkspaceAssetItem[],
   nextItems: DashboardWorkspaceAssetItem[],
@@ -28,20 +62,7 @@ export function mergeDashboardWorkspaceItems(
   if (previousItems.length === 0 || nextItems.length === 0) return nextItems;
 
   const previousById = new Map(previousItems.map((item) => [item.id, item]));
-  return nextItems.map((item) => {
-    const previous = previousById.get(item.id);
-    if (!previous) return item;
-    if (!dashboardWorkspaceItemHasCardSignals(previous) || dashboardWorkspaceItemHasCardSignals(item)) return item;
-    return {
-      ...item,
-      completedSteps: previous.completedSteps,
-      totalSteps: previous.totalSteps,
-      missingItems: previous.missingItems,
-      evidenceStatus: previous.evidenceStatus,
-      signatureStatus: previous.signatureStatus,
-      hasOpenIssues: previous.hasOpenIssues,
-    };
-  });
+  return nextItems.map((item) => mergeWorkspaceItemCardSignalsMonotonic(item, previousById.get(item.id)));
 }
 
 export function stabilizeDashboardWorkspace(
@@ -183,12 +204,20 @@ export function dedupeDashboardWorkspace(
   authoritative?: DashboardWorkspace,
 ): DashboardWorkspace {
   const ids = new Set<string>();
-  for (const bucket of WORKSPACE_BUCKETS) {
-    for (const item of workspace[bucket]) ids.add(item.id);
-  }
-  if (authoritative) {
+  const authoritativeHasRows = authoritative && dashboardWorkspaceHasRows(authoritative);
+  if (authoritativeHasRows) {
+    // Server workspace is membership source of truth — drop stale local-only ids.
     for (const bucket of WORKSPACE_BUCKETS) {
-      for (const item of authoritative[bucket]) ids.add(item.id);
+      for (const item of authoritative![bucket]) ids.add(item.id);
+    }
+  } else {
+    for (const bucket of WORKSPACE_BUCKETS) {
+      for (const item of workspace[bucket]) ids.add(item.id);
+    }
+    if (authoritative) {
+      for (const bucket of WORKSPACE_BUCKETS) {
+        for (const item of authoritative[bucket]) ids.add(item.id);
+      }
     }
   }
 

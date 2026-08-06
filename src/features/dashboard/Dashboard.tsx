@@ -532,6 +532,10 @@ const Dashboard = () => {
   // had fired all of them. Mirrors the existing runnerLoading pattern.
   const [historyDialogLoading, setHistoryDialogLoading] = useState<string | null>(null);
   const nativeDashboardRefreshTimerRef = useRef<number | null>(null);
+  const dashboardRefreshInFlightRef = useRef<Promise<void> | null>(null);
+  const dashboardRefreshQueuedRef = useRef(false);
+  const attentionInFlightRef = useRef<Promise<void> | null>(null);
+  const attentionQueuedRef = useRef(false);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
@@ -718,67 +722,86 @@ const Dashboard = () => {
 
   const attentionRequestSeqRef = useRef(0);
 
-  const loadAttention = useCallback(async () => {
-    const requestSeq = ++attentionRequestSeqRef.current;
-    setAttentionLoading(true);
-    const attentionUserId = isManager ? undefined : user.id;
-    const applyAttention = (iss: OpenIssueRecord[], sigs: PendingSignatureRecord[]) => {
-      if (requestSeq !== attentionRequestSeqRef.current) return;
-      setOpenIssues(iss);
-      setPendingSigs(sigs);
-    };
-    const finishAttention = () => {
-      if (requestSeq !== attentionRequestSeqRef.current) return;
-      setAttentionLoading(false);
-    };
+  const loadAttention = useCallback((): Promise<void> => {
+    if (attentionInFlightRef.current) {
+      attentionQueuedRef.current = true;
+      return attentionInFlightRef.current;
+    }
 
-    if (isNativePlatform) {
-      try {
-        const [localIssues, localSigs] = await Promise.all([
-          assetWorkflowRunService.listOpenIssues(attentionUserId),
-          assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
-        ]);
-        applyAttention(localIssues, localSigs);
-      } catch {
-        // Keep the current attention widgets if local cache probing fails.
-      }
-      if (shouldSkipBlockingFetch()) {
-        finishAttention();
+    const requestSeq = ++attentionRequestSeqRef.current;
+    const promise = (async () => {
+      setAttentionLoading(true);
+      const attentionUserId = isManager ? undefined : user.id;
+      const applyAttention = (iss: OpenIssueRecord[], sigs: PendingSignatureRecord[]) => {
+        if (requestSeq !== attentionRequestSeqRef.current) return;
+        setOpenIssues(iss);
+        setPendingSigs(sigs);
+      };
+      const finishAttention = () => {
+        if (requestSeq !== attentionRequestSeqRef.current) return;
+        setAttentionLoading(false);
+      };
+
+      if (isNativePlatform) {
+        try {
+          const [localIssues, localSigs] = await Promise.all([
+            assetWorkflowRunService.listOpenIssues(attentionUserId),
+            assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
+          ]);
+          applyAttention(localIssues, localSigs);
+        } catch {
+          // Keep the current attention widgets if local cache probing fails.
+        }
+        if (shouldSkipBlockingFetch()) {
+          finishAttention();
+          return;
+        }
+        try {
+          const [iss, sigs] = await Promise.all([
+            assetWorkflowRunService.listOpenIssues(attentionUserId),
+            assetWorkflowRunService.listPendingSignatures(attentionUserId),
+          ]);
+          applyAttention(iss, sigs);
+        } catch {
+          // Keep local attention widgets on timeout or server errors.
+        } finally {
+          finishAttention();
+        }
         return;
       }
-      void Promise.all([
-        assetWorkflowRunService.listOpenIssues(attentionUserId),
-        assetWorkflowRunService.listPendingSignatures(attentionUserId),
-      ])
-        .then(([iss, sigs]) => {
-          applyAttention(iss, sigs);
-        })
-        .catch(() => {})
-        .finally(finishAttention);
-      return;
-    }
 
-    try {
-      const [iss, sigs] = await Promise.all([
-        assetWorkflowRunService.listOpenIssues(attentionUserId),
-        assetWorkflowRunService.listPendingSignatures(attentionUserId),
-      ]);
-      applyAttention(iss, sigs);
-      if (!isNativePlatform && user.id) {
-        try {
-          sessionStorage.setItem(
-            `${DASHBOARD_ATTENTION_SESSION_PREFIX}${user.id}`,
-            JSON.stringify({ issues: iss, sigs }),
-          );
-        } catch {
-          // Ignore storage quota errors.
+      try {
+        const [iss, sigs] = await Promise.all([
+          assetWorkflowRunService.listOpenIssues(attentionUserId),
+          assetWorkflowRunService.listPendingSignatures(attentionUserId),
+        ]);
+        applyAttention(iss, sigs);
+        if (!isNativePlatform && user.id) {
+          try {
+            sessionStorage.setItem(
+              `${DASHBOARD_ATTENTION_SESSION_PREFIX}${user.id}`,
+              JSON.stringify({ issues: iss, sigs }),
+            );
+          } catch {
+            // Ignore storage quota errors.
+          }
         }
+      } catch {
+        // Keep session-cached attention widgets on timeout or server errors.
+      } finally {
+        finishAttention();
       }
-    } catch {
-      // Keep session-cached attention widgets on timeout or server errors.
-    } finally {
-      finishAttention();
-    }
+    })();
+
+    attentionInFlightRef.current = promise.finally(() => {
+      attentionInFlightRef.current = null;
+      if (attentionQueuedRef.current) {
+        attentionQueuedRef.current = false;
+        void loadAttention();
+      }
+    });
+
+    return attentionInFlightRef.current;
   }, [isManager, isNativePlatform, user.id]);
 
   // Silent attention refresh on repo:issues:updated — must NOT call loadAttention()
@@ -1110,28 +1133,50 @@ const Dashboard = () => {
     unlockDeferredDashboardBoot,
   ]);
 
-  const refreshLiveDashboardDataNow = useCallback(() => {
-    if (isNativePlatform) {
-      seedNativeDashboardSummariesFromLocal();
-      seedNativeDashboardWorkspaceFromLocal();
+  const refreshLiveDashboardDataNow = useCallback((): Promise<void> => {
+    if (dashboardRefreshInFlightRef.current) {
+      dashboardRefreshQueuedRef.current = true;
+      return dashboardRefreshInFlightRef.current;
     }
-    projectAssetService.listOpen().then(setOpenAssets);
-    projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
-    setWorkspaceLoading(true);
-    projectAssetService
-      .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
-      .then((data) => { applyDashboardWorkspace(data); })
-      .catch(() => { /* keep last-good workspace on a failed manual refresh - never blank it */ })
-      .finally(() => setWorkspaceLoading(false));
-    loadAttention();
-    setAnalyticsRefreshTick((t) => t + 1);
+
+    const promise = (async () => {
+      if (isNativePlatform) {
+        seedNativeDashboardSummariesFromLocal();
+        // Skip local workspace seed while a network refresh is in flight — it races
+        // with the server response and caused MY INSTALLS to flicker 2 ↔ 3.
+      }
+      setWorkspaceLoading(true);
+      try {
+        await Promise.all([
+          projectAssetService.listOpen().then(setOpenAssets),
+          projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
+          projectAssetService
+            .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
+            .then((data) => { applyDashboardWorkspace(data); })
+            .catch(() => { /* keep last-good workspace on a failed manual refresh - never blank it */ }),
+          loadAttention(),
+        ]);
+        setAnalyticsRefreshTick((t) => t + 1);
+      } finally {
+        setWorkspaceLoading(false);
+      }
+    })();
+
+    dashboardRefreshInFlightRef.current = promise.finally(() => {
+      dashboardRefreshInFlightRef.current = null;
+      if (dashboardRefreshQueuedRef.current) {
+        dashboardRefreshQueuedRef.current = false;
+        void refreshLiveDashboardDataNow();
+      }
+    });
+
+    return dashboardRefreshInFlightRef.current;
   }, [
     applyDashboardWorkspace,
     effectiveDashboardWorkspaceUserId,
     isNativePlatform,
     loadAttention,
     seedNativeDashboardSummariesFromLocal,
-    seedNativeDashboardWorkspaceFromLocal,
   ]);
 
   const refreshLiveDashboardData = useCallback(() => {
@@ -1600,33 +1645,9 @@ const Dashboard = () => {
   }, []);
 
   const refreshDashboardAfterIssueUpdate = useCallback(async () => {
-    if (isNativePlatform) {
-      seedNativeDashboardSummariesFromLocal();
-      seedNativeDashboardWorkspaceFromLocal();
-    }
-
-    const [, , , workspace] = await Promise.all([
-      loadAttention(),
-      projectAssetService.listOpen().then(setOpenAssets),
-      projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
-      projectAssetService
-        .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
-        .then((data) => {
-          applyDashboardWorkspace(data);
-          return data;
-        })
-        .catch(() => null),
-    ]);
-    setAnalyticsRefreshTick((t) => t + 1);
-    return workspace;
-  }, [
-    applyDashboardWorkspace,
-    effectiveDashboardWorkspaceUserId,
-    isNativePlatform,
-    loadAttention,
-    seedNativeDashboardSummariesFromLocal,
-    seedNativeDashboardWorkspaceFromLocal,
-  ]);
+    await refreshLiveDashboardDataNow();
+    return dashboardWorkspaceRef.current;
+  }, [refreshLiveDashboardDataNow]);
 
   const openHistoryReport = useCallback(async (assetItem: DashboardWorkspaceAssetItem) => {
     setHistoryDialogLoading(assetItem.id);
