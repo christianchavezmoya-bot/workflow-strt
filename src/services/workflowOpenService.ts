@@ -119,5 +119,8 @@ export async function loadWorkflowOpenPayload(
 export function refreshWorkflowOpenDataInBackground(assetId: string, configId: string): void {
   if (!isMobileNativePlatform()) return;
   void workflowConfigService.refreshByIdInBackground(configId);
-  void assetWorkflowRunService.listByAssetFresh(assetId).catch(() => []);
+  // Fire-and-forget — runner already opened from local cache; avoid a second
+  // boundedFreshRead on every reopen (that was doubling network work with
+  // Dashboard's own background refresh on the same tap).
+  assetWorkflowRunService.refreshByAssetInBackground(assetId);
 }
