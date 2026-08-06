@@ -5,7 +5,8 @@ import offlineStore from "./offlineStore";
 import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
-import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
+import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
+import { shouldSkipRunMutation } from "./connectivityMonitor";
 import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun } from "./assetWorkflowRunService";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
@@ -106,7 +107,10 @@ export const signatureService = {
       // the offline branch. Same pattern as assetWorkflowRunService.startRun.
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
       const requestPayload = await mediaStore.resolveUploadPayload(queuedPayload);
-      const r = await api.post<SignatureEvent>("/signature-events", requestPayload, { params: { runId: resolvedRunId } });
+      const r = await api.post<SignatureEvent>("/signature-events", requestPayload, {
+        params: { runId: resolvedRunId },
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       const now = r.data.signedAtUtc ?? new Date().toISOString();
       const cachedRun = await offlineStore.getRun(runId) ?? await offlineStore.getRun(resolvedRunId);
       if (cachedRun) {

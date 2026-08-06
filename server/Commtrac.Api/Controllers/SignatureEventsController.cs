@@ -61,11 +61,43 @@ public class SignatureEventsController : ControllerBase
         if (role != "Installer" && role != "Customer")
             return BadRequest(new { message = "SignerRole must be 'Installer' or 'Customer'." });
 
-        // Role order gate
+        // Idempotent replay — phone may retry after a timeout once the event landed.
+        var existingForRole = await _db.SignatureEvents
+            .AsNoTracking()
+            .Where(e => e.RunId == runId && e.SignerRole == role)
+            .OrderByDescending(e => e.SignedAtUtc)
+            .FirstOrDefaultAsync();
+        if (existingForRole is not null)
+            return Ok(ToDto(existingForRole));
+
         if (role == "Customer" && run.SignatureStatus != "PendingCustomer")
+        {
+            if (run.CustomerSignedAt.HasValue || run.SignatureStatus is "Signed" or "Declined")
+            {
+                var existingCustomer = await _db.SignatureEvents
+                    .AsNoTracking()
+                    .Where(e => e.RunId == runId && e.SignerRole == "Customer")
+                    .OrderByDescending(e => e.SignedAtUtc)
+                    .FirstOrDefaultAsync();
+                if (existingCustomer is not null)
+                    return Ok(ToDto(existingCustomer));
+            }
             return UnprocessableEntity(new { message = "Installer must sign before customer." });
+        }
         if (role == "Installer" && run.SignatureStatus != "PendingInstaller")
+        {
+            if (run.InstallerSignedAt.HasValue)
+            {
+                var existingInstaller = await _db.SignatureEvents
+                    .AsNoTracking()
+                    .Where(e => e.RunId == runId && e.SignerRole == "Installer")
+                    .OrderByDescending(e => e.SignedAtUtc)
+                    .FirstOrDefaultAsync();
+                if (existingInstaller is not null)
+                    return Ok(ToDto(existingInstaller));
+            }
             return UnprocessableEntity(new { message = "Run is not awaiting installer signature." });
+        }
 
         // Declined requires notes
         if (req.ReasonCode == "Declined" && string.IsNullOrWhiteSpace(req.Notes))

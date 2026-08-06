@@ -42,6 +42,8 @@ import offlineStore, { type OfflineRun } from "../services/offlineStore";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
+import type { SubmitSignaturePayload } from "../services/signatureService";
+import { isSignatureAlreadyAppliedError, isSignatureOrderingError } from "../utils/signatureSyncHelpers";
 import { mediaStore } from "../services/mediaStore";
 import syncQueue, { type SyncOpType } from "../services/syncQueue";
 import { revertLocalEntityForConflict } from "../services/syncConflictProbe";
@@ -506,6 +508,46 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   }
 }
 
+/** Treat server 422 as success when the signature for this role is already recorded. */
+async function tryCompleteSignatureFromServer(
+  action: PendingAction,
+  runId: string,
+  errorMessage: string,
+): Promise<boolean> {
+  const payload = action.body as SubmitSignaturePayload | undefined;
+  const role = payload?.signerRole;
+  if (!role || action.opType !== "SIGNATURE_SUBMIT") return false;
+  if (isSignatureOrderingError(errorMessage)) return false;
+  if (!isSignatureAlreadyAppliedError(errorMessage)) return false;
+
+  try {
+    const eventsRes = await api.get<SignatureEvent[]>("/signature-events", { params: { runId } });
+    const existing = eventsRes.data.find((event) => event.signerRole === role);
+    if (existing) {
+      await processSyncedAction(action, existing);
+      return true;
+    }
+
+    const runRes = await api.get<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`);
+    const run = runRes.data;
+    const signedAt = role === "Installer" ? run.installerSignedAt : run.customerSignedAt;
+    if (!signedAt) return false;
+
+    await processSyncedAction(action, {
+      id: `server-${role.toLowerCase()}-${runId}`,
+      runId,
+      signerRole: role,
+      signerName: payload.signerName,
+      signedAtUtc: signedAt,
+      hasDrawnSignature: Boolean(payload.signatureData),
+      reasonCode: payload.reasonCode ?? "Completed",
+    } as SignatureEvent);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function buildAssetDocumentLinkUploadRequest(body: unknown): Promise<FormData> {
   const payload = body as AssetDocumentLinkUploadBody;
   const fileDataUrl = await mediaStore.resolveMediaValue(payload.fileData);
@@ -722,12 +764,53 @@ export function useSyncEngine(): SyncState {
         } else if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
           const isWorkflowRunOp = action.entityType === "workflow-run";
           const isRejectableStatus = httpStatus === 422 || httpStatus === 400;
-          if (isWorkflowRunOp && isRejectableStatus) {
+          const rejectMessage = extractServerErrorMessage(e, `Server rejected (${httpStatus})`);
+
+          if (action.opType === "SIGNATURE_SUBMIT" && isRejectableStatus) {
+            if (isSignatureOrderingError(rejectMessage)) {
+              const diagnostics = buildSyncAttemptDiagnostics({
+                action,
+                requestUrl,
+                requestMethod: action.method,
+                mappedRunId,
+                requestData,
+                durationMs: Date.now() - attemptStartedAt,
+                timeoutMs,
+                error: e,
+                serverReachable: getServerReachable(),
+                connectivity: connectivityRef.current,
+              });
+              await pendingMarkRetry(action.id, rejectMessage, diagnostics);
+              anyError = true;
+            } else if (mappedRunId && await tryCompleteSignatureFromServer(action, mappedRunId, rejectMessage)) {
+              await pendingRemove(action.id);
+              await syncMetaSet(action.entityType);
+              syncedAny = true;
+            } else if (isWorkflowRunOp) {
+              await pendingMarkConflict(action.id, {
+                conflictKind: "business_rule",
+                conflictHttpStatus: httpStatus,
+                conflictMessage: rejectMessage,
+              });
+              await markRunSyncFailed(action.entityId, rejectMessage);
+              window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
+                detail: {
+                  actionId: action.id,
+                  entityId: action.entityId,
+                  entityType: action.entityType,
+                  httpStatus,
+                  message: rejectMessage,
+                },
+              }));
+              anyError = true;
+            } else {
+              await pendingRemove(action.id);
+            }
+          } else if (isWorkflowRunOp && isRejectableStatus) {
             // Server rejected a workflow op (e.g. RUN_COMPLETE with open blocking
             // issues). This is NOT "malformed/deleted" — it's a rejection the user
             // must see, and dependent ops (signatures after a rejected complete)
             // must not proceed against a run the server never completed.
-            const rejectMessage = extractServerErrorMessage(e, `Server rejected (${httpStatus})`);
             await pendingMarkConflict(action.id, {
               conflictKind: "business_rule",
               conflictHttpStatus: httpStatus,

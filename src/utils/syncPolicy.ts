@@ -8,6 +8,7 @@ export function getSyncOpTimeoutMs(opType?: string | null): number {
     case "RUN_UPDATE":
     case "RUN_COMPLETE":
     case "STEP_RESULTS":
+    case "SIGNATURE_SUBMIT":
       return RUN_MUTATION_TIMEOUT_MS;
     default:
       return 10_000;
