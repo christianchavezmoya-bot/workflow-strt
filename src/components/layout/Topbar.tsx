@@ -410,7 +410,7 @@ const Topbar = () => {
                 flexShrink: 0,
               }}
             />
-            <DiagnosticClockBar variant="compact" projectTimeZoneId={projectTimeZoneFromUrl} projectLabel={projectLabelFromUrl} />
+            <DiagnosticClockBar variant="compact" officeOnly />
           </Stack>
         ) : (
           <>

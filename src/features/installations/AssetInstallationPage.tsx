@@ -126,7 +126,7 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
-import { mergeRunsIntoMap, mergeRunRecord, runHasCaptureBlobs } from "../../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, mergeRunRecord } from "../../types/assetWorkflowRunSummary";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
@@ -1020,15 +1020,12 @@ const AssetInstallationPage = () => {
       // render. Do NOT block on the dependency fetch here.
       setLibFeatures(feats);
 
-      // PERF: one batched request by productId (was N getByFeature calls).
-      // Dependencies are only needed for capture-column metadata — defer so the
-      // feature-driven render commits first.
+      // Dependencies enrich capture-column metadata — load immediately on native
+      // so the schema skeleton can paint before run blobs finish hydrating.
       const loadDeps = async () => {
         try {
           const map = await featureDependencyService.mapByProduct(activeProduct.id);
           if (cancelled) return;
-          // Ensure every feature has an entry (even if empty) so callers don't
-          // treat missing keys as "not loaded yet".
           const complete: Record<string, FeatureDependency[]> = {};
           for (const f of feats) complete[f.id] = map[f.id] ?? [];
           setDepsByFeature(complete);
@@ -1036,7 +1033,11 @@ const AssetInstallationPage = () => {
           if (!cancelled) setDepsByFeature({});
         }
       };
-      setTimeout(() => { void loadDeps(); }, 0);
+      if (isNativePlatform) {
+        void loadDeps();
+      } else {
+        setTimeout(() => { void loadDeps(); }, 0);
+      }
     }).catch(() => {
       if (!cancelled) {
         setLibFeatures([]);
@@ -1044,7 +1045,7 @@ const AssetInstallationPage = () => {
       }
     });
     return () => { cancelled = true; };
-  }, [activeProduct?.id]);
+  }, [activeProduct?.id, isNativePlatform]);
 
   const featureSelectionsByConfig = useMemo((): FeatureSelection[][] => {
     return publishedWfConfigs.map((c) => {
@@ -2018,16 +2019,14 @@ const AssetInstallationPage = () => {
     return displayAssets.filter((a) => a.assignedUserId === currentUser.id);
   }, [displayAssets, isNativePlatform, mobileScope, currentUser.id]);
 
-  const nativeCaptureBlobsReady = useMemo(() => {
-    if (!isNativePlatform || mobileAssets.length === 0) return true;
-    return mobileAssets.every((asset) => {
-      const runs = runsMap[asset.id];
-      if (!runs || runs.length === 0) return true;
-      const run = pickCaptureRun(runs);
-      if (!run) return true;
-      return runHasCaptureBlobs(run);
-    });
-  }, [isNativePlatform, mobileAssets, runsMap]);
+  useEffect(() => {
+    if (!isNativePlatform || !selectedProjectId || assets.length === 0) return;
+    const assetIds = assets
+      .filter((asset) => asset.projectId === selectedProjectId)
+      .map((asset) => asset.id);
+    if (assetIds.length === 0) return;
+    void assetWorkflowRunService.prioritizeRunHydration(selectedProjectId, assetIds);
+  }, [isNativePlatform, selectedProjectId, assetsKey]);
 
   useEffect(() => {
     if (!isNativePlatform || !capturePopupOpen || mobileAssets.length === 0) return;
@@ -7745,7 +7744,7 @@ ${words.slice(midpoint).join(" ")}`;
           hideSelectionColumn
           assets={mobileAssets}
           runsMap={runsMap}
-          captureRunsLoading={!nativeCaptureBlobsReady}
+          captureRunsLoading={libFeatures.length === 0}
           schemaFallback
           features={libFeatures}
           depsByFeature={depsByFeature}

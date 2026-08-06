@@ -98,3 +98,24 @@ export function createCountryResolver(offices: OfficeLike[]) {
     return value;
   };
 }
+
+/** Map a user-profile office string to the active-global-office country label. */
+export function normalizeActiveOfficeFromUser(
+  userOffice?: string | null,
+  offices: OfficeLike[] = [],
+): string {
+  const trimmed = (userOffice ?? "").trim();
+  if (!trimmed) return "All";
+
+  if (offices.length > 0) {
+    const country = createCountryResolver(offices)(trimmed);
+    if (country) return country;
+  }
+
+  if (trimmed.includes(",")) {
+    const country = trimmed.split(",").slice(-1)[0]?.trim();
+    if (country) return country;
+  }
+
+  return trimmed;
+}

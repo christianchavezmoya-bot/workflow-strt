@@ -269,7 +269,7 @@ export default function CaptureSpreadsheetDialog({
   const table = useMemo(() => {
     const fromRuns = buildProjectCaptureTable(assets, runsMapRef.current, features);
     if (fromRuns.groups.length > 0 || !schemaFallback) return fromRuns;
-    if (Object.keys(depsByFeature).length === 0) return fromRuns;
+    if (features.length === 0) return fromRuns;
     const skeleton = buildSchemaCaptureTableSkeleton(assets, features, depsByFeature, maxUnitsByFeature);
     return skeleton.groups.length > 0 ? skeleton : fromRuns;
     // Rebuild when column structure changes — not on every stepResultsJson value edit.

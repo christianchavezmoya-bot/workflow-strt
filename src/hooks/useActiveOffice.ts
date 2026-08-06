@@ -1,5 +1,7 @@
 ﻿import { useCallback, useEffect, useState } from "react";
 import { useAuth } from "./useAuth";
+import { normalizeActiveOfficeFromUser } from "../utils/officeCountry";
+import { officesService } from "../services/officesService";
 
 export type ActiveOffice = string;
 
@@ -11,8 +13,7 @@ function storageKey(userId: string): string {
 
 /** Default active global office from the signed-in user's profile office. */
 export function defaultOfficeForUser(userOffice?: string): ActiveOffice {
-  const trimmed = userOffice?.trim();
-  return trimmed || "All";
+  return normalizeActiveOfficeFromUser(userOffice);
 }
 
 function readStoredOffice(userId: string, userOffice?: string): ActiveOffice {
@@ -26,6 +27,13 @@ function readStoredOffice(userId: string, userOffice?: string): ActiveOffice {
   return defaultOfficeForUser(userOffice);
 }
 
+function seedOfficeForUser(userId: string, userOffice?: string): ActiveOffice | null {
+  const normalized = defaultOfficeForUser(userOffice);
+  if (normalized === "All") return null;
+  localStorage.setItem(storageKey(userId), normalized);
+  return normalized;
+}
+
 export const useActiveOffice = () => {
   const { user, authReady } = useAuth();
   const [activeOffice, setActiveOffice] = useState<ActiveOffice>(() =>
@@ -37,6 +45,23 @@ export const useActiveOffice = () => {
       setActiveOffice(defaultOfficeForUser(user.office));
       return;
     }
+
+    const scoped = localStorage.getItem(storageKey(user.id));
+    const legacy = localStorage.getItem(LEGACY_STORAGE_KEY);
+    if (!scoped && !legacy && user.office?.trim()) {
+      void officesService.getAll().then((offices) => {
+        const normalized = normalizeActiveOfficeFromUser(user.office, offices);
+        if (normalized !== "All") {
+          localStorage.setItem(storageKey(user.id), normalized);
+          setActiveOffice(normalized);
+        }
+      }).catch(() => {
+        const seeded = seedOfficeForUser(user.id, user.office);
+        if (seeded) setActiveOffice(seeded);
+      });
+      return;
+    }
+
     setActiveOffice(readStoredOffice(user.id, user.office));
   }, [authReady, user.id, user.office]);
 

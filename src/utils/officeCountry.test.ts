@@ -37,6 +37,15 @@ describe("createCountryResolver", () => {
   });
 });
 
+describe("normalizeActiveOfficeFromUser", () => {
+  it("extracts country from city, country profile office strings", async () => {
+    const { normalizeActiveOfficeFromUser } = await import("./officeCountry");
+    expect(normalizeActiveOfficeFromUser("Newcastle, Australia")).toBe("Australia");
+    expect(normalizeActiveOfficeFromUser("")).toBe("All");
+    expect(normalizeActiveOfficeFromUser("Australia")).toBe("Australia");
+  });
+});
+
 describe("getStepsForType", () => {
   it("external projects include a Pending Approval step", () => {
     expect(getStepsForType("External")).toContain("Pending Approval");

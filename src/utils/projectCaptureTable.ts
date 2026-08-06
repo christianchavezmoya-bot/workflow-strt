@@ -360,9 +360,8 @@ export function computeApplicableColumnIds(
 }
 
 /**
- * Web-only fallback: column headers from product feature dependencies while full run
- * blobs are still loading. Cells are empty and not editable until blob-derived table
- * replaces this (same path native always uses — never call on phone).
+ * Schema skeleton for capture columns while full run blobs hydrate.
+ * Cells stay empty until blob-derived values replace them.
  */
 export function buildSchemaCaptureTableSkeleton(
   assets: ProjectAsset[],

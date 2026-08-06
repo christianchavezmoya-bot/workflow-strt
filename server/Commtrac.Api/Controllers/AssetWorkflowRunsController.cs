@@ -76,6 +76,46 @@ public class AssetWorkflowRunsController : ControllerBase
         };
     }
 
+    private static AssetWorkflowRunDto ToCaptureDetailDto(
+        string id,
+        string assetId,
+        string workflowConfigId,
+        int workflowVersion,
+        string workflowSnapshotJson,
+        string? workOrderId,
+        string status,
+        bool isLocked,
+        string? technicianUserId,
+        string stepResultsJson,
+        int productiveSeconds,
+        int downtimeSeconds,
+        int downtimeEvents,
+        int runNumber,
+        string? completedByName,
+        string signatureStatus,
+        DateTime? installerSignedAt,
+        DateTime? customerSignedAt,
+        DateTime startedAt,
+        DateTime? completedAt,
+        DateTime createdAt,
+        DateTime updatedAt,
+        string bomActualJson,
+        string? lastAmendedByName,
+        string? lastAmendedByRole,
+        DateTime? lastAmendedAtUtc,
+        int amendmentCount) => new(
+        id, assetId, workflowConfigId, workflowVersion,
+        workflowSnapshotJson, workOrderId, status, isLocked,
+        technicianUserId, stepResultsJson,
+        "[]", "[]",
+        productiveSeconds, downtimeSeconds, downtimeEvents,
+        runNumber, completedByName,
+        signatureStatus, installerSignedAt, customerSignedAt,
+        startedAt, completedAt, createdAt, updatedAt,
+        bomActualJson,
+        lastAmendedByName, lastAmendedByRole, lastAmendedAtUtc, amendmentCount
+    );
+
     private static AssetWorkflowRunDto ToDto(AssetWorkflowRunEntity e) => new(
         e.Id, e.AssetId, e.WorkflowConfigId, e.WorkflowVersion,
         e.WorkflowSnapshotJson, e.WorkOrderId, e.Status, e.IsLocked,
@@ -408,12 +448,52 @@ public class AssetWorkflowRunsController : ControllerBase
                 return Ok(Array.Empty<AssetWorkflowRunDto>());
             }
 
+            // Project only capture-needed columns — skip IssuesJson / TimeTrackingJson blobs.
             var runs = await _db.AssetWorkflowRuns
                 .Where(r => selectedIds.Contains(r.Id))
                 .AsNoTracking()
+                .Select(r => new
+                {
+                    r.Id,
+                    r.AssetId,
+                    r.WorkflowConfigId,
+                    r.WorkflowVersion,
+                    r.WorkflowSnapshotJson,
+                    r.WorkOrderId,
+                    r.Status,
+                    r.IsLocked,
+                    r.TechnicianUserId,
+                    r.StepResultsJson,
+                    r.ProductiveSeconds,
+                    r.DowntimeSeconds,
+                    r.DowntimeEvents,
+                    r.RunNumber,
+                    r.CompletedByName,
+                    r.SignatureStatus,
+                    r.InstallerSignedAt,
+                    r.CustomerSignedAt,
+                    r.StartedAt,
+                    r.CompletedAt,
+                    r.CreatedAt,
+                    r.UpdatedAt,
+                    r.BomActualJson,
+                    r.LastAmendedByName,
+                    r.LastAmendedByRole,
+                    r.LastAmendedAtUtc,
+                    r.AmendmentCount,
+                })
                 .ToListAsync();
 
-            return Ok(runs.Select(ToDto));
+            return Ok(runs.Select(r => ToCaptureDetailDto(
+                r.Id, r.AssetId, r.WorkflowConfigId, r.WorkflowVersion,
+                r.WorkflowSnapshotJson, r.WorkOrderId, r.Status, r.IsLocked,
+                r.TechnicianUserId, r.StepResultsJson,
+                r.ProductiveSeconds, r.DowntimeSeconds, r.DowntimeEvents,
+                r.RunNumber, r.CompletedByName,
+                r.SignatureStatus, r.InstallerSignedAt, r.CustomerSignedAt,
+                r.StartedAt, r.CompletedAt, r.CreatedAt, r.UpdatedAt,
+                r.BomActualJson,
+                r.LastAmendedByName, r.LastAmendedByRole, r.LastAmendedAtUtc, r.AmendmentCount)));
         }
         catch (Exception ex)
         {
