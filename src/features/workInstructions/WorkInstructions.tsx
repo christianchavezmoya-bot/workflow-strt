@@ -1,5 +1,5 @@
-﻿import { useCallback, useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useLocation, useSearchParams } from "react-router-dom";
 import {
   AddOutlined,
   ArticleOutlined,
@@ -555,7 +555,15 @@ const WorkInstructions = () => {
   const can = usePermissions();
   const dispatch = useAppDispatch();
   const productsState = useAppSelector((state) => state.products);
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
+  const isActiveRoute = location.pathname.startsWith("/work-instructions");
+  const urlBackfillDoneRef = useRef(false);
+
+  const safeSetSearchParams = useCallback((params: Record<string, string>) => {
+    if (!isActiveRoute) return;
+    setSearchParams(params, { replace: true });
+  }, [isActiveRoute, setSearchParams]);
 
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState<"instructions" | "builder">("instructions");
@@ -607,9 +615,11 @@ const WorkInstructions = () => {
   }, [tab, products.length]);
 
   // Restore active product tab + view mode from URL (priority) or sessionStorage (fallback).
-  // Always pushes the resolved state back to the URL so Favorites captures the exact sub-page.
+  // Read-only — do not rewrite the URL here; that races with sidebar navigation away from
+  // this page when the products list refreshes (e.g. Projects page mount fetching products).
   useEffect(() => {
-    if (products.length === 0) return;
+    if (!isActiveRoute || products.length === 0) return;
+
     const productIdFromUrl = searchParams.get("product");
     const viewFromUrl = searchParams.get("view");
     const configIdFromUrl = searchParams.get("config");
@@ -633,14 +643,38 @@ const WorkInstructions = () => {
 
     setTab(resolvedTabIdx);
     setViewMode(resolvedView);
+    if (configIdFromUrl) setSelectedConfigId(configIdFromUrl);
+  }, [isActiveRoute, products, searchParams]);
+
+  // One-time URL backfill so Favorites capture product/view — only when params are missing.
+  useEffect(() => {
+    if (!isActiveRoute || products.length === 0 || urlBackfillDoneRef.current) return;
+    if (searchParams.has("product") && searchParams.has("view")) {
+      urlBackfillDoneRef.current = true;
+      return;
+    }
+
+    urlBackfillDoneRef.current = true;
+    const productIdFromUrl = searchParams.get("product");
+    const viewFromUrl = searchParams.get("view");
+    const configIdFromUrl = searchParams.get("config");
+
+    let resolvedTabIdx = 0;
+    if (productIdFromUrl) {
+      const idx = products.findIndex((p) => p.id === productIdFromUrl);
+      if (idx >= 0) resolvedTabIdx = idx;
+    }
+
+    const resolvedView: "instructions" | "builder" =
+      viewFromUrl === "builder" ? "builder" : "instructions";
 
     const productId = products[resolvedTabIdx]?.id;
     const params: Record<string, string> = {};
     if (productId) params.product = productId;
     params.view = resolvedView;
     if (configIdFromUrl) params.config = configIdFromUrl;
-    setSearchParams(params, { replace: true });
-  }, [products]); // eslint-disable-line react-hooks/exhaustive-deps
+    safeSetSearchParams(params);
+  }, [isActiveRoute, products, searchParams, safeSetSearchParams]);
 
   const activeProduct = products[tab];
   const [workflowFeatures, setWorkflowFeatures] = useState<WorkflowFeatureDefinition[]>([]);
@@ -904,7 +938,7 @@ const WorkInstructions = () => {
     setViewMode("builder");
     const params: Record<string, string> = { view: "builder", config: cfg.id };
     if (activeProduct?.id) params.product = activeProduct.id;
-    setSearchParams(params, { replace: true });
+    safeSetSearchParams(params);
   }
 
   function handleConfigSaved(updated: WorkflowConfig) {
@@ -923,10 +957,10 @@ const WorkInstructions = () => {
     setViewMode("instructions");
     const params: Record<string, string> = { view: "instructions" };
     if (activeProduct?.id) params.product = activeProduct.id;
-    setSearchParams(params, { replace: true });
+    safeSetSearchParams(params);
   }
 
-  // â”€â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  // ─── Render ───
 
   return (
     <Stack spacing={3}>
@@ -952,7 +986,7 @@ const WorkInstructions = () => {
                 const params: Record<string, string> = {};
                 if (productId) params.product = productId;
                 params.view = next;
-                setSearchParams(params, { replace: true });
+                safeSetSearchParams(params);
               }
             }}
           >
