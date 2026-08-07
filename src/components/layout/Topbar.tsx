@@ -28,6 +28,7 @@ import DiagnosticClockBar from "../ui/DiagnosticClockBar";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
+import { formatInstant } from "../../utils/datetime";
 
 function getRolesFromCache(): string[] {
   try {
@@ -95,7 +96,7 @@ const Topbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, isAuthenticated, authReady } = useAuth();
-  const { notifications, unreadNotifications, loading: notificationsLoading, fromCache: notificationsFromCache, acknowledge } = useNotificationInbox();
+  const { notifications, unreadNotifications, loading: notificationsLoading, fromCache: notificationsFromCache, acknowledge, refresh: refreshNotifications } = useNotificationInbox();
   const { complexViewActive, recordLogoTap } = useComplexView();
   const { viewMode, toggleViewMode } = useViewMode();
   const { isFavorited, getFavorite, add, remove } = useFavoritesContext();
@@ -144,6 +145,10 @@ const Topbar = () => {
   const [indexLoading, setIndexLoading] = useState(false);
   const [indexPopoverAnchor, setIndexPopoverAnchor] = useState<null | HTMLElement>(null);
   const isNotificationsOpen = Boolean(notificationsAnchor);
+
+  useEffect(() => {
+    if (isNotificationsOpen) void refreshNotifications();
+  }, [isNotificationsOpen, refreshNotifications]);
 
   // ── Favorites star ───────────────────────────────────────────────────────────
   const currentPath = location.pathname + location.search;
@@ -666,7 +671,7 @@ const Topbar = () => {
                         {notification.message}
                       </Typography>
                       <Typography variant="caption" color="text.disabled" sx={{ display: "block", mt: 0.5 }}>
-                        {new Date(notification.createdAtUtc).toLocaleString()} · {notificationGroup(notification.eventType)}
+                        {formatInstant(notification.createdAtUtc, projectTimeZoneFromUrl, { withZone: false })} · {notificationGroup(notification.eventType)}
                       </Typography>
                     </Box>
                     {!notification.isRead && (

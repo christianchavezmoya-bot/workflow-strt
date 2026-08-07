@@ -9,6 +9,7 @@ import NotificationBanner from "./NotificationBanner";
 import PullToRefresh from "./PullToRefresh";
 import SyncDroppedBanner from "./SyncDroppedBanner";
 import OfflineModeBanner from "./OfflineModeBanner";
+import NativeLifecycleBanner from "./NativeLifecycleBanner";
 import OfflineBootstrapBanner from "./OfflineBootstrapBanner";
 import SyncBusyOverlay from "./SyncBusyOverlay";
 import { useViewMode } from "../../contexts/ViewModeContext";
@@ -81,6 +82,7 @@ const AppShell = () => {
           <SyncDroppedBanner />
           <OfflineBootstrapBanner />
           <OfflineModeBanner />
+          <NativeLifecycleBanner />
           {isViewOnly && (
             <Box sx={{ px: 2, py: 1, borderBottom: "1px solid rgba(245, 158, 11, 0.25)", background: "rgba(245, 158, 11, 0.12)", color: "warning.light", fontSize: "0.85rem", fontWeight: 700 }}>
               View-only mode is active. Changes are disabled.

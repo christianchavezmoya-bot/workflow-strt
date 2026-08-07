@@ -1,10 +1,12 @@
-﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { App } from "@capacitor/app";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { notificationService } from "../services/notificationService";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { useAuth } from "../hooks/useAuth";
 import { isDashboardRoute } from "../utils/postLoginRoute";
 import type { AppNotification } from "../types/notification";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
@@ -151,7 +153,6 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     //   3) Skip polling entirely while offline — serve the IndexedDB cache instead.
     let debounceTimer: number | undefined;
     const debouncedRefresh = () => {
-      if (shouldSkipBlockingFetch()) return;
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       debounceTimer = window.setTimeout(() => {
         debounceTimer = undefined;
@@ -191,6 +192,20 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       void refresh();
     };
 
+    let removeAppListener: (() => void) | undefined;
+    if (isMobileNativePlatform()) {
+      void App.addListener("appStateChange", ({ isActive }) => {
+        if (!isActive) return;
+        void refresh();
+        if (!shouldSkipBlockingFetch()) {
+          stopPolling();
+          startPolling();
+        }
+      }).then((handle) => {
+        removeAppListener = () => { void handle.remove(); };
+      });
+    }
+
     window.addEventListener("focus", handleRefreshTrigger);
     window.addEventListener("online", handleRefreshTrigger);
     window.addEventListener("auth-change", handleRefreshTrigger);
@@ -202,6 +217,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
     return () => {
       stopPolling();
+      removeAppListener?.();
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
       window.removeEventListener("online", handleRefreshTrigger);

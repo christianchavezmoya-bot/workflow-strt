@@ -63,6 +63,7 @@ import { canEditRun } from "../../utils/runEditPermissions";
 import { isCaptureColumnEditable } from "../../utils/captureTableEdit";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { pickCaptureRun } from "../../utils/captureSpreadsheet";
+import { resolveAssetClosedAt } from "../../utils/assetTableDates";
 import { captureSpreadsheetTheme } from "../../theme/captureSpreadsheetTheme";
 import CaptureSpreadsheetRow from "./CaptureSpreadsheetRow";
 import CaptureVirtualizedTableBody from "./CaptureVirtualizedTableBody";
@@ -441,16 +442,35 @@ export default function CaptureSpreadsheetDialog({
     });
   }, [columnFilters, getColumnFilterValue, rows, search]);
 
+  const getColumnSortValue = useCallback((
+    key: string,
+    asset: ProjectAsset,
+    capture: ProjectCaptureRow,
+    mergedCells: Record<string, string>,
+  ) => {
+    if (key === "asset-job:dateCreated") return asset.createdAt ?? "";
+    if (key === "asset-job:dateClosed") return resolveAssetClosedAt(asset, runsMap[asset.id]) ?? "";
+    return getColumnFilterValue(key, asset, capture, mergedCells);
+  }, [getColumnFilterValue, runsMap]);
+
   const sortedFilteredRows = useMemo(() => {
     if (!columnSort) return filteredRows;
     const { key, direction } = columnSort;
     const mult = direction === "asc" ? 1 : -1;
+    const isDateColumn = key === "asset-job:dateCreated" || key === "asset-job:dateClosed";
     return [...filteredRows].sort((a, b) => {
-      const av = getColumnFilterValue(key, a.asset, a.capture, a.mergedCells);
-      const bv = getColumnFilterValue(key, b.asset, b.capture, b.mergedCells);
+      const av = getColumnSortValue(key, a.asset, a.capture, a.mergedCells);
+      const bv = getColumnSortValue(key, b.asset, b.capture, b.mergedCells);
+      if (isDateColumn) {
+        const aTime = Date.parse(av);
+        const bTime = Date.parse(bv);
+        const aVal = Number.isNaN(aTime) ? 0 : aTime;
+        const bVal = Number.isNaN(bTime) ? 0 : bTime;
+        return mult * (aVal - bVal);
+      }
       return mult * av.localeCompare(bv, undefined, { numeric: true, sensitivity: "base" });
     });
-  }, [columnSort, filteredRows, getColumnFilterValue]);
+  }, [columnSort, filteredRows, getColumnSortValue]);
 
   const selectionEnabled = !hideSelectionColumn && Boolean(selectedAssetIds && onToggleAssetSelection && onToggleVisibleAssetSelection);
   const filteredAssetIds = useMemo(() => sortedFilteredRows.map(({ asset }) => asset.id), [sortedFilteredRows]);
@@ -1130,11 +1150,19 @@ export default function CaptureSpreadsheetDialog({
         </MenuItem>
         <MenuItem onClick={() => filterMenu.key && setSortForColumn(filterMenu.key, "asc")}>
           <ListItemIcon sx={{ minWidth: 32 }}><ArrowUpwardOutlined fontSize="small" /></ListItemIcon>
-          <ListItemText primary="Ascending (A → Z)" />
+          <ListItemText primary={
+            filterMenu.key === "asset-job:dateCreated" || filterMenu.key === "asset-job:dateClosed"
+              ? "Oldest first"
+              : "Ascending (A → Z)"
+          } />
         </MenuItem>
         <MenuItem onClick={() => filterMenu.key && setSortForColumn(filterMenu.key, "desc")}>
           <ListItemIcon sx={{ minWidth: 32 }}><ArrowDownwardOutlined fontSize="small" /></ListItemIcon>
-          <ListItemText primary="Descending (Z → A)" />
+          <ListItemText primary={
+            filterMenu.key === "asset-job:dateCreated" || filterMenu.key === "asset-job:dateClosed"
+              ? "Newest first"
+              : "Descending (Z → A)"
+          } />
         </MenuItem>
         <Divider />
         <MenuItem

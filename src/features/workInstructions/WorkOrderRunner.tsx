@@ -262,7 +262,6 @@ export default function WorkOrderRunner({
   const [values, setValues] = useState<Record<string, Record<string, string>>>(prefillValues ?? {});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
-  const [minimized, setMinimized] = useState(false);
   const sheetDragStartY = useRef(0);
   const [sheetDragOffset, setSheetDragOffset] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -282,6 +281,7 @@ export default function WorkOrderRunner({
   const [flagCostImpact, setFlagCostImpact] = useState("");
   const [flagSubmitted, setFlagSubmitted] = useState(false);
   const [flagMedia, setFlagMedia] = useState<string[]>([]);
+  const [flagSessionIssueIds, setFlagSessionIssueIds] = useState<string[]>([]);
   // Issue editing
   const [editingIssueId, setEditingIssueId] = useState<string | null>(null);
   const [editIssueDesc, setEditIssueDesc] = useState("");
@@ -321,7 +321,6 @@ export default function WorkOrderRunner({
 
   useEffect(() => {
     if (!open) {
-      setMinimized(false);
       setSheetDragOffset(0);
     }
   }, [open]);
@@ -345,7 +344,7 @@ export default function WorkOrderRunner({
 
   function handleSheetTouchEnd() {
     if (sheetDragOffset > 72) {
-      setMinimized(true);
+      void handleClose();
     }
     setSheetDragOffset(0);
   }
@@ -568,13 +567,46 @@ export default function WorkOrderRunner({
     }
   }
 
+  function resetFlagForm() {
+    setFlagDescription("");
+    setFlagExtraHours("");
+    setFlagCostImpact("");
+    setFlagMedia([]);
+    setFlagSubmitted(false);
+    setFlagIsScopeDeviation(false);
+    setFlagSeverity("medium");
+  }
+
+  function openFlagDialog() {
+    setFlagSessionIssueIds([]);
+    resetFlagForm();
+    setFlagOpen(true);
+  }
+
+  function closeFlagDialog() {
+    setFlagSessionIssueIds([]);
+    resetFlagForm();
+    setFlagOpen(false);
+  }
+
+  function cancelFlagDialog() {
+    if (flagSessionIssueIds.length > 0) {
+      setIssues((prev) => prev.filter((issue) => !flagSessionIssueIds.includes(issue.id)));
+      scheduleAutosave();
+    }
+    setFlagSessionIssueIds([]);
+    resetFlagForm();
+    setFlagOpen(false);
+  }
+
   function submitFlag() {
     if (!flagDescription.trim()) return;
     const derivedIssueType: "blocking" | "observation" | "scope-deviation" =
       flagIsScopeDeviation ? "scope-deviation" : flagSeverity === "high" ? "blocking" : "observation";
     const isBlocking = flagSeverity === "high" && !flagIsScopeDeviation;
+    const issueId = randomId("issue");
     const issue: RunIssue = {
-      id: randomId("issue"),
+      id: issueId,
       description: flagDescription.trim(),
       issueType: derivedIssueType,
       isBlocking,
@@ -591,15 +623,15 @@ export default function WorkOrderRunner({
       }),
     };
     setIssues((prev) => [...prev, issue]);
-    setFlagDescription("");
-    setFlagExtraHours("");
-    setFlagCostImpact("");
-    setFlagMedia([]);
+    setFlagSessionIssueIds((prev) => [...prev, issueId]);
+    resetFlagForm();
     setFlagSubmitted(true);
+    scheduleAutosave();
   }
 
   function deleteIssue(id: string) {
     setIssues((prev) => prev.filter((i) => i.id !== id));
+    setFlagSessionIssueIds((prev) => prev.filter((issueId) => issueId !== id));
     scheduleAutosave();
   }
 
@@ -1726,7 +1758,7 @@ export default function WorkOrderRunner({
           >
             <Box sx={{ width: 36, height: 4, borderRadius: 99, bgcolor: "action.disabled" }} />
             <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem" }}>
-              Swipe down to minimize
+              Swipe down to return to dashboard
             </Typography>
           </Box>
         )}
@@ -2158,7 +2190,7 @@ export default function WorkOrderRunner({
           </Stack>
         </DialogContent>
 
-        <Dialog open={flagOpen} onClose={() => { setFlagOpen(false); setFlagSubmitted(false); }} maxWidth="sm" fullWidth>
+        <Dialog open={flagOpen} onClose={closeFlagDialog} maxWidth="sm" fullWidth>
           <DialogTitle sx={{ pb: 1 }}>
             <Stack spacing={0.5}>
               <Typography variant="subtitle2" fontWeight={700} color="error">
@@ -2171,165 +2203,181 @@ export default function WorkOrderRunner({
             </Stack>
           </DialogTitle>
           <DialogContent dividers>
-            <Stack spacing={1.25}>
-              {/* Severity selector */}
-              <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
-                <FormControl size="small" sx={{ minWidth: 240 }}>
-                  <InputLabel shrink>Severity</InputLabel>
-                  <Select
-                    label="Severity"
-                    value={flagSeverity}
-                    onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
-                  >
-                    <MenuItem value="low">Low - observation, non-blocking</MenuItem>
-                    <MenuItem value="medium">Medium - attention needed, non-blocking</MenuItem>
-                    <MenuItem value="high">High - blocks completion</MenuItem>
-                  </Select>
-                </FormControl>
-                <FormControlLabel
-                  control={
-                    <Checkbox
-                      size="small"
-                      checked={flagIsScopeDeviation}
-                      onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
-                    />
-                  }
-                  label={
-                    <Stack direction="row" spacing={0.5} alignItems="center">
-                      <Typography variant="caption">Scope variation</Typography>
-                      <AttachMoneyOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
-                      <AccessTimeOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
-                    </Stack>
-                  }
-                />
-              </Stack>
-              {flagIsScopeDeviation && (
-                <Typography variant="caption" color="warning.main" display="block">
-                  Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements). This is a scope variation.
+            <Stack spacing={2}>
+              <Paper variant="outlined" sx={{ p: 1.5, borderColor: "primary.dark", bgcolor: "rgba(45,212,191,0.04)" }}>
+                <Typography variant="caption" fontWeight={700} color="primary.light" display="block" sx={{ mb: 1, textTransform: "uppercase", letterSpacing: 0.6 }}>
+                  Add an issue
                 </Typography>
-              )}
-
-              {/* Issues already flagged on this step */}
-              {issues.filter((i) => i.stepId === currentStep?.id).length > 0 && (
-                <Stack spacing={0.75}>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                    Flagged on this step:
-                  </Typography>
-                  {issues.filter((i) => i.stepId === currentStep?.id).map((issue) => (
-                    <Paper key={issue.id} variant="outlined" sx={{ p: 1, borderColor: issue.isBlocking ? "error.light" : "warning.light" }}>
-                      {editingIssueId === issue.id ? (
-                        <Stack spacing={0.75}>
-                          <TextField size="small" fullWidth multiline rows={2} label="Description"
-                            value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
-                          <FormControl size="small" sx={{ maxWidth: 220 }}>
-                            <InputLabel shrink>Severity</InputLabel>
-                            <Select label="Severity" value={editIssueSeverity}
-                              onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
-                              <MenuItem value="low">Low - observation only</MenuItem>
-                              <MenuItem value="medium">Medium - attention needed</MenuItem>
-                              <MenuItem value="high">High - blocks completion</MenuItem>
-                            </Select>
-                          </FormControl>
-                          <Stack direction="row" spacing={0.75}>
-                            <Button size="small" variant="contained" color="primary" disabled={!editIssueDesc.trim()} onClick={saveEditIssue}>Save</Button>
-                            <Button size="small" onClick={() => setEditingIssueId(null)}>Cancel</Button>
-                          </Stack>
+                <Stack spacing={1.25}>
+                  <Stack direction="row" spacing={2} alignItems="center" flexWrap="wrap">
+                    <FormControl size="small" sx={{ minWidth: 240 }}>
+                      <InputLabel shrink>Severity</InputLabel>
+                      <Select
+                        label="Severity"
+                        value={flagSeverity}
+                        onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
+                      >
+                        <MenuItem value="low">Low - observation, non-blocking</MenuItem>
+                        <MenuItem value="medium">Medium - attention needed, non-blocking</MenuItem>
+                        <MenuItem value="high">High - blocks completion</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <FormControlLabel
+                      control={
+                        <Checkbox
+                          size="small"
+                          checked={flagIsScopeDeviation}
+                          onChange={(e) => setFlagIsScopeDeviation(e.target.checked)}
+                        />
+                      }
+                      label={
+                        <Stack direction="row" spacing={0.5} alignItems="center">
+                          <Typography variant="caption">Scope variation</Typography>
+                          <AttachMoneyOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                          <AccessTimeOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
                         </Stack>
-                      ) : (
-                        <Stack spacing={0.25}>
-                          <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
-                            <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                              {issue.resolved
-                                ? <Chip size="small" label="Resolved" color="success" sx={{ height: 18, fontSize: 10 }} />
-                                : <Chip size="small"
-                                    label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
-                                    color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "warning"}
-                                    sx={{ height: 18, fontSize: 10 }} />
-                              }
-                              <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ height: 18, fontSize: 10 }} />
-                            </Stack>
-                            <Stack direction="row" spacing={0}>
-                              <Tooltip title="Add comments or close issue">
-                                <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
-                                  <CommentOutlined sx={{ fontSize: 14 }} />
-                                </IconButton>
-                              </Tooltip>
-                              <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                              <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                            </Stack>
-                          </Stack>
-                          <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
-                          <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                            {issue.createdBy ? `${issue.createdBy} - ` : ""}{formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: false })}
-                          </Typography>
-                        </Stack>
-                      )}
-                    </Paper>
-                  ))}
-                </Stack>
-              )}
-              <TextField
-                size="small"
-                fullWidth
-                multiline
-                rows={2}
-                label={flagIssueType === "scope-deviation" ? "Describe the scope variation" : "Describe/Add issue here"}
-                placeholder={flagIssueType === "scope-deviation" ? "e.g. Additional conduit run required due to obstructed original route..." : "Describe what you observed..."}
-                InputLabelProps={{ shrink: true }}
-                value={flagDescription}
-                onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
-              />
-              {flagIsScopeDeviation && (
-                <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      }
+                    />
+                  </Stack>
+                  {flagIsScopeDeviation && (
+                    <Typography variant="caption" color="warning.main" display="block">
+                      Work discovered outside the original scope (e.g. additional cabling, unforeseen access requirements). This is a scope variation.
+                    </Typography>
+                  )}
                   <TextField
                     size="small"
-                    label="Extra hours (est.)"
-                    type="number"
-                    inputProps={{ min: 0, step: 0.5 }}
-                    value={flagExtraHours}
-                    onChange={(e) => setFlagExtraHours(e.target.value)}
-                    sx={{ maxWidth: 160 }}
-                  />
-                  <TextField
-                    size="small"
-                    label="Cost impact (optional)"
-                    placeholder="e.g. GBP 250 materials"
+                    fullWidth
+                    multiline
+                    rows={2}
+                    label={flagIsScopeDeviation ? "Describe the scope variation" : "Describe issue"}
+                    placeholder={flagIsScopeDeviation ? "e.g. Additional conduit run required due to obstructed original route..." : "Describe what you observed..."}
                     InputLabelProps={{ shrink: true }}
-                    value={flagCostImpact}
-                    onChange={(e) => setFlagCostImpact(e.target.value)}
-                    sx={{ flex: 1 }}
+                    value={flagDescription}
+                    onChange={(e) => { setFlagDescription(e.target.value); setFlagSubmitted(false); }}
                   />
+                  {flagIsScopeDeviation && (
+                    <Stack direction={{ xs: "column", sm: "row" }} spacing={1}>
+                      <TextField
+                        size="small"
+                        label="Extra hours (est.)"
+                        type="number"
+                        inputProps={{ min: 0, step: 0.5 }}
+                        value={flagExtraHours}
+                        onChange={(e) => setFlagExtraHours(e.target.value)}
+                        sx={{ maxWidth: 160 }}
+                      />
+                      <TextField
+                        size="small"
+                        label="Cost impact (optional)"
+                        placeholder="e.g. GBP 250 materials"
+                        InputLabelProps={{ shrink: true }}
+                        value={flagCostImpact}
+                        onChange={(e) => setFlagCostImpact(e.target.value)}
+                        sx={{ flex: 1 }}
+                      />
+                    </Stack>
+                  )}
+                  <MediaCapture
+                    media={flagMedia}
+                    onChange={setFlagMedia}
+                    label="Attach Photo / Video (optional)"
+                  />
+                  <Box sx={{ display: "flex", justifyContent: "flex-end" }}>
+                    <Button
+                      size="small"
+                      variant="contained"
+                      color="success"
+                      disabled={!flagDescription.trim()}
+                      onClick={submitFlag}
+                    >
+                      Add issue
+                    </Button>
+                  </Box>
+                  {flagSubmitted && (
+                    <Typography variant="caption" color="success.main" sx={{ fontWeight: 600 }}>
+                      Issue added — add another or close when done
+                    </Typography>
+                  )}
                 </Stack>
-              )}
-              <MediaCapture
-                media={flagMedia}
-                onChange={setFlagMedia}
-                label="Attach Photo / Video (optional)"
-              />
+              </Paper>
+
+              <Paper variant="outlined" sx={{ p: 1.5, borderColor: "warning.dark", bgcolor: "rgba(249,168,37,0.04)" }}>
+                <Typography variant="caption" fontWeight={700} color="warning.light" display="block" sx={{ mb: 1, textTransform: "uppercase", letterSpacing: 0.6 }}>
+                  Issues created on this step
+                </Typography>
+                {issues.filter((i) => i.stepId === currentStep?.id).length === 0 ? (
+                  <Typography variant="body2" color="text.secondary">No issues flagged on this step yet.</Typography>
+                ) : (
+                  <Stack spacing={0.75}>
+                    {issues.filter((i) => i.stepId === currentStep?.id).map((issue) => (
+                      <Paper key={issue.id} variant="outlined" sx={{ p: 1, borderColor: issue.isBlocking ? "error.light" : "warning.light" }}>
+                        {editingIssueId === issue.id ? (
+                          <Stack spacing={0.75}>
+                            <TextField size="small" fullWidth multiline rows={2} label="Description"
+                              value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
+                            <FormControl size="small" sx={{ maxWidth: 220 }}>
+                              <InputLabel shrink>Severity</InputLabel>
+                              <Select label="Severity" value={editIssueSeverity}
+                                onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
+                                <MenuItem value="low">Low - observation only</MenuItem>
+                                <MenuItem value="medium">Medium - attention needed</MenuItem>
+                                <MenuItem value="high">High - blocks completion</MenuItem>
+                              </Select>
+                            </FormControl>
+                            <Stack direction="row" spacing={0.75}>
+                              <Button size="small" variant="contained" color="primary" disabled={!editIssueDesc.trim()} onClick={saveEditIssue}>Save</Button>
+                              <Button size="small" onClick={() => setEditingIssueId(null)}>Cancel</Button>
+                            </Stack>
+                          </Stack>
+                        ) : (
+                          <Stack spacing={0.25}>
+                            <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
+                              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
+                                {issue.resolved
+                                  ? <Chip size="small" label="Resolved" color="success" sx={{ height: 18, fontSize: 10 }} />
+                                  : <Chip size="small"
+                                      label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
+                                      color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "warning"}
+                                      sx={{ height: 18, fontSize: 10 }} />
+                                }
+                                <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ height: 18, fontSize: 10 }} />
+                              </Stack>
+                              <Stack direction="row" spacing={0}>
+                                <Tooltip title="Add comments or close issue">
+                                  <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
+                                    <CommentOutlined sx={{ fontSize: 14 }} />
+                                  </IconButton>
+                                </Tooltip>
+                                <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                                <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                              </Stack>
+                            </Stack>
+                            <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
+                            <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
+                              {issue.createdBy ? `${issue.createdBy} - ` : ""}{formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: false })}
+                            </Typography>
+                          </Stack>
+                        )}
+                      </Paper>
+                    ))}
+                  </Stack>
+                )}
+              </Paper>
             </Stack>
           </DialogContent>
           <DialogActions sx={{ justifyContent: "space-between", gap: 1, px: 3, py: 1.5 }}>
-            {flagSubmitted ? (
-              <Typography variant="caption" color="success.main" sx={{ fontWeight: 600, mr: "auto" }}>
-                Issue added - type another or close
-              </Typography>
-            ) : (
-              <Box />
-            )}
-            <Stack direction="row" spacing={1}>
-              <Button size="small" variant="text" color="inherit" onClick={() => { setFlagOpen(false); setFlagSubmitted(false); }}>
-                Close
-              </Button>
-              <Button
-                size="small"
-                variant="contained"
-                color="success"
-                disabled={!flagDescription.trim()}
-                onClick={submitFlag}
-              >
-                Add issue
-              </Button>
-            </Stack>
+            <Button
+              size="small"
+              variant="outlined"
+              color="warning"
+              disabled={flagSessionIssueIds.length === 0}
+              onClick={cancelFlagDialog}
+            >
+              Cancel & discard
+            </Button>
+            <Button size="small" variant="contained" color="inherit" onClick={closeFlagDialog}>
+              Done
+            </Button>
           </DialogActions>
         </Dialog>
 
@@ -2388,7 +2436,7 @@ export default function WorkOrderRunner({
                     variant="outlined"
                     color="error"
                     startIcon={<ReportProblemOutlined fontSize="small" />}
-                    onClick={() => { setFlagOpen(true); setFlagSubmitted(false); }}
+                    onClick={() => openFlagDialog()}
                   >
                     {stepIssueCount > 0 ? `Issues (${stepIssueCount}) +` : "Flag issue"}
                   </Button>
@@ -3377,7 +3425,7 @@ export default function WorkOrderRunner({
   return (
     <>
       <Dialog
-        open={open && !minimized}
+        open={open}
         onClose={handleClose}
         maxWidth="sm"
         fullWidth
@@ -3422,47 +3470,12 @@ export default function WorkOrderRunner({
           </Box>
         )}
       </Dialog>
-      {open && minimized && isMobileNativePlatform() && (
-        <Box
-          role="button"
-          tabIndex={0}
-          onClick={() => setMinimized(false)}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setMinimized(false); }}
-          sx={{
-            position: "fixed",
-            left: 12,
-            right: 12,
-            bottom: 72,
-            zIndex: (theme) => theme.zIndex.modal + 2,
-            px: 1.5,
-            py: 1,
-            borderRadius: 2,
-            border: "1px solid",
-            borderColor: "primary.main",
-            bgcolor: "background.paper",
-            boxShadow: 6,
-            display: "flex",
-            alignItems: "center",
-            gap: 1,
-            cursor: "pointer",
-          }}
-        >
-          <PlayArrowOutlined color="primary" fontSize="small" />
-          <Box sx={{ minWidth: 0, flex: 1 }}>
-            <Typography variant="body2" fontWeight={700} noWrap>
-              {assetTag ? `${assetTag} · Run in progress` : "Run in progress"}
-            </Typography>
-            <Typography variant="caption" color="text.secondary" noWrap>
-              Tap to resume — run stays active
-            </Typography>
-          </Box>
-        </Box>
-      )}
       {issueForDetail && (
         <IssueDetailDialog
           open={Boolean(issueDetailId)}
           issue={issueForDetail}
           currentUser={currentUserName ?? "Unknown"}
+          timeZoneId={resolvedTimeZone}
           onClose={() => setIssueDetailId(null)}
           onSave={(updated) => handleIssueDetailSave(updated as RunIssue)}
         />

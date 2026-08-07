@@ -13,6 +13,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { useRepoSubscription } from "../../hooks/useRepoSubscription";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
+import { isDashboardAttentionIssue } from "../../utils/issueAttention";
 import { Link, useNavigate } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
@@ -537,6 +538,13 @@ const Dashboard = () => {
     runId?: string;
     source: "asset" | "run";
   } | null>(null);
+  const issueDetailProjectId = useMemo(
+    () => (issueDetailTarget
+      ? openIssues.find((issue) => issue.issueId === issueDetailTarget.issue.id)?.projectId
+      : undefined),
+    [issueDetailTarget, openIssues],
+  );
+  const issueDetailTimeZone = useProjectTimeZone(issueDetailProjectId);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [resolvingDashboardIssueId, setResolvingDashboardIssueId] = useState<string | null>(null);
   // Per-asset, not a shared boolean: with one flag every "View" button in Job
@@ -1527,7 +1535,7 @@ const Dashboard = () => {
   );
   const projectCount = dashboardProjects.length;
   const blockingIssues = visibleOpenIssues.filter((i) => i.isBlocking);
-  const highIssues = visibleOpenIssues.filter((i) => !i.isBlocking && i.severity === "high");
+  const highIssues = visibleOpenIssues.filter((i) => isDashboardAttentionIssue(i));
   const overdueProjects = dashboardProjects.filter((p) => {
     if (!p.finishDate) return false;
     if (String(p.status ?? "") === "Completed") return false;
@@ -2163,12 +2171,7 @@ const Dashboard = () => {
 
     return {
       blockingIssues: assetIssues.filter((issue) => issue.isBlocking),
-      highObservations: assetIssues.filter(
-        (issue) =>
-          !issue.isBlocking &&
-          issue.issueType === "observation" &&
-          issue.severity === "high"
-      ),
+      highObservations: assetIssues.filter((issue) => isDashboardAttentionIssue(issue)),
       pendingSignature:
         pendingSigs.find(
           (sig) => sig.assetId === quickActionAsset.id
@@ -2368,12 +2371,7 @@ const Dashboard = () => {
 
     return {
       blockingIssues: assetIssues.filter((issue) => issue.isBlocking),
-      highObservations: assetIssues.filter(
-        (issue) =>
-          !issue.isBlocking &&
-          issue.issueType === "observation" &&
-          issue.severity === "high"
-      ),
+      highObservations: assetIssues.filter((issue) => isDashboardAttentionIssue(issue)),
       pendingSignature:
         pendingSigs.find(
           (sig) => sig.assetId === asset.id
@@ -2642,7 +2640,7 @@ const Dashboard = () => {
 
     if (quickActionAttention.highObservations.length > 0) {
       return {
-        label: "Review High Observation",
+        label: "Review Observation / Scope",
         color: "info" as const,
         onClick: () => {
           closeQuickActionDialog();
@@ -2809,13 +2807,10 @@ const Dashboard = () => {
   // High-severity observations on user's assigned assets (created by the current user)
   const myInstallHighObservations = useMemo(
     () => openIssues.filter((issue) =>
-      !issue.isBlocking &&
-      issue.severity === "high" &&
-      issue.issueType === "observation" &&
-      (issue.createdBy ?? "") === user.fullName &&
+      isDashboardAttentionIssue(issue) &&
       myInstallAssets.some((asset) => asset.id === issue.assetId)
     ),
-    [openIssues, myInstallAssets, user.fullName]
+    [openIssues, myInstallAssets]
   );
   const myInstallAttentionCount = myInstallBlocking.length + myInstallPendingSigs.length + myInstallHighObservations.length;
   const myInstallMissingMediaCount = useMemo(
@@ -2841,13 +2836,10 @@ const Dashboard = () => {
   // not for high-severity observations. Modeled directly on myInstallHighObservations.
   const myInspectionHighObservations = useMemo(
     () => openIssues.filter((issue) =>
-      !issue.isBlocking &&
-      issue.severity === "high" &&
-      issue.issueType === "observation" &&
-      (issue.createdBy ?? "") === user.fullName &&
+      isDashboardAttentionIssue(issue) &&
       myInspectionAssets.some((asset) => asset.id === issue.assetId)
     ),
-    [openIssues, myInspectionAssets, user.fullName]
+    [openIssues, myInspectionAssets]
   );
   const myInspectionAttentionCount = myInspectionBlocking.length + myInspectionPendingSigs.length + myInspectionHighObservations.length;
 
@@ -3540,7 +3532,7 @@ const Dashboard = () => {
           }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
               <ReportOutlined sx={{ fontSize: 18, color: myInspectionHighObservations.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My High Observations</Typography>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Observations & Scope</Typography>
             </Stack>
             <Typography variant="h5" fontWeight={700} color={myInspectionHighObservations.length > 0 ? "warning.main" : "text.secondary"}>
               {myInspectionHighObservations.length}
@@ -3561,7 +3553,7 @@ const Dashboard = () => {
                 )}
               </Stack>
             ) : (
-              <Typography variant="caption" color="success.main">No high-severity observations</Typography>
+              <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
             )}
           </Box>
         </Grid>
@@ -3717,7 +3709,7 @@ const Dashboard = () => {
           }}>
             <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
               <ReportOutlined sx={{ fontSize: 18, color: highIssues.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>High Observations</Typography>
+              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>Observations & Scope</Typography>
             </Stack>
             <Typography variant="h5" fontWeight={700} color={highIssues.length > 0 ? "warning.main" : "text.secondary"}>
               {highIssues.length}
@@ -3740,7 +3732,7 @@ const Dashboard = () => {
                 )}
               </Stack>
             ) : (
-              <Typography variant="caption" color="success.main">No high-severity observations</Typography>
+              <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
             )}
           </Box>
         </Grid>
@@ -5416,7 +5408,7 @@ const Dashboard = () => {
                 }}>
                   <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
                     <ReportOutlined sx={{ fontSize: 18, color: myInstallHighObservations.length > 0 ? "warning.main" : "text.disabled" }} />
-                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My High Observations</Typography>
+                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Observations & Scope</Typography>
                   </Stack>
                   <Typography variant="h5" fontWeight={700} color={myInstallHighObservations.length > 0 ? "warning.main" : "text.secondary"}>
                     {myInstallHighObservations.length}
@@ -5437,7 +5429,7 @@ const Dashboard = () => {
                       )}
                     </Stack>
                   ) : (
-                    <Typography variant="caption" color="success.main">No high-severity observations</Typography>
+                    <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
                   )}
                 </Box>
               </Grid>
@@ -6208,6 +6200,7 @@ const Dashboard = () => {
           open={!!issueDetailTarget}
           issue={issueDetailTarget.issue}
           currentUser={user.fullName ?? user.email ?? "User"}
+          timeZoneId={issueDetailTimeZone}
           hideComments
           hideResolutionMedia
           onClose={() => setIssueDetailTarget(null)}
@@ -6257,7 +6250,7 @@ const Dashboard = () => {
                       <Chip size="small" color="error" variant="outlined" label={`${quickActionAttention.blockingIssues.length} blocking`} />
                     )}
                     {quickActionAttention.highObservations.length > 0 && (
-                      <Chip size="small" color="warning" variant="outlined" label={`${quickActionAttention.highObservations.length} high observation`} />
+                      <Chip size="small" color="warning" variant="outlined" label={`${quickActionAttention.highObservations.length} obs / scope`} />
                     )}
                     {quickActionAttention.missingMedia && (
                       <Chip size="small" color="warning" variant="outlined" label="Missing photos" />

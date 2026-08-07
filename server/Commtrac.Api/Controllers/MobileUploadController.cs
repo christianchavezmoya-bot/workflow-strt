@@ -132,13 +132,13 @@ public class MobileUploadController : ControllerBase
             return Ok(new { status = "expired" });
         }
 
-        return Ok(new { status = entry.Status, documentId = entry.DocumentId });
+        return Ok(new { status = entry.Status, documentId = entry.DocumentId, documentIds = ParseUploadedDocumentIds(entry) });
     }
 
     [HttpPost("{token}/upload")]
     [AllowAnonymous]
-    [RequestSizeLimit(100_000_000)]
-    public async Task<IActionResult> UploadFile(string token, [FromForm] IFormFile? file)
+    [RequestSizeLimit(200_000_000)]
+    public async Task<IActionResult> UploadFile(string token, [FromForm] IFormFile? file, [FromForm] List<IFormFile>? files)
     {
         var entry = await _db.MobileUploadTokens.FirstOrDefaultAsync(t => t.Token == token);
         if (entry is null)
@@ -151,45 +151,59 @@ public class MobileUploadController : ControllerBase
         }
 
         if (string.Equals(entry.Status, "complete", StringComparison.OrdinalIgnoreCase))
-            return BadRequest(new { error = "File already uploaded for this token." });
+            return BadRequest(new { error = "Files already uploaded for this token." });
 
-        if (file == null || file.Length == 0)
+        var uploadFiles = new List<IFormFile>();
+        if (file is { Length: > 0 }) uploadFiles.Add(file);
+        if (files is not null)
+        {
+            uploadFiles.AddRange(files.Where(f => f.Length > 0));
+        }
+
+        if (uploadFiles.Count == 0)
             return BadRequest(new { error = "No file provided." });
 
         var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
         Directory.CreateDirectory(storageRoot);
 
-        var extension = Path.GetExtension(file.FileName);
-        var storedName = $"{Guid.NewGuid()}{extension}";
-        var storedPath = Path.Combine(storageRoot, storedName);
-
-        await using (var stream = System.IO.File.Create(storedPath))
+        var documentIds = new List<string>();
+        foreach (var upload in uploadFiles)
         {
-            await file.CopyToAsync(stream);
+            var extension = Path.GetExtension(upload.FileName);
+            var storedName = $"{Guid.NewGuid()}{extension}";
+            var storedPath = Path.Combine(storageRoot, storedName);
+
+            await using (var stream = System.IO.File.Create(storedPath))
+            {
+                await upload.CopyToAsync(stream);
+            }
+
+            var doc = new DocumentEntity
+            {
+                Name = upload.FileName,
+                Type = entry.Type,
+                LinkedTo = entry.LinkedTo,
+                UploadedAt = DateTime.UtcNow.ToString("s"),
+                FilePath = Path.Combine("Storage", "Documents", storedName),
+                ContentType = upload.ContentType,
+                FileSize = upload.Length,
+                CreatedBy = "mobile-upload",
+                Notes = null,
+                CustomValuesJson = entry.CustomValuesJson
+            };
+
+            _db.Documents.Add(doc);
+            documentIds.Add(doc.Id);
         }
 
-        var doc = new DocumentEntity
-        {
-            Name = file.FileName,
-            Type = entry.Type,
-            LinkedTo = entry.LinkedTo,
-            UploadedAt = DateTime.UtcNow.ToString("s"),
-            FilePath = Path.Combine("Storage", "Documents", storedName),
-            ContentType = file.ContentType,
-            FileSize = file.Length,
-            CreatedBy = "mobile-upload",
-            Notes = null,
-            CustomValuesJson = entry.CustomValuesJson
-        };
-
-        _db.Documents.Add(doc);
         entry.Status = "complete";
-        entry.DocumentId = doc.Id;
+        entry.DocumentId = documentIds[0];
+        entry.CustomValuesJson = SerializeUploadedDocumentIds(documentIds, entry.CustomValuesJson);
         entry.ConsumedAtUtc = DateTime.UtcNow;
 
         await _db.SaveChangesAsync();
 
-        return Ok(new { documentId = doc.Id });
+        return Ok(new { documentId = documentIds[0], documentIds });
     }
 
     [HttpPost("{token}/missing-media")]
@@ -511,6 +525,59 @@ public class MobileUploadController : ControllerBase
     {
         return string.Equals(entry.Status, "pending", StringComparison.OrdinalIgnoreCase)
                && entry.ExpiresAtUtc < DateTime.UtcNow;
+    }
+
+    private static List<string> ParseUploadedDocumentIds(MobileUploadTokenEntity entry)
+    {
+        var ids = new List<string>();
+        if (!string.IsNullOrWhiteSpace(entry.DocumentId))
+            ids.Add(entry.DocumentId);
+
+        if (string.IsNullOrWhiteSpace(entry.CustomValuesJson))
+            return ids;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(entry.CustomValuesJson);
+            if (doc.RootElement.TryGetProperty("uploadedDocumentIds", out var arr) && arr.ValueKind == JsonValueKind.Array)
+            {
+                foreach (var item in arr.EnumerateArray())
+                {
+                    var id = item.GetString();
+                    if (!string.IsNullOrWhiteSpace(id) && !ids.Contains(id))
+                        ids.Add(id);
+                }
+            }
+        }
+        catch
+        {
+            // ignore malformed payload
+        }
+
+        return ids;
+    }
+
+    private static string SerializeUploadedDocumentIds(IReadOnlyList<string> documentIds, string? existingCustomValuesJson)
+    {
+        Dictionary<string, JsonElement>? existing = null;
+        if (!string.IsNullOrWhiteSpace(existingCustomValuesJson))
+        {
+            try
+            {
+                existing = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(existingCustomValuesJson, _json);
+            }
+            catch
+            {
+                existing = null;
+            }
+        }
+
+        var payload = existing is not null
+            ? existing.ToDictionary(kvp => kvp.Key, kvp => (object)kvp.Value)
+            : new Dictionary<string, object>();
+
+        payload["uploadedDocumentIds"] = documentIds;
+        return JsonSerializer.Serialize(payload, _json);
     }
 }
 
