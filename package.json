@@ -48,6 +48,7 @@
     "axios": "^1.6.8",
     "capacitor-native-biometric": "^4.2.2",
     "capacitor-secure-storage-plugin": "^0.13.0",
+    "chart.js": "^4.5.1",
     "dayjs": "^1.11.19",
     "docx": "^9.6.0",
     "idb": "^8.0.3",

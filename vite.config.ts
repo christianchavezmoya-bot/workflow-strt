@@ -30,6 +30,10 @@ export default defineConfig({
           if (id.includes("leaflet") || id.includes("react-leaflet")) {
             return "maps";
           }
+
+          if (id.includes("chart.js")) {
+            return "chartjs";
+          }
         },
       },
     },

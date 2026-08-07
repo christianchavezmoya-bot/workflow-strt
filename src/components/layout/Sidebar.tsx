@@ -24,6 +24,7 @@ import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
 import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
+import QueryStatsOutlinedIcon from "@mui/icons-material/QueryStatsOutlined";
 import { NavLink } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
@@ -48,8 +49,9 @@ const navItems = [
   { label: "Documents",         icon: <FolderOutlinedIcon />,                     to: "/documents",                         tourKey: "nav-documents" },
   { label: "Tips & Tricks",     icon: <LightbulbOutlinedIcon />,                  to: "/tips",                              tourKey: "nav-tips" },
   ...(BOM_MODULE_ENABLED ? [{ label: "BOM to Project", icon: <AccountTreeOutlinedIcon />, to: "/admin/bom-project", tourKey: "nav-bom" }] : []),
-  // Admin and Settings are web/desktop only - hidden on native mobile app
+  // Admin, Settings, and Time Analytics are web/desktop only — hidden on native mobile app
   ...(!isNativeMobile ? [
+    { label: "Time Analytics", icon: <QueryStatsOutlinedIcon />, to: "/time-analytics", tourKey: "nav-time-analytics", requiresFullAccess: false },
     { label: "Admin",    icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",    end: true,  tourKey: "nav-admin",     requiresFullAccess: false },
     { label: "Settings", icon: <SettingsOutlinedIcon />,           to: "/settings",            tourKey: "nav-settings",  requiresFullAccess: true  },
   ] : []),
