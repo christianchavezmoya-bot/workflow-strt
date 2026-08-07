@@ -48,13 +48,13 @@ export default function MobileUploadPage() {
 
   const [pageState, setPageState] = useState<PageState>("loading");
   const [tokenInfo, setTokenInfo] = useState<TokenInfo | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
+  const [previews, setPreviews] = useState<string[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedFiles, setSelectedFiles] = useState<Record<string, File | null>>({});
-  const [previews, setPreviews] = useState<Record<string, string | null>>({});
+  const [missingMediaSelectedFiles, setMissingMediaSelectedFiles] = useState<Record<string, File | null>>({});
+  const [missingMediaPreviews, setMissingMediaPreviews] = useState<Record<string, string | null>>({});
   const galleryInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const cameraInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -83,38 +83,35 @@ export default function MobileUploadPage() {
   }, [token]);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0) return;
 
-    setSelectedFile(file);
-    if (file.type.startsWith("image/")) {
-      setPreview(URL.createObjectURL(file));
-      return;
-    }
-
-    setPreview(null);
+    setSelectedFiles(files);
+    setPreviews(files.map((file) => (file.type.startsWith("image/") ? URL.createObjectURL(file) : "")));
   };
 
-  const handleMissingMediaFileChange = (step: MissingMediaStep, file: File | null) => {
-    if (!file) return;
+  const handleMissingMediaFileChange = (step: MissingMediaStep, fileList: FileList | null) => {
+    const files = Array.from(fileList ?? []);
+    if (files.length === 0) return;
+    const file = files[0];
     const key = `${step.stepId}-${step.inputId}`;
-    setSelectedFiles((prev) => ({ ...prev, [key]: file }));
+    setMissingMediaSelectedFiles((prev) => ({ ...prev, [key]: file }));
     if (file.type.startsWith("image/")) {
-      setPreviews((prev) => ({ ...prev, [key]: URL.createObjectURL(file) }));
+      setMissingMediaPreviews((prev) => ({ ...prev, [key]: URL.createObjectURL(file) }));
       return;
     }
-    setPreviews((prev) => ({ ...prev, [key]: null }));
+    setMissingMediaPreviews((prev) => ({ ...prev, [key]: null }));
   };
 
   const handleUpload = async () => {
-    if (!selectedFile || !token) return;
+    if (selectedFiles.length === 0 || !token) return;
 
     setPageState("uploading");
     setUploadProgress(0);
 
     try {
       const formData = new FormData();
-      formData.append("file", selectedFile);
+      selectedFiles.forEach((file) => formData.append("files", file));
 
       await api.post(`/mobile-upload/${token}/upload`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
@@ -136,7 +133,7 @@ export default function MobileUploadPage() {
   const handleMissingMediaUpload = async () => {
     if (!tokenInfo?.missingSteps?.length) return;
     const chosen = tokenInfo.missingSteps
-      .map((step) => ({ step, file: selectedFiles[`${step.stepId}-${step.inputId}`] }))
+      .map((step) => ({ step, file: missingMediaSelectedFiles[`${step.stepId}-${step.inputId}`] }))
       .filter((entry): entry is { step: MissingMediaStep; file: File } => Boolean(entry.file));
 
     if (chosen.length === 0) return;
@@ -215,7 +212,7 @@ export default function MobileUploadPage() {
               Upload complete!
             </Typography>
             <Typography variant="body2" color="text.secondary" textAlign="center">
-              Your file has been received. You can close this tab.
+              Your {selectedFiles.length > 1 ? `${selectedFiles.length} files have` : "file has"} been received. You can close this tab.
             </Typography>
           </Stack>
         )}
@@ -239,8 +236,8 @@ export default function MobileUploadPage() {
                 </Alert>
                 {(tokenInfo.missingSteps ?? []).map((step) => {
                   const key = `${step.stepId}-${step.inputId}`;
-                  const chosenFile = selectedFiles[key];
-                  const previewUrl = previews[key];
+                  const chosenFile = missingMediaSelectedFiles[key];
+                  const previewUrl = missingMediaPreviews[key];
                   const accept = step.inputType === "video" ? "video/*" : "image/*";
                   return (
                     <Paper key={key} variant="outlined" sx={{ p: 2 }}>
@@ -266,7 +263,8 @@ export default function MobileUploadPage() {
                           ref={(el) => { galleryInputRefs.current[key] = el; }}
                           type="file"
                           accept={accept}
-                          onChange={(e) => handleMissingMediaFileChange(step, e.target.files?.[0] ?? null)}
+                          multiple
+                          onChange={(e) => handleMissingMediaFileChange(step, e.target.files)}
                         />
                         <input
                           hidden
@@ -274,7 +272,7 @@ export default function MobileUploadPage() {
                           type="file"
                           accept={accept}
                           capture="environment"
-                          onChange={(e) => handleMissingMediaFileChange(step, e.target.files?.[0] ?? null)}
+                          onChange={(e) => handleMissingMediaFileChange(step, e.target.files)}
                         />
                         <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
                           <Button
@@ -320,7 +318,7 @@ export default function MobileUploadPage() {
                   variant="contained"
                   size="large"
                   fullWidth
-                  disabled={!tokenInfo.missingSteps?.some((step) => selectedFiles[`${step.stepId}-${step.inputId}`])}
+                  disabled={!tokenInfo.missingSteps?.some((step) => missingMediaSelectedFiles[`${step.stepId}-${step.inputId}`])}
                   onClick={handleMissingMediaUpload}
                   startIcon={<UploadFileOutlinedIcon />}
                 >
@@ -333,12 +331,12 @@ export default function MobileUploadPage() {
               onClick={() => fileInputRef.current?.click()}
               sx={{
                 border: "2px dashed",
-                borderColor: selectedFile ? "success.main" : "divider",
+                borderColor: selectedFiles.length > 0 ? "success.main" : "divider",
                 borderRadius: 2,
                 p: 3,
                 textAlign: "center",
                 cursor: "pointer",
-                bgcolor: selectedFile ? "success.50" : "action.hover",
+                bgcolor: selectedFiles.length > 0 ? "success.50" : "action.hover",
                 transition: "all 0.2s",
               }}
             >
@@ -346,32 +344,38 @@ export default function MobileUploadPage() {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*,video/*,application/pdf,.dwg"
+                multiple
                 style={{ display: "none" }}
                 onChange={handleFileChange}
                 capture={undefined}
               />
-              {selectedFile ? (
+              {selectedFiles.length > 0 ? (
                 <Stack spacing={1} alignItems="center">
-                  {preview && (
-                    <Box
-                      component="img"
-                      src={preview}
-                      sx={{ maxHeight: 160, maxWidth: "100%", borderRadius: 1, objectFit: "contain" }}
-                    />
-                  )}
-                  <Typography variant="body2" fontWeight={600} noWrap sx={{ maxWidth: 260 }}>
-                    {selectedFile.name}
+                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent="center">
+                    {previews.filter(Boolean).slice(0, 4).map((previewUrl, idx) => (
+                      <Box
+                        key={previewUrl}
+                        component="img"
+                        src={previewUrl}
+                        sx={{ maxHeight: 80, maxWidth: 80, borderRadius: 1, objectFit: "cover" }}
+                        alt={`Preview ${idx + 1}`}
+                      />
+                    ))}
+                  </Stack>
+                  <Typography variant="body2" fontWeight={600}>
+                    {selectedFiles.length} file{selectedFiles.length === 1 ? "" : "s"} selected
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    {formatBytes(selectedFile.size)} - Tap to change
+                    {selectedFiles.map((file) => file.name).slice(0, 3).join(", ")}
+                    {selectedFiles.length > 3 ? ` +${selectedFiles.length - 3} more` : ""} — Tap to change
                   </Typography>
                 </Stack>
               ) : (
                 <Stack spacing={1} alignItems="center">
                   <UploadFileOutlinedIcon sx={{ fontSize: 48, color: "text.disabled" }} />
-                  <Typography variant="body2" fontWeight={600}>Tap to choose a file</Typography>
+                  <Typography variant="body2" fontWeight={600}>Tap to choose files</Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Photo, video, PDF or drawing
+                    Select one or more photos, videos, PDFs or drawings
                   </Typography>
                 </Stack>
               )}
@@ -381,11 +385,11 @@ export default function MobileUploadPage() {
               variant="contained"
               size="large"
               fullWidth
-              disabled={!selectedFile}
+              disabled={selectedFiles.length === 0}
               onClick={handleUpload}
               startIcon={<UploadFileOutlinedIcon />}
             >
-              Upload
+              Upload{selectedFiles.length > 1 ? ` ${selectedFiles.length} files` : ""}
             </Button>
               </>
             )}

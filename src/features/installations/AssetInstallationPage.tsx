@@ -2026,9 +2026,21 @@ const AssetInstallationPage = () => {
         if (av > bv) return autoSort.dir === "asc" ? 1 : -1;
         return 0;
       });
+    } else if (autoSort.key === "dateCreated" || autoSort.key === "dateClosed") {
+      rows = [...rows].sort((a, b) => {
+        const av = autoSort.key === "dateCreated"
+          ? Date.parse(a.createdAt ?? "")
+          : Date.parse(resolveAssetClosedAt(a, runsMap[a.id]) ?? "");
+        const bv = autoSort.key === "dateCreated"
+          ? Date.parse(b.createdAt ?? "")
+          : Date.parse(resolveAssetClosedAt(b, runsMap[b.id]) ?? "");
+        const aVal = Number.isNaN(av) ? 0 : av;
+        const bVal = Number.isNaN(bv) ? 0 : bv;
+        return autoSort.dir === "asc" ? aVal - bVal : bVal - aVal;
+      });
     }
     return rows;
-  }, [visibleAssets, autoFilters, autoSort, assetAccessors]);
+  }, [visibleAssets, autoFilters, autoSort, assetAccessors, runsMap]);
 
   const virtualizeOperationsTable =
     paginatedWebProject && displayAssets.length >= OPERATIONS_VIRTUALIZE_MIN_ROWS;
@@ -6396,8 +6408,17 @@ ${words.slice(midpoint).join(" ")}`;
 
       {/* Column sort / filter menu */}
       <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
-        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort A → Z</MenuItem>
-        <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort Z → A</MenuItem>
+        {(autoMenu.key === "dateCreated" || autoMenu.key === "dateClosed") ? (
+          <>
+            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort oldest first</MenuItem>
+            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort newest first</MenuItem>
+          </>
+        ) : (
+          <>
+            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort A → Z</MenuItem>
+            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort Z → A</MenuItem>
+          </>
+        )}
         <MenuItem onClick={() => { setAutoSort({ key: "", dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Clear sort</MenuItem>
         {(assetFilterOptions[autoMenu.key] ?? []).map((option) => {
           const label = option || "(Blank)";
@@ -7289,6 +7310,7 @@ ${words.slice(midpoint).join(" ")}`;
               open={Boolean(issueDetailIssueId)}
               issue={issue}
               currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
+              timeZoneId={runnerProjectTimeZone}
               onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); setIssueDetailRunId(null); }}
               onSave={(updated) => saveInlineRunIssue(issueDetailRunId, issueDetailAsset.id, updated as RunIssue)}
             />
@@ -7303,6 +7325,7 @@ ${words.slice(midpoint).join(" ")}`;
             open={Boolean(issueDetailIssueId)}
             issue={issue}
             currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
+            timeZoneId={officeZone}
             onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); setIssueDetailRunId(null); }}
             onSave={(updated) => handleIssueDetailSave(updated as AssetIssue)}
           />

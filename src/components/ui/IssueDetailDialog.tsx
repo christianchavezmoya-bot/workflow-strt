@@ -20,6 +20,7 @@ import type { AssetIssue } from "../../types/projectAsset";
 import type { RunIssue } from "../../types/assetWorkflowRun";
 import MediaCapture from "./MediaCapture";
 import IssueTimeline from "./IssueTimeline";
+import { formatInstant } from "../../utils/datetime";
 
 type AnyIssue = AssetIssue | RunIssue;
 
@@ -27,6 +28,7 @@ interface Props {
   open: boolean;
   issue: AnyIssue;
   currentUser: string;
+  timeZoneId?: string | null;
   readOnly?: boolean;
   hideComments?: boolean;
   hideResolutionMedia?: boolean;
@@ -40,18 +42,8 @@ const SEVERITY_COLOR: Record<string, "error" | "warning" | "default"> = {
   low: "default",
 };
 
-function formatDate(iso: string) {
-  try {
-    return new Date(iso).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return iso;
-  }
+function formatIssueDate(iso: string, timeZoneId?: string | null) {
+  return formatInstant(iso, timeZoneId, { withZone: false }) || iso;
 }
 
 
@@ -59,6 +51,7 @@ export default function IssueDetailDialog({
   open,
   issue,
   currentUser,
+  timeZoneId,
   readOnly = false,
   hideResolutionMedia = false,
   onClose,
@@ -142,7 +135,7 @@ export default function IssueDetailDialog({
           </Typography>
           <Stack direction="row" spacing={1.5} flexWrap="wrap">
             <Typography variant="caption" color="text.secondary">
-              Reported {formatDate(issue.reportedAt)}
+              Reported {formatIssueDate(issue.reportedAt, timeZoneId)}
             </Typography>
             {issue.stepTitle && (
               <Typography variant="caption" color="text.secondary">
@@ -159,7 +152,7 @@ export default function IssueDetailDialog({
           <Box sx={{ px: 2.5, pt: 2 }}>
             <Alert severity="success" icon={<CheckCircleOutlined />}>
               <Typography variant="body2" fontWeight={600}>
-                Closed by {issue.resolvedBy ?? "Unknown"} · {issue.resolvedAt ? formatDate(issue.resolvedAt) : ""}
+                Closed by {issue.resolvedBy ?? "Unknown"} · {issue.resolvedAt ? formatIssueDate(issue.resolvedAt, timeZoneId) : ""}
               </Typography>
               {issue.resolutionNote && (
                 <Typography variant="body2" sx={{ mt: 0.5, fontStyle: "italic" }}>

@@ -38,6 +38,7 @@ interface TokenResponse {
 interface TokenStatus {
   status: "pending" | "complete" | "expired" | "not_found";
   documentId?: string;
+  documentIds?: string[];
 }
 
 export default function QRUploadButton({
@@ -105,6 +106,41 @@ export default function QRUploadButton({
     setProcessing(false);
   };
 
+  const processUploadedDocuments = async (documentIds: string[]) => {
+    const uniqueIds = Array.from(new Set(documentIds.filter(Boolean)));
+    if (uniqueIds.length === 0) return;
+
+    setDone(true);
+    onUploaded(uniqueIds[0]);
+
+    if (!onUploadedWithData) {
+      setTimeout(() => handleClose(), 2000);
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const docs = await documentService.getDocuments();
+      for (const documentId of uniqueIds) {
+        const doc: DocumentRecord | undefined = docs.find((d) => d.id === documentId);
+        if (doc?.downloadUrl) {
+          const buffer = await documentService.openDocumentAsBuffer(doc.downloadUrl);
+          const bytes = new Uint8Array(buffer);
+          let binary = "";
+          bytes.forEach((b) => (binary += String.fromCharCode(b)));
+          const base64 = window.btoa(binary);
+          const dataUrl = `data:${doc.contentType ?? "application/octet-stream"};base64,${base64}`;
+          onUploadedWithData(documentId, dataUrl);
+        }
+      }
+    } catch {
+      // Non-fatal - onUploaded already called
+    } finally {
+      setProcessing(false);
+      setTimeout(() => handleClose(), 2000);
+    }
+  };
+
   // Start/restart polling whenever token changes
   useEffect(() => {
     if (!token || done) return;
@@ -112,33 +148,11 @@ export default function QRUploadButton({
     pollRef.current = setInterval(async () => {
       try {
         const res = await api.get<TokenStatus>(`/mobile-upload/token/${token}`);
-        const { status, documentId } = res.data;
-        if (status === "complete" && documentId) {
+        const { status, documentId, documentIds } = res.data;
+        if (status === "complete" && (documentIds?.length || documentId)) {
           stopPolling();
-          setDone(true);
-          onUploaded(documentId);
-          if (onUploadedWithData) {
-            setProcessing(true);
-            try {
-              // Fetch the document record to get contentType + downloadUrl
-              const docs = await documentService.getDocuments();
-              const doc: DocumentRecord | undefined = docs.find((d) => d.id === documentId);
-              if (doc?.downloadUrl) {
-                const buffer = await documentService.openDocumentAsBuffer(doc.downloadUrl);
-                const bytes = new Uint8Array(buffer);
-                let binary = "";
-                bytes.forEach((b) => (binary += String.fromCharCode(b)));
-                const base64 = window.btoa(binary);
-                const dataUrl = `data:${doc.contentType ?? "application/octet-stream"};base64,${base64}`;
-                onUploadedWithData(documentId, dataUrl);
-              }
-            } catch {
-              // Non-fatal - onUploaded already called
-            } finally {
-              setProcessing(false);
-            }
-          }
-          setTimeout(() => handleClose(), 2000);
+          const ids = documentIds?.length ? documentIds : (documentId ? [documentId] : []);
+          await processUploadedDocuments(ids);
         } else if (status === "expired" || status === "not_found") {
           stopPolling();
           setError("QR code expired. Click Regenerate to get a new one.");
@@ -217,7 +231,7 @@ export default function QRUploadButton({
           {!loading && !error && !done && token && (
             <Stack alignItems="center" spacing={2} py={1}>
               <Typography variant="body2" color="text.secondary" textAlign="center">
-                Scan this QR code with your phone camera to upload a photo, video or document.
+                Scan this QR code with your phone camera to upload one or more photos, videos or documents.
               </Typography>
               <Box
                 sx={{
