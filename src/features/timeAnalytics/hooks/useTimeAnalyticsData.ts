@@ -19,10 +19,15 @@ import type {
 
 export type FetchMode = "api" | "mock" | "auto";
 
+/** Dev: try live API, fall back to mock. Production builds: live API only. */
+export function defaultTimeAnalyticsFetchMode(): FetchMode {
+  return import.meta.env.DEV ? "auto" : "api";
+}
+
 export interface UseTimeAnalyticsDataOptions {
   /** axios instance from the host app — optional; mock-only when omitted. */
   api?: unknown;
-  /** "auto" tries the api and falls back on failure (default). */
+  /** Default from `defaultTimeAnalyticsFetchMode()` — auto in dev, api in prod. */
   mode?: FetchMode;
   /** Refresh interval in ms. 0 disables polling (default). */
   refreshIntervalMs?: number;
@@ -71,7 +76,7 @@ export function useTimeAnalyticsData(
 ): UseTimeAnalyticsDataResult {
   const {
     api,
-    mode: initialMode = "api",
+    mode: initialMode = defaultTimeAnalyticsFetchMode(),
     refreshIntervalMs = 0,
     endpoint,
     filterDebounceMs = 400,

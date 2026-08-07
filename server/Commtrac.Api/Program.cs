@@ -24,6 +24,26 @@ if (!Path.IsPathRooted(dbDataSource))
 var resolvedConnectionString = $"Data Source={dbDataSource}";
 Console.WriteLine($"[DB] Resolved path: {dbDataSource}");
 
+const long freshDbWarningBytes = 5L * 1024 * 1024;
+if (File.Exists(dbDataSource))
+{
+    var dbSizeBytes = new FileInfo(dbDataSource).Length;
+    Console.WriteLine($"[DB] File size: {dbSizeBytes / (1024.0 * 1024.0):F2} MB");
+    if (dbSizeBytes < freshDbWarningBytes)
+    {
+        Console.ForegroundColor = ConsoleColor.Yellow;
+        Console.WriteLine("[DB] WARNING: Database file is very small (< 5 MB).");
+        Console.WriteLine("[DB] You may be on a fresh seed DB, not your populated workflow database.");
+        Console.WriteLine("[DB] Set ConnectionStrings:DefaultConnection to your real commtrac.db (user-secrets or env var).");
+        Console.WriteLine("[DB] See docs/TIME_ANALYTICS_DEV.md");
+        Console.ResetColor();
+    }
+}
+else
+{
+    Console.WriteLine("[DB] File does not exist yet — will be created on first migration.");
+}
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(resolvedConnectionString));
 

@@ -7,7 +7,7 @@ import { Suspense, lazy, useEffect, useMemo, useRef, type ComponentType } from "
 import { MenuItem, Select, FormControl, TextField } from "@mui/material";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "../../../services/api";
-import { useTimeAnalyticsData } from "../hooks/useTimeAnalyticsData";
+import { useTimeAnalyticsData, defaultTimeAnalyticsFetchMode } from "../hooks/useTimeAnalyticsData";
 import { applyGlobalChartTheme } from "../components/ChartTheme";
 import { ErrorState, LoadingState } from "../components/primitives";
 import type { FetchMode } from "../hooks/useTimeAnalyticsData";
@@ -76,9 +76,12 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
   const { data, loading, error, filters, setFilters, refresh, mode, setMode, isMock } =
     useTimeAnalyticsData({
       api: props.api ?? api,
-      mode: props.initialMode ?? "api",
+      mode: props.initialMode ?? defaultTimeAnalyticsFetchMode(),
       refreshIntervalMs: props.refreshIntervalMs,
     });
+
+  const showSparseDataHint =
+    !!data && !isMock && data.projects.length === 0 && data.customers.length === 0;
 
   const switchView = (id: TimeAnalyticsViewId) => {
     navigate(id === "overview" ? "/time-analytics" : `/time-analytics/${id}`);
@@ -195,6 +198,14 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
 
       {error && !isMock && (
         <ErrorState message={error} onRetry={() => void refresh()} />
+      )}
+
+      {showSparseDataHint && (
+        <div className="ta-sparse-hint" role="status">
+          Snapshot returned no projects or customers. You may be on a fresh seed database —
+          check the API startup log for <code>[DB] File size</code> and see{" "}
+          <code>docs/TIME_ANALYTICS_DEV.md</code>.
+        </div>
       )}
 
       {loading && !data ? (

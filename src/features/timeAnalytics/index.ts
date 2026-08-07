@@ -19,7 +19,7 @@ export { default as TimeAnalyticsPage } from "./pages/TimeAnalyticsPage";
 export { TIME_ANALYTICS_VIEWS } from "./pages/TimeAnalyticsPage";
 export type { TimeAnalyticsViewId } from "./pages/TimeAnalyticsPage";
 
-export { useTimeAnalyticsData } from "./hooks/useTimeAnalyticsData";
+export { useTimeAnalyticsData, defaultTimeAnalyticsFetchMode } from "./hooks/useTimeAnalyticsData";
 export type { UseTimeAnalyticsDataOptions, UseTimeAnalyticsDataResult, FetchMode } from "./hooks/useTimeAnalyticsData";
 
 export {
