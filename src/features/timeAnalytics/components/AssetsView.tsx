@@ -47,6 +47,10 @@ function avg(arr: number[]): number {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
+function assetRowKey(a: { type: string; model: string }): string {
+  return `${a.type}::${a.model}`;
+}
+
 function AssetTable({ data }: { data: TimeAnalyticsSnapshot }) {
   return (
     <div className="ta-tbl-wrap">
@@ -63,7 +67,7 @@ function AssetTable({ data }: { data: TimeAnalyticsSnapshot }) {
             const cls = a.difficulty > 12 ? "bad" : a.difficulty > 6 ? "warn" : "good";
             const lbl = a.difficulty > 12 ? "Hard" : a.difficulty > 6 ? "Medium" : "Easy";
             return (
-              <tr key={a.type}>
+              <tr key={assetRowKey(a)}>
                 <td className="name">{a.type}<span className="sub">{a.model}</span></td>
                 <td>{a.model}</td>
                 <td className="num">{a.avgMinutes}m</td>
@@ -110,7 +114,7 @@ function AssetList({ data, mode }: { data: TimeAnalyticsSnapshot; mode: "hardest
   return (
     <div className="ta-barlist">
       {slice.map(a => (
-        <div className="r" key={a.type}>
+        <div className="r" key={assetRowKey(a)}>
           <div className="l">{a.type}</div>
           <div className="b"><span style={{ width: `${(a.avgMinutes / max) * 100}%`, background: mode === "hardest" ? "linear-gradient(90deg, #2dd4bf, #ff9f45)" : "linear-gradient(90deg, #34d399, #3aa1ff)" }} /></div>
           <div className="v">{a.avgMinutes}m</div>

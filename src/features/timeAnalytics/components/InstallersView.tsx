@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { Fragment, useMemo, useRef } from "react";
 import { Card, Kpi, Tag, Avatar, ChartBox, SectionHeader, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { barH } from "./ChartTheme";
@@ -147,8 +147,8 @@ function Heatmap({ data }: { data: TimeAnalyticsSnapshot }) {
         <div />
         {Array.from({ length: 24 }, (_, h) => <div className="ta-heat-axis" key={h}>{h % 3 === 0 ? h : ""}</div>)}
         {days.map(day => (
-          <>
-            <div className="ta-heat-day" key={`d-${day}`}>{day}</div>
+          <Fragment key={day}>
+            <div className="ta-heat-day">{day}</div>
             {Array.from({ length: 24 }, (_, h) => {
               const cell = data.heatmap.find(c => c.day === day && c.hour === h);
               const intensity = cell ? cell.intensity : 0;
@@ -161,7 +161,7 @@ function Heatmap({ data }: { data: TimeAnalyticsSnapshot }) {
                 />
               );
             })}
-          </>
+          </Fragment>
         ))}
       </div>
       <div className="ta-heat-scale">

@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+import { Fragment, useMemo, useRef } from "react";
 import { Card, Kpi, Tag, ActivityFeed, Avatar, ChartBox, SectionHeader, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { lineTrend, gauge } from "./ChartTheme";
@@ -130,21 +130,21 @@ function InstallerTimeline({ data }: { data: TimeAnalyticsSnapshot }) {
     <div>
       <div className="ta-tl">
         {data.installerTimeline.map(it => (
-          <>
-            <div className="label" key={`l-${it.installerId}`}>
+          <Fragment key={it.installerId}>
+            <div className="label">
               <Avatar initials={it.initials} color={it.color} />
               <div>
                 <div className="name">{it.installerName.split(" ")[0]}</div>
                 <div className="role">{it.team}</div>
               </div>
             </div>
-            <div className="row" key={`r-${it.installerId}`}>
+            <div className="row">
               {it.segments.map((s, i) => {
                 const left = (s.startHour / 24) * 100;
                 const width = ((s.endHour - s.startHour) / 24) * 100;
                 return (
                   <div
-                    key={i}
+                    key={`${s.kind}-${s.startHour}-${s.endHour}-${i}`}
                     className={`ta-tbar ${s.kind}`}
                     style={{ left: `${left}%`, width: `${width}%` }}
                     title={`${s.label} · ${s.startHour.toFixed(1)}–${s.endHour.toFixed(1)}h`}
@@ -154,7 +154,7 @@ function InstallerTimeline({ data }: { data: TimeAnalyticsSnapshot }) {
                 );
               })}
             </div>
-          </>
+          </Fragment>
         ))}
       </div>
       <div className="ta-tl-legend">
