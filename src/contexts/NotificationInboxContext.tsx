@@ -7,6 +7,7 @@ import { useAuth } from "../hooks/useAuth";
 import { isDashboardRoute } from "../utils/postLoginRoute";
 import type { AppNotification } from "../types/notification";
 import { isMobileNativePlatform } from "../utils/platform";
+import { prefetchAssetWorkflowData } from "../services/assetPrefetchService";
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
@@ -128,6 +129,13 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
         if (dispatchRecovery && RUN_STATE_EVENT_TYPES.has(newestUnread.eventType)) {
           rememberDashboardRecoverySignal(DASHBOARD_RUN_STATE_RECOVERY_KEY);
           window.dispatchEvent(new Event("notifications:run-state-changed"));
+        }
+        if (
+          isMobileNativePlatform()
+          && ASSIGNMENT_EVENT_TYPES.has(newestUnread.eventType)
+          && newestUnread.assetId
+        ) {
+          void prefetchAssetWorkflowData(newestUnread.assetId);
         }
       }
     } catch (error) {

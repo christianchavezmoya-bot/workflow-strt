@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import { offlineBootstrapService } from "../services/offlineBootstrapService";
 import { isMobileNativePlatform } from "../utils/platform";
 import { subscribeServerReachable } from "../services/connectivityMonitor";
+import { scheduleBootstrapIfQueueEmpty } from "../utils/bootstrapAfterDrain";
 
 /**
  * useOfflineBootstrap — keeps the native offline cache warm.
@@ -76,12 +77,19 @@ export function useOfflineBootstrap(): void {
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
 
+    const onFlushComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ pendingRemaining?: number }>).detail;
+      scheduleBootstrapIfQueueEmpty(detail?.pendingRemaining ?? 0, "all");
+    };
+    window.addEventListener("sync-engine:flush-complete", onFlushComplete);
+
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
       window.removeEventListener("app-foregrounded", onForeground);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
       unsubReachable();
     };
   }, []);
