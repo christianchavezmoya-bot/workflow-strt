@@ -16,8 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Network } from "@capacitor/network";
 import { App } from "@capacitor/app";
 import api from "../services/api";
-import offlineBootstrapService from "../services/offlineBootstrapService";
-import { pendingActiveUploadCount } from "../services/bootstrapUploadGate";
+import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
 import { isMobileNativePlatform } from "../utils/platform";
 import {
   entityGetAllIssues,
@@ -1192,14 +1191,11 @@ export function useSyncEngine(): SyncState {
     await refreshPending();
   }, [refreshPending]);
 
-  /** Upload pending ops immediately, then bootstrap only when the queue is empty. */
+  /** Upload pending ops, wait for drain, then download field data. User Sync Now forces bootstrap. */
   const triggerSync = useCallback(async () => {
     await reconnectAndFlushNow();
     if (isMobileNativePlatform() && hasNetworkSignal()) {
-      const active = await pendingActiveUploadCount();
-      if (active === 0) {
-        void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
-      }
+      scheduleBootstrapAfterUploadDrain("all", 0, true);
     }
   }, []);
 

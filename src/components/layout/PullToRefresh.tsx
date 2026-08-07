@@ -106,8 +106,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
 
       const canRefresh =
         isOnlineRef.current &&
-        !syncingRef.current &&
-        pendingRef.current === 0;
+        !syncingRef.current;
 
       if (dialogOpenRef.current) {
         setPullY(0);
@@ -117,13 +116,16 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
 
       if (!canRefresh) {
         const reason =
-          !isOnlineRef.current      ? "You're offline — connect to sync" :
-          pendingRef.current > 0    ? "Tap SYNC at the top to review queued changes" :
-                                      "Sync already in progress";
+          !isOnlineRef.current ? "You're offline — connect to sync" :
+          "Sync already in progress";
         setToast(reason);
         setPullY(0);
         pullDeltaRef.current = 0;
         return;
+      }
+
+      if (pendingRef.current > 0) {
+        setToast("Syncing changes, then downloading field data…");
       }
 
       void doRefresh();

@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { offlineBootstrapService } from "../services/offlineBootstrapService";
+import { scheduleBootstrapAfterUploadDrain, scheduleBootstrapIfQueueEmpty } from "../utils/bootstrapAfterDrain";
 import { isMobileNativePlatform } from "../utils/platform";
 import { subscribeServerReachable } from "../services/connectivityMonitor";
 
@@ -40,7 +41,7 @@ export function useOfflineBootstrap(): void {
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       if (offlineBootstrapService.isRunning()) return;
       if (await offlineBootstrapService.isStale()) {
-        void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
+        scheduleBootstrapAfterUploadDrain("all");
       }
     };
 
@@ -56,6 +57,11 @@ export function useOfflineBootstrap(): void {
       if (!needsReconnectSyncRef.current) return;
       needsReconnectSyncRef.current = false;
       runFullSync();
+    };
+
+    const onFlushComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ pendingRemaining?: number }>).detail;
+      scheduleBootstrapIfQueueEmpty(detail?.pendingRemaining ?? 0, "all");
     };
 
     let lastServerReachable = true;
@@ -75,6 +81,7 @@ export function useOfflineBootstrap(): void {
     window.addEventListener("app-foregrounded", onForeground);
     window.addEventListener("online", onOnline);
     window.addEventListener("offline", onOffline);
+    window.addEventListener("sync-engine:flush-complete", onFlushComplete);
 
     return () => {
       cancelled = true;
@@ -82,6 +89,7 @@ export function useOfflineBootstrap(): void {
       window.removeEventListener("app-foregrounded", onForeground);
       window.removeEventListener("online", onOnline);
       window.removeEventListener("offline", onOffline);
+      window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
       unsubReachable();
     };
   }, []);

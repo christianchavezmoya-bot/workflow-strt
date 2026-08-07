@@ -18,9 +18,11 @@ export default function NativeLifecycleBanner() {
   if (!showSyncHint) return null;
 
   const detail = syncing
-    ? "Syncing your latest changes…"
+    ? pendingCount > 0
+      ? `Uploading ${pendingCount} change${pendingCount === 1 ? "" : "s"}…`
+      : "Syncing your latest changes…"
     : pendingCount > 0
-      ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} queued — syncing now`
+      ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} queued — field data download after upload`
       : "Checking for updates…";
 
   return (
