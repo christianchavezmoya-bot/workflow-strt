@@ -76,7 +76,7 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
   const { data, loading, error, filters, setFilters, refresh, mode, setMode, isMock } =
     useTimeAnalyticsData({
       api: props.api ?? api,
-      mode: props.initialMode ?? (import.meta.env.DEV ? "auto" : "auto"),
+      mode: props.initialMode ?? "api",
       refreshIntervalMs: props.refreshIntervalMs,
     });
 
@@ -119,6 +119,41 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
           value={filters.to ?? ""}
           onChange={v => setFilters({ ...filters, to: v })}
         />
+
+        {data && data.customers.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <Select
+              displayEmpty
+              value={filters.customerId ?? ""}
+              onChange={e => setFilters({ ...filters, customerId: e.target.value as string, projectId: "" })}
+              sx={filterSelectSx}
+            >
+              <MenuItem value="">All customers</MenuItem>
+              {data.customers.map(c => (
+                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+
+        {data && data.projects.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 180 }}>
+            <Select
+              displayEmpty
+              value={filters.projectId ?? ""}
+              onChange={e => setFilters({ ...filters, projectId: e.target.value as string })}
+              sx={filterSelectSx}
+            >
+              <MenuItem value="">All projects</MenuItem>
+              {(filters.customerId
+                ? data.projects.filter(p => p.customerId === filters.customerId)
+                : data.projects
+              ).map(p => (
+                <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
 
         {showDevModePicker && (
           <FormControl size="small" sx={{ minWidth: 160 }}>
@@ -174,6 +209,15 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
     </div>
   );
 }
+
+const filterSelectSx = {
+  fontSize: 12.5,
+  color: "var(--ta-text-dim)",
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid var(--ta-border)",
+  borderRadius: 1.25,
+  "& .MuiSelect-select": { padding: "6px 10px" },
+};
 
 function DateChip({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
   return (

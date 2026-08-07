@@ -45,6 +45,7 @@ builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"))
 builder.Services.AddScoped<ISmsSender, SmsSender>();
 builder.Services.AddScoped<NotificationService>();
 builder.Services.AddScoped<IDocumentContentSearchService, DocumentContentSearchService>();
+builder.Services.AddScoped<TimeAnalyticsSnapshotService>();
 builder.Services.AddSingleton<DocumentSearchIndexStatusStore>();
 builder.Services.AddSingleton<IDocumentSearchIndexMonitor>(sp => sp.GetRequiredService<DocumentSearchIndexStatusStore>());
 builder.Services.AddSingleton<DocumentSearchIndexQueue>();

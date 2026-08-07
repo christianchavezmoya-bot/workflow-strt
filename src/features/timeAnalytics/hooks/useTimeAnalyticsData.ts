@@ -71,7 +71,7 @@ export function useTimeAnalyticsData(
 ): UseTimeAnalyticsDataResult {
   const {
     api,
-    mode: initialMode = "auto",
+    mode: initialMode = "api",
     refreshIntervalMs = 0,
     endpoint,
     filterDebounceMs = 400,
