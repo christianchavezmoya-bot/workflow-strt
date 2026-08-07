@@ -10,6 +10,7 @@
  * The default export is the page component for ergonomic routing.
  */
 
+import "./chartSetup";
 import "./styles.css";
 import TimeAnalyticsPage from "./pages/TimeAnalyticsPage";
 export default TimeAnalyticsPage;

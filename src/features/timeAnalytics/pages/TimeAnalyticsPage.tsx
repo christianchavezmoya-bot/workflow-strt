@@ -9,7 +9,6 @@ import { useLocation, useNavigate } from "react-router-dom";
 import api from "../../../services/api";
 import { useTimeAnalyticsData } from "../hooks/useTimeAnalyticsData";
 import { applyGlobalChartTheme } from "../components/ChartTheme";
-import { Chart } from "chart.js";
 import { ErrorState, LoadingState } from "../components/primitives";
 import type { FetchMode } from "../hooks/useTimeAnalyticsData";
 import type { TimeAnalyticsSnapshot } from "../types";
@@ -63,7 +62,7 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
 
   useEffect(() => {
     if (themeAppliedRef.current) return;
-    applyGlobalChartTheme(Chart);
+    applyGlobalChartTheme();
     themeAppliedRef.current = true;
   }, []);
 

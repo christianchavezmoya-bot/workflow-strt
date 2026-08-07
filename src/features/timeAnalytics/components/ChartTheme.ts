@@ -1,61 +1,10 @@
 /**
  * Chart.js theme + config factories.
  *
- * Each function returns a Chart.js config object. The actual
- * `new Chart(canvas, config)` call is in `mountChart()` so
- * we get lifecycle safety (destroy on unmount, dedup on re-render).
- *
- * Chart.js v4 with Vite requires explicit registration of scales,
- * elements, and controllers (the Chronos CDN build auto-registers all).
+ * Chart registration lives in ../chartSetup.ts (chart.js/auto singleton).
  */
 
-import {
-  Chart as ChartJS,
-  CategoryScale,
-  LinearScale,
-  RadialLinearScale,
-  BarElement,
-  LineElement,
-  PointElement,
-  ArcElement,
-  BarController,
-  LineController,
-  DoughnutController,
-  RadarController,
-  ScatterController,
-  Filler,
-  Legend,
-  Tooltip,
-  type Chart as ChartT,
-} from "chart.js";
-
-let chartComponentsRegistered = false;
-
-/** Register Chart.js building blocks once — required for bundled (non-CDN) builds. */
-export function ensureChartJsRegistered(): void {
-  if (chartComponentsRegistered) return;
-  ChartJS.register(
-    CategoryScale,
-    LinearScale,
-    RadialLinearScale,
-    BarElement,
-    LineElement,
-    PointElement,
-    ArcElement,
-    BarController,
-    LineController,
-    DoughnutController,
-    RadarController,
-    ScatterController,
-    Filler,
-    Legend,
-    Tooltip,
-  );
-  chartComponentsRegistered = true;
-}
-
-// Register as soon as this module loads so lazy view chunks are safe.
-ensureChartJsRegistered();
+import { Chart } from "../chartSetup";
 
 // ============================================================
 // Theme constants (match styles.css)
@@ -84,8 +33,7 @@ const gridColor = "rgba(255, 255, 255, 0.06)";
 const tickColor = "#6b7390";
 
 /** Apply global defaults — call once at app boot. */
-export function applyGlobalChartTheme(Chart: typeof ChartT): void {
-  ensureChartJsRegistered();
+export function applyGlobalChartTheme(): void {
   Chart.defaults.font.family = "Manrope, Sora, system-ui, sans-serif";
   Chart.defaults.font.size   = 11.5;
   Chart.defaults.color       = "#aab1c8";
@@ -313,11 +261,14 @@ export const gauge = (pct: number): TAConfig => ({
       data: [pct, 100 - pct],
       backgroundColor: [TA_PAL.accent, "rgba(255,255,255,0.06)"],
       borderWidth: 0,
-      circumference: 270, rotation: 225, cutout: "78%",
     }],
   },
   options: {
-    responsive: true, maintainAspectRatio: false,
+    responsive: true,
+    maintainAspectRatio: false,
+    circumference: 270,
+    rotation: 225,
+    cutout: "78%",
     plugins: { legend: { display: false }, tooltip: { enabled: false } },
   },
 });
