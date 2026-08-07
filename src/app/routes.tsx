@@ -4,6 +4,7 @@ import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
 import { BOM_MODULE_ENABLED } from "../modules/bom-project";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const Dashboard = lazy(() => import("../features/dashboard/Dashboard"));
 const ProjectsPage = lazy(() => import("../features/projects/ProjectsPage"));
@@ -25,6 +26,7 @@ const ExternalSignPage = lazy(() => import("../features/sign/ExternalSignPage"))
 const AssetReportShareViewPage = lazy(() => import("../features/reports/AssetReportShareViewPage"));
 const IssuesBoard = lazy(() => import("../features/issues/IssuesBoard"));
 const MobileUploadPage = lazy(() => import("../features/mobile-upload/MobileUploadPage"));
+const TimeAnalyticsPage = lazy(() => import("../features/timeAnalytics"));
 
 const BomProjectProvider = lazy(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomProjectProvider }))
@@ -66,6 +68,13 @@ const SettingsRoute = () => {
   return can.settings.view ? <Settings /> : <Navigate to="/" replace />;
 };
 
+const TimeAnalyticsRoute = () => {
+  if (isMobileNativePlatform()) {
+    return <Navigate to="/" replace />;
+  }
+  return <TimeAnalyticsPage />;
+};
+
 const ProjectInspectionsRedirect = () => {
   const { id } = useParams<{ id: string }>();
   return <Navigate to={`/projects/${id}`} replace />;
@@ -96,6 +105,8 @@ const AppRoutes = () => {
         <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSites /></LazyRoute>} />
         <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />
         <Route path="/issues" element={<LazyRoute><IssuesBoard /></LazyRoute>} />
+        <Route path="/time-analytics" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
+        <Route path="/time-analytics/:view" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
         <Route path="/settings" element={<LazyRoute><SettingsRoute /></LazyRoute>} />
         <Route path="/profile" element={<LazyRoute><ProfileWizard /></LazyRoute>} />
         {BOM_MODULE_ENABLED && (
