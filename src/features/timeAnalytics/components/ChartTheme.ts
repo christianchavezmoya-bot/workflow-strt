@@ -4,9 +4,58 @@
  * Each function returns a Chart.js config object. The actual
  * `new Chart(canvas, config)` call is in `mountChart()` so
  * we get lifecycle safety (destroy on unmount, dedup on re-render).
+ *
+ * Chart.js v4 with Vite requires explicit registration of scales,
+ * elements, and controllers (the Chronos CDN build auto-registers all).
  */
 
-import type { Chart as ChartT, ChartConfiguration } from "chart.js";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  RadialLinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  ArcElement,
+  BarController,
+  LineController,
+  DoughnutController,
+  RadarController,
+  ScatterController,
+  Filler,
+  Legend,
+  Tooltip,
+  type Chart as ChartT,
+} from "chart.js";
+
+let chartComponentsRegistered = false;
+
+/** Register Chart.js building blocks once — required for bundled (non-CDN) builds. */
+export function ensureChartJsRegistered(): void {
+  if (chartComponentsRegistered) return;
+  ChartJS.register(
+    CategoryScale,
+    LinearScale,
+    RadialLinearScale,
+    BarElement,
+    LineElement,
+    PointElement,
+    ArcElement,
+    BarController,
+    LineController,
+    DoughnutController,
+    RadarController,
+    ScatterController,
+    Filler,
+    Legend,
+    Tooltip,
+  );
+  chartComponentsRegistered = true;
+}
+
+// Register as soon as this module loads so lazy view chunks are safe.
+ensureChartJsRegistered();
 
 // ============================================================
 // Theme constants (match styles.css)
@@ -36,6 +85,7 @@ const tickColor = "#6b7390";
 
 /** Apply global defaults — call once at app boot. */
 export function applyGlobalChartTheme(Chart: typeof ChartT): void {
+  ensureChartJsRegistered();
   Chart.defaults.font.family = "Manrope, Sora, system-ui, sans-serif";
   Chart.defaults.font.size   = 11.5;
   Chart.defaults.color       = "#aab1c8";

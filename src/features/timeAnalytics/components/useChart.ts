@@ -11,6 +11,7 @@
 
 import { useEffect, type RefObject } from "react";
 import { Chart, type ChartConfiguration, type ChartItem } from "chart.js";
+import { ensureChartJsRegistered } from "./ChartTheme";
 
 export function useChart(
   ref: RefObject<HTMLCanvasElement | null>,
@@ -22,6 +23,7 @@ export function useChart(
     const ctx = ref.current.getContext("2d");
     if (!ctx) return;
 
+    ensureChartJsRegistered();
     const chart = new Chart(ctx as ChartItem, buildConfig());
 
     return () => {
