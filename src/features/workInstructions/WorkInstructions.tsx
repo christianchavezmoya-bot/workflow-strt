@@ -1053,7 +1053,7 @@ const WorkInstructions = () => {
             const params: Record<string, string> = {};
             if (productId) params.product = productId;
             params.view = "instructions";
-            setSearchParams(params, { replace: true });
+            safeSetSearchParams(params);
           }}
           variant="scrollable"
           allowScrollButtonsMobile
