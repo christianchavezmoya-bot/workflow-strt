@@ -217,6 +217,81 @@ function buildDashboardWorkspaceFromAssets(
   return bucketDashboardWorkspaceItems(userFiltered);
 }
 
+type CachedAssetRecord = {
+  id: string;
+  productId: string;
+  projectId: string;
+  data: unknown;
+  dirty?: boolean;
+};
+
+/**
+ * Mirror dashboard-workspace rows into the generic asset entity store so cold-start
+ * offline rebuild (dashboardWorkspaceLocal) matches the last online dashboard view.
+ * Skips dirty rows so offline edits are not clobbered.
+ */
+async function hydrateAssetsFromWorkspaceSnapshot(workspace: DashboardWorkspace): Promise<void> {
+  if (!isMobileNativePlatform()) return;
+
+  const flattened = [
+    ...workspace.currentInstalls,
+    ...workspace.currentInspections,
+    ...workspace.installHistory,
+    ...workspace.inspectionHistory,
+  ];
+  if (flattened.length === 0) return;
+
+  const items = dedupeDashboardWorkspaceItemsById(flattened);
+  await Promise.all(items.map(async (item) => {
+    const existing = await entityGetAsset(item.id) as CachedAssetRecord | null;
+    if (existing?.dirty) return;
+
+    const base = existing?.data as ProjectAsset | undefined;
+    if (!base?.productId && !existing?.productId) return;
+
+    const productId = base?.productId ?? existing!.productId;
+    const projectId = item.projectId || base?.projectId || existing!.projectId;
+    const merged = {
+      ...(base ?? {
+        id: item.id,
+        projectId,
+        productId,
+        assetTag: item.assetTag ?? "",
+        status: "NotStarted" as const,
+      }),
+      id: item.id,
+      projectId,
+      productId,
+      assetTag: item.assetTag ?? base?.assetTag ?? "",
+      assetName: item.assetName ?? base?.assetName,
+      assetModel: item.assetModel ?? base?.assetModel,
+      location: item.location ?? base?.location,
+      assignedUserId: item.assignedUserId ?? base?.assignedUserId,
+      status: normalizeStatus(item.status ?? base?.status),
+      isDeleted: item.isDeleted ?? base?.isDeleted,
+      workflowSummary: {
+        ...(base?.workflowSummary ?? {}),
+        hasWorkflow: (item.totalSteps > 0) || base?.workflowSummary?.hasWorkflow || false,
+        latestRunStatus: item.runStatus ?? base?.workflowSummary?.latestRunStatus,
+        signatureStatus: item.signatureStatus ?? base?.workflowSummary?.signatureStatus,
+        completedItems: item.completedSteps ?? base?.workflowSummary?.completedItems ?? 0,
+        requiredItems: item.totalSteps ?? base?.workflowSummary?.requiredItems ?? 0,
+        missingItems: item.missingItems ?? base?.workflowSummary?.missingItems ?? 0,
+        evidenceStatus: item.evidenceStatus ?? base?.workflowSummary?.evidenceStatus,
+        hasOpenIssues: item.hasOpenIssues ?? base?.workflowSummary?.hasOpenIssues ?? false,
+      },
+    } as ProjectAsset;
+
+    await entityPutAsset({
+      id: item.id,
+      productId,
+      projectId,
+      data: merged,
+      dirty: false,
+    });
+  }));
+}
+
 function pickLatestCachedRun(runs: AssetWorkflowRun[]): (AssetWorkflowRun & Partial<OfflineRun>) | undefined {
   if (runs.length === 0) return undefined;
   return runs.reduce((best, run) => {
@@ -760,6 +835,31 @@ export const projectAssetService = {
     }
   },
 
+  /**
+   * Native offline cold-start path: read the persisted dashboard-workspace snapshot
+   * (saved on the last successful online fetch) before falling back to entity rebuild.
+   * Survives app kill; unlike dashboardCache (in-memory only).
+   */
+  async dashboardWorkspaceOfflineFirst(userId?: string): Promise<DashboardWorkspace> {
+    if (!isMobileNativePlatform()) {
+      return {
+        currentInstalls: [],
+        currentInspections: [],
+        installHistory: [],
+        inspectionHistory: [],
+      };
+    }
+
+    if (userId) {
+      const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
+      if (cached && dashboardWorkspaceHasRows(cached)) {
+        return await reconcileWorkspaceWithLocalStatus(cached);
+      }
+    }
+
+    return await this.dashboardWorkspaceLocal(userId);
+  },
+
   async dashboardWorkspace(userId?: string, options?: { light?: boolean }): Promise<DashboardWorkspace> {
     try {
       const params: Record<string, string | boolean> = {};
@@ -775,6 +875,7 @@ export const projectAssetService = {
       // no offline copy at all once dashboardCache's in-memory, restart-clearing cache is gone.
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
+        await hydrateAssetsFromWorkspaceSnapshot(res.data);
       }
       if (isMobileNativePlatform()) {
         return await reconcileWorkspaceWithLocalStatus(res.data);
@@ -782,13 +883,7 @@ export const projectAssetService = {
       return res.data;
     } catch {
       if (isMobileNativePlatform()) {
-        if (userId) {
-          const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
-          if (cached && dashboardWorkspaceHasRows(cached)) {
-            return await reconcileWorkspaceWithLocalStatus(cached);
-          }
-        }
-        return await this.dashboardWorkspaceLocal(userId);
+        return await this.dashboardWorkspaceOfflineFirst(userId);
       }
       throw new Error("dashboard-workspace-failed");
     }

@@ -119,7 +119,7 @@ export interface SyncState {
    * until the first check completes, to avoid a flash of "not reachable"
    * on a fresh app launch.
    */
-  serverReachable: boolean;
+  serverReachable: boolean | null;
   pendingCount: number;
   conflictCount: number;
   lastSyncAt: Date | null;
@@ -629,7 +629,7 @@ export function useSyncEngine(): SyncState {
   // a fresh app launch, before the singleton's first ping has had a chance
   // to complete. See services/connectivityMonitor.ts for why this lives
   // outside this hook rather than as its own timer in here.
-  const [serverReachable, setServerReachable] = useState(true);
+  const [serverReachable, setServerReachable] = useState<boolean | null>(null);
 
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
@@ -1128,7 +1128,7 @@ export function useSyncEngine(): SyncState {
         void reconnectAndFlush();
       }
     });
-  }, []);
+  }, [setConnectivityState, setConnectivityUnlessTokenExpired]);
 
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
