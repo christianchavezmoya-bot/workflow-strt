@@ -1060,6 +1060,46 @@ const Dashboard = () => {
 
     let cancelled = false;
     setWorkspaceLoading(true);
+
+    const restoreCachedWorkspace = () => {
+      const cached = readCachedDashboardWorkspace();
+      if (!cached || !dashboardWorkspaceHasRows(cached)) return;
+      if (dashboardWorkspaceHasRows(dashboardWorkspaceRef.current)) return;
+      applyDashboardWorkspace(cached, { persist: false, stabilize: true });
+      setCacheHydrated(true);
+    };
+
+    // Native cold start while offline: load the durable workspace snapshot (IndexedDB)
+    // before entity-only rebuild. seedNativeDashboardWorkspaceFromLocal() reads generic
+    // asset entities and can show stale Paused rows after app kill while the last online
+    // dashboard-workspace fetch is still in offlineStore.
+    if (isNativePlatform && shouldSkipBlockingFetch()) {
+      void (async () => {
+        restoreCachedWorkspace();
+        try {
+          const data = await projectAssetService.dashboardWorkspaceOfflineFirst(
+            effectiveDashboardWorkspaceUserId,
+          );
+          if (cancelled) return;
+          if (dashboardWorkspaceHasRows(data)) {
+            applyDashboardWorkspace(data, { stabilize: true });
+            setCacheHydrated(true);
+          }
+        } catch {
+          // offlineFirst already falls back to dashboardWorkspaceLocal internally.
+        } finally {
+          if (!cancelled) {
+            setWorkspaceLoading(false);
+            unlockDeferredDashboardBoot();
+          }
+        }
+      })();
+
+      return () => {
+        cancelled = true;
+      };
+    }
+
     seedNativeDashboardWorkspaceFromLocal();
 
     const fetchWorkspaceWithRetry = async (
@@ -1086,14 +1126,6 @@ const Dashboard = () => {
         }
       }
       throw lastErr;
-    };
-
-    const restoreCachedWorkspace = () => {
-      const cached = readCachedDashboardWorkspace();
-      if (!cached || !dashboardWorkspaceHasRows(cached)) return;
-      if (dashboardWorkspaceHasRows(dashboardWorkspaceRef.current)) return;
-      applyDashboardWorkspace(cached, { persist: false, stabilize: true });
-      setCacheHydrated(true);
     };
 
     (async () => {

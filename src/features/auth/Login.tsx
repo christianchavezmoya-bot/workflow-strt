@@ -16,7 +16,7 @@ import { useNavigate } from "react-router-dom";
 import { authService } from "../../services/authService";
 import { secureGet, secureSet } from "../../services/secureStorage";
 import { recordOnlineLogin } from "../../services/biometricAuth";
-import { offlineBootstrapService } from "../../services/offlineBootstrapService";
+import { scheduleBootstrapAfterUploadDrain } from "../../utils/bootstrapAfterDrain";
 import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../services/networkService";
 import strataLogo from "../../assets/strata_transparent.png";
 import { APP_NAME } from "../../constants/branding";
@@ -142,9 +142,8 @@ const Login = () => {
     window.dispatchEvent(new Event("auth-change"));
     window.dispatchEvent(new Event("auth-user-updated"));
 
-    // Kick off a silent background prefetch of everything assigned to this user
-    // so the app is fully usable offline. Fire-and-forget — never blocks login.
-    void offlineBootstrapService.runAfterUploadDrain({ scope: "all" });
+    // Prefetch field data after login — gated on /health ping (not radio alone).
+    scheduleBootstrapAfterUploadDrain("all");
 
     const landingRoute = resolvePostLoginRoute(
       result.user as { role?: string } | undefined,

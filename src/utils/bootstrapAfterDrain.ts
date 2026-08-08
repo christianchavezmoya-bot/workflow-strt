@@ -4,11 +4,12 @@
  */
 
 import offlineBootstrapService, { type BootstrapScope } from "../services/offlineBootstrapService";
-import { getNativeNetworkConnected, getServerReachable, shouldSkipRunMutation } from "../services/connectivityMonitor";
+import { getNativeNetworkConnected, getServerReachable, shouldSkipRunMutation, subscribeServerReachable } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "./platform";
 
 let chainTimer: ReturnType<typeof setTimeout> | null = null;
 let lastScheduledAtMs = 0;
+let deferredBootstrapUnsub: (() => void) | null = null;
 
 /** Minimum gap between automatic bootstrap schedules (assigned-scope prefetch). */
 const AUTO_DEBOUNCE_MS = 3_000;
@@ -37,7 +38,17 @@ export function scheduleBootstrapAfterUploadDrain(
   force = false,
 ): void {
   if (!isMobileNativePlatform()) return;
-  if (!canScheduleBootstrap()) return;
+  if (!canScheduleBootstrap()) {
+    if (!hasNetworkSignal()) return;
+    if (deferredBootstrapUnsub) return;
+    deferredBootstrapUnsub = subscribeServerReachable((reachable) => {
+      if (!reachable) return;
+      deferredBootstrapUnsub?.();
+      deferredBootstrapUnsub = null;
+      scheduleBootstrapAfterUploadDrain(scope, debounceMs, force);
+    });
+    return;
+  }
 
   const run = () => {
     chainTimer = null;

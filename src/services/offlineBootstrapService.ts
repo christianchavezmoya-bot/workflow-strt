@@ -1,5 +1,6 @@
 import { isMobileNativePlatform } from "../utils/platform";
 import { isOfflineModeActive } from "./offlineModeState";
+import { getNativeNetworkConnected, isServerConfirmedReachable } from "./connectivityMonitor";
 import { secureGet } from "./secureStorage";
 import { waitForActiveUploadDrain } from "./bootstrapUploadGate";
 import { syncMetaGet, syncMetaSet, CACHE_SOFT_LIMIT_MS } from "./localDB";
@@ -85,6 +86,17 @@ function emit(name: string, detail?: unknown): void {
   try {
     window.dispatchEvent(new CustomEvent(name, { detail }));
   } catch { /* ignore */ }
+}
+
+/** Bootstrap may download hundreds of assets — require confirmed /health ping on native. */
+function canRunBootstrap(): boolean {
+  if (isOfflineModeActive()) return false;
+  if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+  if (isMobileNativePlatform()) {
+    if (getNativeNetworkConnected() === false) return false;
+    if (!isServerConfirmedReachable()) return false;
+  }
+  return true;
 }
 
 /** Run an async task over items with a bounded concurrency pool. */
@@ -182,8 +194,7 @@ export const offlineBootstrapService = {
   async runAfterUploadDrain(options?: BootstrapRunOptions): Promise<void> {
     if (!isMobileNativePlatform()) return;
     if (_running) return;
-    if (isOfflineModeActive()) return;
-    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    if (!canRunBootstrap()) return;
     await waitForActiveUploadDrain();
     if (_running) return;
     return this.run(options);
@@ -196,8 +207,7 @@ export const offlineBootstrapService = {
   async run(options?: BootstrapRunOptions): Promise<void> {
     if (!isMobileNativePlatform()) return;
     if (_running) return;
-    if (isOfflineModeActive()) return;
-    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    if (!canRunBootstrap()) return;
 
     const scope = options?.scope ?? "all";
     const userId = currentUserId();

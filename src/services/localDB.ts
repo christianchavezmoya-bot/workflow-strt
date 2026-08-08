@@ -656,10 +656,10 @@ export async function entityPutAsset(record: { id: string; productId: string; pr
   } catch { /* ignore */ }
 }
 
-export async function entityGetAsset(id: string): Promise<{ id: string; productId: string; projectId: string; data: unknown } | null> {
+export async function entityGetAsset(id: string): Promise<{ id: string; productId: string; projectId: string; data: unknown; dirty?: boolean } | null> {
   try {
     const db = await getDB();
-    return (await db.get("assets", id) as { id: string; productId: string; projectId: string; data: unknown } | undefined) ?? null;
+    return (await db.get("assets", id) as { id: string; productId: string; projectId: string; data: unknown; dirty?: boolean } | undefined) ?? null;
   } catch { return null; }
 }
 

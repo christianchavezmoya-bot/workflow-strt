@@ -155,15 +155,14 @@ export function startConnectivityMonitor(): void {
 
   // Clear the false-offline flag on any successful API response, not just on
   // the next 30 s ping. `api.ts:228-232` dispatches `api-server-reachable`
-  // on every real server response; treating that as a reachability signal
-  // closes the up-to-30 s window where a single slow `/health` ping would
-  // otherwise false-flag the app into stale-cache serving. Listener is
-  // registered once at singleton startup so the cost is amortised.
+  // on every real server response; reset the circuit breaker so reads can flow
+  // again, but do NOT notify(true) here — only a successful /health ping may
+  // mark the server confirmed-reachable for sync flush and bootstrap download.
+  // A lone dashboard GET succeeding on a flaky link must not start upload/sync.
   if (typeof window !== "undefined") {
     window.addEventListener("api-server-reachable", () => {
       unreachableSignals = 0;
       resetCircuitBreaker();
-      if (currentValue !== true) notify(true);
     });
 
     // Only a real request failing with a genuine network error may mark the
@@ -199,6 +198,11 @@ export function subscribeServerReachable(listener: Listener): () => void {
 /** Current known value, or null if no check has completed yet. */
 export function getServerReachable(): boolean | null {
   return currentValue;
+}
+
+/** Native sync/bootstrap gate: true only after a successful /health ping. */
+export function isServerConfirmedReachable(): boolean {
+  return getServerReachable() === true;
 }
 
 /** Capacitor-reported link state (null until first status event). */
