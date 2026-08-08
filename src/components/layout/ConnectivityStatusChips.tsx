@@ -87,6 +87,14 @@ export function buildConnectivityStatusChips(input: {
       icon: <DnsOutlinedIcon sx={{ fontSize: 14 }} />,
       tone: "danger",
     });
+  } else if (connectivity === "server-unreachable") {
+    chips.push({
+      key: "server",
+      label: "Waiting for server…",
+      tooltip: "Phone has signal. Checking whether the field server is reachable before syncing.",
+      icon: <DnsOutlinedIcon sx={{ fontSize: 14 }} />,
+      tone: "warning",
+    });
   } else if (serverReachable === true) {
     chips.push({
       key: "server",

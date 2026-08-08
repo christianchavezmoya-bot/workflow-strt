@@ -49,16 +49,6 @@ export function useOfflineBootstrap(): void {
 
     const onForeground = () => { void maybeRunStale(); };
 
-    const onOffline = () => {
-      needsReconnectSyncRef.current = true;
-    };
-
-    const onOnline = () => {
-      if (!needsReconnectSyncRef.current) return;
-      needsReconnectSyncRef.current = false;
-      runFullSync();
-    };
-
     const onFlushComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ pendingRemaining?: number }>).detail;
       scheduleBootstrapIfQueueEmpty(detail?.pendingRemaining ?? 0, "all");
@@ -71,6 +61,8 @@ export function useOfflineBootstrap(): void {
         lastServerReachable = false;
         return;
       }
+      // Full field download only after server health ping confirms reachability —
+      // not on radio reconnect alone (corporate Wi‑Fi may not reach the LAN server).
       if (!lastServerReachable && needsReconnectSyncRef.current) {
         needsReconnectSyncRef.current = false;
         runFullSync();
@@ -79,16 +71,12 @@ export function useOfflineBootstrap(): void {
     });
 
     window.addEventListener("app-foregrounded", onForeground);
-    window.addEventListener("online", onOnline);
-    window.addEventListener("offline", onOffline);
     window.addEventListener("sync-engine:flush-complete", onFlushComplete);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
       window.removeEventListener("app-foregrounded", onForeground);
-      window.removeEventListener("online", onOnline);
-      window.removeEventListener("offline", onOffline);
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
       unsubReachable();
     };

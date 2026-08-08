@@ -4,7 +4,7 @@
  */
 
 import offlineBootstrapService, { type BootstrapScope } from "../services/offlineBootstrapService";
-import { getNativeNetworkConnected, shouldSkipRunMutation } from "../services/connectivityMonitor";
+import { getNativeNetworkConnected, getServerReachable, shouldSkipRunMutation } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "./platform";
 
 let chainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -24,7 +24,10 @@ function hasNetworkSignal(): boolean {
 
 function canScheduleBootstrap(): boolean {
   if (!hasNetworkSignal()) return false;
-  if (isMobileNativePlatform() && shouldSkipRunMutation()) return false;
+  if (isMobileNativePlatform()) {
+    if (getServerReachable() !== true) return false;
+    if (shouldSkipRunMutation()) return false;
+  }
   return true;
 }
 

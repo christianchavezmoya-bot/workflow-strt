@@ -124,6 +124,8 @@ export interface SyncState {
   conflictCount: number;
   lastSyncAt: Date | null;
   syncing: boolean;
+  /** True when upload/bootstrap is allowed (native: radio up and server ping confirmed). */
+  canSync: boolean;
   /** Manually trigger a sync flush */
   triggerSync: () => Promise<void>;
   /** Force-proceed a conflicted action (overwrite server version). */
@@ -224,8 +226,19 @@ function hasNetworkSignal(): boolean {
 function canAttemptSyncFlush(): boolean {
   if (isOfflineModeActive()) return false;
   if (!hasNetworkSignal()) return false;
-  if (isMobileNativePlatform() && shouldSkipRunMutation()) return false;
+  if (isMobileNativePlatform()) {
+    // Unknown (null) means ping has not confirmed the server yet — wait.
+    if (getServerReachable() !== true) return false;
+    if (shouldSkipRunMutation()) return false;
+  }
   return true;
+}
+
+/** Radio up but server health ping has not confirmed reachability yet. */
+function setConnectivityAwaitingServerPing(
+  setState: (next: ConnectivityState) => void,
+): void {
+  setState(hasNetworkSignal() ? "server-unreachable" : "offline");
 }
 
 function isNetworkLikeError(error: unknown): boolean {
@@ -968,8 +981,13 @@ export function useSyncEngine(): SyncState {
   // ── Online / offline events ────────────────────────────────────────────────
   useEffect(() => {
     const handleOnline  = () => {
+      if (isMobileNativePlatform()) {
+        // Radio up ≠ server reachable — ping first; flush runs from subscribeServerReachable.
+        setConnectivityAwaitingServerPing(setConnectivityState);
+        pingNow();
+        return;
+      }
       setConnectivityUnlessTokenExpired("online");
-      if (isMobileNativePlatform()) pingNow();
       void reconnectAndFlush();
     };
     const handleOffline = () => setConnectivityState("offline");
@@ -990,9 +1008,8 @@ export function useSyncEngine(): SyncState {
     void Network.addListener("networkStatusChange", (status) => {
       if (!active) return;
       if (status.connected) {
-        setConnectivityUnlessTokenExpired("online");
-        if (isMobileNativePlatform()) pingNow();
-        void reconnectAndFlush();
+        setConnectivityAwaitingServerPing(setConnectivityState);
+        pingNow();
       } else {
         setConnectivityState("offline");
       }
@@ -1004,11 +1021,11 @@ export function useSyncEngine(): SyncState {
       active = false;
       remove?.();
     };
-  }, [flush, setConnectivityState, setConnectivityUnlessTokenExpired]);
+  }, [setConnectivityState]);
 
   // iOS app foreground - appStateChange is more reliable than visibilitychange in WKWebView.
-  // Flushes pending writes when the app comes to the foreground on a native platform.
   // Also dispatches "app-foregrounded" for the stale-pull hook (useStaleOnResume).
+  // Sync flush waits for server health ping — not radio alone.
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
     let listenerHandle: { remove: () => void } | undefined;
@@ -1016,8 +1033,7 @@ export function useSyncEngine(): SyncState {
       if (!isActive) return; // going to background - nothing to do here
       pingNow();
       if (hasNetworkSignal()) {
-        setConnectivityUnlessTokenExpired("online");
-        void reconnectAndFlush();
+        setConnectivityAwaitingServerPing(setConnectivityState);
       } else {
         setConnectivityState("offline");
       }
@@ -1030,7 +1046,7 @@ export function useSyncEngine(): SyncState {
     return () => {
       listenerHandle?.remove();
     };
-  }, [flush, setConnectivityState, setConnectivityUnlessTokenExpired]);
+  }, [setConnectivityState]);
 
   // ── Visibility change (phone unlock / tab switch) ──────────────────────────
   useEffect(() => {
@@ -1226,6 +1242,8 @@ export function useSyncEngine(): SyncState {
     || connectivity === "server-unreachable"
     || isOfflineModeActive();
 
+  const canSync = canAttemptSyncFlush();
+
   const status: SyncStatus =
     connectivity === "token-expired" ? "error" :
     syncing ? "syncing" :
@@ -1243,6 +1261,7 @@ export function useSyncEngine(): SyncState {
     conflictCount: conflicts,
     lastSyncAt,
     syncing,
+    canSync,
     triggerSync,
     resolveConflictKeep,
     resolveConflictDiscard,

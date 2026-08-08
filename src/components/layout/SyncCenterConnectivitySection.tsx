@@ -35,6 +35,7 @@ function sectionSummary(input: {
   }
   if (connectivity === "token-expired") return "Login expired";
   if (serverReachable === false) return "Server not responding";
+  if (connectivity === "server-unreachable") return "Waiting for server…";
   if (conflictCount > 0) return `${conflictCount} conflict${conflictCount === 1 ? "" : "s"} need review`;
   if (syncing) return "Sending changes…";
   if (pendingCount > 0) return `${pendingCount} change${pendingCount === 1 ? "" : "s"} waiting`;

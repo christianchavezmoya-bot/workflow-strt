@@ -6,24 +6,27 @@ import { isMobileNativePlatform } from "../../utils/platform";
 
 export default function NativeLifecycleBanner() {
   const { phase } = useNativeAppLifecycle();
-  const { syncing, pendingCount, connectivity } = useSyncEngine();
+  const { syncing, pendingCount, connectivity, canSync } = useSyncEngine();
 
   if (!isMobileNativePlatform()) return null;
 
   const showSyncHint =
     phase === "foreground-sync"
-    && connectivity === "online"
     && (syncing || pendingCount > 0);
 
   if (!showSyncHint) return null;
 
-  const detail = syncing
+  const detail = !canSync && connectivity === "server-unreachable"
+    ? pendingCount > 0
+      ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} queued — waiting for server…`
+      : "Waiting for server…"
+    : syncing
     ? pendingCount > 0
       ? `Uploading ${pendingCount} change${pendingCount === 1 ? "" : "s"}…`
-      : "Syncing your latest changes…"
+      : "Connected — syncing your changes…"
     : pendingCount > 0
-      ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} queued — field data download after upload`
-      : "Checking for updates…";
+      ? `${pendingCount} change${pendingCount === 1 ? "" : "s"} queued — upload first, then field download`
+      : "Connected — checking for updates…";
 
   return (
     <Box

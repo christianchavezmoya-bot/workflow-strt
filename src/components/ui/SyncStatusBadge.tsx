@@ -34,7 +34,7 @@ function timeAgo(date: Date): string {
 }
 
 export default function SyncStatusBadge() {
-  const { status, pendingCount, conflictCount, lastSyncAt, syncing, triggerSync, connectivity } = useSyncEngine();
+  const { status, pendingCount, conflictCount, lastSyncAt, syncing, canSync, triggerSync, connectivity } = useSyncEngine();
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
 
   const iconSx = { fontSize: 13 };
@@ -79,7 +79,7 @@ export default function SyncStatusBadge() {
 
     if (status === "pending") {
       return (
-        <Stack direction="row" alignItems="center" spacing={0.5} onClick={() => void triggerSync()}>
+        <Stack direction="row" alignItems="center" spacing={0.5} onClick={() => { if (canSync) void triggerSync(); }}>
           <UploadOutlined sx={{ ...iconSx, color: "warning.main" }} />
           <Typography variant="caption" sx={{ fontSize: "0.68rem", color: "warning.main" }}>
             ↑{pendingCount} pending
@@ -100,9 +100,9 @@ export default function SyncStatusBadge() {
           {connectivity !== "token-expired" && (
           <Button
             size="small" variant="text" color="error"
-            onClick={(e) => { e.stopPropagation(); void triggerSync(); }}
+            onClick={(e) => { e.stopPropagation(); if (canSync) void triggerSync(); }}
             sx={{ fontSize: "0.65rem", minWidth: "auto", p: 0, ml: 0.25, textTransform: "none" }}
-            disabled={syncing}
+            disabled={syncing || !canSync}
           >
             Retry
           </Button>
@@ -137,8 +137,8 @@ export default function SyncStatusBadge() {
  * Floating sync icon button — for use on card lists.
  */
 export function SyncIconButton({ onPress }: { onPress?: () => void }) {
-  const { status, triggerSync } = useSyncEngine();
-  const handle = () => { void triggerSync(); onPress?.(); };
+  const { status, canSync, triggerSync } = useSyncEngine();
+  const handle = () => { if (canSync) void triggerSync(); onPress?.(); };
 
   if (status === "syncing") return <CircularProgress size={14} thickness={5} sx={{ ml: 0.5 }} />;
   if (status === "error")   return <ErrorOutlineOutlined sx={{ fontSize: 14, color: "error.main", cursor: "pointer", ml: 0.5 }} onClick={handle} />;

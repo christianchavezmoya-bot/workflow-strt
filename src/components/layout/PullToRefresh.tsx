@@ -7,7 +7,7 @@ const PULL_THRESHOLD = 72;  // raw finger-pixels before triggering
 const MAX_VISUAL     = 80;  // max indicator travel in px
 
 export default function PullToRefresh({ children }: { children: React.ReactNode }) {
-  const { isOnline, syncing, pendingCount, triggerSync } = useSyncEngine();
+  const { canSync, syncing, pendingCount, triggerSync } = useSyncEngine();
 
   const [pullY, setPullY]         = useState(0);
   const [isPulling, setIsPulling] = useState(false);
@@ -18,14 +18,14 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
   const startYRef      = useRef(0);
   const pullDeltaRef   = useRef(0);
   const activePullRef  = useRef(false);
-  const isOnlineRef    = useRef(isOnline);
+  const canSyncRef     = useRef(canSync);
   const pendingRef     = useRef(pendingCount);
   const syncingRef     = useRef(syncing);
   const triggerRef     = useRef(triggerSync);
   const refreshingRef  = useRef(refreshing);
   const dialogOpenRef  = useRef(false);
 
-  isOnlineRef.current   = isOnline;
+  canSyncRef.current    = canSync;
   pendingRef.current    = pendingCount;
   syncingRef.current    = syncing;
   triggerRef.current    = triggerSync;
@@ -105,7 +105,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
       }
 
       const canRefresh =
-        isOnlineRef.current &&
+        canSyncRef.current &&
         !syncingRef.current;
 
       if (dialogOpenRef.current) {
@@ -116,7 +116,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
 
       if (!canRefresh) {
         const reason =
-          !isOnlineRef.current ? "You're offline — connect to sync" :
+          !canSyncRef.current ? "Server not reachable — connect to your field network to sync" :
           "Sync already in progress";
         setToast(reason);
         setPullY(0);
