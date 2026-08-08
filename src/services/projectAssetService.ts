@@ -760,6 +760,31 @@ export const projectAssetService = {
     }
   },
 
+  /**
+   * Native offline cold-start path: read the persisted dashboard-workspace snapshot
+   * (saved on the last successful online fetch) before falling back to entity rebuild.
+   * Survives app kill; unlike dashboardCache (in-memory only).
+   */
+  async dashboardWorkspaceOfflineFirst(userId?: string): Promise<DashboardWorkspace> {
+    if (!isMobileNativePlatform()) {
+      return {
+        currentInstalls: [],
+        currentInspections: [],
+        installHistory: [],
+        inspectionHistory: [],
+      };
+    }
+
+    if (userId) {
+      const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
+      if (cached && dashboardWorkspaceHasRows(cached)) {
+        return await reconcileWorkspaceWithLocalStatus(cached);
+      }
+    }
+
+    return await this.dashboardWorkspaceLocal(userId);
+  },
+
   async dashboardWorkspace(userId?: string, options?: { light?: boolean }): Promise<DashboardWorkspace> {
     try {
       const params: Record<string, string | boolean> = {};
@@ -782,13 +807,7 @@ export const projectAssetService = {
       return res.data;
     } catch {
       if (isMobileNativePlatform()) {
-        if (userId) {
-          const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
-          if (cached && dashboardWorkspaceHasRows(cached)) {
-            return await reconcileWorkspaceWithLocalStatus(cached);
-          }
-        }
-        return await this.dashboardWorkspaceLocal(userId);
+        return await this.dashboardWorkspaceOfflineFirst(userId);
       }
       throw new Error("dashboard-workspace-failed");
     }
