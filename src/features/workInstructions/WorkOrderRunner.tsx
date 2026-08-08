@@ -158,6 +158,17 @@ interface UnlistedConsumable {
   unit: string;
 }
 
+const runnerDialogContentSx = {
+  overflowX: "hidden",
+  px: isMobileNativePlatform() ? 1.5 : 3,
+} as const;
+
+const runnerBodyStackSx = {
+  mt: 1,
+  maxWidth: "100%",
+  minWidth: 0,
+} as const;
+
 function parseRunTimeEntries(json: string): RunTimeEntry[] {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>[];
@@ -1485,8 +1496,8 @@ export default function WorkOrderRunner({
             <Typography variant="caption" color="text.secondary">No sub-fields defined.</Typography>
           )}
           {subFields.map((sf) => (
-            <Stack key={sf.id} direction="row" spacing={1} alignItems="center">
-              <Typography variant="body2" sx={{ minWidth: 140, flexShrink: 0, color: "text.secondary" }}>
+            <Stack key={sf.id} direction={{ xs: "column", sm: "row" }} spacing={1} alignItems={{ xs: "stretch", sm: "center" }} sx={{ minWidth: 0 }}>
+              <Typography variant="body2" sx={{ minWidth: { sm: 140 }, flexShrink: 0, color: "text.secondary" }}>
                 {sf.name}
               </Typography>
               <TextField size="small" fullWidth placeholder={sf.name}
@@ -1663,8 +1674,8 @@ export default function WorkOrderRunner({
           Run workflow
           {renderAssetIdentifier(assetTag)}
         </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2.5} sx={{ mt: 1 }}>
+        <DialogContent sx={runnerDialogContentSx}>
+          <Stack spacing={2.5} sx={runnerBodyStackSx}>
             <Stack spacing={0.5}>
               <Typography variant="body2" color="text.secondary">Workflow</Typography>
               <Typography variant="subtitle2">{workflow.name}</Typography>
@@ -1979,8 +1990,8 @@ export default function WorkOrderRunner({
             </Stack>
           )}
         </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2.5} sx={{ mt: 1 }}>
+        <DialogContent sx={runnerDialogContentSx}>
+          <Stack spacing={2.5} sx={runnerBodyStackSx}>
 
             {/* Feature-linked repeatable step â€" qty confirmation panel */}
             {needsConfirmation && (
@@ -3427,11 +3438,15 @@ export default function WorkOrderRunner({
       <Dialog
         open={open}
         onClose={handleClose}
-        maxWidth="sm"
-        fullWidth
+        fullScreen={isMobileNativePlatform()}
+        maxWidth={isMobileNativePlatform() ? false : "sm"}
+        fullWidth={!isMobileNativePlatform()}
         PaperProps={{
           sx: {
-            maxHeight: "90vh",
+            maxHeight: isMobileNativePlatform() ? "100%" : "90vh",
+            width: "100%",
+            maxWidth: "100%",
+            overflowX: "hidden",
             transform: sheetDragOffset > 0 ? `translateY(${sheetDragOffset}px)` : undefined,
             transition: sheetDragOffset > 0 ? "none" : "transform 0.18s ease-out",
           },

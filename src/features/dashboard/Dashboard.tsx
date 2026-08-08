@@ -4007,32 +4007,6 @@ const Dashboard = () => {
       <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
         Inspection projects and open inspection assets across the current dashboard scope.
       </Typography>
-      <Grid container spacing={1.5} sx={{ mb: 2 }}>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-            <Typography variant="caption" color="text.secondary">Projects</Typography>
-            <Typography variant="h5" fontWeight={700}>{inspectionScopeProjects.length}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-            <Typography variant="caption" color="text.secondary">Open Assets</Typography>
-            <Typography variant="h5" fontWeight={700}>{inspectionScopeAssets.length}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-            <Typography variant="caption" color="text.secondary">In Progress</Typography>
-            <Typography variant="h5" fontWeight={700}>{inspectionScopeAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length}</Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-            <Typography variant="caption" color="text.secondary">Imports Waiting</Typography>
-            <Typography variant="h5" fontWeight={700}>{inspectionImportsWaiting}</Typography>
-          </Paper>
-        </Grid>
-      </Grid>
 
       {inspectionScopeProjects.length === 0 ? (
         <Typography variant="caption" color="text.disabled">No inspection projects in this scope.</Typography>
@@ -4920,9 +4894,13 @@ const Dashboard = () => {
 
       {mobileManagerTab === "inspections" && (
         <>
+          {MyInspectionJobsToday}
+          {MyInspectionAttentionSection}
+          {MyInspectionJobHistory}
+          {InspectionInboxSection}
           <Box className="glass-card" sx={{ p: 2 }}>
             <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Inspections</Typography>
+              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Inspection Projects</Typography>
               <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
             </Stack>
             {managedInspectionProjects.length === 0
@@ -4941,8 +4919,6 @@ const Dashboard = () => {
                 </Stack>
             }
           </Box>
-
-          {InspectionInboxSection}
         </>
       )}
 
@@ -5035,7 +5011,9 @@ const Dashboard = () => {
                 </Select>
               </FormControl>
             )}
-            <Stack direction="row" spacing={0.75}>
+            <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap", gap: 0.5 }}>
+              {pmDashboardTab !== "my-inspections" && (
+                <>
               <Chip icon={<WorkOutlineOutlined sx={{ fontSize: 13 }} />}
                 label={`${overviewActiveCount} active`} size="small"
                 color={overviewActiveCount > 0 ? "primary" : "default"} variant="outlined"
@@ -5059,6 +5037,8 @@ const Dashboard = () => {
                 <Chip icon={<ErrorOutlineOutlined sx={{ fontSize: 13 }} />}
                   label={`${overviewBlockingCount} blocking`} size="small"
                   color="error" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
+              )}
+                </>
               )}
             </Stack>
           </Stack>
@@ -5096,6 +5076,7 @@ const Dashboard = () => {
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionJobsToday}
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionAttentionSection}
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && MyInspectionJobHistory}
+      {showTabBar && !isManager && pmDashboardTab === "my-inspections" && InspectionInboxSection}
 
 
       {/* FIELD USER VIEW */}
@@ -5697,6 +5678,7 @@ const Dashboard = () => {
           {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionJobsToday}
           {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionAttentionSection}
           {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionJobHistory}
+          {pmDashboardTab === "my-inspections" && !isAdmin && InspectionInboxSection}
           {pmDashboardTab === "my-inspections" && isAdmin && AdminInspectionWorkspace}
 
           {/* Pending Approvals strip - if any */}
@@ -5724,7 +5706,7 @@ const Dashboard = () => {
           )}
 
           {/* Inspection signals */}
-          {(pmDashboardTab === "pm-projects" || pmDashboardTab === "my-inspections") && InspectionInboxSection}
+          {pmDashboardTab === "pm-projects" && InspectionInboxSection}
 
           {/* Auto-assignment flags - field user self-assigned */}
           {pmDashboardTab === "pm-projects" && autoAssignFlags.length > 0 && (

@@ -24,8 +24,9 @@ import { authService } from "../../services/authService";
 import { useSseEvents } from "../../hooks/useSseEvents";
 import { useOfflineBootstrap } from "../../hooks/useOfflineBootstrap";
 import { useShellCatalogBootstrap } from "../../hooks/useShellCatalogBootstrap";
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { initTapFeedback } from "../../services/tapFeedback";
+import { useAppHeaderOffset } from "../../hooks/useAppHeaderOffset";
 import type { User } from "../../types/user";
 
 /** Runs onboarding hooks only when a real user id exists (stable hook order per mount). */
@@ -66,6 +67,8 @@ const AppShell = () => {
   const { viewMode } = useViewMode();
   const { isViewOnly } = useAccessMode();
   const mobileWebLayout = useMobileWebLayout();
+  const headerStackRef = useRef<HTMLDivElement>(null);
+  useAppHeaderOffset(headerStackRef);
   useSseEvents(); // real-time push from server
   useOfflineBootstrap(); // keep offline cache warm (native only)
   useShellCatalogBootstrap(); // warm Redux catalog once after auth (web perf)
@@ -78,18 +81,20 @@ const AppShell = () => {
         {/* Sidebar: desktop web only (hidden on mobile web + native via layout rules) */}
         {viewMode === "full" && !mobileWebLayout && <Sidebar />}
         <Box className={`app-main ${viewMode === "minimal" ? "minimal-view" : ""}`}>
-          <NotificationBanner />
-          <SyncDroppedBanner />
-          <OfflineBootstrapBanner />
-          <OfflineModeBanner />
-          <NativeLifecycleBanner />
-          {isViewOnly && (
-            <Box sx={{ px: 2, py: 1, borderBottom: "1px solid rgba(245, 158, 11, 0.25)", background: "rgba(245, 158, 11, 0.12)", color: "warning.light", fontSize: "0.85rem", fontWeight: 700 }}>
-              View-only mode is active. Changes are disabled.
-            </Box>
-          )}
-          <Topbar />
-          <FieldNotificationBar />
+          <Box ref={headerStackRef} className="app-header-stack">
+            <NotificationBanner />
+            <SyncDroppedBanner />
+            <OfflineBootstrapBanner />
+            <OfflineModeBanner />
+            <NativeLifecycleBanner />
+            {isViewOnly && (
+              <Box sx={{ px: 2, py: 1, borderBottom: "1px solid rgba(245, 158, 11, 0.25)", background: "rgba(245, 158, 11, 0.12)", color: "warning.light", fontSize: "0.85rem", fontWeight: 700 }}>
+                View-only mode is active. Changes are disabled.
+              </Box>
+            )}
+            <Topbar />
+            <FieldNotificationBar />
+          </Box>
           <PullToRefresh>
             <Box component="main" className="app-content">
               <Outlet />
