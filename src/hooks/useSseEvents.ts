@@ -18,18 +18,57 @@ import { getApiBaseUrl } from "../services/apiBase";
 import { invalidateWebCacheByPrefix } from "../services/webFreshCache";
 import { probePendingConflictsFromSse } from "../services/syncConflictProbe";
 import { isMobileNativePlatform } from "../utils/platform";
+import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
+import { prefetchAssignedAssetsInProject } from "../services/assetPrefetchService";
+import type { User } from "../types/user";
 
 const BASE_RETRY_MS = 3_000;
 const MAX_RETRY_MS  = 30_000;
+const SSE_PREFETCH_DEBOUNCE_MS = 3_000;
+
+function currentUserId(): string | null {
+  try {
+    const raw = secureGet("auth_user");
+    if (!raw) return null;
+    return (JSON.parse(raw) as User)?.id ?? null;
+  } catch {
+    return null;
+  }
+}
 
 export function useSseEvents() {
   const esRef        = useRef<EventSource | null>(null);
   const retryRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prefetchRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCount   = useRef(0);
   const activeRef    = useRef(true);
 
   useEffect(() => {
     activeRef.current = true;
+
+    const clearPrefetchDebounce = () => {
+      if (prefetchRef.current) {
+        clearTimeout(prefetchRef.current);
+        prefetchRef.current = null;
+      }
+    };
+
+    const onAssetsUpdatedFromServer = (detail: Record<string, unknown>) => {
+      window.dispatchEvent(new Event("notifications:refresh"));
+      if (!isMobileNativePlatform()) return;
+
+      const projectId = typeof detail.projectId === "string" ? detail.projectId : undefined;
+      const userId = currentUserId();
+      clearPrefetchDebounce();
+      prefetchRef.current = setTimeout(() => {
+        prefetchRef.current = null;
+        if (projectId && userId) {
+          void prefetchAssignedAssetsInProject(projectId, userId);
+        } else {
+          scheduleBootstrapAfterUploadDrain("assigned");
+        }
+      }, SSE_PREFETCH_DEBOUNCE_MS);
+    };
 
     const clearRetry = () => {
       if (retryRef.current) { clearTimeout(retryRef.current); retryRef.current = null; }
@@ -68,6 +107,7 @@ export function useSseEvents() {
             invalidateWebCacheByPrefix("/dashboard/");
           }
           window.dispatchEvent(new CustomEvent("sse:assets:updated", { detail }));
+          onAssetsUpdatedFromServer(detail);
           void probePendingConflictsFromSse({
             productId: typeof detail.productId === "string" ? detail.productId : undefined,
             projectId: typeof detail.projectId === "string" ? detail.projectId : undefined,
@@ -104,6 +144,7 @@ export function useSseEvents() {
 
     return () => {
       activeRef.current = false;
+      clearPrefetchDebounce();
       close();
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online",  handleOnline);

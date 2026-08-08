@@ -6,6 +6,7 @@ import { Backdrop, Box, Stack, Typography, keyframes } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import strataLogo from "../../assets/strata_transparent.png";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
 
 const spin3d = keyframes`
   from { transform: rotateX(14deg) rotateY(0deg); }
@@ -26,6 +27,8 @@ export default function SyncBusyOverlay() {
     if (!isMobileNativePlatform()) return;
 
     const applySyncing = (active: boolean) => {
+      if (active && shouldSkipRunMutation()) return;
+
       if (active) {
         if (hideTimerRef.current !== null) {
           window.clearTimeout(hideTimerRef.current);

@@ -573,6 +573,7 @@ export default function SyncCenterPage({ open, onClose }: Props) {
     conflictCount,
     lastSyncAt,
     syncing,
+    canSync,
     triggerSync,
     resolveConflictKeep,
     resolveConflictDiscard,
@@ -826,9 +827,9 @@ export default function SyncCenterPage({ open, onClose }: Props) {
               size="small"
               startIcon={<RefreshIcon />}
               onClick={() => void triggerSync()}
-              disabled={syncing}
+              disabled={syncing || !canSync}
             >
-              {syncing ? "Syncing…" : "Sync Now"}
+              {syncing ? "Syncing…" : canSync ? "Sync Now" : "Waiting for server…"}
             </Button>
             {hasFailed && (
               <Button

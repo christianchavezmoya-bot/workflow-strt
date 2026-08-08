@@ -335,7 +335,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   }, [productId]);
 
   useEffect(() => {
-    workflowTypeService.listAll().then(setWorkflowTypes).catch(() => {});
+    workflowTypeService.list().then(setWorkflowTypes).catch(() => {});
   }, []);
 
   // Feature selections — managed in the builder (not just the publish dialog)

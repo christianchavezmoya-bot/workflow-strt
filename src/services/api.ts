@@ -2,7 +2,7 @@ import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from "axio
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
-import { shouldSkipBlockingFetch } from "./connectivityMonitor";
+import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
@@ -232,8 +232,10 @@ api.interceptors.request.use(async (config) => {
   const skipBlocking =
     !url.includes("/auth/")
     && isMobileNativePlatform()
-    && !isSyncEngineWrite
-    && (shouldSkipBlockingFetch() || isCircuitOpen());
+    && (
+      (!isSyncEngineWrite && (shouldSkipBlockingFetch() || isCircuitOpen()))
+      || (isSyncEngineWrite && shouldSkipRunMutation())
+    );
 
   if (skipBlocking) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
