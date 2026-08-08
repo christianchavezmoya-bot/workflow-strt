@@ -24,6 +24,7 @@ import { APP_NAME } from "../../constants/branding";
 import { secureClearAuth } from "../../services/secureStorage";
 import strataLogo from "../../assets/strata_transparent.png";
 import SyncStatusBadge from "../ui/SyncStatusBadge";
+import DataConsistencyIndicator from "../ui/DataConsistencyIndicator";
 import DiagnosticClockBar from "../ui/DiagnosticClockBar";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
@@ -400,7 +401,7 @@ const Topbar = () => {
     <Box className="topbar">
       <Stack direction="row" spacing={2} alignItems="center">
         {isNativeMobile ? (
-          <Stack direction="row" spacing={1.5} alignItems="center" sx={{ minWidth: 0 }}>
+          <Stack direction="row" spacing={1} alignItems="center" sx={{ minWidth: 0 }}>
             <Box
               component="img"
               src={strataLogo}
@@ -415,6 +416,7 @@ const Topbar = () => {
                 flexShrink: 0,
               }}
             />
+            <DataConsistencyIndicator />
           </Stack>
         ) : (
           <>
