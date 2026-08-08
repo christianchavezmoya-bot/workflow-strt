@@ -1787,28 +1787,39 @@ function StepEditorPanel({
   const needsFeaturePicker = pendingType === "installation" || pendingType === "data-collection";
   const maxUnits = includedFeatures.find((f) => f.id === pendingFeatureId)?.qty ?? 1;
 
-  // For data-collection: which deps to include
+  // For data-collection: which deps to include.
+  // Memoized: this array is an effect dependency below, and a fresh identity on
+  // every render would re-run that effect on every render — which, because the
+  // effect also stores a brand-new Set, re-rendered forever. That render loop
+  // starved React Router's (startTransition-wrapped) location update, so the
+  // sidebar could no longer navigate away from the builder.
   const [selectedDepIds, setSelectedDepIds] = useState<Set<string>>(new Set());
-  const pendingFeatureDeps = pendingType === "data-collection" && pendingFeatureId
-    ? ((depsByFeature?.[pendingFeatureId] ?? []).length > 0
-        ? (depsByFeature?.[pendingFeatureId] ?? []).map((dep) => ({
-            id: dep.id,
-            name: dep.name,
-            valueType: "text",
-            isInventory: dep.isInventory,
-            unit: dep.unit,
-          }))
-        : (productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? []))
-    : [];
+  const pendingFeatureDeps = useMemo(
+    () => (pendingType === "data-collection" && pendingFeatureId
+      ? ((depsByFeature?.[pendingFeatureId] ?? []).length > 0
+          ? (depsByFeature?.[pendingFeatureId] ?? []).map((dep) => ({
+              id: dep.id,
+              name: dep.name,
+              valueType: "text",
+              isInventory: dep.isInventory,
+              unit: dep.unit,
+            }))
+          : (productFeatures.find((f) => f.id === pendingFeatureId)?.subProperties ?? []))
+      : []),
+    [pendingType, pendingFeatureId, depsByFeature, productFeatures],
+  );
 
-  // When feature changes in data-collection mode, select all deps by default
+  // When feature changes in data-collection mode, select all deps by default.
+  // Only replaces the Set when the membership actually differs — setState with a
+  // new Set of identical contents is never an identity bail-out for React.
   useEffect(() => {
-    if (pendingType === "data-collection" && pendingFeatureId) {
-      setSelectedDepIds(new Set(pendingFeatureDeps.map((d) => d.id)));
-    } else {
-      setSelectedDepIds(new Set());
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const next = pendingType === "data-collection" && pendingFeatureId
+      ? pendingFeatureDeps.map((d) => d.id)
+      : [];
+    setSelectedDepIds((prev) => {
+      if (prev.size === next.length && next.every((id) => prev.has(id))) return prev;
+      return new Set(next);
+    });
   }, [pendingType, pendingFeatureId, pendingFeatureDeps]);
 
   function handleApply() {
