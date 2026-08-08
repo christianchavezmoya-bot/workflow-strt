@@ -1,5 +1,5 @@
 ﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation, useNavigation, useSearchParams } from "react-router-dom";
+import { useLocation, useSearchParams } from "react-router-dom";
 import {
   AddOutlined,
   ArticleOutlined,
@@ -556,15 +556,20 @@ const WorkInstructions = () => {
   const dispatch = useAppDispatch();
   const productsState = useAppSelector((state) => state.products);
   const location = useLocation();
-  const navigation = useNavigation();
   const [searchParams, setSearchParams] = useSearchParams();
   const isActiveRoute = location.pathname.startsWith("/work-instructions");
+  const allowUrlWritesRef = useRef(true);
   const urlBackfillDoneRef = useRef(false);
 
+  useEffect(() => {
+    allowUrlWritesRef.current = location.pathname.startsWith("/work-instructions");
+    return () => { allowUrlWritesRef.current = false; };
+  }, [location.pathname]);
+
   const safeSetSearchParams = useCallback((params: Record<string, string>) => {
-    if (!isActiveRoute || navigation.state !== "idle") return;
+    if (!allowUrlWritesRef.current) return;
     setSearchParams(params, { replace: true });
-  }, [isActiveRoute, navigation.state, setSearchParams]);
+  }, [setSearchParams]);
 
   const [tab, setTab] = useState(0);
   const [viewMode, setViewMode] = useState<"instructions" | "builder">("instructions");
@@ -651,7 +656,7 @@ const WorkInstructions = () => {
   // One-time URL backfill so Favorites capture product/view — only when params are missing.
   useEffect(() => {
     if (!isActiveRoute || products.length === 0 || urlBackfillDoneRef.current) return;
-    if (navigation.state !== "idle") return;
+    if (!allowUrlWritesRef.current) return;
     if (searchParams.has("product") && searchParams.has("view")) {
       urlBackfillDoneRef.current = true;
       return;
@@ -677,7 +682,7 @@ const WorkInstructions = () => {
     params.view = resolvedView;
     if (configIdFromUrl) params.config = configIdFromUrl;
     safeSetSearchParams(params);
-  }, [isActiveRoute, products.length, productIdsKey, searchParams, safeSetSearchParams, navigation.state]);
+  }, [isActiveRoute, products.length, productIdsKey, searchParams, safeSetSearchParams]);
 
   const activeProduct = products[tab];
   const [workflowFeatures, setWorkflowFeatures] = useState<WorkflowFeatureDefinition[]>([]);

@@ -67,6 +67,7 @@ import {
   getNativeNetworkConnected,
   getServerReachable,
   shouldSkipBlockingFetch,
+  shouldSkipRunMutation,
 } from "../services/connectivityMonitor";
 import {
   buildSyncAttemptDiagnostics,
@@ -188,6 +189,7 @@ function scheduleReconnectFlush(): void {
 
 async function reconnectAndFlushNow(): Promise<void> {
   if (reconnectFlushInFlight) return;
+  if (!canAttemptSyncFlush()) return;
   reconnectFlushInFlight = true;
   try {
     await pendingResetRetrySchedule();
@@ -216,6 +218,14 @@ function hasNetworkSignal(): boolean {
     return getNativeNetworkConnected() !== false;
   }
   return typeof navigator === "undefined" || navigator.onLine;
+}
+
+/** True when the sync engine should attempt uploads (radio up + server reachable). */
+function canAttemptSyncFlush(): boolean {
+  if (isOfflineModeActive()) return false;
+  if (!hasNetworkSignal()) return false;
+  if (isMobileNativePlatform() && shouldSkipRunMutation()) return false;
+  return true;
 }
 
 function isNetworkLikeError(error: unknown): boolean {
@@ -639,7 +649,7 @@ export function useSyncEngine(): SyncState {
   const flush = useCallback(async () => {
     const conn = connectivityRef.current;
     if (_flushing || conn === "token-expired") return;
-    if (isOfflineModeActive() || !hasNetworkSignal()) return;
+    if (!canAttemptSyncFlush()) return;
 
     _flushing = true;
     setSyncFlushing(true);
@@ -648,6 +658,7 @@ export function useSyncEngine(): SyncState {
     let due: PendingAction[] = [];
     let syncedAny = false;
     let anyError = false;
+    let networkFailureStoppedPass = false;
     try {
       due = await pendingGetDue();
       if (due.length === 0) {
@@ -882,9 +893,11 @@ export function useSyncEngine(): SyncState {
             if (isOfflineSkip) {
               await pendingSetStatus(action.id, "pending");
               setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+              networkFailureStoppedPass = true;
               break;
             }
             setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
+            networkFailureStoppedPass = true;
             break;
           }
         }
@@ -921,9 +934,9 @@ export function useSyncEngine(): SyncState {
       if (
         syncedAny
         && pendingRemaining > 0
-        && hasNetworkSignal()
+        && !networkFailureStoppedPass
+        && canAttemptSyncFlush()
         && connectivityRef.current !== "token-expired"
-        && !isOfflineModeActive()
       ) {
         scheduleChainFlush();
       }
@@ -936,7 +949,7 @@ export function useSyncEngine(): SyncState {
   const scheduleRetry = useCallback(async () => {
     // Don't schedule retry timers while offline — the connectivity-restored
     // subscription will trigger flush() the instant the server comes back.
-    if (!hasNetworkSignal()) return;
+    if (!canAttemptSyncFlush()) return;
     const all = await pendingGetAll();
     if (all.length === 0) return;
     const future = all
@@ -1022,7 +1035,7 @@ export function useSyncEngine(): SyncState {
   // ── Visibility change (phone unlock / tab switch) ──────────────────────────
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === "visible" && hasNetworkSignal()) void flush();
+      if (document.visibilityState === "visible" && canAttemptSyncFlush()) void flush();
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);
@@ -1104,7 +1117,7 @@ export function useSyncEngine(): SyncState {
   // ── Initial load ───────────────────────────────────────────────────────────
   useEffect(() => {
     void refreshPending();
-    if (hasNetworkSignal() && !shouldSkipBlockingFetch()) void flush();
+    if (canAttemptSyncFlush() && !shouldSkipBlockingFetch()) void flush();
   }, [flush, refreshPending]);
 
   // ── queueOrSend ───────────────────────────────────────────────────────────
@@ -1193,8 +1206,9 @@ export function useSyncEngine(): SyncState {
 
   /** Upload pending ops, wait for drain, then download field data. User Sync Now forces bootstrap. */
   const triggerSync = useCallback(async () => {
+    if (!canAttemptSyncFlush()) return;
     await reconnectAndFlushNow();
-    if (isMobileNativePlatform() && hasNetworkSignal()) {
+    if (isMobileNativePlatform() && canAttemptSyncFlush()) {
       scheduleBootstrapAfterUploadDrain("all", 0, true);
     }
   }, []);

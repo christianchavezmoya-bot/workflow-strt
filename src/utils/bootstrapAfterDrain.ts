@@ -4,7 +4,7 @@
  */
 
 import offlineBootstrapService, { type BootstrapScope } from "../services/offlineBootstrapService";
-import { getNativeNetworkConnected } from "../services/connectivityMonitor";
+import { getNativeNetworkConnected, shouldSkipRunMutation } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "./platform";
 
 let chainTimer: ReturnType<typeof setTimeout> | null = null;
@@ -22,13 +22,19 @@ function hasNetworkSignal(): boolean {
   return typeof navigator === "undefined" || navigator.onLine;
 }
 
+function canScheduleBootstrap(): boolean {
+  if (!hasNetworkSignal()) return false;
+  if (isMobileNativePlatform() && shouldSkipRunMutation()) return false;
+  return true;
+}
+
 export function scheduleBootstrapAfterUploadDrain(
   scope: BootstrapScope = "all",
   debounceMs = AUTO_DEBOUNCE_MS,
   force = false,
 ): void {
   if (!isMobileNativePlatform()) return;
-  if (!hasNetworkSignal()) return;
+  if (!canScheduleBootstrap()) return;
 
   const run = () => {
     chainTimer = null;

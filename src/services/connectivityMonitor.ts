@@ -173,11 +173,12 @@ export function startConnectivityMonitor(): void {
       const detail = (event as CustomEvent<{ isTimeout?: boolean }>).detail;
       // A slow endpoint timing out while other calls succeed is not "server down".
       if (detail?.isTimeout && hadRecentApiSuccess()) return;
-      // During an active upload burst, timeouts usually mean a busy LAN server — not offline.
-      if (shouldSuppressUnreachableOffline()) return;
       unreachableSignals += 1;
       if (unreachableSignals < UNREACHABLE_SIGNAL_THRESHOLD) return;
       tripCircuitBreaker();
+      // During an active upload burst, timeouts usually mean a busy LAN server —
+      // suppress the offline UI flip, but still trip the circuit so flush stops.
+      if (shouldSuppressUnreachableOffline()) return;
       if (currentValue !== false) notify(false);
     });
   }

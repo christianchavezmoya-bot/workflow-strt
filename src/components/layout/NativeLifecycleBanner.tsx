@@ -12,7 +12,7 @@ export default function NativeLifecycleBanner() {
 
   const showSyncHint =
     phase === "foreground-sync"
-    && connectivity !== "offline"
+    && connectivity === "online"
     && (syncing || pendingCount > 0);
 
   if (!showSyncHint) return null;
