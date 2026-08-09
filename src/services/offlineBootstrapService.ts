@@ -1,4 +1,5 @@
 import { isMobileNativePlatform } from "../utils/platform";
+import { isSyncLifecyclePaused } from "./syncLifecycleState";
 import { isOfflineModeActive } from "./offlineModeState";
 import { getNativeNetworkConnected, isServerConfirmedReachable } from "./connectivityMonitor";
 import { secureGet } from "./secureStorage";
@@ -90,6 +91,7 @@ function emit(name: string, detail?: unknown): void {
 
 /** Bootstrap may download hundreds of assets — require confirmed /health ping on native. */
 function canRunBootstrap(): boolean {
+  if (isSyncLifecyclePaused()) return false;
   if (isOfflineModeActive()) return false;
   if (typeof navigator !== "undefined" && !navigator.onLine) return false;
   if (isMobileNativePlatform()) {

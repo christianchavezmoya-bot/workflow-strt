@@ -78,6 +78,10 @@ public record CreateNotificationRequest(
 
 public record AcknowledgeNotificationsRequest(List<string>? NotificationIds);
 
+public record RegisterPushTokenRequest(string Token, string? Platform);
+
+public record UnregisterPushTokenRequest(string Token);
+
 public record UserDto(
     string Id,
     string Email,

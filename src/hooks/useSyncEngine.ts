@@ -14,7 +14,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Network } from "@capacitor/network";
-import { App } from "@capacitor/app";
 import api from "../services/api";
 import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -76,6 +75,7 @@ import {
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { isOfflineModeActive } from "../services/offlineModeState";
+import { isSyncLifecyclePaused, subscribeSyncLifecyclePaused } from "../services/syncLifecycleState";
 import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
 import {
   fromWorkInstructionDto,
@@ -225,6 +225,7 @@ function hasNetworkSignal(): boolean {
 /** True when the sync engine should attempt uploads (radio up + server reachable). */
 function canAttemptSyncFlush(): boolean {
   if (isOfflineModeActive()) return false;
+  if (isMobileNativePlatform() && isSyncLifecyclePaused()) return false;
   if (!hasNetworkSignal()) return false;
   if (isMobileNativePlatform()) {
     // Unknown (null) means ping has not confirmed the server yet — wait.
@@ -633,6 +634,11 @@ export function useSyncEngine(): SyncState {
   // to complete. See services/connectivityMonitor.ts for why this lives
   // outside this hook rather than as its own timer in here.
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
+  const [, setLifecyclePausedTick] = useState(0);
+
+  useEffect(() => subscribeSyncLifecyclePaused(() => {
+    setLifecyclePausedTick((t) => t + 1);
+  }), []);
 
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
@@ -1026,35 +1032,12 @@ export function useSyncEngine(): SyncState {
     };
   }, [setConnectivityState]);
 
-  // iOS app foreground - appStateChange is more reliable than visibilitychange in WKWebView.
-  // Also dispatches "app-foregrounded" for the stale-pull hook (useStaleOnResume).
-  // Sync flush waits for server health ping — not radio alone.
-  useEffect(() => {
-    if (!isMobileNativePlatform()) return;
-    let listenerHandle: { remove: () => void } | undefined;
-    App.addListener("appStateChange", ({ isActive }) => {
-      if (!isActive) return; // going to background - nothing to do here
-      pingNow();
-      if (hasNetworkSignal()) {
-        setConnectivityAwaitingServerPing(setConnectivityState);
-      } else {
-        setConnectivityState("offline");
-      }
-      window.dispatchEvent(new CustomEvent("app-foregrounded", {
-        detail: { timestamp: Date.now() },
-      }));
-    }).then((handle) => {
-      listenerHandle = handle;
-    });
-    return () => {
-      listenerHandle?.remove();
-    };
-  }, [setConnectivityState]);
-
   // ── Visibility change (phone unlock / tab switch) ──────────────────────────
   useEffect(() => {
     const handleVisibility = () => {
-      if (document.visibilityState === "visible" && canAttemptSyncFlush()) void flush();
+      if (document.visibilityState !== "visible") return;
+      if (isMobileNativePlatform() && isSyncLifecyclePaused()) return;
+      if (canAttemptSyncFlush()) void flush();
     };
     document.addEventListener("visibilitychange", handleVisibility);
     return () => document.removeEventListener("visibilitychange", handleVisibility);

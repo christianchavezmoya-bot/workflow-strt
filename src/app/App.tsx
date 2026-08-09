@@ -1,6 +1,5 @@
 ﻿import { useEffect, useState, useCallback } from "react";
 import { Box, CircularProgress, Typography } from "@mui/material";
-import { App as CapApp } from "@capacitor/app";
 import AppRoutes from "./routes";
 import { brandSettingsService } from "../services/brandSettingsService";
 import {
@@ -17,12 +16,17 @@ import BiometricLockScreen from "../components/BiometricLockScreen";
 import Login from "../features/auth/Login";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
+import { useNativeSyncLifecycle } from "../hooks/useNativeSyncLifecycle";
+import { useSyncAmbientAudio } from "../hooks/useSyncAmbientAudio";
 
 const App = () => {
   const [authState, setAuthState] = useState<BiometricCheckResult | null>(null);
   const [loading, setLoading] = useState(true);
   // Ticks when JWT expiry / connectivity should re-evaluate the render gate.
   const [loginGateTick, setLoginGateTick] = useState(0);
+
+  useNativeSyncLifecycle();
+  useSyncAmbientAudio();
 
   const forceLogin = useCallback(() => {
     console.log("[App] Forcing Login — JWT expired while online");
@@ -111,52 +115,71 @@ const App = () => {
   }, [applyAuthMode]);
 
   // Enforce Login when JWT expires while the device is online (every 5s + on reachability).
+  // Pauses while the app is backgrounded — no need to force login until user returns.
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
     if (authState !== "session-unlocked") return;
+
+    let interval: number | undefined;
 
     const check = () => {
       if (shouldForceLoginNow()) forceLogin();
       else setLoginGateTick((t) => t + 1);
     };
 
-    check();
-    const interval = window.setInterval(() => { void requiresOnlineLoginAsync().then((needed) => {
-      if (needed) forceLogin();
-      else setLoginGateTick((t) => t + 1);
-    }); }, 5_000);
-
-    const onReachable = () => { void requiresOnlineLoginAsync().then((needed) => {
-      if (needed) forceLogin();
-    }); };
-    window.addEventListener("api-server-reachable", onReachable);
-    window.addEventListener("offline-mode-online", onReachable);
-
-    return () => {
-      window.clearInterval(interval);
-      window.removeEventListener("api-server-reachable", onReachable);
-      window.removeEventListener("offline-mode-online", onReachable);
+    const startInterval = () => {
+      if (interval !== undefined) return;
+      check();
+      interval = window.setInterval(() => {
+        void requiresOnlineLoginAsync().then((needed) => {
+          if (needed) forceLogin();
+          else setLoginGateTick((t) => t + 1);
+        });
+      }, 5_000);
     };
-  }, [authState, forceLogin]);
 
-  useEffect(() => {
-    if (!isMobileNativePlatform()) return;
-    let handle: { remove: () => void } | undefined;
-    void CapApp.addListener("appStateChange", ({ isActive }) => {
-      if (!isActive) return;
+    const stopInterval = () => {
+      if (interval !== undefined) {
+        window.clearInterval(interval);
+        interval = undefined;
+      }
+    };
+
+    startInterval();
+
+    const onReachable = () => {
+      void requiresOnlineLoginAsync().then((needed) => {
+        if (needed) forceLogin();
+      });
+    };
+
+    const onForeground = () => {
+      startInterval();
       const token = secureGet("auth_token");
       if (!token || !isAuthTokenExpired(token)) return;
       void requiresOnlineLoginAsync().then((needed) => {
         if (needed) forceLogin();
         else void refreshAuthState();
       });
-    }).then((listener) => {
-      handle = listener;
-    });
-    return () => {
-      handle?.remove();
     };
-  }, [refreshAuthState, forceLogin]);
+
+    const onBackground = () => {
+      stopInterval();
+    };
+
+    window.addEventListener("api-server-reachable", onReachable);
+    window.addEventListener("offline-mode-online", onReachable);
+    window.addEventListener("app-foregrounded", onForeground);
+    window.addEventListener("app-backgrounded", onBackground);
+
+    return () => {
+      stopInterval();
+      window.removeEventListener("api-server-reachable", onReachable);
+      window.removeEventListener("offline-mode-online", onReachable);
+      window.removeEventListener("app-foregrounded", onForeground);
+      window.removeEventListener("app-backgrounded", onBackground);
+    };
+  }, [authState, forceLogin, refreshAuthState]);
 
   if (loading) {
     return (

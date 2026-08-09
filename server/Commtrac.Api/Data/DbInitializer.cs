@@ -43,6 +43,7 @@ public static class DbInitializer
         // database crashes with "no such column: IsDeleted".
         EnsureSoftDeleteColumns(db);
         EnsureNotificationSettingsResendFrom(db);
+        EnsurePushDeviceTokensTable(db);
 
         if (!db.Users.Any())
         {
@@ -202,6 +203,36 @@ public static class DbInitializer
         {
             entity.SmtpFrom = AppBranding.EmailFromAddress;
             db.SaveChanges();
+        }
+    }
+
+    private static void EnsurePushDeviceTokensTable(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS PushDeviceTokens (
+                    Id            TEXT PRIMARY KEY NOT NULL,
+                    UserId        TEXT NOT NULL,
+                    Token         TEXT NOT NULL,
+                    Platform      TEXT NOT NULL DEFAULT 'unknown',
+                    CreatedAtUtc  TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                    UpdatedAtUtc  TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE UNIQUE INDEX IF NOT EXISTS IX_PushDeviceTokens_Token ON PushDeviceTokens (Token)";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_PushDeviceTokens_UserId ON PushDeviceTokens (UserId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
         }
     }
 
