@@ -55,6 +55,7 @@ import { STEP_TYPE_LABELS } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
+import { usePermissions } from "../../hooks/usePermissions";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import QRUploadButton from "../../components/QRUploadButton";
 import type { WorkflowConfig } from "../../types/workflowConfig";
@@ -288,6 +289,11 @@ function MobileStepStrip({ stepsSorted, selectedStepId, onSelect, onAdd }: Mobil
 // ───────────────────────────────────────────────────────────────────────────
 
 const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished, onNewConfig }: WorkflowBuilderProps) => {
+  // Publishing is a separate Tier-2 right from building: a role may be allowed to draft a
+  // workflow without being allowed to release it to the field. Entry into the builder is
+  // gated on `build` by WorkInstructions; this gates the release action itself.
+  const can = usePermissions();
+  const canPublishWorkflow = !!can.workInstructionsBuilder?.publish;
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
   const [currentConfig, setCurrentConfig] = useState<WorkflowConfig | null>(null);
@@ -1097,7 +1103,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
           >
             Run
           </Button>
-          {currentConfig?.status !== "Published" && currentConfig?.status !== "Archived" && (
+          {canPublishWorkflow && currentConfig?.status !== "Published" && currentConfig?.status !== "Archived" && (
             <Button
               size="small"
               variant="contained"

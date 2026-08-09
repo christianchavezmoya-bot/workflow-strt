@@ -724,9 +724,12 @@ export const UserManagement: React.FC = () => {
   const emptyDomains = (): DomainPermissions => ({
     projects:                { view: false, viewScope: "own", edit: false, editScope: "none", approve: false, delete: false },
     installationAssets:      { view: false, viewScope: "own", edit: false, editScope: "none", runWorkflow: false, delete: false, viewCapture: false, editCapture: false, editCaptureScope: "none" },
-    workInstructionsBuilder: { view: false, viewScope: "own", build: false, publish: false, archive: false },
+    workInstructionsBuilder: { view: false, viewScope: "own", build: false, publish: false, archive: false, delete: false },
     documents:               { view: false, viewScope: "own", upload: false, delete: false },
     settings:                { view: false, edit: false },
+    bomProject:              { view: false, upload: false, map: false, commit: false, delete: false },
+    tips:                    { view: false, create: false, edit: false, delete: false },
+    analytics:               { view: false, viewScope: "own", export: false },
   });
 
   const [roleForm, setRoleForm] = useState({
@@ -1068,6 +1071,11 @@ export const UserManagement: React.FC = () => {
               view: computed.settings.view || (saved.settings?.view ?? false),
               edit: computed.settings.edit || (saved.settings?.edit ?? false),
             },
+            // Fall back to computed for areas added after this config was saved, so the
+            // editor opens showing the role's effective rights rather than all-unticked.
+            bomProject: { ...computed.bomProject, ...(saved.bomProject ?? {}) },
+            tips:       { ...computed.tips,       ...(saved.tips ?? {}) },
+            analytics:  { ...computed.analytics,  ...(saved.analytics ?? {}) },
           };
         })(),
       });
@@ -4395,6 +4403,13 @@ export const UserManagement: React.FC = () => {
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>archive</Typography>
                       </Stack>
                     </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.workInstructionsBuilder.delete}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, workInstructionsBuilder: { ...prev.domains.workInstructionsBuilder, delete: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
+                      </Stack>
+                    </TableCell>
                   </TableRow>
 
                   {/* Documents */}
@@ -4446,6 +4461,112 @@ export const UserManagement: React.FC = () => {
                         <Checkbox size="small" checked={!!roleForm.domains.settings.edit}
                           onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, settings: { ...prev.domains.settings, edit: e.target.checked } } }))} />
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>edit</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell /><TableCell /><TableCell />
+                  </TableRow>
+
+                  {/* BOM to Project — columns follow the module's stages: upload → map → commit */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>BOM to Project</Typography></TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.bomProject?.view}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, bomProject: { ...prev.domains.bomProject, view: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell />
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.bomProject?.upload}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, bomProject: { ...prev.domains.bomProject, upload: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>upload</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.bomProject?.map}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, bomProject: { ...prev.domains.bomProject, map: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>map</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.bomProject?.delete}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, bomProject: { ...prev.domains.bomProject, delete: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.bomProject?.commit}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, bomProject: { ...prev.domains.bomProject, commit: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>commit</Typography>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+
+                  {/* Tips & Tricks — previously borrowed the Documents flags */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Tips &amp; Tricks</Typography></TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.tips?.view}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, tips: { ...prev.domains.tips, view: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell />
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.tips?.create}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, tips: { ...prev.domains.tips, create: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>create</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.tips?.edit}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, tips: { ...prev.domains.tips, edit: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>edit</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.tips?.delete}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, tips: { ...prev.domains.tips, delete: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell />
+                  </TableRow>
+
+                  {/* Time Analytics — had no permission of its own before */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Time Analytics</Typography></TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.analytics?.view}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, analytics: { ...prev.domains.analytics, view: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Select size="small" value={roleForm.domains.analytics?.viewScope ?? "own"}
+                        disabled={!roleForm.domains.analytics?.view}
+                        onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, analytics: { ...prev.domains.analytics, viewScope: e.target.value as "own" | "all" } } }))}
+                        sx={{ fontSize: "0.7rem" }}
+                      >
+                        <MenuItem value="own" sx={{ fontSize: "0.75rem" }}>Own</MenuItem>
+                        <MenuItem value="all" sx={{ fontSize: "0.75rem" }}>All</MenuItem>
+                      </Select>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.analytics?.export}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, analytics: { ...prev.domains.analytics, export: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>export</Typography>
                       </Stack>
                     </TableCell>
                     <TableCell /><TableCell /><TableCell />

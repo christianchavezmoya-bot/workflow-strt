@@ -9,6 +9,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
@@ -20,13 +21,22 @@ public class BomImportRunsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly RolePermissionService _perm;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    public BomImportRunsController(AppDbContext db, IConfiguration config)
+    public BomImportRunsController(AppDbContext db, IConfiguration config, RolePermissionService perm)
     {
         _db = db;
         _config = config;
+        _perm = perm;
     }
+
+    /// <summary>
+    /// Tier-2 gate for the BOM stages. Before this the module had no role model at all —
+    /// any signed-in user could upload, map and commit a BOM into a project. Actions map to
+    /// the stage they belong to, so "prepare an import but do not commit it" is expressible.
+    /// </summary>
+    private Task<bool> CanAsync(string action) => _perm.HasAsync(User, "bomProject", action);
 
     private bool ModuleEnabled =>
         _config["ENABLE_BOM_PROJECT_MODULE"]?.ToLower() == "true" ||
@@ -41,6 +51,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> List([FromQuery] bool includeDeleted = false)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("view")) return Forbid();
         var query = includeDeleted ? _db.BomImportRuns.IgnoreQueryFilters() : _db.BomImportRuns;
         var runs = await query
             .OrderByDescending(r => r.UploadedAt)
@@ -53,6 +64,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Get(string id, [FromQuery] bool includeDeleted = false)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("view")) return Forbid();
         var query = includeDeleted ? _db.BomImportRuns.IgnoreQueryFilters() : _db.BomImportRuns;
         var run = await query.FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
@@ -63,6 +75,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Create([FromBody] CreateBomRunRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("upload")) return Forbid();
         var user = HttpContext.User.Identity?.Name ?? "unknown";
         var run = new BomImportRunEntity
         {
@@ -83,6 +96,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Update(string id, [FromBody] UpdateBomRunRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("map")) return Forbid();
         var run = await _db.BomImportRuns.FindAsync(id);
         if (run == null) return NotFound();
 
@@ -104,6 +118,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Delete(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("delete")) return Forbid();
         var run = await _db.BomImportRuns.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         if (run.IsDeleted) return NoContent();
@@ -120,6 +135,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Restore(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("delete")) return Forbid();
         var run = await _db.BomImportRuns.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
 
@@ -140,6 +156,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Purge(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("delete")) return Forbid();
         var run = await _db.BomImportRuns.IgnoreQueryFilters().FirstOrDefaultAsync(r => r.Id == id);
         if (run == null) return NotFound();
         _db.BomImportRuns.Remove(run);
@@ -153,6 +170,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> SaveDraft(string id, [FromBody] JsonElement draft)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("map")) return Forbid();
         var run = await _db.BomImportRuns.FindAsync(id);
         if (run == null) return NotFound();
         run.DraftProjectJson = JsonSerializer.Serialize(draft, JsonOpts);
@@ -166,6 +184,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> GetDraft(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("view")) return Forbid();
         var run = await _db.BomImportRuns.FindAsync(id);
         if (run == null || string.IsNullOrWhiteSpace(run.DraftProjectJson)) return NotFound();
         return Content(run.DraftProjectJson, "application/json");
@@ -177,6 +196,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> SaveValidation(string id, [FromBody] JsonElement validationResult)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("map")) return Forbid();
         var run = await _db.BomImportRuns.FindAsync(id);
         if (run == null) return NotFound();
         run.ValidationResultJson = JsonSerializer.Serialize(validationResult, JsonOpts);
@@ -198,6 +218,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> Publish(string id, [FromBody] PublishBomRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("commit")) return Forbid();
         var run = await _db.BomImportRuns.FindAsync(id);
         if (run == null) return NotFound();
 
@@ -227,6 +248,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> ListProfiles()
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("view")) return Forbid();
         var profiles = await _db.BomMappingProfiles.OrderByDescending(p => p.UpdatedAt).ToListAsync();
         return Ok(profiles.Select(p => new
         {
@@ -242,6 +264,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> CreateProfile([FromBody] SaveProfileRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("map")) return Forbid();
         var profile = new BomMappingProfileEntity
         {
             Name = req.Name,
@@ -257,6 +280,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> DeleteProfile(string id)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("map")) return Forbid();
         var p = await _db.BomMappingProfiles.FindAsync(id);
         if (p == null) return NotFound();
         _db.BomMappingProfiles.Remove(p);
@@ -270,6 +294,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> ListRuleProfiles()
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("view")) return Forbid();
         var profiles = await _db.BomRuleProfiles.OrderByDescending(p => p.UpdatedAt).ToListAsync();
         return Ok(profiles.Select(p => new
         {
@@ -285,6 +310,7 @@ public class BomImportRunsController : ControllerBase
     public async Task<IActionResult> CreateRuleProfile([FromBody] SaveRuleProfileRequest req)
     {
         if (!ModuleEnabled) return ModuleDisabled();
+        if (!await CanAsync("map")) return Forbid();
         var profile = new BomRuleProfileEntity
         {
             Name = req.Name,
