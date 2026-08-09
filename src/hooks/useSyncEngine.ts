@@ -246,10 +246,55 @@ function isNetworkLikeError(error: unknown): boolean {
   return isOfflineNetworkError(error);
 }
 
-async function markRunSyncedFromServer(run: AssetWorkflowRun, fallbackRunId: string): Promise<void> {
+async function markRunSyncedFromServer(
+  run: AssetWorkflowRun,
+  fallbackRunId: string,
+  syncedActionId?: string,
+): Promise<void> {
   const cachedRun = await offlineStore.getRun(fallbackRunId);
+  const otherPending = (await pendingGetByEntityId(fallbackRunId))
+    .filter((item) => item.id !== syncedActionId && !item.conflictDetected);
+  const hasFollowUpOps = otherPending.length > 0;
+  const preserveLocal = Boolean(
+    cachedRun
+    && (hasFollowUpOps || cachedRun.dirty || (cachedRun.isLocked && !run.isLocked)),
+  );
+
   const assetRecord = await entityGetAsset(run.assetId);
   const projectId = cachedRun?.projectId ?? assetRecord?.projectId ?? "";
+
+  if (preserveLocal && cachedRun) {
+    const syncedRun: OfflineRun = {
+      ...run,
+      projectId,
+      serverRunId: run.id,
+      localRunId: cachedRun.localRunId ?? run.id,
+      stepResultsJson: cachedRun.stepResultsJson ?? run.stepResultsJson,
+      issuesJson: cachedRun.issuesJson ?? run.issuesJson,
+      timeTrackingJson: cachedRun.timeTrackingJson ?? run.timeTrackingJson,
+      productiveSeconds: cachedRun.productiveSeconds ?? run.productiveSeconds,
+      downtimeSeconds: cachedRun.downtimeSeconds ?? run.downtimeSeconds,
+      downtimeEvents: cachedRun.downtimeEvents ?? run.downtimeEvents,
+      status: cachedRun.status ?? run.status,
+      isLocked: cachedRun.isLocked ?? run.isLocked,
+      completedAt: cachedRun.completedAt ?? run.completedAt,
+      completedByName: cachedRun.completedByName ?? run.completedByName,
+      bomActualJson: cachedRun.bomActualJson ?? run.bomActualJson,
+      installerSignedAt: cachedRun.installerSignedAt ?? run.installerSignedAt,
+      customerSignedAt: cachedRun.customerSignedAt ?? run.customerSignedAt,
+      signatureStatus: cachedRun.signatureStatus ?? run.signatureStatus,
+      localStatus: hasFollowUpOps ? "PendingSync" : "Synced",
+      lastLocalSavedAt: cachedRun.lastLocalSavedAt ?? new Date().toISOString(),
+      dirty: hasFollowUpOps,
+      syncError: undefined,
+    };
+    await offlineStore.saveRun(syncedRun);
+    if (fallbackRunId !== run.id) {
+      await offlineStore.deleteRun(fallbackRunId);
+    }
+    return;
+  }
+
   const syncedRun: OfflineRun = {
     ...run,
     projectId,
@@ -529,12 +574,15 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
 
   if (action.entityType === "workflow-run" && responseData && typeof responseData === "object") {
     const syncedRun = responseData as AssetWorkflowRun;
-    await markRunSyncedFromServer(syncedRun, action.entityId);
+    await markRunSyncedFromServer(syncedRun, action.entityId, action.id);
     if (action.opType === "RUN_COMPLETE") {
       await refreshAssetAfterRunSync(syncedRun.assetId);
     }
+    const cachedRun = (await offlineStore.getRun(syncedRun.id))
+      ?? (await offlineStore.getRun(action.entityId));
+    const emitRun = cachedRun ?? syncedRun;
     window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
-      detail: { assetId: syncedRun.assetId, runs: [syncedRun], mergeById: true },
+      detail: { assetId: emitRun.assetId, runs: [emitRun], mergeById: true },
     }));
     return;
   }

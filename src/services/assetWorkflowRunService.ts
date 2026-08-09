@@ -12,6 +12,7 @@ import {
   entityGetAllWorkflowRuns,
   entityGetAllAssets,
   entityGetAllProjects,
+  pendingGetAll,
 } from "./localDB";
 import { mediaStore } from "./mediaStore";
 import { workflowConfigService } from "./workflowConfigService";
@@ -414,10 +415,68 @@ function toOfflineRun(run: AssetWorkflowRun, projectId: string, overrides: Parti
   };
 }
 
+async function hasPendingRunSyncOps(runId: string, localRunId?: string): Promise<boolean> {
+  const pending = await pendingGetAll();
+  return pending.some((item) =>
+    !item.conflictDetected
+    && item.entityType === "workflow-run"
+    && (item.entityId === runId || (localRunId && item.entityId === localRunId))
+    && (item.opType === "RUN_COMPLETE" || item.opType === "SIGNATURE_SUBMIT" || item.opType === "RUN_UPDATE" || item.opType === "STEP_RESULTS"),
+  );
+}
+
+/** Pick which run id the workflow runner should open for this asset + config. */
+export async function resolveOpenRunId(
+  assetId: string,
+  workflowConfigId: string,
+  runsHint?: AssetWorkflowRun[],
+): Promise<string | undefined> {
+  const hinted = runsHint ?? [];
+  const byId = new Map<string, AssetWorkflowRun>();
+
+  for (const run of hinted) {
+    if (run.workflowConfigId === workflowConfigId) byId.set(run.id, run);
+  }
+
+  if (isMobileNativePlatform()) {
+    const localRuns = await offlineStore.listRunsByAsset(assetId);
+    for (const run of localRuns) {
+      if (run.workflowConfigId !== workflowConfigId) continue;
+      const key = run.serverRunId ?? run.id;
+      const existing = byId.get(key);
+      const offlineRun = run as OfflineRun;
+      if (!existing || run.isLocked || offlineRun.dirty) {
+        byId.set(key, run);
+      }
+    }
+  }
+
+  const forConfig = [...byId.values()];
+
+  const lockedPendingSignature = forConfig.find((run) =>
+    run.isLocked
+    && (isPendingInstallerSignature(run.signatureStatus) || isPendingCustomerSignature(run.signatureStatus)),
+  );
+  if (lockedPendingSignature) return lockedPendingSignature.id;
+
+  for (const run of forConfig) {
+    if (!run.isLocked) continue;
+    const offlineRun = run as OfflineRun;
+    if (await hasPendingRunSyncOps(run.id, offlineRun.localRunId)) {
+      return run.id;
+    }
+  }
+
+  const activeUnlocked = forConfig.find((run) => !run.isLocked);
+  return activeUnlocked?.id;
+}
+
 async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> {
   const projectId = await resolveProjectId(run.assetId, run.id);
   const existing = await offlineStore.getRun(run.id);
-  if (existing?.dirty) {
+  const pendingOps = await hasPendingRunSyncOps(run.id, existing?.localRunId);
+  const preserveLocal = Boolean(existing?.dirty || pendingOps || (existing?.isLocked && !run.isLocked));
+  if (preserveLocal && existing) {
     const merged = mergeRunRecord(existing, run);
     // Local data is newer (pending sync) - merge server metadata but keep local payload intact
     await offlineStore.saveRun({
@@ -428,8 +487,15 @@ async function cacheServerRun(run: AssetWorkflowRun): Promise<AssetWorkflowRun> 
       timeTrackingJson: existing.timeTrackingJson,
       productiveSeconds: existing.productiveSeconds,
       downtimeSeconds: existing.downtimeSeconds,
+      isLocked: existing.isLocked,
+      completedAt: existing.completedAt,
+      completedByName: existing.completedByName,
+      installerSignedAt: existing.installerSignedAt,
+      customerSignedAt: existing.customerSignedAt,
+      signatureStatus: existing.signatureStatus,
+      bomActualJson: existing.bomActualJson,
       dirty: true,
-      localStatus: existing.localStatus,
+      localStatus: pendingOps ? "PendingSync" : existing.localStatus,
       syncError: existing.syncError,
       lastLocalSavedAt: existing.lastLocalSavedAt,
     });
@@ -1237,6 +1303,15 @@ export const assetWorkflowRunService = {
 
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
+
+      const existingRuns = await offlineStore.listRunsByAsset(assetId);
+      const lockedForConfig = existingRuns.find(
+        (run) => run.workflowConfigId === workflowConfigId && run.isLocked,
+      );
+      if (lockedForConfig) {
+        return lockedForConfig;
+      }
+
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);

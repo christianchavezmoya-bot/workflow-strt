@@ -11,7 +11,7 @@ import {
   setCachedWorkflowShell,
 } from "../utils/workflowOpenCache";
 import { shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
-import { assetWorkflowRunService } from "./assetWorkflowRunService";
+import { assetWorkflowRunService, resolveOpenRunId } from "./assetWorkflowRunService";
 import { workflowConfigService } from "./workflowConfigService";
 import offlineBootstrapService from "./offlineBootstrapService";
 
@@ -99,12 +99,11 @@ export async function loadWorkflowOpenPayload(
     let existingRunId: string | undefined;
     if (!options?.previewOnly && asset) {
       const matchConfigId = options?.workflowConfigIdForRun ?? configId;
-      const runs = options?.runs ?? await assetWorkflowRunService.listByAsset(asset.id);
-      const lockedRun = runs.find((r) => r.workflowConfigId === matchConfigId && r.isLocked);
-      if (!lockedRun) {
-        const activeRun = runs.find((r) => r.workflowConfigId === matchConfigId && !r.isLocked);
-        if (activeRun) existingRunId = activeRun.id;
-      }
+      existingRunId = await resolveOpenRunId(
+        asset.id,
+        matchConfigId,
+        options?.runs ?? undefined,
+      );
     }
 
     if (isMobileNativePlatform() && !options?.previewOnly && asset) {
