@@ -291,11 +291,86 @@ async function resolveRunId(runId: string): Promise<string> {
   return await offlineStore.getMappedId("workflow-run", runId) ?? runId;
 }
 
+function isOfflineTempRunId(runId: string): boolean {
+  return runId.startsWith("offline-run-");
+}
+
+/** Drop IndexedDB ghosts left behind after an offline-run id was remapped to a server id. */
+async function purgeMappedOfflineRunGhost(runId: string): Promise<void> {
+  if (!isOfflineTempRunId(runId)) return;
+  const mappedId = await offlineStore.getMappedId("workflow-run", runId);
+  if (mappedId && mappedId !== runId) {
+    await offlineStore.deleteRun(runId);
+  }
+}
+
+/**
+ * Native-only: remove superseded offline-run rows so resume/sign-off decisions
+ * don't pick a stale unlocked ghost over a locked server run.
+ */
+async function reconcileRunsForAsset(runs: AssetWorkflowRun[]): Promise<AssetWorkflowRun[]> {
+  if (!isMobileNativePlatform() || runs.length === 0) return runs;
+
+  const byConfig = new Map<string, AssetWorkflowRun[]>();
+  for (const run of runs) {
+    if (isOfflineTempRunId(run.id)) {
+      const mappedId = await offlineStore.getMappedId("workflow-run", run.id);
+      if (mappedId) {
+        await offlineStore.deleteRun(run.id);
+        continue;
+      }
+    }
+    const list = byConfig.get(run.workflowConfigId) ?? [];
+    list.push(run);
+    byConfig.set(run.workflowConfigId, list);
+  }
+
+  const kept: AssetWorkflowRun[] = [];
+  for (const configRuns of byConfig.values()) {
+    const sorted = [...configRuns].sort(
+      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
+    );
+    const lockedComplete = sorted.find(
+      (r) => r.isLocked && (r.status === "Complete" || r.signatureStatus === "PendingInstaller" || r.signatureStatus === "PendingCustomer"),
+    );
+    for (const run of sorted) {
+      if (lockedComplete && !run.isLocked && isOfflineTempRunId(run.id)) {
+        await offlineStore.deleteRun(run.id);
+        continue;
+      }
+      kept.push(run);
+    }
+  }
+
+  return kept.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+}
+
 async function getCachedRun(runId: string): Promise<OfflineRun | null> {
+  const mappedId = await offlineStore.getMappedId("workflow-run", runId);
+  if (mappedId && mappedId !== runId) {
+    const serverRun = await offlineStore.getRun(mappedId);
+    if (serverRun) {
+      await purgeMappedOfflineRunGhost(runId);
+      return serverRun;
+    }
+  }
+
   const direct = await offlineStore.getRun(runId);
-  if (direct) return direct;
-  const mappedId = await resolveRunId(runId);
-  if (mappedId !== runId) {
+  if (direct) {
+    if (isOfflineTempRunId(runId)) {
+      const remap = await offlineStore.getMappedId("workflow-run", runId);
+      if (remap) {
+        const serverRun = await offlineStore.getRun(remap);
+        if (serverRun) {
+          await offlineStore.deleteRun(runId);
+          return serverRun;
+        }
+      }
+    }
+    return direct;
+  }
+
+  if (mappedId) {
     return await offlineStore.getRun(mappedId);
   }
   return null;
@@ -921,7 +996,7 @@ export const assetWorkflowRunService = {
   /** IndexedDB runs for an asset - native only; no network. */
   async listLocalByAsset(assetId: string): Promise<AssetWorkflowRun[]> {
     if (!isMobileNativePlatform()) return [];
-    return offlineStore.listRunsByAsset(assetId);
+    return reconcileRunsForAsset(await offlineStore.listRunsByAsset(assetId));
   },
 
   async listLatestByProject(
@@ -1023,8 +1098,9 @@ export const assetWorkflowRunService = {
 
     const cachedRuns = await offlineStore.listRunsByAsset(assetId);
     if (cachedRuns.length > 0) {
+      const reconciled = await reconcileRunsForAsset(cachedRuns);
       refreshRunsInBackground({ type: "asset", id: assetId }, `/asset-workflow-runs/by-asset/${assetId}`);
-      return cachedRuns;
+      return reconciled;
     }
 
     if (shouldSkipBlockingNetworkRead()) {
@@ -1169,6 +1245,14 @@ export const assetWorkflowRunService = {
     } catch (error) {
       if (!isOfflineNetworkError(error)) throw error;
 
+      const existingRuns = await offlineStore.listRunsByAsset(assetId);
+      const lockedForConfig = existingRuns.find(
+        (run) => run.workflowConfigId === workflowConfigId && run.isLocked,
+      );
+      if (lockedForConfig) {
+        return lockedForConfig;
+      }
+
       const existingRunId = await offlineStore.getPreviousRunRef(assetId, workflowConfigId);
       if (existingRunId) {
         const cachedExisting = await getCachedRun(existingRunId);
@@ -1184,7 +1268,6 @@ export const assetWorkflowRunService = {
 
       const localRunId = `offline-run-${randomId()}`;
       const projectId = await resolveProjectId(assetId);
-      const existingRuns = await offlineStore.listRunsByAsset(assetId);
       const offlineRun: OfflineRun = {
         id: localRunId,
         assetId,

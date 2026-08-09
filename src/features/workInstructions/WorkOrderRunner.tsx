@@ -792,7 +792,8 @@ export default function WorkOrderRunner({
       if (!run) return;
 
       if (run.isLocked) {
-        run = await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
+        transitionToLockedRunStage(run);
+        return;
       }
 
       applyRunProgressFromRun(run);
@@ -826,6 +827,11 @@ export default function WorkOrderRunner({
     try {
       if (activeRunId && isMobileNativePlatform()) {
         const localRun = await assetWorkflowRunService.getByIdLocalFirst(activeRunId);
+        if (localRun?.isLocked) {
+          transitionToLockedRunStage(localRun);
+          markOfflinePerf("interactive_ready", "runner-locked");
+          return;
+        }
         if (localRun && !localRun.isLocked) {
           applyRunProgressFromRun(localRun);
 
@@ -862,8 +868,10 @@ export default function WorkOrderRunner({
         return;
       }
 
-      if (run.isLocked && projectAssetId && workflowConfigId) {
-        run = await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
+      if (run.isLocked) {
+        transitionToLockedRunStage(run);
+        markOfflinePerf("interactive_ready", "runner-locked");
+        return;
       }
 
       applyRunProgressFromRun(run);
@@ -3438,12 +3446,11 @@ export default function WorkOrderRunner({
       <Dialog
         open={open}
         onClose={handleClose}
-        fullScreen={isMobileNativePlatform()}
-        maxWidth={isMobileNativePlatform() ? false : "sm"}
-        fullWidth={!isMobileNativePlatform()}
+        maxWidth="sm"
+        fullWidth
         PaperProps={{
           sx: {
-            maxHeight: isMobileNativePlatform() ? "100%" : "90vh",
+            maxHeight: "90vh",
             width: "100%",
             maxWidth: "100%",
             overflowX: "hidden",
