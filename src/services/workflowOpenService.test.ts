@@ -22,6 +22,7 @@ const getById = vi.fn();
 const refreshByIdInBackground = vi.fn();
 const listByAsset = vi.fn();
 const refreshByAssetInBackground = vi.fn();
+const resolveOpenRunId = vi.fn();
 
 vi.mock("./workflowConfigService", () => ({
   workflowConfigService: {
@@ -36,6 +37,7 @@ vi.mock("./assetWorkflowRunService", () => ({
     listByAsset: (...args: unknown[]) => listByAsset(...args),
     refreshByAssetInBackground: (...args: unknown[]) => refreshByAssetInBackground(...args),
   },
+  resolveOpenRunId: (...args: unknown[]) => resolveOpenRunId(...args),
 }));
 
 import {
@@ -71,7 +73,9 @@ describe("loadWorkflowOpenPayload", () => {
     refreshByIdInBackground.mockReset();
     listByAsset.mockReset();
     refreshByAssetInBackground.mockReset();
+    resolveOpenRunId.mockReset();
     listByAsset.mockResolvedValue([]);
+    resolveOpenRunId.mockResolvedValue(undefined);
   });
 
   it("returns parsed workflow from local config cache", async () => {
@@ -94,6 +98,7 @@ describe("loadWorkflowOpenPayload", () => {
 
   it("detects active run for matching workflow config", async () => {
     getByIdLocalFirst.mockResolvedValue(sampleConfig());
+    resolveOpenRunId.mockResolvedValue("run-1");
     const runs: AssetWorkflowRun[] = [{
       id: "run-1",
       assetId: "asset-1",
@@ -121,8 +126,9 @@ describe("loadWorkflowOpenPayload", () => {
     expect(listByAsset).not.toHaveBeenCalled();
   });
 
-  it("does not resume when a locked run awaits signature", async () => {
+  it("resumes locked run when installer signature is pending", async () => {
     getByIdLocalFirst.mockResolvedValue(sampleConfig());
+    resolveOpenRunId.mockResolvedValue("run-locked");
     const runs: AssetWorkflowRun[] = [{
       id: "run-locked",
       assetId: "asset-1",
@@ -146,7 +152,8 @@ describe("loadWorkflowOpenPayload", () => {
 
     const payload = await loadWorkflowOpenPayload("cfg-1", { id: "asset-1" }, { runs });
 
-    expect(payload?.existingRunId).toBeUndefined();
+    expect(payload?.existingRunId).toBe("run-locked");
+    expect(resolveOpenRunId).toHaveBeenCalledWith("asset-1", "cfg-1", runs);
   });
 
   it("returns null when config is missing offline", async () => {

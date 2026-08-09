@@ -787,6 +787,18 @@ export default function WorkOrderRunner({
     if (!projectAssetId || !workflowConfigId) return;
     markOfflinePerf("network_request_start", "runner-reconcile");
     try {
+      if (activeRunId) {
+        const localRun = await assetWorkflowRunService.getByIdLocalFirst(activeRunId);
+        if (localRun?.isLocked) {
+          transitionToLockedRunStage(localRun);
+          return;
+        }
+        // Pending sync owns reconciliation — stale server reads must not wipe captured data.
+        if (localRun && "dirty" in localRun && (localRun as { dirty?: boolean }).dirty) {
+          return;
+        }
+      }
+
       let run = activeRunId
         ? await assetWorkflowRunService.getByIdFresh(activeRunId)
         : await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
