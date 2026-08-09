@@ -1,13 +1,11 @@
-import { App } from "@capacitor/app";
 import { useEffect, useRef, useState } from "react";
-import { pingNow } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 
 export type NativeLifecyclePhase = "idle" | "background" | "foreground-sync";
 
 /**
- * Native-only lifecycle hook: foreground resume triggers connectivity ping,
- * notification refresh, and a brief UI hint while queued writes drain.
+ * Native-only lifecycle UI hook. Listens to app-foregrounded / app-backgrounded
+ * events dispatched by useNativeSyncLifecycle (single appStateChange owner).
  */
 export function useNativeAppLifecycle() {
   const [phase, setPhase] = useState<NativeLifecyclePhase>("idle");
@@ -23,35 +21,25 @@ export function useNativeAppLifecycle() {
     };
 
     const onForeground = () => {
-      pingNow();
-      window.dispatchEvent(new CustomEvent("app-foregrounded", { detail: { timestamp: Date.now() } }));
-      window.dispatchEvent(new Event("notifications:refresh"));
       showForegroundSync();
     };
 
     const onBackground = () => {
       setPhase("background");
-      window.dispatchEvent(new Event("app-backgrounded"));
     };
 
     const onBackOnline = () => {
-      pingNow();
       showForegroundSync();
     };
 
-    let removeAppListener: (() => void) | undefined;
-    void App.addListener("appStateChange", ({ isActive }) => {
-      if (isActive) onForeground();
-      else onBackground();
-    }).then((handle) => {
-      removeAppListener = () => { void handle.remove(); };
-    });
-
+    window.addEventListener("app-foregrounded", onForeground);
+    window.addEventListener("app-backgrounded", onBackground);
     window.addEventListener("offline-mode-online", onBackOnline);
     window.addEventListener("online", onBackOnline);
 
     return () => {
-      removeAppListener?.();
+      window.removeEventListener("app-foregrounded", onForeground);
+      window.removeEventListener("app-backgrounded", onBackground);
       window.removeEventListener("offline-mode-online", onBackOnline);
       window.removeEventListener("online", onBackOnline);
       if (hideTimerRef.current !== undefined) window.clearTimeout(hideTimerRef.current);

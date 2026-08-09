@@ -3,6 +3,7 @@ import { offlineBootstrapService } from "../services/offlineBootstrapService";
 import { scheduleBootstrapAfterUploadDrain, scheduleBootstrapIfQueueEmpty } from "../utils/bootstrapAfterDrain";
 import { isMobileNativePlatform } from "../utils/platform";
 import { subscribeServerReachable } from "../services/connectivityMonitor";
+import { isSyncLifecyclePaused } from "../services/syncLifecycleState";
 
 /**
  * useOfflineBootstrap — keeps the native offline cache warm.
@@ -29,6 +30,7 @@ export function useOfflineBootstrap(): void {
 
     const runFullSync = () => {
       if (cancelled) return;
+      if (isSyncLifecyclePaused()) return;
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       if (offlineBootstrapService.isRunning()) return;
       const lastMs = offlineBootstrapService.getLastCompletedAtMs();
@@ -38,6 +40,7 @@ export function useOfflineBootstrap(): void {
 
     const maybeRunStale = async () => {
       if (cancelled) return;
+      if (isSyncLifecyclePaused()) return;
       if (typeof navigator !== "undefined" && !navigator.onLine) return;
       if (offlineBootstrapService.isRunning()) return;
       if (await offlineBootstrapService.isStale()) {

@@ -130,15 +130,22 @@ export function useSseEvents() {
       };
     };
 
-    // Pause reconnects while offline, resume when we come back online
+    // Pause reconnects while offline or backgrounded; resume when active again
     const handleOffline = () => clearRetry();
     const handleOnline  = () => {
+      retryCount.current = 0;
+      connect();
+    };
+    const handleBackground = () => close();
+    const handleForeground = () => {
       retryCount.current = 0;
       connect();
     };
 
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online",  handleOnline);
+    window.addEventListener("app-backgrounded", handleBackground);
+    window.addEventListener("app-foregrounded", handleForeground);
 
     connect();
 
@@ -148,6 +155,8 @@ export function useSseEvents() {
       close();
       window.removeEventListener("offline", handleOffline);
       window.removeEventListener("online",  handleOnline);
+      window.removeEventListener("app-backgrounded", handleBackground);
+      window.removeEventListener("app-foregrounded", handleForeground);
     };
   }, []); // mount once — token and URL are read on every connect() call
 }

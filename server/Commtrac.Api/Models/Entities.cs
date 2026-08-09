@@ -1448,3 +1448,21 @@ public class InspectionImportEntity
     [MaxLength(200)]
     public string? ArchiveRef { get; set; }
 }
+
+public class PushDeviceTokenEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [MaxLength(100)]
+    public string UserId { get; set; } = string.Empty;
+
+    [MaxLength(512)]
+    public string Token { get; set; } = string.Empty;
+
+    [MaxLength(20)]
+    public string Platform { get; set; } = "unknown";
+
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
+}

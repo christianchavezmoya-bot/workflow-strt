@@ -79,6 +79,7 @@ public class AppDbContext : DbContext
     public DbSet<BomRuleProfileEntity> BomRuleProfiles => Set<BomRuleProfileEntity>();
     // ─── Inspection Imports ───────────────────────────────────────────────────
     public DbSet<InspectionImportEntity> InspectionImports => Set<InspectionImportEntity>();
+    public DbSet<PushDeviceTokenEntity> PushDeviceTokens => Set<PushDeviceTokenEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

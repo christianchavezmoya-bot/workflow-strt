@@ -7,6 +7,7 @@ namespace Commtrac.Api.Services;
 public sealed class NotificationFeedService
 {
     private readonly AppDbContext _db;
+    private readonly PushNotificationDeliveryService _push;
     private static readonly HashSet<string> SuppressedRoles = new(StringComparer.OrdinalIgnoreCase)
     {
         "Viewer",
@@ -14,9 +15,10 @@ public sealed class NotificationFeedService
         "Customer",
     };
 
-    public NotificationFeedService(AppDbContext db)
+    public NotificationFeedService(AppDbContext db, PushNotificationDeliveryService push)
     {
         _db = db;
+        _push = push;
     }
 
     public async Task<List<NotificationInboxDto>> ListForUserAsync(string userId, string role, bool includeRead, int take)
@@ -116,6 +118,11 @@ public sealed class NotificationFeedService
         }
 
         await _db.SaveChangesAsync();
+
+        if (recipientUserIds.Count > 0)
+        {
+            await _push.SendToUsersAsync(recipientUserIds, request.Title.Trim(), request.Message.Trim());
+        }
     }
 
     private static bool IsSuppressedRole(string? role)

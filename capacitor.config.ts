@@ -17,6 +17,13 @@ const config: CapacitorConfig = {
     Camera: {
       // Present the native camera sheet instead of the web fallback on device
     },
+    PushNotifications: {
+      presentationOptions: ["badge", "sound", "alert"],
+    },
+    LocalNotifications: {
+      smallIcon: "ic_stat_icon_config_sample",
+      iconColor: "#0b1d24",
+    },
   }
 };
 

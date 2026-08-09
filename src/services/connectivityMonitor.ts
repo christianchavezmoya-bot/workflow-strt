@@ -126,11 +126,21 @@ async function runPingIfForeground() {
   }
 }
 
+/** Clear stale unreachable state when returning from background (mirrors radio reconnect). */
+export function prepareForegroundConnectivityResume(): void {
+  resetCircuitBreaker();
+  unreachableSignals = 0;
+  if (currentValue === false) currentValue = null;
+}
+
 function startForegroundTracking() {
   if (isMobileNativePlatform()) {
     void App.addListener("appStateChange", ({ isActive }) => {
       isForeground = isActive;
-      if (isActive) void runPingIfForeground();
+      if (isActive) {
+        prepareForegroundConnectivityResume();
+        void runPingIfForeground();
+      }
     });
   } else {
     isForeground = document.visibilityState === "visible";

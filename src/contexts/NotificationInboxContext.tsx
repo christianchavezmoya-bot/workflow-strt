@@ -1,5 +1,4 @@
-﻿import { App } from "@capacitor/app";
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { notificationService } from "../services/notificationService";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
@@ -191,20 +190,16 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       stopPolling();
       void refresh();
     };
-
-    let removeAppListener: (() => void) | undefined;
-    if (isMobileNativePlatform()) {
-      void App.addListener("appStateChange", ({ isActive }) => {
-        if (!isActive) return;
-        void refresh();
-        if (!shouldSkipBlockingFetch()) {
-          stopPolling();
-          startPolling();
-        }
-      }).then((handle) => {
-        removeAppListener = () => { void handle.remove(); };
-      });
-    }
+    const handleAppBackground = () => {
+      stopPolling();
+    };
+    const handleAppForeground = () => {
+      void refresh();
+      if (!shouldSkipBlockingFetch()) {
+        stopPolling();
+        startPolling();
+      }
+    };
 
     window.addEventListener("focus", handleRefreshTrigger);
     window.addEventListener("online", handleRefreshTrigger);
@@ -214,10 +209,17 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     window.addEventListener("offline-mode-online", handleOfflineModeOnline);
     window.addEventListener("offline", handleOfflineModeOffline);
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (isMobileNativePlatform()) {
+      window.addEventListener("app-backgrounded", handleAppBackground);
+      window.addEventListener("app-foregrounded", handleAppForeground);
+    }
 
     return () => {
       stopPolling();
-      removeAppListener?.();
+      if (isMobileNativePlatform()) {
+        window.removeEventListener("app-backgrounded", handleAppBackground);
+        window.removeEventListener("app-foregrounded", handleAppForeground);
+      }
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
       window.removeEventListener("online", handleRefreshTrigger);
