@@ -1315,7 +1315,22 @@ public record PublicRunSummaryDto(
     string? InstallerNotes,
     DateTime? InstallerSignedAt,
     // Project site timezone so the customer-facing PDF renders wall-clock times consistently.
-    string? TimeZoneId = null
+    string? TimeZoneId = null,
+    // Full run + asset metadata for report parity with internal View/Export
+    DateTime? StartedAt = null,
+    string? TimeTrackingJson = null,
+    int ProductiveSeconds = 0,
+    int DowntimeSeconds = 0,
+    int DowntimeEvents = 0,
+    int RunNumber = 1,
+    string? AssetModel = null,
+    string? Manufacturer = null,
+    string? SiteName = null,
+    string? AssignedTechnicianName = null,
+    string? BusinessLogoBase64 = null,
+    string? CustomerLogoBase64 = null,
+    string? CompanyName = null,
+    string? ProductFeaturesJson = null
 );
 
 public record PublicSubmitSignatureRequest(

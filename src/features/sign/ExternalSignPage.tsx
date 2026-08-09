@@ -37,12 +37,10 @@ import {
   KeyboardOutlined,
 } from "@mui/icons-material";
 import api from "../../services/api";
-import type { PublicRunSummary, SignatureEvent } from "../../types/signature";
+import type { PublicRunSummary } from "../../types/signature";
 import { generateWorkflowReport } from "../../utils/generateWorkflowReport";
-import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
-import type { ProjectAsset } from "../../types/projectAsset";
+import { buildPublicSignReportContext } from "../../utils/buildPublicSignReportContext";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
-import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 
 const PAGE = {
   bg: "#0b1d24",
@@ -52,60 +50,6 @@ const PAGE = {
   border: "rgba(255,255,255,0.12)",
   accent: "#2dd4bf",
 };
-
-function buildReportContext(summary: PublicRunSummary) {
-  const run: AssetWorkflowRun = {
-    id: summary.runId,
-    assetId: "",
-    workflowConfigId: "",
-    workflowVersion: 1,
-    workflowSnapshotJson: summary.workflowSnapshotJson,
-    status: "Complete",
-    isLocked: true,
-    stepResultsJson: summary.stepResultsJson,
-    issuesJson: summary.issuesJson,
-    timeTrackingJson: "[]",
-    productiveSeconds: 0,
-    downtimeSeconds: 0,
-    downtimeEvents: 0,
-    runNumber: 1,
-    completedByName: summary.completedByName,
-    signatureStatus: summary.signatureStatus,
-    completedAt: summary.completedAt,
-    startedAt: summary.completedAt,
-    createdAt: summary.completedAt,
-    updatedAt: summary.completedAt,
-  };
-  const asset: ProjectAsset = {
-    id: "",
-    projectId: "",
-    productId: "",
-    assetTag: summary.assetTag ?? summary.assetName,
-    assetName: summary.assetName,
-    serialNumber: summary.assetSerial || undefined,
-    location: summary.assetLocation,
-    status: "Complete",
-    featureValuesJson: "{}",
-    issuesJson: "[]",
-    createdAt: summary.completedAt,
-    updatedAt: summary.completedAt,
-  };
-  const signatureEvents: SignatureEvent[] = [];
-  if (summary.installerSignerName) {
-    signatureEvents.push({
-      id: "installer",
-      runId: summary.runId,
-      signerRole: "Installer",
-      signerName: summary.installerSignerName,
-      signedAtUtc: summary.installerSignedAt ?? summary.completedAt,
-      hasDrawnSignature: !!summary.installerSignatureData,
-      signatureData: summary.installerSignatureData,
-      reasonCode: (summary.installerReasonCode ?? "Completed") as SignatureEvent["reasonCode"],
-      notes: summary.installerNotes,
-    });
-  }
-  return { run, asset, signatureEvents };
-}
 
 // ─── Signature canvas ──────────────────────────────────────────────────────────
 
@@ -205,7 +149,7 @@ export default function ExternalSignPage() {
   const [stage, setStage] = useState<Stage>("loading");
   const [summary, setSummary] = useState<PublicRunSummary | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
@@ -226,22 +170,19 @@ export default function ExternalSignPage() {
     setPreviewLoading(true);
     setPreviewError(null);
     try {
-      const { run, asset, signatureEvents } = buildReportContext(data);
+      const reportContext = await buildPublicSignReportContext(data);
       const pdfBlob = await generateWorkflowReport({
-        run,
-        asset,
-        workflowConfigName: data.workflowName,
-        customerName: data.customerName,
-        jobNumber: data.projectJobNumber,
-        timeZoneId: resolveReportTimeZone({ timeZoneId: data.timeZoneId }),
-        signatureEvents,
+        ...reportContext,
         includeAllSteps: true,
         outputMode: "blob",
       });
       if (!(pdfBlob instanceof Blob)) {
         throw new Error("Failed to build PDF preview.");
       }
-      setPreviewBlob(pdfBlob instanceof Blob ? pdfBlob : null);
+      setPreviewUrl((prev) => {
+        if (prev) URL.revokeObjectURL(prev);
+        return URL.createObjectURL(pdfBlob);
+      });
     } catch {
       setPreviewError("Could not load the report preview. You can still download the PDF below.");
     } finally {
@@ -266,22 +207,19 @@ export default function ExternalSignPage() {
   }, [tokenId, loadPreview]);
 
   useEffect(() => () => {
-    setPreviewBlob(null);
+    setPreviewUrl((prev) => {
+      if (prev) URL.revokeObjectURL(prev);
+      return null;
+    });
   }, []);
 
   const handleDownloadReport = async () => {
     if (!summary) return;
     setDownloadingReport(true);
     try {
-      const { run, asset, signatureEvents } = buildReportContext(summary);
+      const reportContext = await buildPublicSignReportContext(summary);
       await generateWorkflowReport({
-        run,
-        asset,
-        workflowConfigName: summary.workflowName,
-        customerName: summary.customerName,
-        jobNumber: summary.projectJobNumber,
-        timeZoneId: resolveReportTimeZone({ timeZoneId: summary.timeZoneId }),
-        signatureEvents,
+        ...reportContext,
         includeAllSteps: true,
       });
     } finally {
@@ -419,10 +357,12 @@ export default function ExternalSignPage() {
             <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", p: 3 }}>
               <Alert severity="warning" sx={{ maxWidth: 480 }}>{previewError}</Alert>
             </Stack>
-          ) : previewBlob ? (
-            <PdfBlobPreview
-              blob={previewBlob}
-              scrollHint="Scroll down to review all pages before signing"
+          ) : previewUrl ? (
+            <Box
+              component="iframe"
+              title="Installation record preview"
+              src={previewUrl}
+              sx={{ width: "100%", height: "100%", border: 0, bgcolor: "common.white", display: "block" }}
             />
           ) : null}
         </Box>
