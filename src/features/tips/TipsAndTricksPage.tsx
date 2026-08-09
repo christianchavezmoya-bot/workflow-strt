@@ -112,9 +112,11 @@ export default function TipsAndTricksPage() {
   const { user } = useAuth();
   const can = usePermissions();
   const { isOfflineMode } = useOfflineMode();
-  const canViewTips = can.documents.view;
-  const canUploadTips = can.documents.upload;
-  const canDeleteTips = can.documents.delete;
+  // Tips now has its own Tier-2 flags. It used to read the `documents` ones, which meant
+  // you could not grant tips authoring without also granting document upload/delete.
+  const canViewTips = can.tips.view;
+  const canUploadTips = can.tips.create;
+  const canDeleteTips = can.tips.delete;
 
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [products, setProducts] = useState<Product[]>([]);

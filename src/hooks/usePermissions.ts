@@ -50,6 +50,12 @@ const resolveDomains = (roleName: string | undefined, permissions: RolePermissio
         view: defaults.settings.view || (saved.settings?.view ?? false),
         edit: defaults.settings.edit || (saved.settings?.edit ?? false),
       },
+      // Added after the fact, so saved configs predating them have no entry — fall back to
+      // the computed defaults rather than to `undefined`, which would read as "denied" and
+      // silently strip BOM/Tips/Analytics from every existing role on upgrade.
+      bomProject: { ...defaults.bomProject, ...(saved.bomProject ?? {}) },
+      tips:       { ...defaults.tips,       ...(saved.tips ?? {}) },
+      analytics:  { ...defaults.analytics,  ...(saved.analytics ?? {}) },
     };
   } else {
     const fallback = roleName ? FALLBACK_PERMISSIONS[roleName] : undefined;
@@ -135,6 +141,9 @@ export const usePermissions = () => {
         workInstructionsBuilder: domains.workInstructionsBuilder,
         documents: domains.documents,
         settings:  domains.settings,
+        bomProject: { ...domains.bomProject, upload: false, map: false, commit: false, delete: false },
+        tips:       { ...domains.tips,       create: false, edit: false, delete: false },
+        analytics:  domains.analytics,
       };
     }
 
@@ -152,6 +161,9 @@ export const usePermissions = () => {
       workInstructionsBuilder: domains.workInstructionsBuilder,
       documents: domains.documents,
       settings:  domains.settings,
+      bomProject: domains.bomProject,
+      tips:       domains.tips,
+      analytics:  domains.analytics,
     };
   }, [user?.role, roleConfig]);
 
