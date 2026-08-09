@@ -54,6 +54,7 @@ builder.Services.AddScoped<NotificationSettingsService>();
 builder.Services.AddScoped<NotificationFeedService>();
 builder.Services.AddScoped<PushNotificationDeliveryService>();
 builder.Services.AddScoped<ProjectLifecycleService>();
+builder.Services.AddScoped<RolePermissionService>();
 builder.Services.AddSingleton<SseHub>();
 builder.Services.AddSingleton<SqliteBackupService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
