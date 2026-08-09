@@ -33,6 +33,7 @@ import {
   pendingGetConflicted,
   pendingRemove,
   pendingResetRetrySchedule,
+  pendingResetStaleUploading,
   pendingRetryNow,
   pendingSetStatus,
   syncMetaSet,
@@ -75,7 +76,6 @@ import {
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { isOfflineModeActive } from "../services/offlineModeState";
-import { isSyncLifecyclePaused, subscribeSyncLifecyclePaused } from "../services/syncLifecycleState";
 import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
 import {
   fromWorkInstructionDto,
@@ -225,7 +225,6 @@ function hasNetworkSignal(): boolean {
 /** True when the sync engine should attempt uploads (radio up + server reachable). */
 function canAttemptSyncFlush(): boolean {
   if (isOfflineModeActive()) return false;
-  if (isMobileNativePlatform() && isSyncLifecyclePaused()) return false;
   if (!hasNetworkSignal()) return false;
   if (isMobileNativePlatform()) {
     // Unknown (null) means ping has not confirmed the server yet — wait.
@@ -634,11 +633,6 @@ export function useSyncEngine(): SyncState {
   // to complete. See services/connectivityMonitor.ts for why this lives
   // outside this hook rather than as its own timer in here.
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
-  const [, setLifecyclePausedTick] = useState(0);
-
-  useEffect(() => subscribeSyncLifecyclePaused(() => {
-    setLifecyclePausedTick((t) => t + 1);
-  }), []);
 
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
@@ -755,7 +749,11 @@ export function useSyncEngine(): SyncState {
       let mappedRunId: string | null = null;
       let requestUrl = action.url;
       let requestData: unknown = action.body;
-      const timeoutMs = getSyncOpTimeoutMs(action.opType);
+      requestData = action.opType === "ASSET_DOCUMENT_LINK_UPLOAD"
+        ? await buildAssetDocumentLinkUploadRequest(action.body)
+        : await mediaStore.resolveUploadPayload(action.body);
+      const { payloadBytes } = measurePayload(requestData);
+      const timeoutMs = getSyncOpTimeoutMs(action.opType, payloadBytes);
 
       try {
         await pendingSetStatus(action.id, "uploading");
@@ -768,10 +766,6 @@ export function useSyncEngine(): SyncState {
         requestUrl = mappedRunId
           ? remapRunIdInUrl(action.url, action.entityId, mappedRunId)
           : action.url;
-        requestData = action.opType === "ASSET_DOCUMENT_LINK_UPLOAD"
-          ? await buildAssetDocumentLinkUploadRequest(action.body)
-          : await mediaStore.resolveUploadPayload(action.body);
-        const { payloadBytes } = measurePayload(requestData);
         const response = await api.request({
           url: requestUrl,
           method: action.method,
@@ -943,6 +937,7 @@ export function useSyncEngine(): SyncState {
       }
       await scheduleRetryRef.current?.();
     } finally {
+      await pendingResetStaleUploading();
       setSyncing(false);
       dispatchSyncEngineSyncing(false);
       setSyncConnectivitySyncing(false);
@@ -1036,7 +1031,6 @@ export function useSyncEngine(): SyncState {
   useEffect(() => {
     const handleVisibility = () => {
       if (document.visibilityState !== "visible") return;
-      if (isMobileNativePlatform() && isSyncLifecyclePaused()) return;
       if (canAttemptSyncFlush()) void flush();
     };
     document.addEventListener("visibilitychange", handleVisibility);

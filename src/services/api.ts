@@ -228,7 +228,25 @@ api.interceptors.request.use(async (config) => {
   // service's isOfflineNetworkError() (see utils/offlineNetworkError.ts) still
   // routes to the offline path.
   // Auth calls are exempt — login must keep working to recover.
+  const method = (config.method ?? "get").toLowerCase();
   const isSyncEngineWrite = config.syncMeta?.source === "sync-engine";
+
+  // While the upload queue is flushing, defer non-critical GETs on native so a
+  // large POST (e.g. RUN_COMPLETE with embedded photos) is not competing with
+  // dashboard/catalog fetches on a slow LAN link.
+  if (
+    isMobileNativePlatform()
+    && isSyncFlushing()
+    && method === "get"
+    && !url.includes("/auth/")
+    && !isSyncEngineWrite
+  ) {
+    const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
+    err.code = "ERR_NETWORK";
+    err.isOfflineSkip = true;
+    throw err;
+  }
+
   const skipBlocking =
     !url.includes("/auth/")
     && isMobileNativePlatform()
@@ -246,7 +264,6 @@ api.interceptors.request.use(async (config) => {
 
   // Skip refresh for the refresh call itself and for login-related endpoints.
   // GETs must not block UI on token refresh — fire in background; mutations await.
-  const method = (config.method ?? "get").toLowerCase();
   if (!url.includes("/auth/refresh") && !url.includes("/auth/login")) {
     if (method === "get") {
       void silentRefresh();
