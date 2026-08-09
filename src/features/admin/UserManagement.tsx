@@ -724,7 +724,7 @@ export const UserManagement: React.FC = () => {
   const emptyDomains = (): DomainPermissions => ({
     projects:                { view: false, viewScope: "own", edit: false, editScope: "none", approve: false, delete: false },
     installationAssets:      { view: false, viewScope: "own", edit: false, editScope: "none", runWorkflow: false, delete: false, viewCapture: false, editCapture: false, editCaptureScope: "none" },
-    workInstructionsBuilder: { view: false, viewScope: "own", build: false, publish: false, archive: false },
+    workInstructionsBuilder: { view: false, viewScope: "own", build: false, publish: false, archive: false, delete: false },
     documents:               { view: false, viewScope: "own", upload: false, delete: false },
     settings:                { view: false, edit: false },
   });
@@ -4393,6 +4393,13 @@ export const UserManagement: React.FC = () => {
                         <Checkbox size="small" checked={!!roleForm.domains.workInstructionsBuilder.archive}
                           onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, workInstructionsBuilder: { ...prev.domains.workInstructionsBuilder, archive: e.target.checked } } }))} />
                         <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>archive</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.workInstructionsBuilder.delete}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, workInstructionsBuilder: { ...prev.domains.workInstructionsBuilder, delete: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>delete</Typography>
                       </Stack>
                     </TableCell>
                   </TableRow>

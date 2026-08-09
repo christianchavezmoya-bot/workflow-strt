@@ -64,6 +64,12 @@ const resolveDomains = (roleName: string | undefined, permissions: RolePermissio
       projects:           { ...domains.projects,           delete: false },
       installationAssets: { ...domains.installationAssets, delete: false },
       documents:          { ...domains.documents,          delete: false },
+      // Authoring a workflow is a write; a view-only role must never hold it even if an
+      // admin ticked the boxes in the role editor.
+      workInstructionsBuilder: {
+        ...domains.workInstructionsBuilder,
+        build: false, publish: false, archive: false, delete: false,
+      },
     };
   }
 

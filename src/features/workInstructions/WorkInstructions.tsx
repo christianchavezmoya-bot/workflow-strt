@@ -756,6 +756,17 @@ const WorkInstructions = () => {
   // Roles with viewScope="own" see only Published configs (Option B).
   const canViewAllWI = (can.workInstructionsBuilder?.viewScope ?? "own") === "all";
 
+  // Tier-2 workflow permissions. These four flags have been editable in Admin → Roles
+  // since the two-tier model landed, but nothing read them — every control below gated on
+  // the Tier-1 `editForms` flag instead, so unticking "publish" for a role changed nothing
+  // and roles without server-side authoring rights were shown buttons that 403'd.
+  const wiCan = {
+    build:   !!can.workInstructionsBuilder?.build,
+    publish: !!can.workInstructionsBuilder?.publish,
+    archive: !!can.workInstructionsBuilder?.archive,
+    delete:  !!can.workInstructionsBuilder?.delete,
+  };
+
   // Drives the "Show archived (N)" toggle — only worth showing if any exist.
   const archivedCount = useMemo(
     () => configs.filter((c) => c.status === "Archived").length,
@@ -1002,14 +1013,14 @@ const WorkInstructions = () => {
               <FormatListBulletedOutlined fontSize="small" sx={{ mr: 0.75 }} />
               Instructions
             </ToggleButton>
-            {can.editForms && (
+            {wiCan.build && (
               <ToggleButton value="builder">
                 <BuildOutlined fontSize="small" sx={{ mr: 0.75 }} />
                 Builder
               </ToggleButton>
             )}
           </ToggleButtonGroup>
-          {can.editForms && (
+          {wiCan.build && (
             <IconButton
               size="small"
               onMouseEnter={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
@@ -1131,7 +1142,7 @@ const WorkInstructions = () => {
                     />
                   )}
                 </Stack>
-                {can.editForms && (
+                {wiCan.build && (
                   <Button variant="contained" size="small" onClick={openNewConfig}>
                     + New Work Instruction
                   </Button>
@@ -1202,17 +1213,17 @@ const WorkInstructions = () => {
                               Export
                             </Button>
                           )}
-                          {can.editForms && (
+                          {wiCan.build && (
                             <Button size="small" variant="outlined" onClick={() => openBuilder(cfg)}>
                               Builder
                             </Button>
                           )}
-                          {can.editForms && cfg.status === "Draft" && (
+                          {wiCan.build && cfg.status === "Draft" && (
                             <Button size="small" variant="outlined" onClick={() => openEditConfig(cfg)}>
                               Details
                             </Button>
                           )}
-                          {can.editForms && cfg.status !== "Archived" && (
+                          {wiCan.archive && cfg.status !== "Archived" && (
                             <Button size="small" variant="outlined" onClick={() => setArchiveConfig(cfg)}>
                               Archive
                             </Button>
@@ -1265,7 +1276,7 @@ const WorkInstructions = () => {
                         <TableCell align="right">
                           <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
                             {/* New version — Published/Archived */}
-                            {can.editForms && (cfg.status === "Published" || cfg.status === "Archived") && (
+                            {wiCan.build && (cfg.status === "Published" || cfg.status === "Archived") && (
                               <Tooltip title="Create new version (Draft)">
                                 <span>
                                   <IconButton
@@ -1292,14 +1303,14 @@ const WorkInstructions = () => {
                                 </IconButton>
                               </Tooltip>
                             )}
-                            {can.editForms && (
+                            {wiCan.build && (
                               <Tooltip title={cfg.status === "Published" ? "View in Builder (read-only)" : "Open Builder"}>
                                 <IconButton size="small" color="primary" onClick={() => openBuilder(cfg)}>
                                   <BuildOutlined fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                             )}
-                            {can.editForms && cfg.status === "Draft" && (
+                            {wiCan.build && cfg.status === "Draft" && (
                               <Tooltip title="Edit details">
                                 <IconButton size="small" onClick={() => openEditConfig(cfg)}>
                                   <SettingsOutlined fontSize="small" />
@@ -1313,14 +1324,14 @@ const WorkInstructions = () => {
                                 a workflow: it stays in the database and out of the working
                                 list, and the assign dialog only offers Published configs so
                                 it can no longer be assigned to new assets. */}
-                            {can.editForms && cfg.status !== "Archived" && (
+                            {wiCan.archive && cfg.status !== "Archived" && (
                               <Tooltip title="Archive (retire this workflow)">
                                 <IconButton size="small" onClick={() => setArchiveConfig(cfg)}>
                                   <ArchiveOutlined fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                             )}
-                            {can.editForms && (
+                            {wiCan.delete && (
                               <Tooltip title="Delete">
                                 <IconButton size="small" color="error" onClick={() => setDeleteConfig(cfg)}>
                                   <DeleteOutline fontSize="small" />

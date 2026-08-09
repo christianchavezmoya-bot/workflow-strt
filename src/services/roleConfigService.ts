@@ -17,7 +17,7 @@ export interface DomainPermissions {
     editCapture?: boolean;
     editCaptureScope?: EditScope;
   };
-  workInstructionsBuilder: { view: boolean; viewScope: ViewScope; build: boolean; publish: boolean; archive: boolean };
+  workInstructionsBuilder: { view: boolean; viewScope: ViewScope; build: boolean; publish: boolean; archive: boolean; delete?: boolean };
   documents:            { view: boolean; viewScope: ViewScope; upload: boolean; delete: boolean };
   settings:             { view: boolean; edit: boolean };
 }
@@ -48,14 +48,20 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
     return {
       projects:                { view: true,  viewScope: "all", edit: false, editScope: "none", approve: false,      delete: false },
       installationAssets:      { view: true,  viewScope: "all", edit: false, editScope: "none", runWorkflow: false,  delete: false, viewCapture: true, editCapture: false, editCaptureScope: "none" },
-      workInstructionsBuilder: { view: true,  viewScope: "all", build: false, publish: false,   archive: false },
+      workInstructionsBuilder: { view: true,  viewScope: "all", build: false, publish: false,   archive: false, delete: false },
       documents:               { view: true,  viewScope: "all", upload: false, delete: false },
       settings:                { view: false, edit: false },
     };
   }
   const canEdit   = p.editFields || p.modifyData;
   const canDelete = p.createDeleteTables;
-  const canBuild  = p.editForms;
+  // Authoring a workflow config (build/publish/archive/delete) is Admin + Project Manager
+  // on the server — every mutating endpoint on WorkflowConfigsController carries
+  // [Authorize(Roles = "Admin,Project Manager")]. createDeleteTables is the flag those two
+  // roles have and the others don't, so it is the honest default here. Deriving these from
+  // editForms (as before) handed Supervisor/QA/Installer/Technician buttons the API
+  // rejected with a silent 403.
+  const canAuthorWorkflow = p.createDeleteTables;
   // createDeleteTables is the clearest proxy for "full admin access" — those roles see and edit all records.
   // Roles without it (Installer, Engineer, Technician, Supervisor) default to viewing/editing only their own.
   const viewAll: ViewScope  = p.createDeleteTables ? "all" : "own";
@@ -73,7 +79,14 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
       editCapture: p.modifyData || p.createDeleteTables,
       editCaptureScope: p.createDeleteTables ? "all" : (canEdit ? "own" : "none"),
     },
-    workInstructionsBuilder: { view: true, viewScope: viewAll, build: canBuild, publish: p.modifyData, archive: p.modifyData },
+    workInstructionsBuilder: {
+      view: true,
+      viewScope: viewAll,
+      build: canAuthorWorkflow,
+      publish: canAuthorWorkflow,
+      archive: canAuthorWorkflow,
+      delete: canAuthorWorkflow,
+    },
     documents:               { view: true, viewScope: viewAll, upload: canEdit, delete: canDelete },
     settings:                { view: p.createDeleteTables, edit: p.createDeleteTables },
   };
