@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
 using Commtrac.Api.Services;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.IdentityModel.Tokens;
 
@@ -17,6 +18,10 @@ namespace Commtrac.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/sse")]
+// Exempt from the global fallback policy: EventSource cannot send an Authorization
+// header, so the JWT arrives as ?token=... and is validated by hand in ValidateToken
+// below. The endpoint is not unauthenticated — it authenticates itself.
+[AllowAnonymous]
 public class SseController : ControllerBase
 {
     private readonly SseHub       _hub;

@@ -4,6 +4,7 @@
  * All routes are under /api/bom-import-runs.
  * Feature-gated: returns 503 when ENABLE_BOM_PROJECT_MODULE != "true".
  */
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
@@ -14,6 +15,7 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/bom-import-runs")]
+[Authorize]
 public class BomImportRunsController : ControllerBase
 {
     private readonly AppDbContext _db;

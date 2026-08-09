@@ -2,6 +2,7 @@ using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
 using Commtrac.Api.Utils;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
@@ -16,6 +17,9 @@ namespace Commtrac.Api.Controllers;
 /// </summary>
 [ApiController]
 [Route("api/public/sign")]
+// Exempt from the global fallback policy by design: external signers have no account.
+// Every endpoint here validates the one-time signing token instead.
+[AllowAnonymous]
 public class PublicSignController : ControllerBase
 {
     private readonly AppDbContext _db;
