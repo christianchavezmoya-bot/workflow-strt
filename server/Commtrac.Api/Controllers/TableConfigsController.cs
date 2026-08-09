@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -8,6 +9,7 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/table-configs")]
+[Authorize]
 public class TableConfigsController : ControllerBase
 {
     private readonly AppDbContext _db;
