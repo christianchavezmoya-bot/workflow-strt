@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
@@ -7,6 +8,7 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/installation-tabs")]
+[Authorize]
 public class InstallationTabsController : ControllerBase
 {
     private readonly AppDbContext _db;

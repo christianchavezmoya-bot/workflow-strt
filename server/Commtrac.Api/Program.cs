@@ -3,6 +3,7 @@ using System.Text;
 using System.Security.Claims;
 using Commtrac.Api.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
@@ -164,7 +165,17 @@ builder.Services
         };
     });
 
-builder.Services.AddAuthorization();
+// Authenticated-by-default. Without a fallback policy, a controller that simply forgets
+// [Authorize] is served anonymously — which is how the BOM, admin-tab, installation-tab
+// and table-config endpoints ended up publicly readable. Endpoints that are genuinely
+// public (health, login, external signing, report shares, mobile upload, SSE) opt out
+// explicitly with [AllowAnonymous]; anything new is protected unless it says otherwise.
+builder.Services.AddAuthorization(options =>
+{
+    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+        .RequireAuthenticatedUser()
+        .Build();
+});
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>

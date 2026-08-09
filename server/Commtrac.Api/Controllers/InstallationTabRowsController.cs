@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
@@ -8,6 +9,7 @@ namespace Commtrac.Api.Controllers;
 
 [ApiController]
 [Route("api/installation-tab-rows")]
+[Authorize]
 public class InstallationTabRowsController : ControllerBase
 {
     private readonly AppDbContext _db;
