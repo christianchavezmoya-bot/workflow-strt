@@ -121,6 +121,34 @@ describe("loadWorkflowOpenPayload", () => {
     expect(listByAsset).not.toHaveBeenCalled();
   });
 
+  it("does not resume when a locked run awaits signature", async () => {
+    getByIdLocalFirst.mockResolvedValue(sampleConfig());
+    const runs: AssetWorkflowRun[] = [{
+      id: "run-locked",
+      assetId: "asset-1",
+      workflowConfigId: "cfg-1",
+      isLocked: true,
+      status: "Complete",
+      runNumber: 1,
+      startedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      createdAt: new Date().toISOString(),
+      stepResultsJson: "[]",
+      issuesJson: "[]",
+      timeTrackingJson: "[]",
+      workflowVersion: 1,
+      workflowSnapshotJson: "{}",
+      productiveSeconds: 0,
+      downtimeSeconds: 0,
+      downtimeEvents: 0,
+      signatureStatus: "PendingInstaller",
+    } as AssetWorkflowRun];
+
+    const payload = await loadWorkflowOpenPayload("cfg-1", { id: "asset-1" }, { runs });
+
+    expect(payload?.existingRunId).toBeUndefined();
+  });
+
   it("returns null when config is missing offline", async () => {
     getByIdLocalFirst.mockResolvedValue(null);
 

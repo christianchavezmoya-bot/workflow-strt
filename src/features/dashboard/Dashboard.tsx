@@ -146,6 +146,28 @@ function pendingSignatureStageText(signatureStatus?: string | null) {
   return "Awaiting sign-off";
 }
 
+/** Ignore stale offline-run ghosts when a locked completion already exists. */
+function pickActiveRunForAttention(sortedRuns: AssetWorkflowRun[]): AssetWorkflowRun | null {
+  const awaitingSignature = sortedRuns.some(
+    (run) => run.isLocked
+      && (run.signatureStatus === "PendingInstaller" || run.signatureStatus === "PendingCustomer"),
+  );
+  if (awaitingSignature) return null;
+
+  const unlocked = sortedRuns.find((run) => !run.isLocked) ?? null;
+  if (!unlocked) return null;
+
+  const lockedComplete = sortedRuns.find(
+    (run) => run.isLocked
+      && run.workflowConfigId === unlocked.workflowConfigId
+      && run.status === "Complete",
+  );
+  if (lockedComplete && unlocked.id.startsWith("offline-run-")) {
+    return null;
+  }
+  return unlocked;
+}
+
 function isActiveAsset(status?: string | null) {
   const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
   return value === "notstarted" || value === "inprogress" || value === "onhold" 
@@ -2009,6 +2031,23 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNativePlatform, myInstallAssetIdsKey]);
 
+  useEffect(() => {
+    if (!isNativePlatform) return;
+    const handler = (event: Event) => {
+      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
+      if (!assetId) return;
+      void assetWorkflowRunService.listByAsset(assetId).then((runs) => {
+        setNativeMyJobsCardContext((prev) => {
+          const existing = prev[assetId];
+          if (!existing) return prev;
+          return { ...prev, [assetId]: { ...existing, runs } };
+        });
+      });
+    };
+    window.addEventListener("workflow-runs-cache-updated", handler as EventListener);
+    return () => window.removeEventListener("workflow-runs-cache-updated", handler as EventListener);
+  }, [isNativePlatform]);
+
   // Prime assignment cache for My Jobs cards so offline opens don't treat empty
   // IndexedDB as "no workflow assigned" when bootstrap hasn't filled this asset yet.
   useEffect(() => {
@@ -2209,7 +2248,7 @@ const Dashboard = () => {
           (sig) => sig.assetId === quickActionAsset.id
         ) ?? null,
       missingMedia: resolveMissingMediaForAsset(quickActionAsset, quickActionRuns),
-      activeRun: sortedRuns.find((run) => !run.isLocked) ?? null,
+      activeRun: pickActiveRunForAttention(sortedRuns),
       latestRun,
     };
   }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
@@ -2409,7 +2448,7 @@ const Dashboard = () => {
           (sig) => sig.assetId === asset.id
         ) ?? null,
       missingMedia: resolveMissingMediaForAsset(asset, runs),
-      activeRun: sortedRuns.find((run) => !run.isLocked) ?? null,
+      activeRun: pickActiveRunForAttention(sortedRuns),
       latestRun,
     };
   }
@@ -2496,6 +2535,10 @@ const Dashboard = () => {
       assetWorkflowRunService.refreshByAssetInBackground(asset.id);
 
       const attention = getQuickActionAttentionForAsset(asset, runs);
+      if (attention.pendingSignature) {
+        openSignatureRepair(attention.pendingSignature);
+        return;
+      }
       if (attention.activeRun && !attention.activeRun.isLocked) {
         const launched = await resumeActiveRunFromDashboard(asset, attention.activeRun);
         if (launched) return;
@@ -2551,6 +2594,34 @@ const Dashboard = () => {
       if (!docsLoadDeferred) setDocsLoading(false);
       setQuickActionLoading(false);
     }
+  }
+
+  async function handleMyJobsAssetTap(asset: QuickActionAsset, cardAction?: MyJobsCardAction) {
+    const action = cardAction ?? getMyJobsCardAction(asset);
+    if (action.actionKind === "missing-media") {
+      await openMissingMediaFromDashboardAsset(asset);
+      return;
+    }
+    if (action.actionKind === "resolve-blocking") {
+      const blockingIssue = openIssues.find((issue) => issue.assetId === asset.id && issue.isBlocking);
+      if (blockingIssue) {
+        setRunnerLoading(asset.id);
+        try {
+          await openIssueRepair(blockingIssue);
+        } finally {
+          setRunnerLoading((current) => (current === asset.id ? null : current));
+        }
+        return;
+      }
+    }
+    const pendingSignature = pendingSigs.find((sig) => sig.assetId === asset.id);
+    if (action.actionKind === "signature" || pendingSignature) {
+      if (pendingSignature) {
+        openSignatureRepair(pendingSignature);
+        return;
+      }
+    }
+    await openQuickActionOrStart(asset);
   }
 
   async function openRunnerWithPayload(
@@ -3218,7 +3289,7 @@ const Dashboard = () => {
               const cardAction = getMyJobsCardAction(a);
               return (
                 <Grid item xs={12} sm={6} md={4} key={a.id}>
-                  <Paper elevation={0} onClick={() => { void openQuickActionOrStart(a); }}
+                  <Paper elevation={0} onClick={() => { void handleMyJobsAssetTap(a, cardAction); }}
                     sx={{
                       p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
                       cursor: "pointer", transition: "all 0.15s",
@@ -3259,7 +3330,7 @@ const Dashboard = () => {
                         disabled={runnerLoading === a.id}
                         onClick={(e) => {
                           e.stopPropagation();
-                          void openQuickActionOrStart(a);
+                          void handleMyJobsAssetTap(a, cardAction);
                         }}
                         sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}>
                         {cardAction.buttonLabel}
@@ -5123,7 +5194,7 @@ const Dashboard = () => {
                     const cardAction = getMyJobsCardAction(a);
                     return (
                       <Grid item xs={12} sm={6} md={4} key={a.id}>
-                        <Paper elevation={0} onClick={() => { void openQuickActionOrStart(a); }}
+                        <Paper elevation={0} onClick={() => { void handleMyJobsAssetTap(a, cardAction); }}
                           sx={{
                             p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
                             cursor: "pointer", transition: "all 0.15s",
@@ -5190,31 +5261,7 @@ const Dashboard = () => {
                               disabled={runnerLoading === a.id}
                               onClick={(e) => {
                                 e.stopPropagation();
-                                if (cardAction.actionKind === "missing-media") {
-                                  void openMissingMediaFromDashboardAsset(a);
-                                  return;
-                                }
-                                if (cardAction.actionKind === "resolve-blocking") {
-                                  const blockingIssue = openIssues.find((issue) => issue.assetId === a.id && issue.isBlocking);
-                                  if (blockingIssue) {
-                                    // openIssueRepair tracks its own dialog flag, so drive
-                                    // runnerLoading here too or this button alone would stay
-                                    // inert while it loads the issue.
-                                    setRunnerLoading(a.id);
-                                    void openIssueRepair(blockingIssue).finally(() => {
-                                      setRunnerLoading((current) => (current === a.id ? null : current));
-                                    });
-                                    return;
-                                  }
-                                }
-                                if (cardAction.actionKind === "signature") {
-                                  const pendingSignature = pendingSigs.find((sig) => sig.assetId === a.id);
-                                  if (pendingSignature) {
-                                    openSignatureRepair(pendingSignature);
-                                    return;
-                                  }
-                                }
-                                void openQuickActionOrStart(a);
+                                void handleMyJobsAssetTap(a, cardAction);
                               }}
                               sx={{
                                 alignSelf: "flex-start",

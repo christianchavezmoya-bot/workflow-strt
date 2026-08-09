@@ -100,8 +100,11 @@ export async function loadWorkflowOpenPayload(
     if (!options?.previewOnly && asset) {
       const matchConfigId = options?.workflowConfigIdForRun ?? configId;
       const runs = options?.runs ?? await assetWorkflowRunService.listByAsset(asset.id);
-      const activeRun = runs.find((r) => r.workflowConfigId === matchConfigId && !r.isLocked);
-      if (activeRun) existingRunId = activeRun.id;
+      const lockedRun = runs.find((r) => r.workflowConfigId === matchConfigId && r.isLocked);
+      if (!lockedRun) {
+        const activeRun = runs.find((r) => r.workflowConfigId === matchConfigId && !r.isLocked);
+        if (activeRun) existingRunId = activeRun.id;
+      }
     }
 
     if (isMobileNativePlatform() && !options?.previewOnly && asset) {

@@ -261,6 +261,9 @@ async function markRunSyncedFromServer(run: AssetWorkflowRun, fallbackRunId: str
     syncError: undefined,
   };
   await offlineStore.saveRun(syncedRun);
+  if (fallbackRunId !== run.id) {
+    await offlineStore.deleteRun(fallbackRunId);
+  }
 }
 
 function remapRunIdInUrl(url: string, oldRunId: string, newRunId: string): string {
