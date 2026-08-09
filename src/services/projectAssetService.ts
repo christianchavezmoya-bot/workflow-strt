@@ -412,6 +412,12 @@ export const projectAssetService = {
     const asset = fromDto(res.data);
     if (isMobileNativePlatform()) {
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+    } else {
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+        detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
+      }));
     }
     return asset;
   },
@@ -421,6 +427,18 @@ export const projectAssetService = {
     const created = res.data.map(fromDto);
     if (isMobileNativePlatform()) {
       await Promise.all(created.map((a) => entityPutAsset({ id: a.id, productId: a.productId, projectId: a.projectId, data: a })));
+    } else {
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
+      if (created[0]) {
+        window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+          detail: {
+            assetId: created[0].id,
+            productId: created[0].productId,
+            projectId: created[0].projectId,
+          },
+        }));
+      }
     }
     return created;
   },

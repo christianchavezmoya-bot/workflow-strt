@@ -89,7 +89,7 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
             linkedTo={qrLinkedTo}
             label="Phone"
             onUploaded={() => {}}
-            onUploadedWithData={(_docId, dataUrl) => onChange([...media, dataUrl])}
+            onUploadedAllWithData={(dataUrls) => onChange([...media, ...dataUrls])}
           />
         )}
 

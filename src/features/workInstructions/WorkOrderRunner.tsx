@@ -60,6 +60,7 @@ import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
+import WorkflowDateCapture from "../../components/ui/WorkflowDateCapture";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
 import RunTimeline from "../../components/ui/RunTimeline";
@@ -341,6 +342,7 @@ export default function WorkOrderRunner({
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
   const [activeRun, setActiveRun] = useState<AssetWorkflowRun | null>(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
+  const runningContentRef = useRef<HTMLDivElement>(null);
 
   function handleSheetTouchStart(clientY: number) {
     if (!isMobileNativePlatform() || !activeRunId || stage !== "running") return;
@@ -903,6 +905,25 @@ export default function WorkOrderRunner({
       [stepId]: { ...(prev[stepId] ?? {}), [inputId]: val },
     }));
   }
+
+  function appendMediaUrls(stepId: string, inputId: string, dataUrls: string[]) {
+    if (dataUrls.length === 0) return;
+    if (activeRun && !runEditPerms.data) return;
+    setValues((prev) => {
+      const stepVals = prev[stepId] ?? {};
+      let media: string[] = [];
+      try { media = JSON.parse(stepVals[inputId] || "[]"); } catch { /* empty */ }
+      return {
+        ...prev,
+        [stepId]: { ...stepVals, [inputId]: JSON.stringify([...media, ...dataUrls]) },
+      };
+    });
+  }
+
+  useEffect(() => {
+    if (stage !== "running") return;
+    runningContentRef.current?.scrollTo({ top: 0, behavior: "auto" });
+  }, [currentStepId, stage]);
 
   function getInputValue(stepId: string, inputId: string): string {
     return values[stepId]?.[inputId] ?? "";
@@ -1479,8 +1500,13 @@ export default function WorkOrderRunner({
     }
     if (inp.type === "date") {
       return (
-        <TextField size="small" type="date" fullWidth error={isReq}
-          value={val} onChange={(e) => onChange(e.target.value)} InputLabelProps={{ shrink: true }} />
+        <WorkflowDateCapture
+          value={val}
+          onChange={onChange}
+          label={inp.label}
+          error={isReq}
+          timeZoneId={resolvedTimeZone}
+        />
       );
     }
     if (inp.type === "scan") {
@@ -1565,10 +1591,8 @@ export default function WorkOrderRunner({
             docType="workflow-evidence"
             linkedTo={inp.label}
             label="Upload from Phone"
-            onUploaded={() => { /* handled by onUploadedWithData */ }}
-            onUploadedWithData={(_, dataUrl) => {
-              onChange(JSON.stringify([...media, dataUrl]));
-            }}
+            onUploaded={() => { /* handled by onUploadedAllWithData */ }}
+            onUploadedAllWithData={(dataUrls) => appendMediaUrls(sid, inp.id, dataUrls)}
           />
           </Stack>
           {media.length > 0 && (
@@ -1653,8 +1677,15 @@ export default function WorkOrderRunner({
     }
     if (field.type === "date") {
       return (
-        <TextField size="small" type="date" fullWidth error={isReq}
-          value={val} onChange={(e) => onChange(e.target.value)} InputLabelProps={{ shrink: true }} />
+        <WorkflowDateCapture
+          value={val}
+          onChange={onChange}
+          label={field.label}
+          hint={field.hint}
+          fieldKey={field.key}
+          error={isReq}
+          timeZoneId={resolvedTimeZone}
+        />
       );
     }
     if (field.type === "number") {
@@ -1998,7 +2029,7 @@ export default function WorkOrderRunner({
             </Stack>
           )}
         </DialogTitle>
-        <DialogContent sx={runnerDialogContentSx}>
+        <DialogContent ref={runningContentRef} sx={runnerDialogContentSx}>
           <Stack spacing={2.5} sx={runnerBodyStackSx}>
 
             {/* Feature-linked repeatable step â€" qty confirmation panel */}
@@ -3451,9 +3482,6 @@ export default function WorkOrderRunner({
         PaperProps={{
           sx: {
             maxHeight: "90vh",
-            width: "100%",
-            maxWidth: "100%",
-            overflowX: "hidden",
             transform: sheetDragOffset > 0 ? `translateY(${sheetDragOffset}px)` : undefined,
             transition: sheetDragOffset > 0 ? "none" : "transform 0.18s ease-out",
           },
