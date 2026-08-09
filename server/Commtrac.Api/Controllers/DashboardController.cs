@@ -1,3 +1,5 @@
+using System.Security.Claims;
+using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
@@ -11,6 +13,8 @@ namespace Commtrac.Api.Controllers;
 [Authorize(Roles = "Admin,Project Manager")]
 public class DashboardController : ControllerBase
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { PropertyNameCaseInsensitive = true };
+
     private readonly AppDbContext _db;
 
     public DashboardController(AppDbContext db) => _db = db;
@@ -21,11 +25,19 @@ public class DashboardController : ControllerBase
     public async Task<ActionResult<EvidenceCompletenessDto>> EvidenceCompleteness([FromQuery] int windowDays = 90)
     {
         var cutoff = DateTime.UtcNow.AddDays(-windowDays);
+        var scopedAssetIds = await GetScopedAssetIdsAsync();
+        if (scopedAssetIds is { Count: 0 })
+            return Ok(EmptyEvidenceCompleteness(windowDays));
 
         // Slim projection — avoid hydrating StepResultsJson blobs into entities.
-        var runRows = await _db.AssetWorkflowRuns
+        var runQuery = _db.AssetWorkflowRuns
             .AsNoTracking()
-            .Where(r => r.Status == "Complete" && r.CompletedAt >= cutoff)
+            .Where(r => r.Status == "Complete" && r.CompletedAt >= cutoff);
+
+        if (scopedAssetIds != null)
+            runQuery = runQuery.Where(r => scopedAssetIds.Contains(r.AssetId));
+
+        var runRows = await runQuery
             .Select(r => new
             {
                 r.AssetId,
@@ -39,7 +51,7 @@ public class DashboardController : ControllerBase
             .ToListAsync();
 
         if (runRows.Count == 0)
-            return Ok(new EvidenceCompletenessDto(windowDays, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new()));
+            return Ok(EmptyEvidenceCompleteness(windowDays));
 
         var assetIds = runRows.Select(r => r.AssetId).Distinct().ToList();
         var assetToProject = await _db.ProjectAssets
@@ -114,9 +126,24 @@ public class DashboardController : ControllerBase
         var cutoff = now.AddDays(-windowDays);
         var prev   = now.AddDays(-windowDays * 2);
 
-        var currentRows = await _db.AssetWorkflowRuns
+        var scopedAssetIds = await GetScopedAssetIdsAsync();
+        if (scopedAssetIds is { Count: 0 })
+            return Ok(EmptyWorkflowHealth(windowDays));
+
+        var currentQuery = _db.AssetWorkflowRuns
             .AsNoTracking()
-            .Where(r => r.StartedAt >= cutoff)
+            .Where(r => r.StartedAt >= cutoff);
+        var previousQuery = _db.AssetWorkflowRuns
+            .AsNoTracking()
+            .Where(r => r.StartedAt >= prev && r.StartedAt < cutoff);
+
+        if (scopedAssetIds != null)
+        {
+            currentQuery = currentQuery.Where(r => scopedAssetIds.Contains(r.AssetId));
+            previousQuery = previousQuery.Where(r => scopedAssetIds.Contains(r.AssetId));
+        }
+
+        var currentRows = await currentQuery
             .Select(r => new HealthRunRow(
                 r.AssetId,
                 r.WorkflowConfigId,
@@ -127,9 +154,7 @@ public class DashboardController : ControllerBase
                 r.CustomerSignedAt))
             .ToListAsync();
 
-        var previousRows = await _db.AssetWorkflowRuns
-            .AsNoTracking()
-            .Where(r => r.StartedAt >= prev && r.StartedAt < cutoff)
+        var previousRows = await previousQuery
             .Select(r => new HealthRunRow(
                 r.AssetId,
                 r.WorkflowConfigId,
@@ -193,6 +218,85 @@ public class DashboardController : ControllerBase
     }
 
     // ── Helpers ──────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Returns null for Admin (org-wide). PMs are limited to projects they manage or belong to.
+    /// Empty set means the user has no in-scope projects yet.
+    /// </summary>
+    private async Task<HashSet<string>?> GetScopedProjectIdsAsync()
+    {
+        var role = User.FindFirst("role")?.Value
+            ?? User.FindFirst(ClaimTypes.Role)?.Value;
+        if (string.Equals(role, "Admin", StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        var userId = User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrWhiteSpace(userId))
+            return new HashSet<string>();
+
+        var user = await _db.Users.AsNoTracking()
+            .Where(u => u.Id == userId)
+            .Select(u => new { u.FullName })
+            .FirstOrDefaultAsync();
+        if (user == null)
+            return new HashSet<string>();
+
+        var pmName = user.FullName?.Trim() ?? "";
+        var projects = await _db.Projects.AsNoTracking()
+            .Where(p => !p.IsDeleted)
+            .Select(p => new { p.Id, p.ProjectManager, p.TeamMemberIdsJson })
+            .ToListAsync();
+
+        var scoped = new HashSet<string>();
+        foreach (var project in projects)
+        {
+            if (!string.IsNullOrWhiteSpace(pmName)
+                && string.Equals(project.ProjectManager?.Trim(), pmName, StringComparison.OrdinalIgnoreCase))
+            {
+                scoped.Add(project.Id);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(project.TeamMemberIdsJson))
+                continue;
+
+            try
+            {
+                var members = JsonSerializer.Deserialize<List<string>>(project.TeamMemberIdsJson, JsonOptions)
+                    ?? new List<string>();
+                if (members.Contains(userId))
+                    scoped.Add(project.Id);
+            }
+            catch
+            {
+                // ignore malformed team json
+            }
+        }
+
+        return scoped;
+    }
+
+    private async Task<HashSet<string>?> GetScopedAssetIdsAsync()
+    {
+        var scopedProjectIds = await GetScopedProjectIdsAsync();
+        if (scopedProjectIds == null)
+            return null;
+        if (scopedProjectIds.Count == 0)
+            return new HashSet<string>();
+
+        var assetIds = await _db.ProjectAssets.AsNoTracking()
+            .Where(a => scopedProjectIds.Contains(a.ProjectId))
+            .Select(a => a.Id)
+            .ToListAsync();
+        return assetIds.ToHashSet();
+    }
+
+    private static EvidenceCompletenessDto EmptyEvidenceCompleteness(int windowDays) =>
+        new(windowDays, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, new());
+
+    private static WorkflowHealthDto EmptyWorkflowHealth(int windowDays) =>
+        new(windowDays, 0, 0, 0, 0, 0, 0, 0, 0, new());
 
     private sealed record HealthRunRow(
         string AssetId,

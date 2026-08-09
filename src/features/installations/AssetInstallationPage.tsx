@@ -3792,7 +3792,7 @@ ${words.slice(midpoint).join(" ")}`;
             return configsByType.get(ct)?.id;
           })(),
         }));
-      await Promise.all(assets.map((a) =>
+      const created = await Promise.all(assets.map((a) =>
         projectAssetService.create({
           projectId: selectedProjectId || projects[0]?.id || "",
           productId: activeProduct.id,
@@ -3804,9 +3804,16 @@ ${words.slice(midpoint).join(" ")}`;
           productConfigId: a.productConfigId,
         }),
       ));
+      setAssets((prev) => {
+        const merged = [...prev];
+        for (const asset of created) {
+          if (!merged.some((item) => item.id === asset.id)) merged.push(asset);
+        }
+        return merged;
+      });
       setCsvImportOpen(false);
       setCsvRows([]);
-      refreshAssets();
+      void refreshAssets();
     } catch { alert("Import failed. Check your CSV and try again."); } finally {
       setCsvImporting(false);
     }

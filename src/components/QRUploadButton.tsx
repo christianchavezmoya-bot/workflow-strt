@@ -9,6 +9,7 @@ import { QRCodeSVG } from "qrcode.react";
 import api from "../services/api";
 import { documentService, type DocumentRecord } from "../services/documentService";
 import { getFallbackPublicFrontendBaseUrl, resolvePublicFrontendBaseUrl } from "../services/publicFrontendBase";
+import { invalidateWebCache } from "../services/webFreshCache";
 
 interface QRUploadButtonProps {
   /** Document type to store (e.g. "tips") */
@@ -25,6 +26,8 @@ interface QRUploadButtonProps {
    * callback with both the documentId and the dataUrl.
    */
   onUploadedWithData?: (documentId: string, dataUrl: string) => void;
+  /** Called once with every uploaded data URL (preferred for multi-photo uploads). */
+  onUploadedAllWithData?: (dataUrls: string[]) => void;
   /** Optional button label override */
   label?: string;
   disabled?: boolean;
@@ -47,6 +50,7 @@ export default function QRUploadButton({
   customValuesJson,
   onUploaded,
   onUploadedWithData,
+  onUploadedAllWithData,
   label = "Upload from Phone",
   disabled,
 }: QRUploadButtonProps) {
@@ -113,14 +117,16 @@ export default function QRUploadButton({
     setDone(true);
     onUploaded(uniqueIds[0]);
 
-    if (!onUploadedWithData) {
+    if (!onUploadedWithData && !onUploadedAllWithData) {
       setTimeout(() => handleClose(), 2000);
       return;
     }
 
     setProcessing(true);
     try {
+      invalidateWebCache("/documents");
       const docs = await documentService.getDocuments();
+      const dataUrls: string[] = [];
       for (const documentId of uniqueIds) {
         const doc: DocumentRecord | undefined = docs.find((d) => d.id === documentId);
         if (doc?.downloadUrl) {
@@ -129,9 +135,12 @@ export default function QRUploadButton({
           let binary = "";
           bytes.forEach((b) => (binary += String.fromCharCode(b)));
           const base64 = window.btoa(binary);
-          const dataUrl = `data:${doc.contentType ?? "application/octet-stream"};base64,${base64}`;
-          onUploadedWithData(documentId, dataUrl);
+          dataUrls.push(`data:${doc.contentType ?? "application/octet-stream"};base64,${base64}`);
+          onUploadedWithData?.(documentId, dataUrls[dataUrls.length - 1]!);
         }
+      }
+      if (dataUrls.length > 0) {
+        onUploadedAllWithData?.(dataUrls);
       }
     } catch {
       // Non-fatal - onUploaded already called

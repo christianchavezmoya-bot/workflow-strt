@@ -115,6 +115,7 @@ export default function MobileUploadPage() {
 
       await api.post(`/mobile-upload/${token}/upload`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120_000,
         onUploadProgress: (e) => {
           if (e.total) {
             setUploadProgress(Math.round((e.loaded / e.total) * 100));
@@ -151,6 +152,7 @@ export default function MobileUploadPage() {
 
       await api.post(`/mobile-upload/${token}/missing-media`, formData, {
         headers: { "Content-Type": "multipart/form-data" },
+        timeout: 120_000,
         onUploadProgress: (e) => {
           if (e.total) {
             setUploadProgress(Math.round((e.loaded / e.total) * 100));
