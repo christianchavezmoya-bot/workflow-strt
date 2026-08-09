@@ -66,4 +66,19 @@ export interface PublicRunSummary {
   installerSignedAt?: string;
   /** Project site IANA timezone so the customer PDF renders wall-clock times consistently. */
   timeZoneId?: string;
+  /** Full run timing + metadata for report parity with internal View/Export. */
+  startedAt?: string;
+  timeTrackingJson?: string;
+  productiveSeconds?: number;
+  downtimeSeconds?: number;
+  downtimeEvents?: number;
+  runNumber?: number;
+  assetModel?: string;
+  manufacturer?: string;
+  siteName?: string;
+  assignedTechnicianName?: string;
+  businessLogoBase64?: string;
+  customerLogoBase64?: string;
+  companyName?: string;
+  productFeaturesJson?: string;
 }
