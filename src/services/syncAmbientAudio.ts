@@ -1,13 +1,15 @@
 /**
  * syncAmbientAudio — loops ambient audio while upload or download is active.
  *
- * Driven by useSyncAmbientAudio (sync-engine:syncing + bootstrap:* events).
- * Stops automatically when both queues are idle or the app backgrounds.
+ * Audio file: place ambient.mp3 at repo root (workflow-strt/ambient.mp3).
+ * prebuild/predev copies it to public/ambient.mp3 for Vite + Capacitor.
  */
 
-import ambientUrl from "../assets/ambient.mp3";
 import { isSyncLifecyclePaused } from "./syncLifecycleState";
 import { isMobileNativePlatform } from "../utils/platform";
+
+/** Served from public/ambient.mp3 (copied from repo root at build time). */
+const AMBIENT_URL = "/ambient.mp3";
 
 const DEFAULT_VOLUME = 0.35;
 
@@ -18,7 +20,7 @@ let playAttemptInFlight = false;
 
 function getAudio(): HTMLAudioElement {
   if (!audio) {
-    audio = new Audio(ambientUrl);
+    audio = new Audio(AMBIENT_URL);
     audio.loop = true;
     audio.preload = "auto";
     audio.volume = DEFAULT_VOLUME;
