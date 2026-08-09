@@ -1149,11 +1149,13 @@ export function useSyncEngine(): SyncState {
       // The ping is the only signal that catches "link up, server unreachable"
       // (e.g. Wi-Fi off, fell back to cellular, backend is LAN-only) without
       // waiting for the user to trigger a real request via navigation.
-      if (!reachable) {
+      if (reachable === false) {
         setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
-      } else {
+      } else if (reachable === true) {
         setConnectivityUnlessTokenExpired("online");
         void reconnectAndFlush();
+      } else {
+        setConnectivityAwaitingServerPing(setConnectivityState);
       }
     });
   }, [setConnectivityState, setConnectivityUnlessTokenExpired]);
@@ -1267,7 +1269,7 @@ export function useSyncEngine(): SyncState {
 
   const wouldShowOffline =
     connectivity === "offline"
-    || connectivity === "server-unreachable"
+    || (connectivity === "server-unreachable" && serverReachable === false)
     || isOfflineModeActive();
 
   const canSync = canAttemptSyncFlush();

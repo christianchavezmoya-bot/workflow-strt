@@ -31,7 +31,12 @@ const PING_INTERVAL_MS = 30_000;
 const UNREACHABLE_SIGNAL_THRESHOLD = 2;
 const RETRY_PING_DELAY_MS = 1500;
 
-type Listener = (reachable: boolean) => void;
+type Listener = (reachable: boolean | null) => void;
+
+function hasNetworkSignal(): boolean {
+  if (isMobileNativePlatform()) return nativeNetworkConnected !== false;
+  return typeof navigator === "undefined" || navigator.onLine;
+}
 
 let started = false;
 let currentValue: boolean | null = null; // null = no successful check yet
@@ -64,7 +69,7 @@ function startNativeNetworkTracking(): void {
       // first write after reconnect can still be skipped even though the radio is
       // back and the server may be reachable.
       resetCircuitBreaker();
-      if (currentValue === false) currentValue = null;
+      if (currentValue === false) notify(null);
       pingNow();
       return;
     }
@@ -91,7 +96,7 @@ function startNativeNetworkTracking(): void {
   });
 }
 
-function notify(value: boolean) {
+function notify(value: boolean | null) {
   currentValue = value;
   listeners.forEach((fn) => fn(value));
 }
@@ -130,7 +135,7 @@ async function runPingIfForeground() {
 export function prepareForegroundConnectivityResume(): void {
   resetCircuitBreaker();
   unreachableSignals = 0;
-  if (currentValue === false) currentValue = null;
+  if (currentValue === false) notify(null);
 }
 
 function startForegroundTracking() {
@@ -164,15 +169,16 @@ export function startConnectivityMonitor(): void {
   intervalId = setInterval(() => { void runPingIfForeground(); }, PING_INTERVAL_MS);
 
   // Clear the false-offline flag on any successful API response, not just on
-  // the next 30 s ping. `api.ts:228-232` dispatches `api-server-reachable`
-  // on every real server response; reset the circuit breaker so reads can flow
-  // again, but do NOT notify(true) here — only a successful /health ping may
-  // mark the server confirmed-reachable for sync flush and bootstrap download.
-  // A lone dashboard GET succeeding on a flaky link must not start upload/sync.
+  // the next 30 s ping. Reset the circuit so reads/writes can flow again.
+  // When the UI was stuck offline, a real server response is strong evidence
+  // the link is back — recover without waiting for the next /health tick.
   if (typeof window !== "undefined") {
     window.addEventListener("api-server-reachable", () => {
       unreachableSignals = 0;
       resetCircuitBreaker();
+      if (currentValue === false && hadRecentApiSuccess()) {
+        notify(true);
+      }
     });
 
     // Only a real request failing with a genuine network error may mark the
@@ -188,6 +194,9 @@ export function startConnectivityMonitor(): void {
       // During an active upload burst, timeouts usually mean a busy LAN server —
       // suppress the offline UI flip, but still trip the circuit so flush stops.
       if (shouldSuppressUnreachableOffline()) return;
+      // GET timeouts on a connected phone usually mean a saturated LAN server,
+      // not a dead link. Pause writes via the circuit, but do not show offline.
+      if (detail?.isTimeout && hasNetworkSignal()) return;
       if (currentValue !== false) notify(false);
     });
   }
@@ -272,4 +281,12 @@ export function _resetConnectivityMonitorForTests(): void {
   if (intervalId) clearInterval(intervalId);
   intervalId = null;
   listeners.clear();
+}
+
+/** Reset reachability state without unregistering the singleton monitor. */
+export function _resetConnectivityStateForTests(): void {
+  currentValue = null;
+  unreachableSignals = 0;
+  nativeNetworkConnected = true;
+  resetCircuitBreaker();
 }

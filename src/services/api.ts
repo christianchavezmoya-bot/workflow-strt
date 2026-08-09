@@ -251,7 +251,10 @@ api.interceptors.request.use(async (config) => {
     !url.includes("/auth/")
     && isMobileNativePlatform()
     && (
-      (!isSyncEngineWrite && (shouldSkipBlockingFetch() || isCircuitOpen()))
+      // Reads fail open: only skip when radio is down or user forced offline.
+      // Do not fast-bail GETs on circuit-open — that caused a death spiral
+      // where one timeout burst blocked all subsequent reads as offline-skip.
+      (!isSyncEngineWrite && shouldSkipBlockingFetch())
       || (isSyncEngineWrite && shouldSkipRunMutation())
     );
 

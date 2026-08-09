@@ -56,11 +56,12 @@ export function useOfflineBootstrap(): void {
 
     let lastServerReachable = true;
     const unsubReachable = subscribeServerReachable((reachable) => {
-      if (!reachable) {
+      if (reachable === false) {
         needsReconnectSyncRef.current = true;
         lastServerReachable = false;
         return;
       }
+      if (reachable !== true) return;
       // Full field download only after server health ping confirms reachability —
       // not on radio reconnect alone (corporate Wi‑Fi may not reach the LAN server).
       if (!lastServerReachable && needsReconnectSyncRef.current) {

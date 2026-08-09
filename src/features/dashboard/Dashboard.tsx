@@ -11,6 +11,7 @@ import {
 } from "@mui/icons-material";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
+import { runPool } from "../../utils/asyncPool";
 import { useRepoSubscription } from "../../hooks/useRepoSubscription";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { isDashboardAttentionIssue } from "../../utils/issueAttention";
@@ -2081,9 +2082,18 @@ const Dashboard = () => {
   // While online, refresh assignments for visible My Jobs assets in background.
   useEffect(() => {
     if (!isNativePlatform || myInstallAssets.length === 0 || shouldSkipBlockingFetch()) return;
-    for (const asset of myInstallAssets) {
-      void assetWorkflowAssignmentService.listByAsset(asset.id);
-    }
+
+    let cancelled = false;
+    void (async () => {
+      await runPool(myInstallAssets, 2, async (asset) => {
+        if (cancelled) return;
+        await assetWorkflowAssignmentService.listByAsset(asset.id);
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+    };
     // This is the effect that was driving the request storm: listByAsset() dispatches
     // repo:assignments:updated on native, which triggers a dashboardWorkspace refresh,
     // which produced a new myInstallAssets reference, which (with myInstallAssets in

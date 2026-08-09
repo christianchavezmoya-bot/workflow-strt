@@ -21,7 +21,8 @@ describe("circuitBreaker", () => {
   it("opens after trip and resets on success", () => {
     tripCircuitBreaker();
     expect(isCircuitOpen()).toBe(true);
-    expect(shouldSkipBlockingNetworkRead()).toBe(true);
+    // Reads no longer fast-bail on circuit alone — radio-up reads keep trying.
+    expect(shouldSkipBlockingNetworkRead()).toBe(false);
     resetCircuitBreaker();
     expect(isCircuitOpen()).toBe(false);
   });

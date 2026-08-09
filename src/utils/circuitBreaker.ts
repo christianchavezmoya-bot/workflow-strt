@@ -31,12 +31,12 @@ export function resetCircuitBreaker(): void {
 }
 
 /**
- * Skip blocking network reads when the device is offline or the circuit is open.
- * Unlike health-ping reachability, the circuit only opens after real request failures.
+ * Skip blocking network reads when the device is offline.
+ * Unlike writes, reads should keep attempting while radio is up — a tripped
+ * circuit usually means a busy/slow server, not a dead link.
  */
 export function shouldSkipBlockingNetworkRead(): boolean {
-  if (shouldSkipBlockingFetch()) return true;
-  return isCircuitOpen();
+  return shouldSkipBlockingFetch();
 }
 
 /** Test helper */
