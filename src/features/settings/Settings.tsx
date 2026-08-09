@@ -59,11 +59,14 @@ import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
 import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { APP_NAME } from "../../constants/branding";
-import * as XLSX from "xlsx";
 import PasswordField from "../../components/ui/PasswordField";
 import { secureGet, secureRemove } from "../../services/secureStorage";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import RecoveryCenter from "./RecoveryCenter";
+
+async function loadXlsx() {
+  return import("xlsx");
+}
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
@@ -364,6 +367,7 @@ const Settings = () => {
   const [fieldType, setFieldType] = useState("text");
   const [editField, setEditField] = useState<null | { id: string; name: string; type: string }>(null);
   const [fieldDefinitions, setFieldDefinitions] = useState<FieldDefinition[]>([]);
+  const [fieldsLoading, setFieldsLoading] = useState(false);
   const [assignedFieldsDraft, setAssignedFieldsDraft] = useState<Record<string, string[]>>({});
   const [assignedFieldsDirty, setAssignedFieldsDirty] = useState(false);
   const [assignedFieldsSaving, setAssignedFieldsSaving] = useState(false);
@@ -740,13 +744,18 @@ const Settings = () => {
     const a = document.createElement("a"); a.href = url; a.download = "features.csv"; a.click(); URL.revokeObjectURL(url);
   }
 
-  function exportFeaturesXLSX() {
-    const headers = ["Name/Part#","Description","Type","Brand","Supplier","Business Part#","Mfr Part#","Unit Price"];
-    const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):""]);
-    const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Features");
-    XLSX.writeFile(wb, "features.xlsx");
+  async function exportFeaturesXLSX() {
+    try {
+      const XLSX = await loadXlsx();
+      const headers = ["Name/Part#","Description","Type","Brand","Supplier","Business Part#","Mfr Part#","Unit Price"];
+      const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):""]);
+      const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Features");
+      XLSX.writeFile(wb, "features.xlsx");
+    } catch {
+      alert("Failed to export Excel file. Check console for details.");
+    }
   }
 
   function exportFeaturesJSON() {
@@ -776,15 +785,20 @@ const Settings = () => {
     }
   }
 
-  function downloadFeatureTemplate() {
-    const ws = XLSX.utils.aoa_to_sheet([
-      ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice"],
-      ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00"],
-      ["* required", "optional", "optional (default: text)", "optional", "optional", "optional", "optional", "optional"],
-    ]);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, "Features");
-    XLSX.writeFile(wb, "features-template.xlsx");
+  async function downloadFeatureTemplate() {
+    try {
+      const XLSX = await loadXlsx();
+      const ws = XLSX.utils.aoa_to_sheet([
+        ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice"],
+        ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00"],
+        ["* required", "optional", "optional (default: text)", "optional", "optional", "optional", "optional", "optional"],
+      ]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Features");
+      XLSX.writeFile(wb, "features-template.xlsx");
+    } catch {
+      alert("Failed to download template. Check console for details.");
+    }
   }
 
   function handleFeatureImportFile(e: ChangeEvent<HTMLInputElement>) {
@@ -793,8 +807,9 @@ const Settings = () => {
     setFeatureImportError(null);
     setFeatureImportDone(null);
     const reader = new FileReader();
-    reader.onload = (ev) => {
+    reader.onload = async (ev) => {
       try {
+        const XLSX = await loadXlsx();
         const data = new Uint8Array(ev.target!.result as ArrayBuffer);
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
@@ -1288,13 +1303,31 @@ const Settings = () => {
   const [downloadMenuAnchor, setDownloadMenuAnchor] = useState<null | HTMLElement>(null);
   const tableColumnSlots = 6;
 
+  const sortedTableOptions = useMemo(
+    () => [...tableOptions].sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" })),
+    [tableOptions]
+  );
+
+  const filteredSortedFieldDefinitions = useMemo(() => {
+    const query = fieldSearch.toLowerCase();
+    return fieldDefinitions
+      .filter((field) =>
+        field.name.toLowerCase().includes(query) ||
+        field.fieldType.toLowerCase().includes(query)
+      )
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }));
+  }, [fieldDefinitions, fieldSearch]);
+
   const reloadFieldDefinitions = async () => {
+    setFieldsLoading(true);
     try {
       const data = await fieldService.getDefinitions();
       setFieldDefinitions(data);
       window.dispatchEvent(new Event("field-definitions-changed"));
     } catch {
       setFieldDefinitions([]);
+    } finally {
+      setFieldsLoading(false);
     }
   };
 
@@ -2983,7 +3016,14 @@ const Settings = () => {
                 fullWidth
                 sx={{ mb: 2 }}
               />
-              {fieldDefinitions.length === 0 ? (
+              {fieldsLoading ? (
+                <Stack spacing={1} alignItems="center" sx={{ marginTop: 3, py: 4 }}>
+                  <CircularProgress size={28} />
+                  <Typography variant="body2" color="text.secondary">
+                    Loading field definitions...
+                  </Typography>
+                </Stack>
+              ) : fieldDefinitions.length === 0 ? (
                 <Stack spacing={1} sx={{ marginTop: 1 }}>
                   <Typography variant="body2" color="text.secondary">
                     No fields yet. Click "Seed/Refresh Default Fields" above to load defaults.
@@ -3004,16 +3044,7 @@ const Settings = () => {
                     </TableRow>
                   </TableHead>
                   <TableBody>
-                    {fieldDefinitions
-                      .filter((field) =>
-                        field.name.toLowerCase().includes(fieldSearch.toLowerCase()) ||
-                        field.fieldType.toLowerCase().includes(fieldSearch.toLowerCase())
-                      )
-                      .sort((a, b) => {
-                        // Sort alphabetically by field name
-                        return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' });
-                      })
-                      .map((field) => {
+                    {filteredSortedFieldDefinitions.map((field) => {
                       const tables = field.tables ?? [];
                       const slots =
                         assignedFieldsDraft[field.id] ??
@@ -3062,9 +3093,7 @@ const Settings = () => {
                                   <MenuItem value="">
                                     <em>None</em>
                                   </MenuItem>
-                                  {[...tableOptions]
-                                    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" }))
-                                    .map((option) => (
+                                  {sortedTableOptions.map((option) => (
                                     <MenuItem key={option} value={option}>
                                       {option}
                                     </MenuItem>
@@ -3106,10 +3135,7 @@ const Settings = () => {
                         </TableRow>
                       );
                     })}
-                    {fieldDefinitions.filter((field) =>
-                      field.name.toLowerCase().includes(fieldSearch.toLowerCase()) ||
-                      field.fieldType.toLowerCase().includes(fieldSearch.toLowerCase())
-                    ).length === 0 && (
+                    {filteredSortedFieldDefinitions.length === 0 && (
                       <TableRow>
                         <TableCell colSpan={tableColumnSlots + 4} align="center">
                           <Typography variant="body2" color="text.secondary">

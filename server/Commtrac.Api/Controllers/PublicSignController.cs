@@ -100,6 +100,94 @@ public class PublicSignController : ControllerBase
             officeCountry,
             officeState) ?? "UTC";
 
+        string? assignedTechnicianName = null;
+        if (!string.IsNullOrWhiteSpace(asset?.AssignedUserId))
+        {
+            assignedTechnicianName = await _db.Users
+                .AsNoTracking()
+                .Where(u => u.Id == asset!.AssignedUserId)
+                .Select(u => u.FullName)
+                .FirstOrDefaultAsync();
+        }
+
+        string? siteName = null;
+        if (!string.IsNullOrWhiteSpace(project?.SiteId))
+        {
+            siteName = await _db.Sites
+                .AsNoTracking()
+                .Where(s => s.Id == project!.SiteId)
+                .Select(s => s.Name)
+                .FirstOrDefaultAsync();
+        }
+
+        string? customerLogo = null;
+        if (!string.IsNullOrWhiteSpace(project?.CustomerId))
+        {
+            customerLogo = await _db.Customers
+                .AsNoTracking()
+                .Where(c => c.Id == project!.CustomerId)
+                .Select(c => c.Logo)
+                .FirstOrDefaultAsync();
+        }
+
+        var businessLogo = await _db.BrandSettings.AsNoTracking()
+            .Where(s => s.Key == "logo")
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync();
+        var companyName = await _db.BrandSettings.AsNoTracking()
+            .Where(s => s.Key == "app-name")
+            .Select(s => s.Value)
+            .FirstOrDefaultAsync();
+
+        string? productFeaturesJson = null;
+        if (!string.IsNullOrWhiteSpace(asset?.ProductId))
+        {
+            var featureRows = await (
+                from pf in _db.ProductFeatures.AsNoTracking()
+                join f in _db.Features.AsNoTracking() on pf.FeatureId equals f.Id
+                where pf.ProductId == asset!.ProductId
+                orderby pf.SortOrder
+                select new
+                {
+                    f.Id,
+                    f.Name,
+                    f.Description,
+                    f.ValueType,
+                    f.OptionsJson,
+                    f.SubPropertiesJson,
+                    f.IsInventory,
+                    f.CaptureFieldsJson,
+                    f.Brand,
+                    f.Supplier,
+                    f.AlternativePartNumber,
+                    f.ManufacturerPartNumber,
+                    f.UnitPrice,
+                    f.ProductLink,
+                }
+            ).ToListAsync();
+
+            if (featureRows.Count > 0)
+            {
+                productFeaturesJson = JsonSerializer.Serialize(featureRows.Select(f => new
+                {
+                    id = f.Id,
+                    name = f.Name,
+                    description = f.Description,
+                    valueType = f.ValueType,
+                    options = ParseJsonStringArray(f.OptionsJson),
+                    subProperties = ParseJsonElement(f.SubPropertiesJson),
+                    isInventory = f.IsInventory,
+                    captureFields = ParseJsonStringArray(f.CaptureFieldsJson),
+                    brand = f.Brand,
+                    supplier = f.Supplier,
+                    alternativePartNumber = f.AlternativePartNumber,
+                    manufacturerPartNumber = f.ManufacturerPartNumber,
+                    unitPrice = f.UnitPrice,
+                    productLink = f.ProductLink,
+                }));
+            }
+        }
+
         return Ok(new PublicRunSummaryDto(
             run.Id,
             asset?.AssetName ?? asset?.AssetTag ?? "Asset",
@@ -123,7 +211,21 @@ public class PublicSignController : ControllerBase
             installerEvt?.ReasonCode,
             installerEvt?.Notes,
             installerEvt?.SignedAtUtc,
-            resolvedTimeZone
+            resolvedTimeZone,
+            run.StartedAt,
+            run.TimeTrackingJson ?? "[]",
+            run.ProductiveSeconds,
+            run.DowntimeSeconds,
+            run.DowntimeEvents,
+            run.RunNumber,
+            asset?.AssetModel,
+            asset?.Manufacturer,
+            siteName,
+            assignedTechnicianName,
+            businessLogo,
+            customerLogo,
+            companyName,
+            productFeaturesJson
         ));
     }
 
@@ -291,5 +393,31 @@ public class PublicSignController : ControllerBase
         // Email sending is wired at the infrastructure layer; return OTP in dev mode only.
         // In production, this endpoint should dispatch via NotificationService.
         return Ok(new { message = $"OTP sent to {token.RecipientEmail}. (dev: {otp})" });
+    }
+
+    private static string[] ParseJsonStringArray(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return Array.Empty<string>();
+        try
+        {
+            return JsonSerializer.Deserialize<string[]>(json) ?? Array.Empty<string>();
+        }
+        catch
+        {
+            return Array.Empty<string>();
+        }
+    }
+
+    private static JsonElement ParseJsonElement(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return JsonSerializer.Deserialize<JsonElement>("[]");
+        try
+        {
+            return JsonSerializer.Deserialize<JsonElement>(json);
+        }
+        catch
+        {
+            return JsonSerializer.Deserialize<JsonElement>("[]");
+        }
     }
 }
