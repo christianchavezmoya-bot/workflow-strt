@@ -68,11 +68,45 @@ const SettingsRoute = () => {
   return can.settings.view ? <Settings /> : <Navigate to="/" replace />;
 };
 
+// Every guard below waits for permissionsReady for the same reason SettingsRoute does:
+// usePermissions returns a Viewer placeholder until the role config settles, so deciding
+// before then bounces authorised users off their own pages on a cold load.
 const TimeAnalyticsRoute = () => {
+  const can = usePermissions();
   if (isMobileNativePlatform()) {
     return <Navigate to="/" replace />;
   }
-  return <TimeAnalyticsPage />;
+  if (!can.permissionsReady) return null;
+  return can.analytics.view ? <TimeAnalyticsPage /> : <Navigate to="/" replace />;
+};
+
+// /admin had no guard at all — any authenticated user could open User Management by URL
+// and read the full user list. Buttons inside were gated, so they could not change
+// anything, but the page and its data rendered.
+const AdminRoute = () => {
+  const can = usePermissions();
+  if (!can.permissionsReady) return null;
+  return can.createUsers || can.settings.view ? <UserManagement /> : <Navigate to="/" replace />;
+};
+
+const TipsRoute = () => {
+  const can = usePermissions();
+  if (!can.permissionsReady) return null;
+  return can.tips.view ? <TipsAndTricksPage /> : <Navigate to="/" replace />;
+};
+
+const WorkInstructionsRoute = () => {
+  const can = usePermissions();
+  if (!can.permissionsReady) return null;
+  return can.workInstructionsBuilder.view ? <WorkInstructions /> : <Navigate to="/" replace />;
+};
+
+// Guards the whole BOM module. The routes are already behind BOM_MODULE_ENABLED; this adds
+// the per-role check the module never had.
+const BomRoute = ({ children }: { children: ReactNode }) => {
+  const can = usePermissions();
+  if (!can.permissionsReady) return null;
+  return can.bomProject.view ? <>{children}</> : <Navigate to="/" replace />;
 };
 
 const ProjectInspectionsRedirect = () => {
@@ -98,10 +132,10 @@ const AppRoutes = () => {
         <Route path="/projects/:id/assets/:assetId/inspections" element={<LazyRoute><ProjectAssetInspectionPage /></LazyRoute>} />
         <Route path="/installations/assets" element={<LazyRoute><AssetInstallationPage /></LazyRoute>} />
         <Route path="/installations/capture" element={<LazyRoute><CaptureTablePage /></LazyRoute>} />
-        <Route path="/work-instructions" element={<LazyRoute><WorkInstructions /></LazyRoute>} />
+        <Route path="/work-instructions" element={<LazyRoute><WorkInstructionsRoute /></LazyRoute>} />
         <Route path="/documents" element={<LazyRoute><DocumentsPage /></LazyRoute>} />
-        <Route path="/tips" element={<LazyRoute><TipsAndTricksPage /></LazyRoute>} />
-        <Route path="/admin" element={<LazyRoute><UserManagement /></LazyRoute>} />
+        <Route path="/tips" element={<LazyRoute><TipsRoute /></LazyRoute>} />
+        <Route path="/admin" element={<LazyRoute><AdminRoute /></LazyRoute>} />
         <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSites /></LazyRoute>} />
         <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />
         <Route path="/issues" element={<LazyRoute><IssuesBoard /></LazyRoute>} />
@@ -113,9 +147,11 @@ const AppRoutes = () => {
           <Route
             element={
               <LazyRoute>
-                <BomProjectProvider>
-                  <Outlet />
-                </BomProjectProvider>
+                <BomRoute>
+                  <BomProjectProvider>
+                    <Outlet />
+                  </BomProjectProvider>
+                </BomRoute>
               </LazyRoute>
             }
           >

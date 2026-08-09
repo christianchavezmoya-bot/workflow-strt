@@ -63,9 +63,23 @@ const Sidebar = () => {
   const can = usePermissions();
   const { activeOffice, updateActiveOffice } = useActiveOffice();
 
+  // Until now only /settings was filtered, so Admin, BOM to Project, Tips and Time
+  // Analytics appeared for every role including Viewer — and /admin had no route guard
+  // either, so a Viewer could open User Management and read the full user list.
+  // permissionsReady matters here: before the role config settles, usePermissions returns
+  // the Viewer placeholder, and filtering on that would make items flicker out and back in.
   const visibleNavItems = navItems.filter((item) => {
-    if (item.to === "/settings" && !can.settings.view) return false;
-    return true;
+    if (!can.permissionsReady) return true;
+    switch (item.to) {
+      case "/settings":            return can.settings.view;
+      case "/admin":               return can.createUsers || can.settings.view;
+      case "/tips":                return can.tips.view;
+      case "/time-analytics":      return can.analytics.view;
+      case "/admin/bom-project":   return can.bomProject.view;
+      case "/work-instructions":   return can.workInstructionsBuilder.view;
+      case "/documents":           return can.documents.view;
+      default:                     return true;
+    }
   });
   const [officeOptions, setOfficeOptions] = useState<string[]>(() => {
     const stored = localStorage.getItem("active_office");
