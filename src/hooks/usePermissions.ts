@@ -115,7 +115,12 @@ export const usePermissions = () => {
   useEffect(() => {
     const reload = () => {
       roleConfigService.clearCache();
-      setConfigReady(false);
+      // Deliberately does NOT clear configReady. This is a refresh of an already-settled
+      // config, not an initial load, and permissionsReady gates route guards: dropping it
+      // to false unmounts whatever page the user is on. On /admin that was self-feeding —
+      // saving roles dispatches this event, the guard unmounted UserManagement, it
+      // remounted and saved again, ~8 remounts and 4 DB writes per 5s, forever.
+      // The permissions themselves still update when loadRoleConfig() resolves.
       loadRoleConfig();
     };
     window.addEventListener("roles-config-changed", reload);
