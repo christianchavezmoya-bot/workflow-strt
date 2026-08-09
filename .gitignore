@@ -6,7 +6,6 @@ dist/
 build/
 build-device/
 tempbuild/
-public/ambient.mp3
 *.tsbuildinfo
 
 # Environment variables

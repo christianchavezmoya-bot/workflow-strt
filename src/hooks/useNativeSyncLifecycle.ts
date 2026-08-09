@@ -4,20 +4,15 @@ import {
   pingNow,
   prepareForegroundConnectivityResume,
 } from "../services/connectivityMonitor";
-import { setSyncLifecyclePaused } from "../services/syncLifecycleState";
 import { isMobileNativePlatform } from "../utils/platform";
-import { pendingCount } from "../services/localDB";
-import {
-  cancelPendingUploadLocalReminder,
-  schedulePendingUploadLocalReminder,
-  registerPushNotificationsIfNeeded,
-} from "../services/pushNotificationService";
+import { registerPushNotificationsIfNeeded } from "../services/pushNotificationService";
 
 const FOREGROUND_PING_RETRY_MS = 1_500;
 
 /**
- * Single native lifecycle hook: pause sync/download in background, resume on foreground.
+ * Single native lifecycle hook: resume connectivity + sync on foreground.
  * Dispatches app-foregrounded / app-backgrounded for other subscribers.
+ * Upload/download are NOT paused in background (Background URLSession planned separately).
  */
 export function useNativeSyncLifecycle(): void {
   useEffect(() => {
@@ -34,7 +29,6 @@ export function useNativeSyncLifecycle(): void {
     };
 
     const onForeground = () => {
-      setSyncLifecyclePaused(false);
       prepareForegroundConnectivityResume();
       clearPingRetry();
       pingNow();
@@ -45,19 +39,12 @@ export function useNativeSyncLifecycle(): void {
 
       window.dispatchEvent(new CustomEvent("app-foregrounded", { detail: { timestamp: Date.now() } }));
       window.dispatchEvent(new Event("notifications:refresh"));
-
-      void cancelPendingUploadLocalReminder();
       window.dispatchEvent(new Event("sync-request-flush-now"));
     };
 
     const onBackground = () => {
       clearPingRetry();
-      setSyncLifecyclePaused(true);
       window.dispatchEvent(new Event("app-backgrounded"));
-
-      void pendingCount().then((count) => {
-        if (count > 0) void schedulePendingUploadLocalReminder(count);
-      });
     };
 
     void registerPushNotificationsIfNeeded();

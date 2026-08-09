@@ -385,6 +385,22 @@ export async function pendingResetRetrySchedule(): Promise<void> {
   }
 }
 
+/** Reset actions left in "uploading" if a flush pass aborts mid-flight. */
+export async function pendingResetStaleUploading(): Promise<void> {
+  try {
+    const db = await getDB();
+    const all = await pendingGetAll();
+    const stale = all.filter((item) => item.status === "uploading");
+    if (stale.length === 0) return;
+    await Promise.all(
+      stale.map((item) => db.put("pending_actions", { ...item, status: "pending" as const })),
+    );
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch {
+    // ignore
+  }
+}
+
 /** Get only actions that are due for retry right now (no nextRetryAt, or it has passed). */
 export async function pendingGetDue(): Promise<PendingAction[]> {
   try {

@@ -5,7 +5,7 @@ export type NativeLifecyclePhase = "idle" | "background" | "foreground-sync";
 
 /**
  * Native-only lifecycle UI hook. Listens to app-foregrounded / app-backgrounded
- * events dispatched by useNativeSyncLifecycle (single appStateChange owner).
+ * events dispatched by useNativeSyncLifecycle (foreground resume + app events).
  */
 export function useNativeAppLifecycle() {
   const [phase, setPhase] = useState<NativeLifecyclePhase>("idle");
