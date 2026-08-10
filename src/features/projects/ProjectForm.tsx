@@ -34,7 +34,6 @@ import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useNavigate, useParams } from "react-router-dom";
-import { demoCustomers, demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
@@ -162,11 +161,11 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     [globalOffices]
   );
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
-  const customers = customersState.items.length ? customersState.items : demoCustomers;
+  const customers = customersState.items;
   const filteredCustomers = useMemo(() => {
     return customers;
   }, [customers]);
-  const products = productsState.items.length ? productsState.items : demoProducts;
+  const products = productsState.items;
   const editingProject = useMemo(() => items.find((item) => item.id === id) ?? null, [id, items]);
   const canEditExistingProject = useMemo(() => {
     if (!id) return true;

@@ -54,7 +54,6 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import { demoProducts } from "../../data/demo";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { featureService } from "../../services/featureService";
@@ -612,7 +611,7 @@ const WorkInstructions = () => {
   }, [dispatch]);
 
   const products = useMemo(
-    () => (productsState.items.length ? productsState.items : demoProducts),
+    () => productsState.items,
     [productsState.items],
   );
   const productIdsKey = useMemo(() => products.map((p) => p.id).join("|"), [products]);

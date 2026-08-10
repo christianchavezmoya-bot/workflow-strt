@@ -95,7 +95,6 @@ import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchProjects } from "../../store/projectSlice";
 import { fetchUsers } from "../../store/usersSlice";
-import { demoProducts } from "../../data/demo";
 import { projectAssetService } from "../../services/projectAssetService";
 import { productConfigService, type ProductConfig } from "../../services/productConfigService";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
@@ -750,7 +749,7 @@ const AssetInstallationPage = () => {
   }, [dispatch, productsState.items.length, productsState.loading, projects.length, projectsLoading, users.length, usersLoading]);
 
   const products = useMemo(
-    () => (productsState.items.length ? productsState.items : productsState.loading ? [] : demoProducts),
+    () => (productsState.loading ? [] : productsState.items),
     [productsState.items, productsState.loading],
   );
   // Stable product-id key so Redux array identity churn doesn't re-trigger the
