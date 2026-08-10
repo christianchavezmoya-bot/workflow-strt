@@ -1,20 +1,12 @@
 /**
  * Full-screen sync busy overlay (native only).
- * Shows a rotating Strata mark while the offline queue is flushing after reconnect.
+ * Shows a 3D STRATA N-GO mark spinning on the horizontal axis while the offline queue flushes.
  */
-import { Backdrop, Box, Stack, Typography, keyframes } from "@mui/material";
+import { Backdrop, Box, Stack, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
-import strataLogo from "../../assets/strata_transparent.png";
+import StrataNgoSpinLogo3D from "../branding/StrataNgoSpinLogo3D";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
-
-const spin3d = keyframes`
-  from { transform: rotateX(14deg) rotateY(0deg); }
-  to { transform: rotateX(14deg) rotateY(360deg); }
-`;
-
-const LOGO_WIDTH = { xs: 148, sm: 168 } as const;
-const LOGO_HEIGHT = { xs: 78, sm: 88 } as const;
 
 const MIN_VISIBLE_MS = 450;
 
@@ -76,60 +68,12 @@ export default function SyncBusyOverlay() {
     >
       <Stack alignItems="center" spacing={2}>
         <Box
-          aria-label="Strata Worldwide"
+          aria-label="Strata N-go"
           sx={{
-            perspective: 1100,
-            perspectiveOrigin: "center center",
-            width: LOGO_WIDTH,
-            height: LOGO_HEIGHT,
+            filter: "drop-shadow(0 12px 22px rgba(15, 23, 42, 0.5))",
           }}
         >
-          <Box
-            sx={{
-              position: "relative",
-              width: "100%",
-              height: "100%",
-              transformStyle: "preserve-3d",
-              animation: `${spin3d} 1.15s linear infinite`,
-              willChange: "transform",
-            }}
-          >
-            <Box
-              component="img"
-              src={strataLogo}
-              alt=""
-              draggable={false}
-              aria-hidden
-              sx={{
-                position: "absolute",
-                inset: 0,
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                transform: "translateZ(8px)",
-                backfaceVisibility: "hidden",
-                filter: "drop-shadow(0 10px 18px rgba(15, 23, 42, 0.45))",
-              }}
-            />
-            <Box
-              component="img"
-              src={strataLogo}
-              alt=""
-              draggable={false}
-              aria-hidden
-              sx={{
-                position: "absolute",
-                inset: 0,
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                transform: "rotateY(180deg) translateZ(8px)",
-                backfaceVisibility: "hidden",
-                opacity: 0.78,
-                filter: "brightness(0.82) drop-shadow(0 6px 12px rgba(15, 23, 42, 0.35))",
-              }}
-            />
-          </Box>
+          <StrataNgoSpinLogo3D />
         </Box>
         <Typography
           variant="body1"
