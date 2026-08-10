@@ -428,8 +428,6 @@ export const UserManagement: React.FC = () => {
   const [customerOpen, setCustomerOpen] = useState(false);
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
-  const [assetOpen, setAssetOpen] = useState(false);
-  const [editingAssetId, setEditingAssetId] = useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<{
     type: "user" | "customer" | "product" | "role" | "site" | "office";
     id: string;
@@ -512,27 +510,9 @@ export const UserManagement: React.FC = () => {
   const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
   const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
   const [editProductOpen, setEditProductOpen] = useState(false);
-  const [assetForm, setAssetForm] = useState({
-    machineType: "",
-    machineId: "",
-    serialNumber: "",
-    pmCount: "1",
-    comments: ""
-  });
-  const [assets, setAssets] = useState<Array<{
-    id: string;
-    seq: number;
-    machineType: string;
-    machineId: string;
-    serialNumber: string;
-    pmCount: string;
-    comments: string;
-  }>>([]);
-  const [customAssetColumns, setCustomAssetColumns] = useState<string[]>([]);
   const usersDynamic = useDynamicFields("users");
   const customersDynamic = useDynamicFields("customers");
   const productsDynamic = useDynamicFields("products");
-  const assetsDynamic = useDynamicFields("assets");
   const allFieldDefinitions = useFieldDefinitions();
   // Use database field definitions for users table
   const allUsersFields = useMemo(() =>
@@ -599,25 +579,8 @@ export const UserManagement: React.FC = () => {
       }))
     ], [baseFieldNames, productsDynamic.definitions])
   );
-  const assetsTableConfig = useTableConfig(
-    "assets",
-    useMemo(() => [
-      { id: "base-machineType", name: baseFieldNames.assets?.["base-machineType"] || "Machine Type", type: "text" },
-      { id: "base-machineId", name: baseFieldNames.assets?.["base-machineId"] || "Machine ID", type: "text" },
-      { id: "base-serialNumber", name: baseFieldNames.assets?.["base-serialNumber"] || "Serial Number", type: "text" },
-      { id: "base-pmCount", name: baseFieldNames.assets?.["base-pmCount"] || "PM Count", type: "text" },
-      { id: "base-comments", name: baseFieldNames.assets?.["base-comments"] || "Comments", type: "text" },
-      ...assetsDynamic.definitions.map((field) => ({
-        id: field.id,
-        name: field.name,
-        type: field.fieldType,
-        linkToFieldId: field.linkToFieldId,
-        actionType: field.actionType
-      }))
-    ], [baseFieldNames, assetsDynamic.definitions])
-  );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
-  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "assets" | "roles">("users");
+  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "roles">("users");
 
   const availableFieldsForAdminTable = useMemo(() => {
     if (tableConfigTarget === "roles") return [];
@@ -652,11 +615,6 @@ export const UserManagement: React.FC = () => {
     [orderedProductsDefinitions]
   );
 
-  const orderedAssetsDefinitions = useMemo(
-    () => getOrderedDefinitions(assetsDynamic.definitions, assetsTableConfig.config),
-    [assetsDynamic.definitions, assetsTableConfig.config]
-  );
-
   const orderedUsersDefinitions = useMemo(
     () => getOrderedDefinitions(usersDynamic.definitions, usersTableConfig.config),
     [usersDynamic.definitions, usersTableConfig.config]
@@ -681,7 +639,6 @@ export const UserManagement: React.FC = () => {
   const [editCustomerDynamicValues, setEditCustomerDynamicValues] = useState<Record<string, string>>({});
   const [productDynamicValues, setProductDynamicValues] = useState<Record<string, string>>({});
   const [editProductDynamicValues, setEditProductDynamicValues] = useState<Record<string, string>>({});
-  const [assetDynamicValues, setAssetDynamicValues] = useState<Record<string, string>>({});
   const [userSort, setUserSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
   const [userFilters, setUserFilters] = useState<Record<string, Set<string>>>({});
   const [userMenu, setUserMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
@@ -698,12 +655,6 @@ export const UserManagement: React.FC = () => {
   const [productSort, setProductSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
   const [productFilters, setProductFilters] = useState<Record<string, Set<string>>>({});
   const [productMenu, setProductMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
-    anchorEl: null,
-    key: ""
-  });
-  const [assetSort, setAssetSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
-  const [assetFilters, setAssetFilters] = useState<Record<string, Set<string>>>({});
-  const [assetMenu, setAssetMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
     anchorEl: null,
     key: ""
   });
@@ -861,40 +812,6 @@ export const UserManagement: React.FC = () => {
     };
     fetchSites();
   }, []);
-
-  useEffect(() => {
-    const storedAssets = localStorage.getItem("admin_assets");
-    if (storedAssets) {
-      try {
-        const parsed = JSON.parse(storedAssets) as typeof assets;
-        const withSeq = parsed.map((item, index) => ({
-          ...item,
-          seq: item.seq ?? index + 1
-        }));
-        setAssets(withSeq);
-      } catch {
-        setAssets([]);
-      }
-    }
-    const storedColumns = localStorage.getItem("admin_asset_columns");
-    if (storedColumns) {
-      try {
-        const parsed = JSON.parse(storedColumns) as string[];
-        setCustomAssetColumns(parsed);
-      } catch {
-        setCustomAssetColumns([]);
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    localStorage.setItem("admin_assets", JSON.stringify(assets));
-  }, [assets]);
-
-  useEffect(() => {
-    localStorage.setItem("admin_asset_columns", JSON.stringify(customAssetColumns));
-  }, [customAssetColumns]);
-
 
   // Track initial mount to avoid saving on first load
   const isInitialRolesMount = useRef(true);
@@ -1127,17 +1044,6 @@ export const UserManagement: React.FC = () => {
   }, [productsDynamic.definitions]);
 
   useEffect(() => {
-    if (assetsDynamic.definitions.length === 0) return;
-    setAssetDynamicValues((prev) => {
-      const next = { ...prev };
-      assetsDynamic.definitions.forEach((field) => {
-        if (next[field.id] === undefined) next[field.id] = "";
-      });
-      return next;
-    });
-  }, [assetsDynamic.definitions]);
-
-  useEffect(() => {
     setCustomerForm((prev) => ({ ...prev, office: activeOffice === "All" ? "" : activeOffice }));
   }, [activeOffice]);
 
@@ -1265,7 +1171,7 @@ export const UserManagement: React.FC = () => {
         const data = await adminTabsService.getAll();
         if (data.length > 0) {
           // Strip dispatch tab if it was previously injected (now lives in Projects page)
-          const cleaned = data.filter((t) => t.type !== "dispatch");
+          const cleaned = data.filter((t) => t.type !== "dispatch" && t.type !== "assets");
           setAdminTabsConfig(cleaned);
           setAdminTabsLoaded(true);
           return;
@@ -1302,19 +1208,10 @@ export const UserManagement: React.FC = () => {
           config: { order: [], hidden: [] }
         },
         {
-          id: "admin-assets",
-          label: "Assets",
-          type: "assets",
-          position: 4,
-          columns: [],
-          fieldIds: [],
-          config: { order: [], hidden: [] }
-        },
-        {
           id: "admin-roles",
           label: "Roles",
           type: "roles",
-          position: 5,
+          position: 3,
           columns: [],
           fieldIds: [],
           config: { order: [], hidden: [] }
@@ -1506,34 +1403,6 @@ export const UserManagement: React.FC = () => {
 
     return options;
   }, [products, productsTableConfig.visibleFields, productsDynamic.valuesByEntity]);
-
-  const assetFilterOptions = useMemo(() => {
-    const options: Record<string, string[]> = {};
-
-    assetsTableConfig.visibleFields.forEach((field) => {
-      const values = new Set<string>();
-      assets.forEach((asset) => {
-        let value = "";
-        if (field.id === "base-machineType") {
-          value = normalize(asset.machineType);
-        } else if (field.id === "base-machineId") {
-          value = normalize(asset.machineId);
-        } else if (field.id === "base-serialNumber") {
-          value = normalize(asset.serialNumber);
-        } else if (field.id === "base-pmCount") {
-          value = normalize(asset.pmCount);
-        } else if (field.id === "base-comments") {
-          value = normalize(asset.comments ?? "");
-        } else {
-          value = normalize(assetsDynamic.valuesByEntity[asset.id]?.[field.id]?.value ?? "");
-        }
-        values.add(value);
-      });
-      options[field.id] = Array.from(values).sort();
-    });
-
-    return options;
-  }, [assets, assetsTableConfig.visibleFields, assetsDynamic.valuesByEntity]);
 
   const roleLabels = useMemo(() => Object.keys(rolesConfig), [rolesConfig]);
 
@@ -1733,63 +1602,6 @@ export const UserManagement: React.FC = () => {
 
     return result;
   }, [products, productFilters, productSort, productsDynamic.valuesByEntity]);
-
-  // Comprehensive assets filtering including dynamic fields
-  const filteredAssets = useMemo(() => {
-    let result = [...assets];
-
-    // Apply filters for each field
-    Object.entries(assetFilters).forEach(([fieldId, valueSet]) => {
-      if (valueSet.size === 0) return;
-      result = result.filter((asset) => {
-        let fieldValue = "";
-        if (fieldId === "base-machineType") fieldValue = normalize(asset.machineType);
-        else if (fieldId === "base-machineId") fieldValue = normalize(asset.machineId);
-        else if (fieldId === "base-serialNumber") fieldValue = normalize(asset.serialNumber);
-        else if (fieldId === "base-pmCount") fieldValue = normalize(asset.pmCount);
-        else if (fieldId === "base-comments") fieldValue = normalize(asset.comments ?? "");
-        else fieldValue = normalize(assetsDynamic.valuesByEntity[asset.id]?.[fieldId]?.value ?? "");
-
-        return valueSet.has(fieldValue);
-      });
-    });
-
-    // Apply sorting
-    if (assetSort.key) {
-      result.sort((a, b) => {
-        let aVal = "";
-        let bVal = "";
-
-        if (assetSort.key === "base-machineType") {
-          aVal = normalize(a.machineType);
-          bVal = normalize(b.machineType);
-        } else if (assetSort.key === "base-machineId") {
-          aVal = normalize(a.machineId);
-          bVal = normalize(b.machineId);
-        } else if (assetSort.key === "base-serialNumber") {
-          aVal = normalize(a.serialNumber);
-          bVal = normalize(b.serialNumber);
-        } else if (assetSort.key === "base-pmCount") {
-          aVal = normalize(a.pmCount);
-          bVal = normalize(b.pmCount);
-        } else if (assetSort.key === "base-comments") {
-          aVal = normalize(a.comments ?? "");
-          bVal = normalize(b.comments ?? "");
-        } else {
-          aVal = normalize(assetsDynamic.valuesByEntity[a.id]?.[assetSort.key]?.value ?? "");
-          bVal = normalize(assetsDynamic.valuesByEntity[b.id]?.[assetSort.key]?.value ?? "");
-        }
-
-        if (assetSort.dir === "asc") {
-          return aVal.localeCompare(bVal);
-        } else {
-          return bVal.localeCompare(aVal);
-        }
-      });
-    }
-
-    return result;
-  }, [assets, assetFilters, assetSort, assetsDynamic.valuesByEntity]);
 
   const filteredRoles = useMemo(() => {
     const rows = roleLabels.map((role, index) => ({ role, seq: index + 1 }));
@@ -3572,191 +3384,6 @@ export const UserManagement: React.FC = () => {
         </Box>
       )}
 
-      {/* Assets Tab */}
-      {adminTabsConfig[tab]?.type === "assets" && (
-        <Stack spacing={2}>
-          <Stack direction="row">
-            {can.modifyData && (
-              <Button variant="contained" startIcon={<AddOutlined />} onClick={() => {
-                setEditingAssetId(null);
-                setAssetForm({
-                  machineType: "",
-                  machineId: "",
-                  serialNumber: "",
-                  pmCount: "1",
-                  comments: ""
-                });
-                setAssetDynamicValues({});
-                setAssetOpen(true);
-              }}>
-                New Asset
-              </Button>
-            )}
-          </Stack>
-
-          {actionError && <Alert severity="error">{actionError}</Alert>}
-
-          <Paper className="glass-card" sx={{ overflow: 'hidden' }}>
-          <Table>
-            <TableHead>
-              <TableRow>
-                <TableCell>#</TableCell>
-                {assetsTableConfig.visibleFields.map((field) => (
-                  <TableCell key={`assets-header-${field.id}`}>
-                    <Stack direction="row" alignItems="center" spacing={0.5}>
-                      <span style={fieldLabelStyle}>{field.name}</span>
-                      <IconButton
-                        size="small"
-                        onClick={(event) => setAssetMenu({ anchorEl: event.currentTarget, key: field.id })}
-                      >
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                ))}
-                <TableCell>Actions</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {filteredAssets.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={2 + assetsTableConfig.visibleFields.length} align="center">
-                    <Typography variant="body2" color="text.secondary">
-                      No assets yet
-                    </Typography>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                filteredAssets.map((asset, index) => {
-                  const getAssetFieldValue = (fieldId: string) => {
-                    if (fieldId === "base-machineType") return asset.machineType;
-                    if (fieldId === "base-machineId") return asset.machineId;
-                    if (fieldId === "base-serialNumber") return asset.serialNumber;
-                    if (fieldId === "base-pmCount") return asset.pmCount;
-                    if (fieldId === "base-comments") return asset.comments || "-";
-                    return assetsDynamic.valuesByEntity[asset.id]?.[fieldId]?.value || "-";
-                  };
-
-                  return (
-                    <TableRow key={asset.id} hover>
-                      <TableCell>{index + 1}</TableCell>
-                      {assetsTableConfig.visibleFields.map((field) => (
-                        <TableCell key={`${asset.id}-${field.id}`}>
-                          {getAssetFieldValue(field.id)}
-                        </TableCell>
-                      ))}
-                      {can.modifyData && (
-                      <TableCell>
-                        <Stack direction="row" spacing={1}>
-                          <Tooltip title="Edit asset">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setAssetForm({
-                                  machineType: asset.machineType,
-                                  machineId: asset.machineId,
-                                  serialNumber: asset.serialNumber,
-                                  pmCount: asset.pmCount,
-                                  comments: asset.comments
-                                });
-                                const dynamicVals = assetsDynamic.valuesByEntity[asset.id] || {};
-                                const next: Record<string, string> = {};
-                                assetsDynamic.definitions.forEach((field) => {
-                                  next[field.id] = dynamicVals[field.id]?.value || "";
-                                });
-                                setAssetDynamicValues(next);
-                                setEditingAssetId(asset.id);
-                                setAssetOpen(true);
-                              }}
-                            >
-                              <EditOutlined fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                          <Tooltip title="Delete asset">
-                            <IconButton
-                              size="small"
-                              onClick={() => {
-                                setAssets((prev) => prev.filter((a) => a.id !== asset.id));
-                              }}
-                            >
-                              <DeleteOutline fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
-                        </Stack>
-                      </TableCell>
-                      )}
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-          </Paper>
-          <Menu
-            anchorEl={assetMenu.anchorEl}
-            open={Boolean(assetMenu.anchorEl)}
-            onClose={() => setAssetMenu({ anchorEl: null, key: "" })}
-            slotProps={{
-              paper: {
-                sx: { maxHeight: 400 }
-              }
-            }}
-          >
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                if (assetMenu.key) setAssetSort({ key: assetMenu.key, dir: "asc" });
-                setAssetMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Sort A → Z
-            </MenuItem>
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                if (assetMenu.key) setAssetSort({ key: assetMenu.key, dir: "desc" });
-                setAssetMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Sort Z → A
-            </MenuItem>
-            <MenuItem
-              dense
-              sx={{ fontSize: "0.875rem", py: 0.5 }}
-              onClick={() => {
-                setAssetSort({ key: "", dir: "asc" });
-                setAssetMenu({ anchorEl: null, key: "" });
-              }}
-            >
-              Clear sort
-            </MenuItem>
-            {(assetFilterOptions[assetMenu.key as keyof typeof assetFilterOptions] || []).map((option) => {
-              const label = option || "(Blank)";
-              const selected = !!assetFilters[assetMenu.key]?.has(option);
-              return (
-                <MenuItem
-                  dense
-                  key={`${assetMenu.key}-${option}`}
-                  sx={{ py: 0.25, minHeight: "unset" }}
-                  onClick={() => {
-                    if (!assetMenu.key) return;
-                    toggleFilterValue(setAssetFilters, assetMenu.key, option);
-                  }}
-                >
-                  <Checkbox checked={selected} size="small" sx={{ py: 0 }} />
-                  <ListItemText
-                    primary={label}
-                    primaryTypographyProps={{ fontSize: "0.8125rem" }}
-                  />
-                </MenuItem>
-              );
-            })}
-          </Menu>
-        </Stack>
-      )}
-
       {/* Custom Tabs - Dynamically Rendered */}
       {adminTabsConfig
         .filter((tabConfig) => tabConfig.type === "custom")
@@ -4618,7 +4245,7 @@ export const UserManagement: React.FC = () => {
                 ? customersTableConfig.orderedFields
                 : tableConfigTarget === "products"
                   ? productsTableConfig.orderedFields
-                  : assetsTableConfig.orderedFields
+                  : customersTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
@@ -4629,14 +4256,13 @@ export const UserManagement: React.FC = () => {
                 ? customersTableConfig.config
                 : tableConfigTarget === "products"
                   ? productsTableConfig.config
-                  : assetsTableConfig.config
+                  : customersTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
           if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
-          if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
           if (tableConfigTarget === "roles") return;
@@ -4650,7 +4276,6 @@ export const UserManagement: React.FC = () => {
           if (tableConfigTarget === "users") await usersDynamic.reload();
           if (tableConfigTarget === "customers") await customersDynamic.reload();
           if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
           try {
@@ -4668,7 +4293,6 @@ export const UserManagement: React.FC = () => {
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -4697,7 +4321,7 @@ export const UserManagement: React.FC = () => {
                   ? customersDynamic.definitions
                   : tableConfigTarget === "products"
                     ? productsDynamic.definitions
-                    : assetsDynamic.definitions;
+                    : [];
             const existing = defs.find((item) => item.id === fieldId)
               || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
@@ -4712,7 +4336,6 @@ export const UserManagement: React.FC = () => {
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -4728,7 +4351,6 @@ export const UserManagement: React.FC = () => {
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
           } catch (error) {
             console.error("Error deleting field:", error);
             setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
@@ -5096,7 +4718,7 @@ export const UserManagement: React.FC = () => {
               ? rolesTableConfig.orderedFields
               : tableConfigTarget === "products"
                 ? productsTableConfig.orderedFields
-                : assetsTableConfig.orderedFields
+                : customersTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
@@ -5105,13 +4727,12 @@ export const UserManagement: React.FC = () => {
               ? rolesTableConfig.config
               : tableConfigTarget === "products"
                 ? productsTableConfig.config
-                : assetsTableConfig.config
+                : customersTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
           if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
-          if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
           if (tableConfigTarget === "roles") return;
@@ -5124,7 +4745,6 @@ export const UserManagement: React.FC = () => {
           await allFieldDefinitions.reload();
           if (tableConfigTarget === "users") await usersDynamic.reload();
           if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
           if (tableConfigTarget === "roles") return;
@@ -5141,7 +4761,6 @@ export const UserManagement: React.FC = () => {
           await allFieldDefinitions.reload();
           if (tableConfigTarget === "users") await usersDynamic.reload();
           if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
           if (type === "lookup field" && actionType === "create linked table") {
             openOrCreateAdminLinkedTab(name);
           }
@@ -5164,7 +4783,7 @@ export const UserManagement: React.FC = () => {
                 ? usersDynamic.definitions
                 : tableConfigTarget === "products"
                   ? productsDynamic.definitions
-                  : assetsDynamic.definitions;
+                  : [];
             const existing = defs.find((item) => item.id === fieldId)
               || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
@@ -5178,7 +4797,6 @@ export const UserManagement: React.FC = () => {
             await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -5193,7 +4811,6 @@ export const UserManagement: React.FC = () => {
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
           } catch (error) {
             console.error("Error deleting field:", error);
             setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
@@ -5381,7 +4998,7 @@ export const UserManagement: React.FC = () => {
                 ? customersTableConfig.orderedFields
                 : tableConfigTarget === "products"
                   ? productsTableConfig.orderedFields
-                  : assetsTableConfig.orderedFields
+                  : customersTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
@@ -5392,14 +5009,13 @@ export const UserManagement: React.FC = () => {
                 ? customersTableConfig.config
                 : tableConfigTarget === "products"
                   ? productsTableConfig.config
-                  : assetsTableConfig.config
+                  : customersTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
           if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
           if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
-          if (tableConfigTarget === "assets") assetsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
           if (tableConfigTarget === "roles") return;
@@ -5413,7 +5029,6 @@ export const UserManagement: React.FC = () => {
           if (tableConfigTarget === "users") await usersDynamic.reload();
           if (tableConfigTarget === "customers") await customersDynamic.reload();
           if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (tableConfigTarget === "assets") await assetsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
           try {
@@ -5431,7 +5046,6 @@ export const UserManagement: React.FC = () => {
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -5460,7 +5074,7 @@ export const UserManagement: React.FC = () => {
                   ? customersDynamic.definitions
                   : tableConfigTarget === "products"
                     ? productsDynamic.definitions
-                    : assetsDynamic.definitions;
+                    : [];
             const existing = defs.find((item) => item.id === fieldId)
               || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
@@ -5475,7 +5089,6 @@ export const UserManagement: React.FC = () => {
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -5491,7 +5104,6 @@ export const UserManagement: React.FC = () => {
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
             if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (tableConfigTarget === "assets") await assetsDynamic.reload();
           } catch (error) {
             console.error("Error deleting field:", error);
             setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
@@ -6355,107 +5967,6 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog
-        open={assetOpen}
-        onClose={() => {
-          setAssetOpen(false);
-          setEditingAssetId(null);
-        }}
-        maxWidth="sm"
-        fullWidth
-      >
-        <DialogTitle>{editingAssetId ? "Edit asset" : "Create asset"}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <TextField
-              label={baseFieldNames.assets?.["base-machineType"] || "Machine Type"}
-              value={assetForm.machineType}
-              onChange={(event) => setAssetForm((prev) => ({ ...prev, machineType: event.target.value }))}
-            />
-            <TextField
-              label={baseFieldNames.assets?.["base-machineId"] || "Machine ID"}
-              value={assetForm.machineId}
-              onChange={(event) => setAssetForm((prev) => ({ ...prev, machineId: event.target.value }))}
-            />
-            <TextField
-              label={baseFieldNames.assets?.["base-serialNumber"] || "Serial Number"}
-              value={assetForm.serialNumber}
-              onChange={(event) => setAssetForm((prev) => ({ ...prev, serialNumber: event.target.value }))}
-            />
-            <FormControl fullWidth>
-              <InputLabel shrink>{baseFieldNames.assets?.["base-pmCount"] || "PM Count"}</InputLabel>
-              <Select
-                label={baseFieldNames.assets?.["base-pmCount"] || "PM Count"}
-                value={assetForm.pmCount}
-                onChange={(event) => setAssetForm((prev) => ({ ...prev, pmCount: event.target.value }))}
-              >
-                {["1", "2", "3", "4", "5"].map((value) => (
-                  <MenuItem key={value} value={value}>
-                    {value}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField
-              label={baseFieldNames.assets?.["base-comments"] || "Comments"}
-              value={assetForm.comments}
-              onChange={(event) => setAssetForm((prev) => ({ ...prev, comments: event.target.value }))}
-              multiline
-              rows={2}
-            />
-            <DynamicFieldsForm
-              definitions={orderedAssetsDefinitions}
-              values={assetDynamicValues}
-              onChange={setAssetDynamicValues}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setAssetOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              const targetId = editingAssetId || randomId();
-              setAssets((prev) => {
-                if (editingAssetId) {
-                  return prev.map((item) =>
-                    item.id === editingAssetId ? { ...item, ...assetForm } : item
-                  );
-                }
-                const nextSeq = prev.length ? Math.max(...prev.map((item) => item.seq)) + 1 : 1;
-                return [
-                  {
-                    id: targetId,
-                    seq: nextSeq,
-                    ...assetForm
-                  },
-                  ...prev
-                ];
-              });
-              assetsDynamic.upsertForEntity(
-                targetId,
-                assetDynamicValues,
-                assetsDynamic.valuesByEntity[targetId]
-              );
-              setAssetForm({
-                machineType: "",
-                machineId: "",
-                serialNumber: "",
-                pmCount: "1",
-                comments: ""
-              });
-              setAssetDynamicValues({});
-              setEditingAssetId(null);
-              setAssetOpen(false);
-            }}
-          >
-            Save
-          </Button>
-        </DialogActions>
-      </Dialog>
-
         <Menu
           anchorEl={adminSettingsMenu}
           open={adminSettingsMenuOpen}
@@ -6474,7 +5985,6 @@ export const UserManagement: React.FC = () => {
               }
               if (selected.type === "users") setTableConfigTarget("users");
               if (selected.type === "roles") setTableConfigTarget("roles");
-              if (selected.type === "assets") setTableConfigTarget("assets");
               setTableConfigOpen(true);
             }}
           >
@@ -6492,19 +6002,6 @@ export const UserManagement: React.FC = () => {
             }
             if (selected.type === "customers") {
               setCustomerOpen(true);
-              return;
-            }
-            if (selected.type === "assets") {
-              setEditingAssetId(null);
-              setAssetForm({
-                machineType: "",
-                machineId: "",
-                serialNumber: "",
-                pmCount: "1",
-                comments: ""
-              });
-              setAssetDynamicValues({});
-              setAssetOpen(true);
               return;
             }
               if (selected.type === "custom") {
@@ -6598,7 +6095,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">
-                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : item.type === "assets" ? "Assets" : "Default"}
+                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : "Default"}
                       </Typography>
                     </TableCell>
                     <TableCell>
