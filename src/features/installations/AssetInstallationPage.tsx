@@ -100,7 +100,7 @@ import { productConfigService, type ProductConfig } from "../../services/product
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
-import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun } from "../../services/assetWorkflowRunService";
+import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun, isPendingCustomerSignature, isPendingInstallerSignature } from "../../services/assetWorkflowRunService";
 import { RunHydrationPriority } from "../../services/runHydrationQueue";
 import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -128,6 +128,7 @@ import { siteService } from "../../services/siteService";
 import type { Site } from "../../types/site";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
+import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../../components/ui/WorkflowSignatureFlowHost";
 import AssetInspectionDialog from "./AssetInspectionDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
@@ -215,6 +216,21 @@ const CONFIGURABLE_COLUMNS: ColumnDef[] = [
 ];
 
 const DEFAULT_COL_ORDER = CONFIGURABLE_COLUMNS.map((c) => c.id);
+const OPERATIONS_CHECKBOX_W = 28;
+const OPERATIONS_EXPAND_W = 36;
+const OPERATIONS_TAG_STICKY_LEFT = OPERATIONS_CHECKBOX_W + OPERATIONS_EXPAND_W;
+
+function operationsStickyPrefixSx(left: number, zIndex: number) {
+  return isMobileNativePlatform()
+    ? {}
+    : {
+      position: "sticky" as const,
+      left,
+      zIndex,
+      bgcolor: "background.paper",
+      ...(left > 0 ? { boxShadow: "2px 0 6px rgba(0,0,0,0.12)" } : {}),
+    };
+}
 const LS_COL_KEY = "asset_installation_columns_v2";
 const CAPTURE_HIDDEN_GROUPS_KEY = "capture_spreadsheet_hidden_groups_v1";
 const FORCE_VISIBLE_COL_IDS = ["dateCreated", "dateClosed"] as const;
@@ -608,6 +624,7 @@ const AssetInstallationPage = () => {
   // False when the run was created synthetically from a JSON import (no point re-running)
   const [runHistoryAllowRerun, setRunHistoryAllowRerun] = useState(true);
   const [runHistoryEntryMode, setRunHistoryEntryMode] = useState<"default" | "customer-sign">("default");
+  const [signatureFlowTarget, setSignatureFlowTarget] = useState<WorkflowSignatureFlowTarget | null>(null);
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   // Workflow type mismatch confirmation
   const [wfMismatchConfirm, setWfMismatchConfirm] = useState<{
@@ -940,6 +957,14 @@ const AssetInstallationPage = () => {
       openMissingMediaDialog(asset, photoRun);
       deepLinkHandledRef.current = key;
       return;
+    }
+
+    if (actionFromUrl === "signature") {
+      if (!isNativePlatform && targetRun) {
+        void openSignatureFlow(asset, targetRun);
+        deepLinkHandledRef.current = key;
+        return;
+      }
     }
 
     if (actionFromUrl === "signature" || actionFromUrl === "history" || (actionFromUrl === "issue" && issueSourceFromUrl === "run")) {
@@ -2890,6 +2915,38 @@ const AssetInstallationPage = () => {
     void openRunHistory(asset);
   }
 
+  async function openSignatureFlow(asset: ProjectAsset, preferredRun?: AssetWorkflowRun | null) {
+    let run = preferredRun ?? null;
+    if (!run) {
+      let assetRuns = runsMap[asset.id];
+      if (!assetRuns) {
+        try {
+          assetRuns = await assetWorkflowRunService.listByAsset(asset.id);
+          setRunsMap((prev) => ({ ...prev, [asset.id]: assetRuns! }));
+        } catch {
+          assetRuns = [];
+        }
+      }
+      run = [...assetRuns]
+        .filter((item) => isPendingInstallerSignature(item.signatureStatus) || isPendingCustomerSignature(item.signatureStatus))
+        .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] ?? null;
+    }
+    const canRequestCustomer = currentUser.role === "Admin" || currentUser.role === "Project Manager";
+    if (
+      !isNativePlatform
+      && run
+      && (
+        isPendingInstallerSignature(run.signatureStatus)
+        || (isPendingCustomerSignature(run.signatureStatus) && canRequestCustomer)
+      )
+    ) {
+      const proj = projects.find((p) => p.id === asset.projectId);
+      setSignatureFlowTarget({ asset, run, jobNumber: proj?.jobNumber });
+      return;
+    }
+    void openRunHistory(asset, run?.workflowConfigId, undefined, "customer-sign");
+  }
+
   async function openRunHistory(asset: ProjectAsset, wfConfigId?: string, wfConfigName?: string, entryMode: "default" | "customer-sign" = "default") {
     // If a specific config was requested, open immediately
     if (wfConfigId) {
@@ -4105,7 +4162,12 @@ ${words.slice(midpoint).join(" ")}`;
         return { ...base, icon: <ReportProblemOutlined />, onClick: () => summary.latestRun ? openBlockingIssue(asset) : void startAssetFromBestWorkflowSource(asset), variant: "outlined" };
       case "installer-sign":
       case "customer-sign":
-        return { ...base, icon: <DrawOutlined />, onClick: () => openRunHistory(asset, undefined, undefined, "customer-sign"), variant: "outlined" };
+        return {
+          ...base,
+          icon: <DrawOutlined />,
+          onClick: () => { void openSignatureFlow(asset, summary.latestRun); },
+          variant: "outlined",
+        };
       case "run-details":
         return { ...base, icon: <HistoryOutlined />, onClick: () => openRunHistory(asset), variant: "text" };
       case "no-workflow":
@@ -4509,7 +4571,7 @@ ${words.slice(midpoint).join(" ")}`;
               : undefined
         }}
       >
-        <TableCell sx={{ px: 0.5 }}>
+        <TableCell sx={{ px: 0.5, ...operationsStickyPrefixSx(0, 2) }}>
           <Checkbox
             size="small"
             checked={selectedAssetIds.has(asset.id)}
@@ -4523,7 +4585,7 @@ ${words.slice(midpoint).join(" ")}`;
             }}
           />
         </TableCell>
-        <TableCell sx={{ px: 1 }}>
+        <TableCell sx={{ px: 1, ...operationsStickyPrefixSx(OPERATIONS_CHECKBOX_W, 2) }}>
           <IconButton size="small" onClick={() => {
             const nextId = isExpanded ? null : asset.id;
             setExpandedAssetId(nextId);
@@ -4532,7 +4594,7 @@ ${words.slice(midpoint).join(" ")}`;
             {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
           </IconButton>
         </TableCell>
-        <TableCell>
+        <TableCell sx={operationsStickyPrefixSx(OPERATIONS_TAG_STICKY_LEFT, 2)}>
           <Stack direction="row" alignItems="center" spacing={0.75}>
             {hasIssue && (
               <Box
@@ -6005,7 +6067,7 @@ ${words.slice(midpoint).join(" ")}`;
             <Table size="small" stickyHeader={virtualizeOperationsTable} sx={{ minWidth: 900 }}>
               <TableHead>
                 <TableRow>
-                  <TableCell sx={{ width: 28, px: 0.5 }}>
+                  <TableCell sx={{ width: 28, px: 0.5, ...operationsStickyPrefixSx(0, 4) }}>
                     <Checkbox
                       size="small"
                       indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < displayAssets.length}
@@ -6016,8 +6078,8 @@ ${words.slice(midpoint).join(" ")}`;
                       }}
                     />
                   </TableCell>
-                  <TableCell sx={{ width: 36, px: 1 }} />
-                  <TableCell>
+                  <TableCell sx={{ width: 36, px: 1, ...operationsStickyPrefixSx(OPERATIONS_CHECKBOX_W, 4) }} />
+                  <TableCell sx={operationsStickyPrefixSx(OPERATIONS_TAG_STICKY_LEFT, 4)}>
                     <Stack direction="row" alignItems="center" spacing={0.25}>
                       <Typography variant="caption" fontWeight={700}>Asset Tag</Typography>
                       <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: "assetTag" })}>
@@ -6836,6 +6898,26 @@ ${words.slice(midpoint).join(" ")}`;
           project={runHistoryProject ?? undefined}
           customerLogoBase64={runHistoryCustomerLogo}
           assignedTechnician={users.find((u) => u.id === runHistoryAsset?.assignedUserId)?.fullName}
+        />
+      )}
+
+      {!isNativePlatform && (
+        <WorkflowSignatureFlowHost
+          target={signatureFlowTarget}
+          assignedTechnician={currentUser?.fullName ?? undefined}
+          canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
+          onClose={() => setSignatureFlowTarget(null)}
+          onComplete={() => { void refreshAssets(); }}
+        />
+      )}
+
+      {!isNativePlatform && (
+        <WorkflowSignatureFlowHost
+          target={signatureFlowTarget}
+          assignedTechnician={currentUser?.fullName ?? undefined}
+          canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
+          onClose={() => setSignatureFlowTarget(null)}
+          onComplete={() => { void refreshAssets(); }}
         />
       )}
 

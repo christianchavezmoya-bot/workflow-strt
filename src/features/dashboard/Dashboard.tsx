@@ -66,6 +66,8 @@ import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignm
 import { workflowTypeService } from "../../services/workflowTypeService";
 import type { MissingMediaFlag as PhotoMissingMediaFlag, PhotoUpdateNotification } from "./photoUploadTypes";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
+import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../../components/ui/WorkflowSignatureFlowHost";
+import AttentionItemList from "./AttentionItemList";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -555,6 +557,7 @@ const Dashboard = () => {
   const [closingDashboardProjectId, setClosingDashboardProjectId] = useState<string | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
+  const [signatureFlowTarget, setSignatureFlowTarget] = useState<WorkflowSignatureFlowTarget | null>(null);
   const [issueDetailTarget, setIssueDetailTarget] = useState<{
     issue: AssetIssue | RunIssue;
     assetId: string;
@@ -1712,6 +1715,20 @@ const Dashboard = () => {
     },
     [projectById]
   );
+  const assetAttentionLabel = useCallback(
+    (record: {
+      projectId?: string | null;
+      jobNumber?: string | null;
+      assetTag?: string | null;
+      assetName?: string | null;
+    }) => {
+      const project = record.projectId ? projectById.get(record.projectId) : undefined;
+      const jobNumber = record.jobNumber || project?.jobNumber || "No job";
+      const assetLabel = record.assetTag || record.assetName || "Asset";
+      return `${jobNumber}: ${assetLabel}`;
+    },
+    [projectById]
+  );
 
   const buildAssetRepairPath = useCallback((params: {
     projectId: string;
@@ -1936,14 +1953,34 @@ const Dashboard = () => {
     }
   }, [issueDetailTarget, openIssues, refreshDashboardAfterIssueUpdate]);
 
-  const openSignatureRepair = useCallback((sig: PendingSignatureRecord) => {
-    navigate(buildAssetRepairPath({
-      projectId: sig.projectId,
-      assetId: sig.assetId,
-      action: "signature",
-      runId: sig.runId,
-    }));
-  }, [buildAssetRepairPath, navigate]);
+  const openSignatureRepair = useCallback(async (sig: PendingSignatureRecord) => {
+    if (isNativePlatform) {
+      navigate(buildAssetRepairPath({
+        projectId: sig.projectId,
+        assetId: sig.assetId,
+        action: "signature",
+        runId: sig.runId,
+      }));
+      return;
+    }
+    try {
+      const [asset, run] = await Promise.all([
+        projectAssetService.getById(sig.assetId),
+        assetWorkflowRunService.getById(sig.runId),
+      ]);
+      if (!asset || !run) {
+        setDashboardError("Could not open sign-off for this asset.");
+        return;
+      }
+      setSignatureFlowTarget({
+        asset,
+        run,
+        jobNumber: sig.jobNumber || projectById.get(sig.projectId)?.jobNumber,
+      });
+    } catch {
+      setDashboardError("Could not open sign-off. Check your connection and try again.");
+    }
+  }, [buildAssetRepairPath, isNativePlatform, navigate, projectById]);
 
   const openMissingMediaRepair = useCallback((flag: MissingMediaFlag) => {
     const projectId = openAssets.find((asset) => asset.id === flag.assetId)?.projectId;
@@ -3610,20 +3647,19 @@ const Dashboard = () => {
               {myInspectionBlocking.length}
             </Typography>
             {myInspectionBlocking.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {myInspectionBlocking.slice(0, 3).map((iss) => (
-                  <ItemRow key={iss.issueId}
-                    label={`${iss.jobNumber}: ${iss.assetTag}`}
+              <AttentionItemList
+                items={myInspectionBlocking}
+                maxCollapsed={3}
+                getKey={(iss) => iss.issueId}
+                renderItem={(iss) => (
+                  <ItemRow
+                    label={assetAttentionLabel(iss)}
                     sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
                     actionLabel="Resolve now"
-                    onClick={() => openIssueRepair(iss)} />
-                ))}
-                {myInspectionBlocking.length > 3 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{myInspectionBlocking.length - 3} more
-                  </Typography>
+                    onClick={() => openIssueRepair(iss)}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">
                 {resolvingDashboardIssueId ? "Refreshing blocking issues..." : "No blocking issues"}
@@ -3648,23 +3684,22 @@ const Dashboard = () => {
               {myInspectionPendingSigs.length}
             </Typography>
             {myInspectionPendingSigs.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {myInspectionPendingSigs.slice(0, 3).map((s) => (
-                  <ItemRow key={s.runId}
-                    label={`${s.jobNumber}: ${s.assetTag}`}
+              <AttentionItemList
+                items={myInspectionPendingSigs}
+                maxCollapsed={3}
+                getKey={(s) => s.runId}
+                renderItem={(s) => (
+                  <ItemRow
+                    label={assetAttentionLabel(s)}
                     sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                     actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
                     {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
                       ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
                       : {})}
-                    onClick={() => openSignatureRepair(s)} />
-                ))}
-                {myInspectionPendingSigs.length > 3 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{myInspectionPendingSigs.length - 3} more
-                  </Typography>
+                    onClick={() => { void openSignatureRepair(s); }}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">All signatures collected</Typography>
             )}
@@ -3687,20 +3722,19 @@ const Dashboard = () => {
               {myInspectionHighObservations.length}
             </Typography>
             {myInspectionHighObservations.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {myInspectionHighObservations.slice(0, 3).map((iss) => (
-                  <ItemRow key={iss.issueId}
-                    label={`${iss.jobNumber}: ${iss.assetTag}`}
+              <AttentionItemList
+                items={myInspectionHighObservations}
+                maxCollapsed={3}
+                getKey={(iss) => iss.issueId}
+                renderItem={(iss) => (
+                  <ItemRow
+                    label={assetAttentionLabel(iss)}
                     sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
                     actionLabel="Review"
-                    onClick={() => openIssueRepair(iss)} />
-                ))}
-                {myInspectionHighObservations.length > 3 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{myInspectionHighObservations.length - 3} more
-                  </Typography>
+                    onClick={() => openIssueRepair(iss)}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
             )}
@@ -3748,22 +3782,19 @@ const Dashboard = () => {
               {blockingIssues.length}
             </Typography>
             {blockingIssues.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {blockingIssues.slice(0, 4).map((iss) => (
-                  <ItemRow key={iss.issueId}
-                    label={isAdmin
-                      ? projectAttentionLabel(iss.projectId, iss.jobNumber, undefined)
-                      : `${iss.jobNumber}: ${iss.assetTag}`}
+              <AttentionItemList
+                items={blockingIssues}
+                maxCollapsed={4}
+                getKey={(iss) => iss.issueId}
+                renderItem={(iss) => (
+                  <ItemRow
+                    label={assetAttentionLabel(iss)}
                     sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
                     actionLabel="Resolve"
-                    onClick={() => openIssueRepair(iss)} />
-                ))}
-                {blockingIssues.length > 4 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{blockingIssues.length - 4} more
-                  </Typography>
+                    onClick={() => openIssueRepair(iss)}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">No blocking issues</Typography>
             )}
@@ -3786,21 +3817,20 @@ const Dashboard = () => {
               {overdueProjects.length}
             </Typography>
             {overdueProjects.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {overdueProjects.slice(0, 4).map((p) => (
-                  <ItemRow key={p.id}
+              <AttentionItemList
+                items={overdueProjects}
+                maxCollapsed={4}
+                getKey={(p) => p.id}
+                renderItem={(p) => (
+                  <ItemRow
                     label={isAdmin
                       ? projectAttentionLabel(p.id, p.jobNumber, p.customerName)
                       : `${p.jobNumber} - ${p.customerName || ""}`}
                     sub={`Due ${fmtDate(p.finishDate)}`}
-                    onClick={() => navigate(`/projects/${p.id}`)} />
-                ))}
-                {overdueProjects.length > 4 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{overdueProjects.length - 4} more
-                  </Typography>
+                    onClick={() => navigate(`/projects/${p.id}`)}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">No overdue projects</Typography>
             )}
@@ -3823,25 +3853,22 @@ const Dashboard = () => {
               {visiblePendingSigs.length}
             </Typography>
             {visiblePendingSigs.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {visiblePendingSigs.slice(0, 4).map((s) => (
-                        <ItemRow key={s.runId}
-                          label={isAdmin
-                            ? projectAttentionLabel(s.projectId, s.jobNumber, undefined)
-                            : `${s.jobNumber}: ${s.assetTag}`}
-                          sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
-                          actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
-                          {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
-                            ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
-                            : {})}
-                          onClick={() => openSignatureRepair(s)} />
-                ))}
-                {visiblePendingSigs.length > 4 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{visiblePendingSigs.length - 4} more
-                  </Typography>
+              <AttentionItemList
+                items={visiblePendingSigs}
+                maxCollapsed={4}
+                getKey={(s) => s.runId}
+                renderItem={(s) => (
+                  <ItemRow
+                    label={assetAttentionLabel(s)}
+                    sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
+                    actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                    {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
+                      ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
+                      : {})}
+                    onClick={() => { void openSignatureRepair(s); }}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">All signatures collected</Typography>
             )}
@@ -3864,22 +3891,19 @@ const Dashboard = () => {
               {highIssues.length}
             </Typography>
             {highIssues.length > 0 ? (
-              <Stack spacing={0.25} sx={{ mt: 1 }}>
-                {highIssues.slice(0, 4).map((iss) => (
-                  <ItemRow key={iss.issueId}
-                    label={isAdmin
-                      ? projectAttentionLabel(iss.projectId, iss.jobNumber, undefined)
-                      : `${iss.jobNumber}: ${iss.assetTag}`}
+              <AttentionItemList
+                items={highIssues}
+                maxCollapsed={4}
+                getKey={(iss) => iss.issueId}
+                renderItem={(iss) => (
+                  <ItemRow
+                    label={assetAttentionLabel(iss)}
                     sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
                     actionLabel="Review"
-                    onClick={() => openIssueRepair(iss)} />
-                ))}
-                {highIssues.length > 4 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                    +{highIssues.length - 4} more
-                  </Typography>
+                    onClick={() => openIssueRepair(iss)}
+                  />
                 )}
-              </Stack>
+              />
             ) : (
               <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
             )}
@@ -5444,20 +5468,19 @@ const Dashboard = () => {
                     {myInstallBlocking.length}
                   </Typography>
                   {myInstallBlocking.length > 0 ? (
-                    <Stack spacing={0.25} sx={{ mt: 1 }}>
-                      {myInstallBlocking.slice(0, 3).map((iss) => (
-                        <ItemRow key={iss.issueId}
-                          label={`${iss.jobNumber}: ${iss.assetTag}`}
+                    <AttentionItemList
+                      items={myInstallBlocking}
+                      maxCollapsed={3}
+                      getKey={(iss) => iss.issueId}
+                      renderItem={(iss) => (
+                        <ItemRow
+                          label={assetAttentionLabel(iss)}
                           sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
                           actionLabel="Resolve now"
-                          onClick={() => openIssueRepair(iss)} />
-                      ))}
-                      {myInstallBlocking.length > 3 && (
-                        <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                          +{myInstallBlocking.length - 3} more
-                        </Typography>
+                          onClick={() => openIssueRepair(iss)}
+                        />
                       )}
-                    </Stack>
+                    />
                   ) : (
                     <Typography variant="caption" color="success.main">
                       {resolvingDashboardIssueId ? "Refreshing blocking issues..." : "No blocking issues"}
@@ -5482,23 +5505,22 @@ const Dashboard = () => {
                     {myInstallPendingSigs.length}
                   </Typography>
                   {myInstallPendingSigs.length > 0 ? (
-                    <Stack spacing={0.25} sx={{ mt: 1 }}>
-                      {myInstallPendingSigs.slice(0, 3).map((s) => (
-                        <ItemRow key={s.runId}
-                          label={`${s.jobNumber}: ${s.assetTag}`}
+                    <AttentionItemList
+                      items={myInstallPendingSigs}
+                      maxCollapsed={3}
+                      getKey={(s) => s.runId}
+                      renderItem={(s) => (
+                        <ItemRow
+                          label={assetAttentionLabel(s)}
                           sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                           actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
                           {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
                             ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
                             : {})}
-                          onClick={() => openSignatureRepair(s)} />
-                      ))}
-                      {myInstallPendingSigs.length > 3 && (
-                        <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                          +{myInstallPendingSigs.length - 3} more
-                        </Typography>
+                          onClick={() => { void openSignatureRepair(s); }}
+                        />
                       )}
-                    </Stack>
+                    />
                   ) : (
                     <Typography variant="caption" color="success.main">All signatures collected</Typography>
                   )}
@@ -5521,20 +5543,19 @@ const Dashboard = () => {
                     {myInstallHighObservations.length}
                   </Typography>
                   {myInstallHighObservations.length > 0 ? (
-                    <Stack spacing={0.25} sx={{ mt: 1 }}>
-                      {myInstallHighObservations.slice(0, 3).map((iss) => (
-                        <ItemRow key={iss.issueId}
-                          label={`${iss.jobNumber}: ${iss.assetTag}`}
+                    <AttentionItemList
+                      items={myInstallHighObservations}
+                      maxCollapsed={3}
+                      getKey={(iss) => iss.issueId}
+                      renderItem={(iss) => (
+                        <ItemRow
+                          label={assetAttentionLabel(iss)}
                           sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
                           actionLabel="Review"
-                          onClick={() => openIssueRepair(iss)} />
-                      ))}
-                      {myInstallHighObservations.length > 3 && (
-                        <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                          +{myInstallHighObservations.length - 3} more
-                        </Typography>
+                          onClick={() => openIssueRepair(iss)}
+                        />
                       )}
-                    </Stack>
+                    />
                   ) : (
                     <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
                   )}
@@ -5692,23 +5713,22 @@ const Dashboard = () => {
                 {myInstallPendingSigs.length === 0 ? (
                   <Typography variant="caption" color="text.secondary">No pending sign-offs</Typography>
                 ) : (
-                  <Stack spacing={0.25}>
-                    {myInstallPendingSigs.slice(0, 5).map((s) => (
-                      <ItemRow key={s.runId}
-                        label={`${s.jobNumber}: ${s.assetTag}`}
+                  <AttentionItemList
+                    items={myInstallPendingSigs}
+                    maxCollapsed={5}
+                    getKey={(s) => s.runId}
+                    renderItem={(s) => (
+                      <ItemRow
+                        label={assetAttentionLabel(s)}
                         sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                         actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
                         {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
                           ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
                           : {})}
-                        onClick={() => openSignatureRepair(s)} />
-                    ))}
-                    {myInstallPendingSigs.length > 5 && (
-                      <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                        +{myInstallPendingSigs.length - 5} more
-                      </Typography>
+                        onClick={() => { void openSignatureRepair(s); }}
+                      />
                     )}
-                  </Stack>
+                  />
                 )}
               </Box>
             </Grid>
@@ -6317,6 +6337,16 @@ const Dashboard = () => {
           hideResolutionMedia
           onClose={() => setIssueDetailTarget(null)}
           onSave={(updated) => void handleDashboardIssueSave(updated as AssetIssue | RunIssue)}
+        />
+      )}
+
+      {!isNativePlatform && (
+        <WorkflowSignatureFlowHost
+          target={signatureFlowTarget}
+          assignedTechnician={user.fullName ?? undefined}
+          canRequestCustomerSignature={isManager}
+          onClose={() => setSignatureFlowTarget(null)}
+          onComplete={() => { void loadAttention(); }}
         />
       )}
 

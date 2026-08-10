@@ -97,6 +97,25 @@ type ColumnConfig = {
   renderCell: (project: Project, products: any[]) => React.ReactNode;
 };
 
+const DEFAULT_PROJECT_COLUMN_ORDER = [
+  "jobNumber",
+  "projectManager",
+  "customerName",
+  "products",
+  "siteName",
+  "region",
+  "description",
+  "startDate",
+  "finishDate",
+  "status",
+  "projectType",
+  "customerId",
+  "office",
+];
+
+const PROJECT_CHEVRON_W = 40;
+const PROJECT_JOB_STICKY_LEFT = PROJECT_CHEVRON_W;
+
 const builtInColumnConfigs: ColumnConfig[] = [
   {
     id: "jobNumber",
@@ -147,25 +166,18 @@ const builtInColumnConfigs: ColumnConfig[] = [
     )
   },
   {
+    id: "projectManager",
+    name: "Project Manager",
+    required: false,
+    minWidth: 130,
+    renderCell: (project: Project) => project.projectManager || "-"
+  },
+  {
     id: "customerName",
     name: "Customer name",
     required: false,
     minWidth: 150,
     renderCell: (project: Project) => project.customerName || "-"
-  },
-  {
-    id: "siteName",
-    name: "Site",
-    required: false,
-    minWidth: 160,
-    renderCell: (project: Project) => project.siteName || "-"
-  },
-  {
-    id: "customerId",
-    name: "Customer ID",
-    required: true,
-    minWidth: 120,
-    renderCell: (project: Project) => project.customerId || "-"
   },
   {
     id: "products",
@@ -180,11 +192,11 @@ const builtInColumnConfigs: ColumnConfig[] = [
         : "-"
   },
   {
-    id: "office",
-    name: "Office",
-    required: true,
-    minWidth: 120,
-    renderCell: (project: Project) => project.office || "-"
+    id: "siteName",
+    name: "Site",
+    required: false,
+    minWidth: 160,
+    renderCell: (project: Project) => project.siteName || "-"
   },
   {
     id: "region",
@@ -192,13 +204,6 @@ const builtInColumnConfigs: ColumnConfig[] = [
     required: false,
     minWidth: 120,
     renderCell: (project: Project) => project.region || "-"
-  },
-  {
-    id: "projectManager",
-    name: "Project Manager",
-    required: false,
-    minWidth: 130,
-    renderCell: (project: Project) => project.projectManager || "-"
   },
   {
     id: "description",
@@ -235,6 +240,20 @@ const builtInColumnConfigs: ColumnConfig[] = [
     required: true,
     minWidth: 120,
     renderCell: (project: Project) => project.projectType || "-"
+  },
+  {
+    id: "customerId",
+    name: "Customer ID",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => project.customerId || "-"
+  },
+  {
+    id: "office",
+    name: "Office",
+    required: true,
+    minWidth: 120,
+    renderCell: (project: Project) => project.office || "-"
   }
 ];
 
@@ -497,15 +516,24 @@ const ProjectList = () => {
   const orderedColumns = useMemo(() => {
     const builtInIds = builtInColumnConfigs.map((col) => col.id);
     const dynamicIds = projectDynamicColumns.map((field) => field.id);
-    const allIds = [...builtInIds, ...dynamicIds];
+    const cityField = projectDynamicColumns.find(
+      (field) => /city/i.test(field.name) || /city/i.test(field.id),
+    );
 
     let order: string[];
     if (projectsTableConfig.config.order.length > 0) {
       order = [...projectsTableConfig.config.order];
+      const allIds = [...builtInIds, ...dynamicIds];
       const remaining = allIds.filter((id) => !order.includes(id));
       order = [...order, ...remaining];
     } else {
-      order = allIds;
+      order = [...DEFAULT_PROJECT_COLUMN_ORDER];
+      if (cityField && !order.includes(cityField.id)) {
+        const siteIdx = order.indexOf("siteName");
+        order.splice(siteIdx >= 0 ? siteIdx + 1 : order.length, 0, cityField.id);
+      }
+      const remainingDynamic = dynamicIds.filter((id) => !order.includes(id));
+      order = [...order, ...remainingDynamic];
     }
 
     const hiddenSet = new Set(projectsTableConfig.config.hidden);
@@ -896,7 +924,14 @@ const ProjectList = () => {
           <Table sx={{ minWidth: 2000 }} size="small" stickyHeader>
           <TableHead>
             <TableRow>
-              <TableCell sx={{ width: 40, padding: '8px 12px' }} />
+              <TableCell sx={{
+                width: PROJECT_CHEVRON_W,
+                padding: '8px 12px',
+                position: 'sticky',
+                left: 0,
+                zIndex: 5,
+                bgcolor: 'background.paper',
+              }} />
               <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
               {orderedColumns.map((column) => (
                 <TableCell
@@ -905,7 +940,16 @@ const ProjectList = () => {
                     minWidth: column.minWidth || 100,
                     maxWidth: column.maxWidth,
                     whiteSpace: column.maxWidth ? 'normal' : 'nowrap',
-                    padding: '8px 12px'
+                    padding: '8px 12px',
+                    ...(column.id === "jobNumber"
+                      ? {
+                        position: "sticky",
+                        left: PROJECT_JOB_STICKY_LEFT,
+                        zIndex: 4,
+                        bgcolor: "background.paper",
+                        boxShadow: "2px 0 6px rgba(0,0,0,0.12)",
+                      }
+                      : {}),
                   }}
                 >
                   <Stack direction="row" alignItems="center" spacing={0.5}>
@@ -929,7 +973,14 @@ const ProjectList = () => {
               return (
                 <React.Fragment key={project.id}>
                   <TableRow hover selected={isExpanded}>
-                    <TableCell sx={{ width: 40, padding: '4px 8px' }}>
+                    <TableCell sx={{
+                      width: PROJECT_CHEVRON_W,
+                      padding: '4px 8px',
+                      position: 'sticky',
+                      left: 0,
+                      zIndex: 3,
+                      bgcolor: 'background.paper',
+                    }}>
                       <IconButton
                         size="small"
                         onClick={() => setExpandedProjectId(isExpanded ? null : project.id)}
@@ -947,7 +998,16 @@ const ProjectList = () => {
                           whiteSpace: column.maxWidth ? 'normal' : 'nowrap',
                           overflow: column.maxWidth ? 'hidden' : 'visible',
                           textOverflow: column.maxWidth ? 'ellipsis' : 'clip',
-                          padding: '8px 12px'
+                          padding: '8px 12px',
+                          ...(column.id === "jobNumber"
+                            ? {
+                              position: "sticky",
+                              left: PROJECT_JOB_STICKY_LEFT,
+                              zIndex: 2,
+                              bgcolor: "background.paper",
+                              boxShadow: "2px 0 6px rgba(0,0,0,0.12)",
+                            }
+                            : {}),
                         }}
                       >
                         {column.renderCell(project, products)}
@@ -1211,18 +1271,18 @@ const ProjectList = () => {
         onChange={projectsTableConfig.setConfig}
         builtInColumns={[
           { id: "jobNumber", name: "Job Number", type: "text", required: true },
-          { id: "customerName", name: "Customer name", type: "text", required: false },
-          { id: "siteName", name: "Site", type: "text", required: false },
-          { id: "customerId", name: "Customer ID", type: "text", required: true },
-          { id: "products", name: "Product name", type: "multi-select", required: true },
-          { id: "office", name: "Office", type: "text", required: true },
-          { id: "region", name: "Country/State", type: "text", required: false },
           { id: "projectManager", name: "Project Manager", type: "text", required: false },
+          { id: "customerName", name: "Customer name", type: "text", required: false },
+          { id: "products", name: "Product name", type: "multi-select", required: true },
+          { id: "siteName", name: "Site", type: "text", required: false },
+          { id: "region", name: "Country/State", type: "text", required: false },
           { id: "description", name: "Description", type: "text", required: true },
           { id: "startDate", name: "Start Date", type: "date", required: true },
           { id: "finishDate", name: "Finish Date", type: "date", required: true },
           { id: "status", name: "Status", type: "single select", required: true },
-          { id: "projectType", name: "Project Type", type: "single select", required: true }
+          { id: "projectType", name: "Project Type", type: "single select", required: true },
+          { id: "customerId", name: "Customer ID", type: "text", required: true },
+          { id: "office", name: "Office", type: "text", required: true },
         ]}
         onAddField={async (fieldId) => {
           const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
