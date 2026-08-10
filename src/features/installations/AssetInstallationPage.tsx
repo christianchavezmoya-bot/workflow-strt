@@ -464,6 +464,8 @@ const AssetInstallationPage = () => {
     }
   });
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
+  const assetsRefreshTimerRef = useRef<number | null>(null);
+  const assetsRefreshWhenVisibleRef = useRef(false);
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     try {
@@ -1660,22 +1662,61 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("api-server-reachable", handler);
   }, [refreshAssets]);
 
+  const scheduleRefreshAssets = useCallback(() => {
+    if (typeof document !== "undefined" && document.hidden) {
+      assetsRefreshWhenVisibleRef.current = true;
+      return;
+    }
+    if (isNativePlatform) {
+      void refreshAssets();
+      return;
+    }
+    if (assetsRefreshTimerRef.current !== null) {
+      window.clearTimeout(assetsRefreshTimerRef.current);
+    }
+    assetsRefreshTimerRef.current = window.setTimeout(() => {
+      assetsRefreshTimerRef.current = null;
+      void refreshAssets();
+    }, 400);
+  }, [isNativePlatform, refreshAssets]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (!document.hidden && assetsRefreshWhenVisibleRef.current) {
+        assetsRefreshWhenVisibleRef.current = false;
+        scheduleRefreshAssets();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [scheduleRefreshAssets]);
+
+  useEffect(() => () => {
+    if (assetsRefreshTimerRef.current !== null) {
+      window.clearTimeout(assetsRefreshTimerRef.current);
+    }
+  }, []);
+
   // Fix 9 — Real-time server push: re-fetch when SSE notifies this product/project changed
   useEffect(() => {
     const handler = (e: Event) => {
       const { productId, projectId } = (e as CustomEvent<{ productId?: string; projectId?: string }>).detail ?? {};
       const productIds = new Set(products.map((p) => p.id));
+      // Web + project scoped: unscoped broadcast SSE is usually another job — skip full refetch.
+      if (!isNativePlatform && selectedProjectId && !productId && !projectId) {
+        return;
+      }
       if (
         (productId && productIds.has(productId)) ||
         (projectId && projectId === selectedProjectId) ||
         (!productId && !projectId)
       ) {
-        void refreshAssets();
+        scheduleRefreshAssets();
       }
     };
     window.addEventListener("sse:assets:updated", handler as EventListener);
     return () => window.removeEventListener("sse:assets:updated", handler as EventListener);
-  }, [refreshAssets, products, selectedProjectId]);
+  }, [isNativePlatform, products, scheduleRefreshAssets, selectedProjectId]);
 
   useEffect(() => {
     const handler = (e: Event) => {

@@ -1,8 +1,22 @@
 # Web performance baseline
 
-**Date:** 2026-08-04  
+**Date:** 2026-08-10 (updated after Phase E)  
 **Environment:** Dev seed DB (`node scripts/seed-pm-smoke-data.mjs`), 152 assets + JO00991, Vite dev + API :4000  
 **Reference:** `docs/WEB_PERF_IMPLEMENTATION_PLAN.md`
+
+---
+
+## Phased rollout status (A–E)
+
+| Phase | Branch / PR | Shipped | Focus |
+|-------|-------------|---------|-------|
+| **A** | `cursor/web-perf-phase-a-cd21` (#136) | ✓ | Lazy heavy chunks, defer capture table build, coalesce dashboard refresh |
+| **B** | `cursor/web-perf-phase-b-cd21` (#137) | ✓ | Extract `AssetEditDialog`, memo `CaptureSpreadsheetDialog` |
+| **C** | `cursor/web-perf-phase-d-cd21` (#139) | ✓ | Lazy photo/docs dialogs, surgical web run cache invalidation, merge run updates on Assets |
+| **D** | `cursor/web-perf-phase-d-cd21` (#139) | ✓ | Runs-detail dedupe, deferred capture search, lazy doc preview |
+| **E** | `cursor/web-perf-phase-e-cd21` | pending | Lower project Autocomplete threshold, debounce web SSE asset refresh, skip unscoped broadcast when project scoped |
+
+**Next (optional):** PM smoke strict gates on field JO00991, backend dashboard slim queries (PR #9), further Assets route code-split.
 
 ---
 
