@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
   AddOutlined,
   ArrowDropDown,
@@ -86,7 +86,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import * as XLSX from "xlsx";
+import { ALL_PRINT_COLUMNS, type GroupByKey, type PrintRow } from "../../utils/assetListReportColumns";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -108,21 +108,14 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
-import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import type { WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
 import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 import ProjectJobSelect from "../../components/ProjectJobSelect";
-import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
-import { getWorkflowDisplayState } from "../../utils/workflowDisplayState";
-import {
-  generateAssetListReport,
-  ALL_PRINT_COLUMNS,
-  type PrintRow,
-  type GroupByKey,
-} from "../../utils/generateAssetListReport";
+import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
@@ -133,7 +126,6 @@ import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import { siteService } from "../../services/siteService";
 import type { Site } from "../../types/site";
-import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import AssetDocumentsDialog from "./AssetDocumentsDialog";
@@ -152,7 +144,6 @@ import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
-import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
 import { buildFullCaptureJobColumns } from "../../utils/captureAssetJobColumns";
 import { formatAssetTableDate, resolveAssetClosedAt } from "../../utils/assetTableDates";
 import {
@@ -180,6 +171,9 @@ import {
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
+
+const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
+const CaptureSpreadsheetDialog = lazy(() => import("./CaptureSpreadsheetDialog"));
 
 // Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
 
@@ -1845,12 +1839,16 @@ const AssetInstallationPage = () => {
     );
   }, [currentUser.fullName, currentUser.id, projects]);
 
-  // Build capture index once from the full asset set (not search-filtered).
-  // Filtering display rows is cheap; rebuilding from workflow runs is expensive
-  // and used to re-run on every search keystroke via displayAssets.
+  // Defer expensive capture index until capture-field search or native capture popup needs it.
+  const needsCaptureTableIndex = search.trim().length > 0 || capturePopupOpen;
+
   const captureTableBase = useMemo(
-    () => (libFeatures.length ? buildProjectCaptureTable(assets, runsMap, libFeatures) : null),
-    [assets, runsMap, libFeatures],
+    () => (
+      needsCaptureTableIndex && libFeatures.length
+        ? buildProjectCaptureTable(assets, runsMap, libFeatures)
+        : null
+    ),
+    [needsCaptureTableIndex, assets, runsMap, libFeatures],
   );
 
   const captureIndexByAsset = useMemo(() => {
@@ -2036,6 +2034,42 @@ const AssetInstallationPage = () => {
     return rows;
   }, [visibleAssets, autoFilters, autoSort, assetAccessors, runsMap]);
 
+  const displayStateByAssetId = useMemo(() => {
+    const map = new Map<string, WorkflowDisplayState>();
+    for (const asset of displayAssets) {
+      const runs = runsMap[asset.id] ?? [];
+      const projectWorkflowMode = projectMap.get(asset.projectId)?.workflowMode;
+      map.set(asset.id, getWorkflowDisplayState(asset, runs, {
+        paused: Boolean(pausedProgress[asset.id]),
+        inspectionMode: projectHasInspection(projectWorkflowMode),
+        hasRunnableWorkflowSource:
+          (assignmentsMap[asset.id]?.length ?? 0) > 0
+          || !!asset.productConfigId
+          || !!asset.workflowTemplateId
+          || !!asset.workflowSummary?.hasWorkflow,
+      }));
+    }
+    return map;
+  }, [displayAssets, runsMap, pausedProgress, assignmentsMap, projectMap]);
+
+  const resolveAssetDisplayState = useCallback((
+    asset: ProjectAsset,
+    projectWorkflowMode?: string | null,
+  ): WorkflowDisplayState => {
+    const cached = displayStateByAssetId.get(asset.id);
+    if (cached) return cached;
+    const runs = runsMap[asset.id] ?? [];
+    return getWorkflowDisplayState(asset, runs, {
+      paused: Boolean(pausedProgress[asset.id]),
+      inspectionMode: projectHasInspection(projectWorkflowMode),
+      hasRunnableWorkflowSource:
+        (assignmentsMap[asset.id]?.length ?? 0) > 0
+        || !!asset.productConfigId
+        || !!asset.workflowTemplateId
+        || !!asset.workflowSummary?.hasWorkflow,
+    });
+  }, [displayStateByAssetId, runsMap, pausedProgress, assignmentsMap]);
+
   const virtualizeOperationsTable =
     paginatedWebProject && displayAssets.length >= OPERATIONS_VIRTUALIZE_MIN_ROWS;
 
@@ -2066,44 +2100,6 @@ const AssetInstallationPage = () => {
       void assetWorkflowRunService.prioritizeRunHydration(projectId, assetIds);
     }
   }, [capturePopupOpen, isNativePlatform, mobileAssets]);
-
-  const captureExportTable = useMemo(() => {
-    if (!captureTableBase) {
-      return { columns: [], groups: [], rows: [] as ReturnType<typeof buildProjectCaptureTable>["rows"] };
-    }
-    const idSet = new Set(displayAssets.map((a) => a.id));
-    return {
-      columns: captureTableBase.columns,
-      groups: captureTableBase.groups,
-      rows: captureTableBase.rows.filter((row) => idSet.has(row.assetId)),
-    };
-  }, [captureTableBase, displayAssets]);
-
-  const captureExportGroups = useMemo(() => {
-    const groups = captureExportTable.groups;
-    if (groups.length === 0) return groups;
-
-    let hidden = new Set<string>();
-    try {
-      hidden = new Set<string>(JSON.parse(localStorage.getItem(CAPTURE_HIDDEN_GROUPS_KEY) || "[]") as string[]);
-    } catch {
-      hidden = new Set<string>();
-    }
-
-    const filtered = groups
-      .map((group) => ({
-        ...group,
-        columns: group.columns.filter((column) => !hidden.has(group.key) && !hidden.has(column.id)),
-      }))
-      .filter((group) => group.columns.length > 0);
-
-    return filtered.length > 0 ? filtered : groups;
-  }, [captureExportTable.groups]);
-
-  const captureExportRowMap = useMemo(
-    () => new Map(captureExportTable.rows.map((row) => [row.assetId, row])),
-    [captureExportTable.rows],
-  );
 
   // Print scope computation (needs userMap / projectMap / configMap / runsMap)
   const printRows = useMemo((): PrintRow[] => {
@@ -2201,16 +2197,6 @@ const AssetInstallationPage = () => {
       projectMap, userMap, assignmentsMap, runsMap, workflowConfigMap: wfConfigMap, timeZoneId: officeZone,
     }),
     [assignmentsMap, officeZone, projectMap, runsMap, userMap, wfConfigMap],
-  );
-
-  const captureComponentExportGroups = useMemo(
-    () => captureExportGroups.filter((group) => group.groupType !== "general"),
-    [captureExportGroups],
-  );
-
-  const captureSignOffExportGroups = useMemo(
-    () => captureExportGroups.filter((group) => group.groupType === "general"),
-    [captureExportGroups],
   );
 
   const assetExportColumnOptions = useMemo<AssetExportColumnOption[]>(() => {
@@ -3074,7 +3060,9 @@ const AssetInstallationPage = () => {
       customerService.getCustomers()
         .then(async (all) => {
           const rawLogo = all.find((c) => c.customerId === proj.customerId || c.id === proj.customerId)?.logo ?? null;
-          const resolved = rawLogo ? await resolveImageToDataUrl(rawLogo) : null;
+          const resolved = rawLogo
+            ? await import("../../utils/generateWorkflowReport").then(({ resolveImageToDataUrl }) => resolveImageToDataUrl(rawLogo))
+            : null;
           setRunHistoryCustomerLogo(resolved);
         })
         .catch(() => setRunHistoryCustomerLogo(null));
@@ -3131,17 +3119,7 @@ const AssetInstallationPage = () => {
   }
 
   function getOperationsStatusLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
-    const runs = runsMap[asset.id] ?? [];
-    const displayState = getWorkflowDisplayState(asset, runs, {
-      paused: Boolean(pausedProgress[asset.id]),
-      inspectionMode: projectHasInspection(projectWorkflowMode),
-      hasRunnableWorkflowSource:
-        (assignmentsMap[asset.id]?.length ?? 0) > 0
-        || !!asset.productConfigId
-        || !!asset.workflowTemplateId
-        || !!asset.workflowSummary?.hasWorkflow,
-    });
-    return displayState.status.label;
+    return resolveAssetDisplayState(asset, projectWorkflowMode).status.label;
   }
 
   function getAssetActionLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
@@ -3211,6 +3189,7 @@ const AssetInstallationPage = () => {
 
     if (assetExportIncludeBusinessLogo) {
       const rawBusinessLogo = await brandSettingsService.get().then((settings) => settings?.logoBase64 ?? null).catch(() => null);
+      const { resolveImageToDataUrl } = await import("../../utils/generateWorkflowReport");
       businessLogo = rawBusinessLogo ? await resolveImageToDataUrl(rawBusinessLogo) : null;
     }
 
@@ -3218,6 +3197,7 @@ const AssetInstallationPage = () => {
       const rawCustomerLogo = await customerService.getCustomers()
         .then((all) => all.find((customer) => customer.customerId === projectContext.customerId || customer.id === projectContext.customerId)?.logo ?? null)
         .catch(() => null);
+      const { resolveImageToDataUrl } = await import("../../utils/generateWorkflowReport");
       customerLogo = rawCustomerLogo ? await resolveImageToDataUrl(rawCustomerLogo) : null;
     }
 
@@ -3300,7 +3280,8 @@ ${words.slice(midpoint).join(" ")}`;
     return palettes[index % palettes.length];
   }
 
-  function buildAssetExportWorkbook(report: Awaited<ReturnType<typeof buildAssetExportPackage>>) {
+  async function buildAssetExportWorkbook(report: Awaited<ReturnType<typeof buildAssetExportPackage>>) {
+    const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
     const normalizedHeaders = report.columns.map((column) => normalizeExcelHeaderLabel(column.headerLabel ?? column.label));
     const noteLabels = report.columns.map((column) => column.noteLabel || "");
@@ -3517,7 +3498,8 @@ ${words.slice(midpoint).join(" ")}`;
           `${report.filenameBase}.json`,
         );
       } else if (assetExportFormat === "excel") {
-        const workbook = buildAssetExportWorkbook(report);
+        const workbook = await buildAssetExportWorkbook(report);
+        const XLSX = await import("xlsx");
         XLSX.writeFile(workbook, `${report.filenameBase}.xlsx`);
       } else {
         const pdfHtml = buildAssetExportHtml(report, { excel: false });
@@ -3552,6 +3534,8 @@ ${words.slice(midpoint).join(" ")}`;
     setReportExportOpen(true);
     try {
       const reportContext = await buildAssetReportContext(asset);
+      const { generateWorkflowReport } = await import("../../utils/generateWorkflowReport");
+      const { workflowReportBaseFileName } = await import("../../utils/workflowReportExport");
       const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run);
       const pdfBlob = await generateWorkflowReport({
         ...reportContext,
@@ -3618,8 +3602,12 @@ ${words.slice(midpoint).join(" ")}`;
         : Promise.resolve([] as LibFeature[]),
     ]);
     const [bizLogoResolved, custLogoResolved] = await Promise.all([
-      brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
-      rawCustomerLogo ? resolveImageToDataUrl(rawCustomerLogo) : Promise.resolve(null),
+      brandSettings.logoBase64
+        ? import("../../utils/generateWorkflowReport").then(({ resolveImageToDataUrl }) => resolveImageToDataUrl(brandSettings.logoBase64!))
+        : Promise.resolve(null),
+      rawCustomerLogo
+        ? import("../../utils/generateWorkflowReport").then(({ resolveImageToDataUrl }) => resolveImageToDataUrl(rawCustomerLogo))
+        : Promise.resolve(null),
     ]);
 
     const reportRun = isMobileNativePlatform()
@@ -3650,6 +3638,12 @@ ${words.slice(midpoint).join(" ")}`;
     setReportGenerating(asset.id);
     try {
       const reportContext = reportPreviewContext ?? await buildAssetReportContext(asset);
+      const { generateWorkflowReport } = await import("../../utils/generateWorkflowReport");
+      const {
+        buildWorkflowReportJson,
+        createWorkflowReportDocx,
+        workflowReportBaseFileName,
+      } = await import("../../utils/workflowReportExport");
       const fileBase = reportPreviewFileBase ?? workflowReportBaseFileName(reportContext.asset, reportContext.run);
 
       if (format === "pdf") {
@@ -4198,11 +4192,7 @@ ${words.slice(midpoint).join(" ")}`;
     const openImportDialog = () => setImportDialogAsset(asset);
 
     const runs = getSortedRuns(asset.id);
-    const ds = getWorkflowDisplayState(asset, runs, {
-      paused: summary.paused,
-      inspectionMode: inspectionEnabled,
-      hasRunnableWorkflowSource,
-    });
+    const ds = resolveAssetDisplayState(asset, projectWorkflowMode);
 
     if (!ds.action || ds.action.kind === "none") return null;
 
@@ -4283,15 +4273,7 @@ ${words.slice(midpoint).join(" ")}`;
     const baseColor = STATUS_COLORS[status] ?? "default";
     const runs = runsMap[asset.id] ?? [];
     const issueHealth = computeAssetHealth(asset, runs);
-    const rowDisplayState = getWorkflowDisplayState(asset, runs, {
-      paused: Boolean(pausedProgress[asset.id]),
-      inspectionMode: projectHasInspection(projectWorkflowMode),
-      hasRunnableWorkflowSource:
-        (assignmentsMap[asset.id]?.length ?? 0) > 0
-        || !!asset.productConfigId
-        || !!asset.workflowTemplateId
-        || !!asset.workflowSummary?.hasWorkflow,
-    });
+    const rowDisplayState = resolveAssetDisplayState(asset, projectWorkflowMode);
     const chipColor =
       status === "Cancelled" ? "error"
       : issueHealth === "red" ? "error"
@@ -4388,11 +4370,7 @@ ${words.slice(midpoint).join(" ")}`;
     // the shared display state. Stacked; resolved ones render dimmed so the
     // record stays visible (R1). Colors: yellow(camera/medium), grey(low),
     // red(blocking), orange(high-observation).
-    const dsWidgets = getWorkflowDisplayState(asset, runsMap[asset.id] ?? [], {
-      paused,
-      inspectionMode: false,
-      hasRunnableWorkflowSource: true,
-    }).feature.widgets;
+    const dsWidgets = resolveAssetDisplayState(asset, undefined).feature.widgets;
 
     const widgetColorHex: Record<string, string> = {
       yellow: "#d79b24", grey: "#8a9ba8", red: "#d32f2f", orange: "#e8833a",
@@ -5853,11 +5831,7 @@ ${words.slice(midpoint).join(" ")}`;
             const isExpanded = expandedAssetId === asset.id;
             const runs = runsMap[asset.id] ?? [];
             const healthColor = computeAssetHealth(asset, runs);
-            const cardDisplayState = getWorkflowDisplayState(asset, runs, {
-              paused: Boolean(pausedProgress[asset.id]),
-              inspectionMode: false,
-              hasRunnableWorkflowSource: true,
-            });
+            const cardDisplayState = resolveAssetDisplayState(asset, proj?.workflowMode);
             const cardWidgets = cardDisplayState.feature.widgets;
 
             // Signature check — same logic as web status column
@@ -7228,6 +7202,7 @@ ${words.slice(midpoint).join(" ")}`;
       </Dialog>
 
       {runnerOpen && runnerWorkflow && runnerAsset && runnerProduct && (
+        <Suspense fallback={null}>
         <WorkOrderRunner
           open={runnerOpen}
           onClose={() => {
@@ -7274,6 +7249,7 @@ ${words.slice(midpoint).join(" ")}`;
             }
           }}
         />
+        </Suspense>
       )}
 
       {photoUploadTarget && (
@@ -7661,6 +7637,7 @@ ${words.slice(midpoint).join(" ")}`;
               setPrintGenerating(true);
               try {
                 const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+                const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
                 await generateAssetListReport({
                   rows: printRows,
                   columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
@@ -7693,6 +7670,7 @@ ${words.slice(midpoint).join(" ")}`;
               setPrintGenerating(true);
               try {
                 const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+                const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
                 await generateAssetListReport({
                   rows: printRows,
                   columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
@@ -7846,6 +7824,7 @@ ${words.slice(midpoint).join(" ")}`;
       />
 
       {isNativePlatform && (
+        <Suspense fallback={null}>
         <CaptureSpreadsheetDialog
           open={capturePopupOpen}
           onClose={() => setCapturePopupOpen(false)}
@@ -7881,6 +7860,7 @@ ${words.slice(midpoint).join(" ")}`;
               : null;
           }}
         />
+        </Suspense>
       )}
 
       <Snackbar
