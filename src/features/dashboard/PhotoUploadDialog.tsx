@@ -40,48 +40,9 @@ import { isMobileNativePlatform } from "../../utils/platform";
 import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
+import type { MissingMediaFlag, MissingStep, PhotoUpdateNotification } from "./photoUploadTypes";
 
-// -- Types -------------------------------------------------------------------
-
-export type MissingStep = {
-  stepId: string;
-  stepOrder: number;
-  stepTitle: string;
-  stepDescription?: string;
-  inputId: string;
-  inputLabel: string;
-  inputType: "photo" | "video";
-  captured: number;
-};
-
-export type MissingMediaFlag = {
-  id: string;
-  runId: string;
-  assetId: string;
-  assetTag: string;
-  jobNumber: string;
-  workflowName: string;
-  technicianUserId: string;
-  technicianName: string;
-  completedAt: string;
-  missingSteps: MissingStep[];
-  totalExpected: number;
-  totalCaptured: number;
-  lastUpdatedAt?: string;
-  lastUpdatedBy?: string;
-};
-
-export type PhotoUpdateNotification = {
-  id: string;
-  runId: string;
-  assetTag: string;
-  jobNumber: string;
-  workflowName: string;
-  installerName: string;
-  updatedAt: string;
-  stillMissing: number;
-  wasComplete: boolean;
-};
+export type { MissingMediaFlag, MissingStep, PhotoUpdateNotification } from "./photoUploadTypes";
 
 type StoredStepCapture = {
   stepId: string;

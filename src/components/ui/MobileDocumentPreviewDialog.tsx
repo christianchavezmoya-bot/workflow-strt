@@ -22,13 +22,8 @@ import {
   Toolbar,
   Tooltip,
   Typography,
-  useMediaQuery,
-  useTheme,
 } from "@mui/material";
-import mammoth from "mammoth";
-import * as XLSX from "xlsx";
 import axios from "axios";
-import * as pdfjsLib from "pdfjs-dist";
 import { documentService, type DocumentRecord } from "../../services/documentService";
 import { isMobileNativePlatform } from "../../utils/platform";
 import {
@@ -37,10 +32,21 @@ import {
   getDocumentPreviewFileType,
 } from "../../utils/documentPreview";
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
-  "pdfjs-dist/build/pdf.worker.mjs",
-  import.meta.url,
-).toString();
+type PdfJsModule = typeof import("pdfjs-dist");
+let pdfjsModulePromise: Promise<PdfJsModule> | null = null;
+
+async function loadPdfJs(): Promise<PdfJsModule> {
+  if (!pdfjsModulePromise) {
+    pdfjsModulePromise = import("pdfjs-dist").then((pdfjsLib) => {
+      pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
+        "pdfjs-dist/build/pdf.worker.mjs",
+        import.meta.url,
+      ).toString();
+      return pdfjsLib;
+    });
+  }
+  return pdfjsModulePromise;
+}
 
 type PreviewMode = "pdf" | "image" | "video" | "html" | "iframe" | "unsupported";
 
@@ -210,6 +216,7 @@ function PdfCanvasPreview({
       onPageCount(0);
 
       try {
+        const pdfjsLib = await loadPdfJs();
         const loadingTask = pdfjsLib.getDocument({ data, disableFontFace: true });
         const pdf = await loadingTask.promise;
         if (cancelled) {
@@ -475,8 +482,6 @@ function HtmlDocumentPreview({
 }
 
 export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Props) {
-  const theme = useTheme();
-  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [htmlPreview, setHtmlPreview] = useState<string | null>(null);
@@ -565,6 +570,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           if (buffer.byteLength === 0) throw new Error("This file is empty.");
 
           if (fileType === "docx") {
+            const mammoth = await import("mammoth");
             const result = await mammoth.convertToHtml({ arrayBuffer: buffer });
             if (cancelled) return;
             const bodyHtml = isMobileNativePlatform()
@@ -588,6 +594,7 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
           }
 
           if (fileType === "xlsx" || fileType === "xls") {
+            const XLSX = await import("xlsx");
             const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
             if (!workbook.SheetNames.length) throw new Error("This spreadsheet has no worksheets.");
             const firstSheet = workbook.Sheets[workbook.SheetNames[0]];
@@ -629,13 +636,12 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
     <Dialog
       open={open}
       onClose={onClose}
-      fullScreen={isPhone}
-      maxWidth="xl"
+      maxWidth="lg"
       fullWidth
       PaperProps={{
         sx: {
-          height: isPhone ? "100%" : "92vh",
-          borderRadius: isPhone ? 0 : 4,
+          height: "88vh",
+          borderRadius: 4,
           overflow: "hidden",
           background: "linear-gradient(180deg, rgba(8,18,24,0.98), rgba(8,14,19,0.99))",
           border: "1px solid rgba(45,212,191,0.18)",

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
   AddOutlined,
   ArrowDropDown,
@@ -86,7 +86,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import * as XLSX from "xlsx";
+import { ALL_PRINT_COLUMNS, type GroupByKey, type PrintRow } from "../../utils/assetListReportColumns";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -100,7 +100,7 @@ import { productConfigService, type ProductConfig } from "../../services/product
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
-import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun } from "../../services/assetWorkflowRunService";
 import { RunHydrationPriority } from "../../services/runHydrationQueue";
 import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -108,21 +108,14 @@ import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
-import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import type { WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
 import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 import ProjectJobSelect from "../../components/ProjectJobSelect";
-import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
-import { getWorkflowDisplayState } from "../../utils/workflowDisplayState";
-import {
-  generateAssetListReport,
-  ALL_PRINT_COLUMNS,
-  type PrintRow,
-  type GroupByKey,
-} from "../../utils/generateAssetListReport";
+import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
@@ -133,16 +126,15 @@ import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import { siteService } from "../../services/siteService";
 import type { Site } from "../../types/site";
-import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
-import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import AssetInspectionDialog from "./AssetInspectionDialog";
-import PhotoUploadDialog, { type MissingMediaFlag } from "../dashboard/PhotoUploadDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import AssetAddDialog from "./AssetAddDialog";
+import AssetEditDialog from "./AssetEditDialog";
+import type { MissingMediaFlag } from "../dashboard/photoUploadTypes";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
@@ -152,7 +144,6 @@ import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { deriveOpenIssuesFromAsset } from "../../utils/issueDerivation";
 import type { Feature as LibFeature } from "../../types/feature";
 import type { FeatureDependency } from "../../types/featureDependency";
-import CaptureSpreadsheetDialog from "./CaptureSpreadsheetDialog";
 import { buildFullCaptureJobColumns } from "../../utils/captureAssetJobColumns";
 import { formatAssetTableDate, resolveAssetClosedAt } from "../../utils/assetTableDates";
 import {
@@ -180,6 +171,11 @@ import {
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
+
+const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
+const CaptureSpreadsheetDialog = lazy(() => import("./CaptureSpreadsheetDialog"));
+const PhotoUploadDialog = lazy(() => import("../dashboard/PhotoUploadDialog"));
+const AssetDocumentsDialog = lazy(() => import("./AssetDocumentsDialog"));
 
 // Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
 
@@ -387,38 +383,6 @@ function nextDraftConfigNumber(configs: WorkflowConfig[], productName: string) {
 }
 
 // ------------------------------------------------------------------
-// Asset form
-// ------------------------------------------------------------------
-
-interface AssetForm {
-  projectId: string;
-  configId: string;
-  assetTag: string;
-  assetName: string;
-  serialNumber: string;
-  assetModel: string;
-  manufacturer: string;
-  location: string;
-  assignedUserId: string;
-  notes: string;
-  featureValues: Record<string, string>;
-}
-
-const emptyForm = (): AssetForm => ({
-  projectId: "",
-  configId: "",
-  assetTag: "",
-  assetName: "",
-  serialNumber: "",
-  assetModel: "",
-  manufacturer: "",
-  location: "",
-  assignedUserId: "",
-  notes: "",
-  featureValues: {},
-});
-
-// ------------------------------------------------------------------
 // Report generator (type only â€" the async function lives inside the component)
 // ------------------------------------------------------------------
 
@@ -500,6 +464,8 @@ const AssetInstallationPage = () => {
     }
   });
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
+  const assetsRefreshTimerRef = useRef<number | null>(null);
+  const assetsRefreshWhenVisibleRef = useRef(false);
 
   const [selectedProjectId, setSelectedProjectId] = useState<string>(() => {
     try {
@@ -547,16 +513,8 @@ const AssetInstallationPage = () => {
   // Add dialog — form state lives in AssetAddDialog so keystrokes don't re-render this page.
   const [addOpen, setAddOpen] = useState(false);
 
-  // Edit dialog
-  const [editOpen, setEditOpen] = useState(false);
+  // Edit dialog — form state lives in AssetEditDialog so keystrokes don't re-render this page.
   const [editAsset, setEditAsset] = useState<ProjectAsset | null>(null);
-  const [editForm, setEditForm] = useState<AssetForm>(emptyForm());
-  const [editError, setEditError] = useState<string | null>(null);
-  const [editSaving, setEditSaving] = useState(false);
-  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-  const [cancelDialogMode, setCancelDialogMode] = useState<"cancel" | "undo">("cancel");
-  const [cancelReason, setCancelReason] = useState("");
-  const [cancellingAsset, setCancellingAsset] = useState(false);
 
   // Delete (single)
   const [deleteAsset, setDeleteAsset] = useState<ProjectAsset | null>(null);
@@ -1704,22 +1662,61 @@ const AssetInstallationPage = () => {
     return () => window.removeEventListener("api-server-reachable", handler);
   }, [refreshAssets]);
 
+  const scheduleRefreshAssets = useCallback(() => {
+    if (typeof document !== "undefined" && document.hidden) {
+      assetsRefreshWhenVisibleRef.current = true;
+      return;
+    }
+    if (isNativePlatform) {
+      void refreshAssets();
+      return;
+    }
+    if (assetsRefreshTimerRef.current !== null) {
+      window.clearTimeout(assetsRefreshTimerRef.current);
+    }
+    assetsRefreshTimerRef.current = window.setTimeout(() => {
+      assetsRefreshTimerRef.current = null;
+      void refreshAssets();
+    }, 400);
+  }, [isNativePlatform, refreshAssets]);
+
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (!document.hidden && assetsRefreshWhenVisibleRef.current) {
+        assetsRefreshWhenVisibleRef.current = false;
+        scheduleRefreshAssets();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [scheduleRefreshAssets]);
+
+  useEffect(() => () => {
+    if (assetsRefreshTimerRef.current !== null) {
+      window.clearTimeout(assetsRefreshTimerRef.current);
+    }
+  }, []);
+
   // Fix 9 — Real-time server push: re-fetch when SSE notifies this product/project changed
   useEffect(() => {
     const handler = (e: Event) => {
       const { productId, projectId } = (e as CustomEvent<{ productId?: string; projectId?: string }>).detail ?? {};
       const productIds = new Set(products.map((p) => p.id));
+      // Web + project scoped: unscoped broadcast SSE is usually another job — skip full refetch.
+      if (!isNativePlatform && selectedProjectId && !productId && !projectId) {
+        return;
+      }
       if (
         (productId && productIds.has(productId)) ||
         (projectId && projectId === selectedProjectId) ||
         (!productId && !projectId)
       ) {
-        void refreshAssets();
+        scheduleRefreshAssets();
       }
     };
     window.addEventListener("sse:assets:updated", handler as EventListener);
     return () => window.removeEventListener("sse:assets:updated", handler as EventListener);
-  }, [refreshAssets, products, selectedProjectId]);
+  }, [isNativePlatform, products, scheduleRefreshAssets, selectedProjectId]);
 
   useEffect(() => {
     const handler = (e: Event) => {
@@ -1782,24 +1779,19 @@ const AssetInstallationPage = () => {
         }
         return next;
       });
+      if (assetId && mergeById) {
+        const primaryRun = runs[0];
+        if (primaryRun) {
+          const derivedStatus = deriveOfflineAssetStatusFromRun(primaryRun);
+          setAssets((prev) => prev.map((a) => (
+            a.id === assetId && a.status !== derivedStatus ? { ...a, status: derivedStatus } : a
+          )));
+        }
+      }
     };
     window.addEventListener("workflow-runs-cache-updated", handler as EventListener);
     return () => window.removeEventListener("workflow-runs-cache-updated", handler as EventListener);
   }, []);
-
-  // Web: signature submit and run completion invalidate caches but do not emit
-  // workflow-runs-cache-updated (native-only). Refresh assets + runs so signature
-  // chips and action buttons stay current after signing in the runner.
-  useEffect(() => {
-    if (isNativePlatform) return;
-    const handler = () => { void refreshAssets(); };
-    window.addEventListener("notifications:run-state-changed", handler);
-    window.addEventListener("repo:runs:updated", handler);
-    return () => {
-      window.removeEventListener("notifications:run-state-changed", handler);
-      window.removeEventListener("repo:runs:updated", handler);
-    };
-  }, [isNativePlatform, refreshAssets]);
 
   // Fix 6 — Background poll every 90s while page is visible (mobile only)
   useEffect(() => {
@@ -1845,12 +1837,16 @@ const AssetInstallationPage = () => {
     );
   }, [currentUser.fullName, currentUser.id, projects]);
 
-  // Build capture index once from the full asset set (not search-filtered).
-  // Filtering display rows is cheap; rebuilding from workflow runs is expensive
-  // and used to re-run on every search keystroke via displayAssets.
+  // Defer expensive capture index until capture-field search or native capture popup needs it.
+  const needsCaptureTableIndex = search.trim().length > 0 || capturePopupOpen;
+
   const captureTableBase = useMemo(
-    () => (libFeatures.length ? buildProjectCaptureTable(assets, runsMap, libFeatures) : null),
-    [assets, runsMap, libFeatures],
+    () => (
+      needsCaptureTableIndex && libFeatures.length
+        ? buildProjectCaptureTable(assets, runsMap, libFeatures)
+        : null
+    ),
+    [needsCaptureTableIndex, assets, runsMap, libFeatures],
   );
 
   const captureIndexByAsset = useMemo(() => {
@@ -2036,6 +2032,42 @@ const AssetInstallationPage = () => {
     return rows;
   }, [visibleAssets, autoFilters, autoSort, assetAccessors, runsMap]);
 
+  const displayStateByAssetId = useMemo(() => {
+    const map = new Map<string, WorkflowDisplayState>();
+    for (const asset of displayAssets) {
+      const runs = runsMap[asset.id] ?? [];
+      const projectWorkflowMode = projectMap.get(asset.projectId)?.workflowMode;
+      map.set(asset.id, getWorkflowDisplayState(asset, runs, {
+        paused: Boolean(pausedProgress[asset.id]),
+        inspectionMode: projectHasInspection(projectWorkflowMode),
+        hasRunnableWorkflowSource:
+          (assignmentsMap[asset.id]?.length ?? 0) > 0
+          || !!asset.productConfigId
+          || !!asset.workflowTemplateId
+          || !!asset.workflowSummary?.hasWorkflow,
+      }));
+    }
+    return map;
+  }, [displayAssets, runsMap, pausedProgress, assignmentsMap, projectMap]);
+
+  const resolveAssetDisplayState = useCallback((
+    asset: ProjectAsset,
+    projectWorkflowMode?: string | null,
+  ): WorkflowDisplayState => {
+    const cached = displayStateByAssetId.get(asset.id);
+    if (cached) return cached;
+    const runs = runsMap[asset.id] ?? [];
+    return getWorkflowDisplayState(asset, runs, {
+      paused: Boolean(pausedProgress[asset.id]),
+      inspectionMode: projectHasInspection(projectWorkflowMode),
+      hasRunnableWorkflowSource:
+        (assignmentsMap[asset.id]?.length ?? 0) > 0
+        || !!asset.productConfigId
+        || !!asset.workflowTemplateId
+        || !!asset.workflowSummary?.hasWorkflow,
+    });
+  }, [displayStateByAssetId, runsMap, pausedProgress, assignmentsMap]);
+
   const virtualizeOperationsTable =
     paginatedWebProject && displayAssets.length >= OPERATIONS_VIRTUALIZE_MIN_ROWS;
 
@@ -2066,44 +2098,6 @@ const AssetInstallationPage = () => {
       void assetWorkflowRunService.prioritizeRunHydration(projectId, assetIds);
     }
   }, [capturePopupOpen, isNativePlatform, mobileAssets]);
-
-  const captureExportTable = useMemo(() => {
-    if (!captureTableBase) {
-      return { columns: [], groups: [], rows: [] as ReturnType<typeof buildProjectCaptureTable>["rows"] };
-    }
-    const idSet = new Set(displayAssets.map((a) => a.id));
-    return {
-      columns: captureTableBase.columns,
-      groups: captureTableBase.groups,
-      rows: captureTableBase.rows.filter((row) => idSet.has(row.assetId)),
-    };
-  }, [captureTableBase, displayAssets]);
-
-  const captureExportGroups = useMemo(() => {
-    const groups = captureExportTable.groups;
-    if (groups.length === 0) return groups;
-
-    let hidden = new Set<string>();
-    try {
-      hidden = new Set<string>(JSON.parse(localStorage.getItem(CAPTURE_HIDDEN_GROUPS_KEY) || "[]") as string[]);
-    } catch {
-      hidden = new Set<string>();
-    }
-
-    const filtered = groups
-      .map((group) => ({
-        ...group,
-        columns: group.columns.filter((column) => !hidden.has(group.key) && !hidden.has(column.id)),
-      }))
-      .filter((group) => group.columns.length > 0);
-
-    return filtered.length > 0 ? filtered : groups;
-  }, [captureExportTable.groups]);
-
-  const captureExportRowMap = useMemo(
-    () => new Map(captureExportTable.rows.map((row) => [row.assetId, row])),
-    [captureExportTable.rows],
-  );
 
   // Print scope computation (needs userMap / projectMap / configMap / runsMap)
   const printRows = useMemo((): PrintRow[] => {
@@ -2203,16 +2197,6 @@ const AssetInstallationPage = () => {
     [assignmentsMap, officeZone, projectMap, runsMap, userMap, wfConfigMap],
   );
 
-  const captureComponentExportGroups = useMemo(
-    () => captureExportGroups.filter((group) => group.groupType !== "general"),
-    [captureExportGroups],
-  );
-
-  const captureSignOffExportGroups = useMemo(
-    () => captureExportGroups.filter((group) => group.groupType === "general"),
-    [captureExportGroups],
-  );
-
   const assetExportColumnOptions = useMemo<AssetExportColumnOption[]>(() => {
     const exportColumns = visibleColumns.filter((column) => column.id !== "assetName" && column.id !== "status");
     return [
@@ -2304,120 +2288,12 @@ const AssetInstallationPage = () => {
   }
 
   function openEditAsset(asset: ProjectAsset) {
-    let fv: Record<string, string> = {};
-    try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
     setEditAsset(asset);
-    setEditForm({
-      projectId: asset.projectId,
-      configId: asset.productConfigId ?? "",
-      assetTag: asset.assetTag,
-      assetName: asset.assetName ?? "",
-      serialNumber: asset.serialNumber ?? "",
-      assetModel: asset.assetModel ?? "",
-      manufacturer: asset.manufacturer ?? "",
-      location: asset.location || getSiteLocation(projectMap.get(asset.projectId)?.siteId),
-      assignedUserId: asset.assignedUserId ?? "",
-      notes: asset.notes ?? "",
-      featureValues: fv,
-    });
-    setEditError(null);
-    setEditOpen(true);
   }
 
-  async function saveEditAsset() {
-    if (!editAsset) return;
-    const tag = editForm.assetTag.trim();
-    if (!tag) { setEditError("Asset tag is required."); return; }
-    setEditSaving(true);
-    setEditError(null);
-    try {
-      const updated = await projectAssetService.update(editAsset.id, {
-        assetTag: tag,
-        assetName: editForm.assetName.trim() || undefined,
-        serialNumber: editForm.serialNumber.trim() || undefined,
-        assetModel: editForm.assetModel.trim() || undefined,
-        manufacturer: editForm.manufacturer.trim() || undefined,
-        location: editForm.location.trim() || undefined,
-        assignedUserId: editForm.assignedUserId || undefined,
-        notes: editForm.notes.trim() || undefined,
-        productConfigId: editForm.configId,
-        featureValuesJson: Object.keys(editForm.featureValues).length
-          ? JSON.stringify(editForm.featureValues)
-          : undefined,
-      });
-      setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      setEditAsset(updated);
-      setEditForm((prev) => ({ ...prev, notes: updated.notes ?? prev.notes }));
-      setEditOpen(false);
-      setEditAsset(null);
-    } catch {
-      setEditError("Failed to update asset.");
-    } finally {
-      setEditSaving(false);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Cancel asset
-  //
-  // Cancel is a STATUS, not a soft-delete: the asset stays visible on this page
-  // (chip + filter) instead of disappearing the way a deleted asset does. It
-  // rides the existing Admin/PM update endpoint, so no new backend route.
-  //
-  // No run surgery is needed. IsCurrentWorkspaceAsset drops a cancelled asset
-  // before it inspects the run, and every active-asset query already excludes
-  // "Cancelled" - so an in-flight run simply stops counting as current and the
-  // captured work is preserved as an audit record.
-  // ------------------------------------------------------------------
-
-  async function confirmCancelAsset() {
-    if (!editAsset) return;
-    const reason = cancelReason.trim();
-    if (!reason) return;
-    setCancellingAsset(true);
-    setEditError(null);
-    try {
-      const stamp = new Date().toISOString().slice(0, 10);
-      const existingNotes = (editForm.notes ?? "").trim();
-      const cancelNote = `[Cancelled ${stamp}] ${reason}`;
-      const updated = await projectAssetService.update(editAsset.id, {
-        status: "Cancelled",
-        notes: existingNotes ? `${existingNotes}\n${cancelNote}` : cancelNote,
-      });
-      setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      setEditAsset(updated);
-      setEditForm((prev) => ({ ...prev, notes: updated.notes ?? prev.notes }));
-      setCancelConfirmOpen(false);
-      setCancelReason("");
-    } catch {
-      setEditError("Failed to cancel asset.");
-    } finally {
-      setCancellingAsset(false);
-    }
-  }
-
-  async function confirmUndoCancelAsset() {
-    if (!editAsset) return;
-    setCancellingAsset(true);
-    setEditError(null);
-    try {
-      const stamp = new Date().toISOString().slice(0, 10);
-      const existingNotes = (editForm.notes ?? "").trim();
-      const undoNote = `[Cancellation removed ${stamp}] Restored to Not Started`;
-      const updated = await projectAssetService.update(editAsset.id, {
-        status: "NotStarted",
-        notes: existingNotes ? `${existingNotes}\n${undoNote}` : undoNote,
-      });
-      setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      setEditAsset(updated);
-      setEditForm((prev) => ({ ...prev, notes: updated.notes ?? prev.notes }));
-      setCancelConfirmOpen(false);
-      setCancelReason("");
-    } catch {
-      setEditError("Failed to restore cancelled asset.");
-    } finally {
-      setCancellingAsset(false);
-    }
+  function handleEditAssetUpdated(updated: ProjectAsset) {
+    setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    setEditAsset((cur) => (cur?.id === updated.id ? updated : cur));
   }
 
   // ------------------------------------------------------------------
@@ -3074,7 +2950,9 @@ const AssetInstallationPage = () => {
       customerService.getCustomers()
         .then(async (all) => {
           const rawLogo = all.find((c) => c.customerId === proj.customerId || c.id === proj.customerId)?.logo ?? null;
-          const resolved = rawLogo ? await resolveImageToDataUrl(rawLogo) : null;
+          const resolved = rawLogo
+            ? await import("../../utils/generateWorkflowReport").then(({ resolveImageToDataUrl }) => resolveImageToDataUrl(rawLogo))
+            : null;
           setRunHistoryCustomerLogo(resolved);
         })
         .catch(() => setRunHistoryCustomerLogo(null));
@@ -3131,17 +3009,7 @@ const AssetInstallationPage = () => {
   }
 
   function getOperationsStatusLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
-    const runs = runsMap[asset.id] ?? [];
-    const displayState = getWorkflowDisplayState(asset, runs, {
-      paused: Boolean(pausedProgress[asset.id]),
-      inspectionMode: projectHasInspection(projectWorkflowMode),
-      hasRunnableWorkflowSource:
-        (assignmentsMap[asset.id]?.length ?? 0) > 0
-        || !!asset.productConfigId
-        || !!asset.workflowTemplateId
-        || !!asset.workflowSummary?.hasWorkflow,
-    });
-    return displayState.status.label;
+    return resolveAssetDisplayState(asset, projectWorkflowMode).status.label;
   }
 
   function getAssetActionLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
@@ -3211,6 +3079,7 @@ const AssetInstallationPage = () => {
 
     if (assetExportIncludeBusinessLogo) {
       const rawBusinessLogo = await brandSettingsService.get().then((settings) => settings?.logoBase64 ?? null).catch(() => null);
+      const { resolveImageToDataUrl } = await import("../../utils/generateWorkflowReport");
       businessLogo = rawBusinessLogo ? await resolveImageToDataUrl(rawBusinessLogo) : null;
     }
 
@@ -3218,6 +3087,7 @@ const AssetInstallationPage = () => {
       const rawCustomerLogo = await customerService.getCustomers()
         .then((all) => all.find((customer) => customer.customerId === projectContext.customerId || customer.id === projectContext.customerId)?.logo ?? null)
         .catch(() => null);
+      const { resolveImageToDataUrl } = await import("../../utils/generateWorkflowReport");
       customerLogo = rawCustomerLogo ? await resolveImageToDataUrl(rawCustomerLogo) : null;
     }
 
@@ -3300,7 +3170,8 @@ ${words.slice(midpoint).join(" ")}`;
     return palettes[index % palettes.length];
   }
 
-  function buildAssetExportWorkbook(report: Awaited<ReturnType<typeof buildAssetExportPackage>>) {
+  async function buildAssetExportWorkbook(report: Awaited<ReturnType<typeof buildAssetExportPackage>>) {
+    const XLSX = await import("xlsx");
     const workbook = XLSX.utils.book_new();
     const normalizedHeaders = report.columns.map((column) => normalizeExcelHeaderLabel(column.headerLabel ?? column.label));
     const noteLabels = report.columns.map((column) => column.noteLabel || "");
@@ -3517,7 +3388,8 @@ ${words.slice(midpoint).join(" ")}`;
           `${report.filenameBase}.json`,
         );
       } else if (assetExportFormat === "excel") {
-        const workbook = buildAssetExportWorkbook(report);
+        const workbook = await buildAssetExportWorkbook(report);
+        const XLSX = await import("xlsx");
         XLSX.writeFile(workbook, `${report.filenameBase}.xlsx`);
       } else {
         const pdfHtml = buildAssetExportHtml(report, { excel: false });
@@ -3552,6 +3424,8 @@ ${words.slice(midpoint).join(" ")}`;
     setReportExportOpen(true);
     try {
       const reportContext = await buildAssetReportContext(asset);
+      const { generateWorkflowReport } = await import("../../utils/generateWorkflowReport");
+      const { workflowReportBaseFileName } = await import("../../utils/workflowReportExport");
       const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run);
       const pdfBlob = await generateWorkflowReport({
         ...reportContext,
@@ -3618,8 +3492,12 @@ ${words.slice(midpoint).join(" ")}`;
         : Promise.resolve([] as LibFeature[]),
     ]);
     const [bizLogoResolved, custLogoResolved] = await Promise.all([
-      brandSettings.logoBase64 ? resolveImageToDataUrl(brandSettings.logoBase64) : Promise.resolve(null),
-      rawCustomerLogo ? resolveImageToDataUrl(rawCustomerLogo) : Promise.resolve(null),
+      brandSettings.logoBase64
+        ? import("../../utils/generateWorkflowReport").then(({ resolveImageToDataUrl }) => resolveImageToDataUrl(brandSettings.logoBase64!))
+        : Promise.resolve(null),
+      rawCustomerLogo
+        ? import("../../utils/generateWorkflowReport").then(({ resolveImageToDataUrl }) => resolveImageToDataUrl(rawCustomerLogo))
+        : Promise.resolve(null),
     ]);
 
     const reportRun = isMobileNativePlatform()
@@ -3650,6 +3528,12 @@ ${words.slice(midpoint).join(" ")}`;
     setReportGenerating(asset.id);
     try {
       const reportContext = reportPreviewContext ?? await buildAssetReportContext(asset);
+      const { generateWorkflowReport } = await import("../../utils/generateWorkflowReport");
+      const {
+        buildWorkflowReportJson,
+        createWorkflowReportDocx,
+        workflowReportBaseFileName,
+      } = await import("../../utils/workflowReportExport");
       const fileBase = reportPreviewFileBase ?? workflowReportBaseFileName(reportContext.asset, reportContext.run);
 
       if (format === "pdf") {
@@ -4198,11 +4082,7 @@ ${words.slice(midpoint).join(" ")}`;
     const openImportDialog = () => setImportDialogAsset(asset);
 
     const runs = getSortedRuns(asset.id);
-    const ds = getWorkflowDisplayState(asset, runs, {
-      paused: summary.paused,
-      inspectionMode: inspectionEnabled,
-      hasRunnableWorkflowSource,
-    });
+    const ds = resolveAssetDisplayState(asset, projectWorkflowMode);
 
     if (!ds.action || ds.action.kind === "none") return null;
 
@@ -4283,15 +4163,7 @@ ${words.slice(midpoint).join(" ")}`;
     const baseColor = STATUS_COLORS[status] ?? "default";
     const runs = runsMap[asset.id] ?? [];
     const issueHealth = computeAssetHealth(asset, runs);
-    const rowDisplayState = getWorkflowDisplayState(asset, runs, {
-      paused: Boolean(pausedProgress[asset.id]),
-      inspectionMode: projectHasInspection(projectWorkflowMode),
-      hasRunnableWorkflowSource:
-        (assignmentsMap[asset.id]?.length ?? 0) > 0
-        || !!asset.productConfigId
-        || !!asset.workflowTemplateId
-        || !!asset.workflowSummary?.hasWorkflow,
-    });
+    const rowDisplayState = resolveAssetDisplayState(asset, projectWorkflowMode);
     const chipColor =
       status === "Cancelled" ? "error"
       : issueHealth === "red" ? "error"
@@ -4388,11 +4260,7 @@ ${words.slice(midpoint).join(" ")}`;
     // the shared display state. Stacked; resolved ones render dimmed so the
     // record stays visible (R1). Colors: yellow(camera/medium), grey(low),
     // red(blocking), orange(high-observation).
-    const dsWidgets = getWorkflowDisplayState(asset, runsMap[asset.id] ?? [], {
-      paused,
-      inspectionMode: false,
-      hasRunnableWorkflowSource: true,
-    }).feature.widgets;
+    const dsWidgets = resolveAssetDisplayState(asset, undefined).feature.widgets;
 
     const widgetColorHex: Record<string, string> = {
       yellow: "#d79b24", grey: "#8a9ba8", red: "#d32f2f", orange: "#e8833a",
@@ -5053,6 +4921,43 @@ ${words.slice(midpoint).join(" ")}`;
     );
   }
 
+  const getProjectById = useCallback(
+    (projectId: string) => projectMap.get(projectId),
+    [projectMap],
+  );
+
+  const captureOnRunUpdated = useCallback((run: AssetWorkflowRun) => {
+    startTransition(() => {
+      setRunsMap((prev) => {
+        const list = prev[run.assetId] ?? [];
+        const next = list.some((r) => r.id === run.id)
+          ? list.map((r) => (r.id === run.id ? run : r))
+          : [...list, run];
+        return { ...prev, [run.assetId]: next };
+      });
+    });
+  }, []);
+
+  const captureRenderStatusRef = useRef(captureTableStatusChip);
+  captureRenderStatusRef.current = captureTableStatusChip;
+  const captureRenderActionsRef = useRef(actionButton);
+  captureRenderActionsRef.current = actionButton;
+
+  const captureRenderStatus = useCallback(
+    (asset: ProjectAsset) => captureRenderStatusRef.current(asset, projectMap.get(asset.projectId)?.workflowMode),
+    [projectMap],
+  );
+
+  const captureRenderActions = useCallback(
+    (asset: ProjectAsset) => {
+      const proj = projectMap.get(asset.projectId);
+      return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
+        ? captureRenderActionsRef.current(asset, proj?.workflowMode)
+        : null;
+    },
+    [projectMap, canRunAssetWorkflow],
+  );
+
   // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
@@ -5075,8 +4980,6 @@ ${words.slice(midpoint).join(" ")}`;
     }
     return { productive, downtime, downtimeEvents };
   }, [visibleAssets, runsMap]);
-
-  const isEditAssetCancelled = editAsset?.status === "Cancelled";
 
   return (
     <Stack spacing={3}>
@@ -5853,11 +5756,7 @@ ${words.slice(midpoint).join(" ")}`;
             const isExpanded = expandedAssetId === asset.id;
             const runs = runsMap[asset.id] ?? [];
             const healthColor = computeAssetHealth(asset, runs);
-            const cardDisplayState = getWorkflowDisplayState(asset, runs, {
-              paused: Boolean(pausedProgress[asset.id]),
-              inspectionMode: false,
-              hasRunnableWorkflowSource: true,
-            });
+            const cardDisplayState = resolveAssetDisplayState(asset, proj?.workflowMode);
             const cardWidgets = cardDisplayState.feature.widgets;
 
             // Signature check — same logic as web status column
@@ -6273,137 +6172,18 @@ ${words.slice(midpoint).join(" ")}`;
         onSaved={refreshAssets}
       />
 
-      {/* Edit asset dialog */}
-      <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Asset - {editAsset?.assetTag}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {isEditAssetCancelled && (
-              <Alert severity="warning" sx={{ fontSize: 12 }}>
-                This asset is cancelled and locked. Its details and workflow can no longer be
-                edited. The reason is recorded in Notes.
-              </Alert>
-            )}
-            {editAsset && (() => {
-              const proj = projectMap.get(editAsset.projectId);
-              if (!proj?.siteName) return null;
-              return (
-                <Stack direction="row" spacing={1.5}>
-                  <TextField
-                    label="Project #" size="small" fullWidth
-                    value={proj.jobNumber}
-                    InputProps={{ readOnly: true }}
-                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
-                  />
-                  <TextField
-                    label="Site Name" size="small" fullWidth
-                    value={proj.siteName}
-                    InputProps={{ readOnly: true }}
-                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
-                  />
-                </Stack>
-              );
-            })()}
-
-            <TextField label="Asset Tag *" size="small" fullWidth required
-              value={editForm.assetTag}
-              onChange={(e) => setEditForm((p) => ({ ...p, assetTag: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Asset Name" size="small" fullWidth
-              value={editForm.assetName}
-              onChange={(e) => setEditForm((p) => ({ ...p, assetName: e.target.value }))}
-              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
-              InputLabelProps={{ shrink: true }}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Configuration Type</InputLabel>
-              <Select
-                label="Configuration Type"
-                value={editForm.configId}
-                onChange={(e) => setEditForm((p) => ({ ...p, configId: e.target.value }))}
-                disabled={Boolean(isEditAssetCancelled)}
-              >
-                <MenuItem value="">(None)</MenuItem>
-                {latestPublishedWfConfigs.map((wc) => (
-                  <MenuItem key={wc.id} value={wc.id}>
-                    {wc.configType ? `${wc.configType} - ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField label="Serial Number" size="small" fullWidth
-              value={editForm.serialNumber}
-              onChange={(e) => setEditForm((p) => ({ ...p, serialNumber: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Asset Model" size="small" fullWidth
-              value={editForm.assetModel}
-              onChange={(e) => setEditForm((p) => ({ ...p, assetModel: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Manufacturer" size="small" fullWidth
-              value={editForm.manufacturer}
-              onChange={(e) => setEditForm((p) => ({ ...p, manufacturer: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Location" size="small" fullWidth
-              value={editForm.location}
-              onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))}
-              placeholder="i.e LV workshop, U/G"
-              InputLabelProps={{ shrink: true }}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Assigned User</InputLabel>
-              <Select label="Assigned User" value={editForm.assignedUserId}
-                onChange={(e) => setEditForm((p) => ({ ...p, assignedUserId: e.target.value }))}
-                disabled={Boolean(isEditAssetCancelled)}>
-                <MenuItem value="">(Unassigned)</MenuItem>
-                {users.filter((u) => u.isActive).map((u) => (
-                  <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1}
-              alignItems={{ xs: "stretch", sm: "center" }}
-              justifyContent="space-between"
-            >
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Typography variant="body2" color="text.secondary">Asset status</Typography>
-                <Chip
-                  size="small"
-                  label={STATUS_LABELS[(editAsset?.status as ProjectAssetStatus) ?? "NotStarted"]}
-                  color={STATUS_COLORS[(editAsset?.status as ProjectAssetStatus) ?? "NotStarted"]}
-                />
-              </Stack>
-              {canEditAssetStatus && (
-                <Button
-                  color={isEditAssetCancelled ? "warning" : "error"}
-                  onClick={() => {
-                    setCancelDialogMode(isEditAssetCancelled ? "undo" : "cancel");
-                    setCancelReason("");
-                    setCancelConfirmOpen(true);
-                  }}
-                  disabled={editSaving}
-                >
-                  {isEditAssetCancelled ? "Undo cancel asset" : "Cancel asset"}
-                </Button>
-              )}
-            </Stack>
-            <TextField label="Notes" size="small" fullWidth multiline rows={2}
-              value={editForm.notes}
-              onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            {editError && <Alert severity="error" sx={{ fontSize: 12 }}>{editError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Close</Button>
-          <Button variant="contained" onClick={saveEditAsset}
-            disabled={editSaving || Boolean(isEditAssetCancelled)}
-            startIcon={editSaving ? <CircularProgress size={14} /> : undefined}>
-            {editSaving ? "Saving..." : "Save changes"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Edit asset dialog — isolated so typing doesn't re-render the operations table */}
+      <AssetEditDialog
+        open={Boolean(editAsset)}
+        asset={editAsset}
+        users={users}
+        latestPublishedWfConfigs={latestPublishedWfConfigs}
+        getProject={getProjectById}
+        getSiteLocation={getSiteLocation}
+        canEditAssetStatus={canEditAssetStatus}
+        onClose={() => setEditAsset(null)}
+        onUpdated={handleEditAssetUpdated}
+      />
 
       {/* Column sort / filter menu */}
       <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
@@ -6439,55 +6219,6 @@ ${words.slice(midpoint).join(" ")}`;
       </Menu>
 
       {/* Archive confirmation */}
-      {/* Cancel / undo cancel asset */}
-      <Dialog open={cancelConfirmOpen} onClose={() => !cancellingAsset && setCancelConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{cancelDialogMode === "undo" ? "Undo asset cancellation?" : "Cancel this asset?"}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {cancelDialogMode === "undo" ? (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                {editAsset?.assetTag} will be restored to <strong>Not Started</strong>. The asset stays
-                visible in active lists and can be worked again.
-              </Alert>
-            ) : (
-              <>
-                <Alert severity="warning" sx={{ fontSize: 12 }}>
-                  {editAsset?.assetTag} will be marked <strong>Cancelled</strong> and locked from further
-                  editing. It stays visible on this page and is filterable by the Cancelled status.
-                  Any work already captured is kept as a record.
-                </Alert>
-                <TextField
-                  label="Reason for cancelling *"
-                  size="small"
-                  fullWidth
-                  required
-                  multiline
-                  rows={3}
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  placeholder="e.g. Equipment removed from site; job descoped by customer"
-                  helperText="Recorded in the asset's Notes."
-                />
-              </>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCancelConfirmOpen(false)} disabled={cancellingAsset}>Back</Button>
-          <Button
-            variant="contained"
-            color={cancelDialogMode === "undo" ? "warning" : "error"}
-            onClick={cancelDialogMode === "undo" ? confirmUndoCancelAsset : confirmCancelAsset}
-            disabled={cancellingAsset || (cancelDialogMode === "cancel" && !cancelReason.trim())}
-            startIcon={cancellingAsset ? <CircularProgress size={14} /> : undefined}
-          >
-            {cancellingAsset
-              ? (cancelDialogMode === "undo" ? "Restoring..." : "Cancelling...")
-              : (cancelDialogMode === "undo" ? "Undo cancel asset" : "Cancel asset")}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog open={Boolean(deleteAsset)} onClose={() => !deletingAsset && setDeleteAsset(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Archive Asset?</DialogTitle>
         <DialogContent>
@@ -7074,6 +6805,7 @@ ${words.slice(midpoint).join(" ")}`;
 
       {/* New run history dialog â€" View/Edit button â†' history, re-run, PDF report */}
       {docsOpen && docsAsset && (
+        <Suspense fallback={null}>
         <AssetDocumentsDialog
           open={docsOpen}
           onClose={() => setDocsOpen(false)}
@@ -7083,6 +6815,7 @@ ${words.slice(midpoint).join(" ")}`;
           onDocsChanged={handleDocsChanged}
           products={products}
         />
+        </Suspense>
       )}
 
       {runHistoryOpen && runHistoryAsset && (
@@ -7228,6 +6961,7 @@ ${words.slice(midpoint).join(" ")}`;
       </Dialog>
 
       {runnerOpen && runnerWorkflow && runnerAsset && runnerProduct && (
+        <Suspense fallback={null}>
         <WorkOrderRunner
           open={runnerOpen}
           onClose={() => {
@@ -7274,9 +7008,11 @@ ${words.slice(midpoint).join(" ")}`;
             }
           }}
         />
+        </Suspense>
       )}
 
       {photoUploadTarget && (
+        <Suspense fallback={null}>
         <PhotoUploadDialog
           open={Boolean(photoUploadTarget)}
           flag={photoUploadTarget}
@@ -7292,6 +7028,7 @@ ${words.slice(midpoint).join(" ")}`;
             ]);
           }}
         />
+        </Suspense>
       )}
 
       {/* Issue detail dialog (comments / close) */}
@@ -7661,6 +7398,7 @@ ${words.slice(midpoint).join(" ")}`;
               setPrintGenerating(true);
               try {
                 const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+                const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
                 await generateAssetListReport({
                   rows: printRows,
                   columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
@@ -7693,6 +7431,7 @@ ${words.slice(midpoint).join(" ")}`;
               setPrintGenerating(true);
               try {
                 const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+                const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
                 await generateAssetListReport({
                   rows: printRows,
                   columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
@@ -7846,6 +7585,7 @@ ${words.slice(midpoint).join(" ")}`;
       />
 
       {isNativePlatform && (
+        <Suspense fallback={null}>
         <CaptureSpreadsheetDialog
           open={capturePopupOpen}
           onClose={() => setCapturePopupOpen(false)}
@@ -7861,26 +7601,12 @@ ${words.slice(midpoint).join(" ")}`;
           activeCountForAsset={getActiveCountForAsset}
           readOnly
           canEditCapture={false}
-          onRunUpdated={(run) => {
-            startTransition(() => {
-              setRunsMap((prev) => {
-                const list = prev[run.assetId] ?? [];
-                const next = list.some((r) => r.id === run.id)
-                  ? list.map((r) => (r.id === run.id ? run : r))
-                  : [...list, run];
-                return { ...prev, [run.assetId]: next };
-              });
-            });
-          }}
+          onRunUpdated={captureOnRunUpdated}
           assetJobColumns={assetCaptureJobColumns}
-          renderStatus={(asset) => captureTableStatusChip(asset, projectMap.get(asset.projectId)?.workflowMode)}
-          renderActions={(asset) => {
-            const proj = projectMap.get(asset.projectId);
-            return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
-              ? actionButton(asset, proj?.workflowMode)
-              : null;
-          }}
+          renderStatus={captureRenderStatus}
+          renderActions={captureRenderActions}
         />
+        </Suspense>
       )}
 
       <Snackbar

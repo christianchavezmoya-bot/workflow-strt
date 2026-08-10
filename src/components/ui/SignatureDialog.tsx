@@ -194,8 +194,7 @@ export default function SignatureDialog({
     <Dialog
       open={open}
       onClose={onClose}
-      fullScreen={isPhone}
-      maxWidth={isPhone ? false : "sm"}
+      maxWidth="sm"
       fullWidth
     >
       <DialogTitle>{roleLabel}</DialogTitle>

@@ -2,7 +2,8 @@ import { Autocomplete, FormControl, InputLabel, MenuItem, Select, TextField } fr
 import { useMemo } from "react";
 import type { Project } from "../types/project";
 
-const AUTocomplete_THRESHOLD = 25;
+/** Switch to searchable Autocomplete below this count — MUI Select renders every MenuItem on open. */
+const AUTocomplete_THRESHOLD = 12;
 
 function formatProjectLabel(p: Project): string {
   return p.customerName ? `${p.jobNumber} · ${p.customerName}` : p.jobNumber;

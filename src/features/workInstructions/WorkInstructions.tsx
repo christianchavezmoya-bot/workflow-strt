@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import {
   AddOutlined,
@@ -67,7 +67,8 @@ import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
-import WorkflowBuilder from "./WorkflowBuilder";
+
+const WorkflowBuilder = lazy(() => import("./WorkflowBuilder"));
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -214,16 +215,15 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
     <Dialog
       open={open}
       onClose={onClose}
-      fullScreen={isPhone}
-      maxWidth="xl"
+      maxWidth="lg"
       fullWidth
       PaperProps={{
         sx: {
-          height: isPhone ? "100%" : "92vh",
+          height: "88vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          borderRadius: isPhone ? 0 : 4,
+          borderRadius: 4,
           background: "linear-gradient(180deg, rgba(8,18,24,0.98), rgba(8,14,19,0.99))",
           border: "1px solid rgba(45,212,191,0.18)",
         },
@@ -1372,6 +1372,7 @@ const WorkInstructions = () => {
               </>
             )}
           </Stack>
+          <Suspense fallback={<Box sx={{ py: 6, display: "flex", justifyContent: "center" }}><CircularProgress /></Box>}>
           <WorkflowBuilder
             productId={activeProduct.id}
             productName={activeProduct.name}
@@ -1382,6 +1383,7 @@ const WorkInstructions = () => {
             onConfigPublished={handleConfigPublished}
             onNewConfig={openNewConfig}
           />
+          </Suspense>
         </Stack>
       )}
 

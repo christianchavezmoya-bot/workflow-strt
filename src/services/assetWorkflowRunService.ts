@@ -88,6 +88,7 @@ export interface ClosedIssueRecord extends OpenIssueRecord {
 }
 
 const CLOSED_ISSUES_CACHE_KEY = "asset-workflow-closed-issues-v1";
+const inflightRunDetailsByKey = new Map<string, Promise<AssetWorkflowRun[]>>();
 const DASHBOARD_ATTENTION_TIMEOUT_MS = 20_000;
 
 function parseTimeEntries(json: string): RunTimeEntry[] {
@@ -642,6 +643,45 @@ function signalLocalRunUpdate(run: AssetWorkflowRun): void {
   }));
 }
 
+function invalidateWebRunDetailCaches(runId: string, assetId?: string): void {
+  invalidateWebCache(`/asset-workflow-runs/${runId}`);
+  if (assetId) {
+    invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
+  }
+}
+
+/**
+ * Surgical web cache invalidation after a run mutation.
+ * Replaces blanket prefix wipes that forced project-wide refetches.
+ */
+function invalidateWebRunMutationCaches(
+  runId: string,
+  assetId: string,
+  scope: "detail" | "asset" = "asset",
+): void {
+  invalidateWebRunDetailCaches(runId, assetId);
+  if (scope === "asset") {
+    invalidateWebCache(`/project-assets/${assetId}`);
+  }
+}
+
+/** Push an updated run into open Assets/Dashboard views without a list refetch. */
+export function emitWebRunCacheUpdated(run: AssetWorkflowRun): void {
+  window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+    detail: { assetId: run.assetId, runs: [run], mergeById: true },
+  }));
+}
+
+/** Surgical web cache invalidation + UI merge after a run mutation response. */
+export function applyWebRunMutationCache(
+  run: AssetWorkflowRun,
+  scope: "detail" | "asset" = "asset",
+): void {
+  invalidateWebRunMutationCaches(run.id, run.assetId, scope);
+  emitWebRunCacheUpdated(run);
+}
+
+/** @deprecated Use invalidateWebRunMutationCaches — kept for tests referencing the old name. */
 function invalidateWebRunReadCaches(assetId?: string): void {
   if (assetId) {
     invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
@@ -651,14 +691,6 @@ function invalidateWebRunReadCaches(assetId?: string): void {
   invalidateWebCacheByPrefix("/asset-workflow-runs/by-project/");
   invalidateWebCacheByPrefix("/project-assets/by-product/");
   invalidateWebCacheByPrefix("/project-assets/by-project/");
-}
-
-/** Surgical invalidation after a single-run text capture edit — avoids project-wide refetch. */
-function invalidateWebRunDetailCaches(runId: string, assetId?: string): void {
-  invalidateWebCache(`/asset-workflow-runs/${runId}`);
-  if (assetId) {
-    invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
-  }
 }
 
 function parseRunIssues(issuesJson: string | undefined): RunIssue[] {
@@ -1132,13 +1164,19 @@ export const assetWorkflowRunService = {
         `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
         { assetIds: sortedIds.join(",") },
       );
-      return webCachedGet(cacheKey, async () => {
+      const inflight = inflightRunDetailsByKey.get(cacheKey);
+      if (inflight) return inflight;
+      const promise = webCachedGet(cacheKey, async () => {
         const res = await api.get<AssetWorkflowRun[]>(
           `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
           { params: { assetIds: sortedIds.join(",") } },
         );
         return res.data;
-      }, { ttlMs: 60_000 });
+      }, { ttlMs: 60_000 }).finally(() => {
+        inflightRunDetailsByKey.delete(cacheKey);
+      });
+      inflightRunDetailsByKey.set(cacheKey, promise);
+      return promise;
     }
     await enqueueProjectRunHydration(projectId, sortedIds, RunHydrationPriority.urgent);
     const runs: AssetWorkflowRun[] = [];
@@ -1296,8 +1334,8 @@ export const assetWorkflowRunService = {
 
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
-      invalidateWebCache(`/asset-workflow-runs/by-asset/${assetId}`);
-      invalidateWebRunReadCaches(assetId);
+      invalidateWebRunMutationCaches(res.data.id, assetId, "asset");
+      emitWebRunCacheUpdated(res.data);
       return res.data;
     }
 
@@ -1411,8 +1449,8 @@ export const assetWorkflowRunService = {
       const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "detail");
+      emitWebRunCacheUpdated(res.data);
       return res.data;
     }
 
@@ -1482,8 +1520,8 @@ export const assetWorkflowRunService = {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/abandon`, {}, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "asset");
+      emitWebRunCacheUpdated(res.data);
       return res.data;
     }
 
@@ -1564,8 +1602,8 @@ export const assetWorkflowRunService = {
       // (see AssetWorkflowRunsController.CompleteRun) - invalidate both so
       // the very next read of either is guaranteed live, not a stale
       // pre-completion snapshot.
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "asset");
+      emitWebRunCacheUpdated(res.data);
       return res.data;
     }
 
@@ -1703,8 +1741,8 @@ export const assetWorkflowRunService = {
     if (!isMobileNativePlatform()) {
       const requestBody = await mediaStore.resolveUploadPayload({ issuesJson });
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/issues`, requestBody);
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "asset");
+      emitWebRunCacheUpdated(res.data);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -1908,11 +1946,11 @@ export const assetWorkflowRunService = {
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-results`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
       if (captureDataAmend) {
         invalidateWebRunDetailCaches(runId, res.data.assetId);
       } else {
-        invalidateWebRunReadCaches(res.data.assetId);
+        invalidateWebRunMutationCaches(runId, res.data.assetId, "detail");
+        emitWebRunCacheUpdated(res.data);
       }
       if (!captureDataAmend) {
         window.dispatchEvent(new Event("notifications:run-state-changed"));
@@ -2010,8 +2048,8 @@ export const assetWorkflowRunService = {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/step-media`, formData, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "detail");
+      emitWebRunCacheUpdated(res.data);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -2036,8 +2074,7 @@ export const assetWorkflowRunService = {
   async patchTimeEntries(runId: string, timeEntriesJson: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const res = await api.patch<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entries`, { timeEntriesJson });
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "detail");
       return res.data;
     }
 
@@ -2053,8 +2090,8 @@ export const assetWorkflowRunService = {
   async waiveCustomerSignature(runId: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/waive-customer-signature`);
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "asset");
+      emitWebRunCacheUpdated(res.data);
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
       return res.data;
@@ -2086,8 +2123,7 @@ export const assetWorkflowRunService = {
 
     if (!isMobileNativePlatform()) {
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, body);
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebRunReadCaches(res.data.assetId);
+      invalidateWebRunMutationCaches(runId, res.data.assetId, "detail");
       return res.data;
     }
 

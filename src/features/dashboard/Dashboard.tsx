@@ -9,7 +9,7 @@ import {
   PhotoCameraOutlined, PlayArrowOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { shouldSkipBlockingFetch } from "../../services/connectivityMonitor";
 import { useRepoSubscription } from "../../hooks/useRepoSubscription";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
@@ -64,9 +64,7 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignmentRepository";
 import { workflowTypeService } from "../../services/workflowTypeService";
-import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
-import WorkOrderRunner from "../workInstructions/WorkOrderRunner";
-import AssetDocumentsDialog from "../installations/AssetDocumentsDialog";
+import type { MissingMediaFlag as PhotoMissingMediaFlag, PhotoUpdateNotification } from "./photoUploadTypes";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
@@ -76,7 +74,6 @@ import type { AssetIssue, ProjectAsset } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { featureService } from "../../services/featureService";
 import type { Feature as LibFeature } from "../../types/feature";
-import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
@@ -92,6 +89,10 @@ import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
 import { entityGetAsset } from "../../services/localDB";
+
+const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
+const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
+const AssetDocumentsDialog = lazy(() => import("../installations/AssetDocumentsDialog"));
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -573,7 +574,8 @@ const Dashboard = () => {
   // History span and disabled at once, so pressing one row looked like the app
   // had fired all of them. Mirrors the existing runnerLoading pattern.
   const [historyDialogLoading, setHistoryDialogLoading] = useState<string | null>(null);
-  const nativeDashboardRefreshTimerRef = useRef<number | null>(null);
+  const dashboardRefreshTimerRef = useRef<number | null>(null);
+  const dashboardRefreshWhenVisibleRef = useRef(false);
   const dashboardRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const dashboardRefreshQueuedRef = useRef(false);
   const attentionInFlightRef = useRef<Promise<void> | null>(null);
@@ -1254,22 +1256,34 @@ const Dashboard = () => {
   ]);
 
   const refreshLiveDashboardData = useCallback(() => {
-    if (!isNativePlatform) {
-      refreshLiveDashboardDataNow();
+    if (typeof document !== "undefined" && document.hidden) {
+      dashboardRefreshWhenVisibleRef.current = true;
       return;
     }
-    if (nativeDashboardRefreshTimerRef.current !== null) {
-      window.clearTimeout(nativeDashboardRefreshTimerRef.current);
+    if (dashboardRefreshTimerRef.current !== null) {
+      window.clearTimeout(dashboardRefreshTimerRef.current);
     }
-    nativeDashboardRefreshTimerRef.current = window.setTimeout(() => {
-      nativeDashboardRefreshTimerRef.current = null;
-      refreshLiveDashboardDataNow();
-    }, 650);
+    const delayMs = isNativePlatform ? 650 : 400;
+    dashboardRefreshTimerRef.current = window.setTimeout(() => {
+      dashboardRefreshTimerRef.current = null;
+      void refreshLiveDashboardDataNow();
+    }, delayMs);
   }, [isNativePlatform, refreshLiveDashboardDataNow]);
 
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (!document.hidden && dashboardRefreshWhenVisibleRef.current) {
+        dashboardRefreshWhenVisibleRef.current = false;
+        refreshLiveDashboardData();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => document.removeEventListener("visibilitychange", onVisibilityChange);
+  }, [refreshLiveDashboardData]);
+
   useEffect(() => () => {
-    if (nativeDashboardRefreshTimerRef.current !== null) {
-      window.clearTimeout(nativeDashboardRefreshTimerRef.current);
+    if (dashboardRefreshTimerRef.current !== null) {
+      window.clearTimeout(dashboardRefreshTimerRef.current);
     }
   }, []);
 
@@ -1759,6 +1773,7 @@ const Dashboard = () => {
           ? featureService.getByProduct(asset.productId).catch(() => [] as LibFeature[])
           : Promise.resolve([] as LibFeature[]),
       ]);
+      const { generateWorkflowReport, resolveImageToDataUrl } = await import("../../utils/generateWorkflowReport");
       const bizLogoResolved = brandSettings.logoBase64
         ? await resolveImageToDataUrl(brandSettings.logoBase64)
         : null;
@@ -2031,6 +2046,25 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNativePlatform, myInstallAssetIdsKey]);
 
+  const nativeMyJobsDisplayStateByAssetId = useMemo(() => {
+    const map = new Map<string, WorkflowDisplayState>();
+    if (!isNativePlatform) return map;
+    for (const asset of myInstallAssets) {
+      const ctx = nativeMyJobsCardContext[asset.id];
+      if (!ctx) continue;
+      map.set(asset.id, getWorkflowDisplayState(ctx.asset, ctx.runs, {
+        paused: isPausedAsset(asset.runStatus),
+        inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
+        hasRunnableWorkflowSource:
+          ctx.runs.length > 0
+          || !!ctx.asset.productConfigId
+          || !!ctx.asset.workflowTemplateId
+          || !!ctx.asset.workflowSummary?.hasWorkflow,
+      }));
+    }
+    return map;
+  }, [isNativePlatform, myInstallAssets, nativeMyJobsCardContext]);
+
   useEffect(() => {
     if (!isNativePlatform) return;
     const handler = (event: Event) => {
@@ -2255,17 +2289,8 @@ const Dashboard = () => {
 
   const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
     if (isNativePlatform) {
-      const nativeContext = nativeMyJobsCardContext[asset.id];
-      if (nativeContext) {
-        const displayState = getWorkflowDisplayState(nativeContext.asset, nativeContext.runs, {
-          paused: isPausedAsset(asset.runStatus),
-          inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
-          hasRunnableWorkflowSource:
-            nativeContext.runs.length > 0
-            || !!nativeContext.asset.productConfigId
-            || !!nativeContext.asset.workflowTemplateId
-            || !!nativeContext.asset.workflowSummary?.hasWorkflow,
-        });
+      const displayState = nativeMyJobsDisplayStateByAssetId.get(asset.id);
+      if (displayState) {
         return myJobsCardActionFromDisplayState(displayState, true);
       }
     }
@@ -2364,7 +2389,7 @@ const Dashboard = () => {
       helperText: isPendingAsset(asset.status) ? "Awaiting sign-off" : "Ready to start",
       widgets,
     };
-  }, [isNativePlatform, missingMediaFlags, nativeMyJobsCardContext, pendingSigs]);
+  }, [isNativePlatform, missingMediaFlags, nativeMyJobsDisplayStateByAssetId, pendingSigs]);
 
   type DashboardProductWorkflow = { configId: string; configName: string; workflowTypeId?: string } | null;
 
@@ -6247,6 +6272,7 @@ const Dashboard = () => {
 
       {/* Photo upload dialog - installer adds missing photos to a completed run */}
       {photoUploadTarget && (
+        <Suspense fallback={null}>
         <PhotoUploadDialog
           open={!!photoUploadTarget}
           flag={photoUploadTarget}
@@ -6269,6 +6295,7 @@ const Dashboard = () => {
             }
           }}
         />
+        </Suspense>
       )}
 
       {issueDetailTarget && (
@@ -6701,6 +6728,7 @@ const Dashboard = () => {
 
       {/* WorkOrderRunner - Run workflow popup */}
       {runnerOpen && runnerWorkflow && runnerAsset && (
+        <Suspense fallback={null}>
         <WorkOrderRunner
           open={runnerOpen}
           onClose={() => {
@@ -6726,10 +6754,12 @@ const Dashboard = () => {
           onComplete={refreshLiveDashboardDataNow}
           onPause={refreshLiveDashboardDataNow}
         />
+        </Suspense>
       )}
 
       {/* Documents Dialog for Quick Action */}
       {docsDialogOpen && docsDialogAsset && (
+        <Suspense fallback={null}>
         <AssetDocumentsDialog
           open={docsDialogOpen}
           onClose={() => setDocsDialogOpen(false)}
@@ -6749,6 +6779,7 @@ const Dashboard = () => {
           }}
           products={products}
         />
+        </Suspense>
       )}
 
       <Snackbar
