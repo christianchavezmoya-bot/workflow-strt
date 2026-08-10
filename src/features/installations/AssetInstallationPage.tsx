@@ -100,7 +100,7 @@ import { productConfigService, type ProductConfig } from "../../services/product
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
-import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun } from "../../services/assetWorkflowRunService";
 import { RunHydrationPriority } from "../../services/runHydrationQueue";
 import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -128,14 +128,13 @@ import { siteService } from "../../services/siteService";
 import type { Site } from "../../types/site";
 import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
-import AssetDocumentsDialog from "./AssetDocumentsDialog";
 import AssetInspectionDialog from "./AssetInspectionDialog";
-import PhotoUploadDialog, { type MissingMediaFlag } from "../dashboard/PhotoUploadDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import AssetAddDialog from "./AssetAddDialog";
 import AssetEditDialog from "./AssetEditDialog";
+import type { MissingMediaFlag } from "../dashboard/photoUploadTypes";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
@@ -175,6 +174,8 @@ import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const CaptureSpreadsheetDialog = lazy(() => import("./CaptureSpreadsheetDialog"));
+const PhotoUploadDialog = lazy(() => import("../dashboard/PhotoUploadDialog"));
+const AssetDocumentsDialog = lazy(() => import("./AssetDocumentsDialog"));
 
 // Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
 
@@ -1737,24 +1738,19 @@ const AssetInstallationPage = () => {
         }
         return next;
       });
+      if (assetId && mergeById) {
+        const primaryRun = runs[0];
+        if (primaryRun) {
+          const derivedStatus = deriveOfflineAssetStatusFromRun(primaryRun);
+          setAssets((prev) => prev.map((a) => (
+            a.id === assetId && a.status !== derivedStatus ? { ...a, status: derivedStatus } : a
+          )));
+        }
+      }
     };
     window.addEventListener("workflow-runs-cache-updated", handler as EventListener);
     return () => window.removeEventListener("workflow-runs-cache-updated", handler as EventListener);
   }, []);
-
-  // Web: signature submit and run completion invalidate caches but do not emit
-  // workflow-runs-cache-updated (native-only). Refresh assets + runs so signature
-  // chips and action buttons stay current after signing in the runner.
-  useEffect(() => {
-    if (isNativePlatform) return;
-    const handler = () => { void refreshAssets(); };
-    window.addEventListener("notifications:run-state-changed", handler);
-    window.addEventListener("repo:runs:updated", handler);
-    return () => {
-      window.removeEventListener("notifications:run-state-changed", handler);
-      window.removeEventListener("repo:runs:updated", handler);
-    };
-  }, [isNativePlatform, refreshAssets]);
 
   // Fix 6 — Background poll every 90s while page is visible (mobile only)
   useEffect(() => {
@@ -6768,6 +6764,7 @@ ${words.slice(midpoint).join(" ")}`;
 
       {/* New run history dialog â€" View/Edit button â†' history, re-run, PDF report */}
       {docsOpen && docsAsset && (
+        <Suspense fallback={null}>
         <AssetDocumentsDialog
           open={docsOpen}
           onClose={() => setDocsOpen(false)}
@@ -6777,6 +6774,7 @@ ${words.slice(midpoint).join(" ")}`;
           onDocsChanged={handleDocsChanged}
           products={products}
         />
+        </Suspense>
       )}
 
       {runHistoryOpen && runHistoryAsset && (
@@ -6973,6 +6971,7 @@ ${words.slice(midpoint).join(" ")}`;
       )}
 
       {photoUploadTarget && (
+        <Suspense fallback={null}>
         <PhotoUploadDialog
           open={Boolean(photoUploadTarget)}
           flag={photoUploadTarget}
@@ -6988,6 +6987,7 @@ ${words.slice(midpoint).join(" ")}`;
             ]);
           }}
         />
+        </Suspense>
       )}
 
       {/* Issue detail dialog (comments / close) */}

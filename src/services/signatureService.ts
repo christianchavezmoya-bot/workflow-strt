@@ -7,8 +7,8 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import { shouldSkipRunMutation } from "./connectivityMonitor";
-import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun } from "./assetWorkflowRunService";
-import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
+import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun, applyWebRunMutationCache } from "./assetWorkflowRunService";
+import { webCachedGet, invalidateWebCache } from "./webFreshCache";
 
 export interface SubmitSignaturePayload {
   signerRole: "Installer" | "Customer";
@@ -72,22 +72,13 @@ export const signatureService = {
     if (!isMobileNativePlatform()) {
       const r = await api.post<SignatureEvent>("/signature-events", payload, { params: { runId } });
       invalidateWebCache(`/signature-events?runId=${runId}`);
-      invalidateWebCache(`/asset-workflow-runs/${runId}`);
-      invalidateWebCacheByPrefix("/asset-workflow-runs/by-asset/");
-      invalidateWebCacheByPrefix("/asset-workflow-runs/by-project/");
-      invalidateWebCacheByPrefix("/project-assets/by-product/");
-      invalidateWebCacheByPrefix("/project-assets/by-project/");
-      // Push the updated run into any open Assets page so signature status
-      // advances immediately without waiting for a stale SWR cache window.
       try {
         const runRes = await api.get<import("../types/assetWorkflowRun").AssetWorkflowRun>(
           `/asset-workflow-runs/${runId}`,
         );
-        window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
-          detail: { assetId: runRes.data.assetId, runs: [runRes.data], mergeById: true },
-        }));
+        applyWebRunMutationCache(runRes.data, "asset");
       } catch {
-        // Non-fatal — notifications:run-state-changed still triggers refresh.
+        invalidateWebCache(`/asset-workflow-runs/${runId}`);
       }
       window.dispatchEvent(new Event("notifications:run-state-changed"));
       window.dispatchEvent(new Event("notifications:refresh"));
