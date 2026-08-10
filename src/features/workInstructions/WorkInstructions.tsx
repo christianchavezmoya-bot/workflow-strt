@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+﻿import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
 import {
   AddOutlined,
@@ -67,7 +67,8 @@ import type { Workflow } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
-import WorkflowBuilder from "./WorkflowBuilder";
+
+const WorkflowBuilder = lazy(() => import("./WorkflowBuilder"));
 
 // â”€â”€â”€ Helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1372,6 +1373,7 @@ const WorkInstructions = () => {
               </>
             )}
           </Stack>
+          <Suspense fallback={<Box sx={{ py: 6, display: "flex", justifyContent: "center" }}><CircularProgress /></Box>}>
           <WorkflowBuilder
             productId={activeProduct.id}
             productName={activeProduct.name}
@@ -1382,6 +1384,7 @@ const WorkInstructions = () => {
             onConfigPublished={handleConfigPublished}
             onNewConfig={openNewConfig}
           />
+          </Suspense>
         </Stack>
       )}
 
