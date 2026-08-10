@@ -88,6 +88,7 @@ export interface ClosedIssueRecord extends OpenIssueRecord {
 }
 
 const CLOSED_ISSUES_CACHE_KEY = "asset-workflow-closed-issues-v1";
+const inflightRunDetailsByKey = new Map<string, Promise<AssetWorkflowRun[]>>();
 const DASHBOARD_ATTENTION_TIMEOUT_MS = 20_000;
 
 function parseTimeEntries(json: string): RunTimeEntry[] {
@@ -1163,13 +1164,19 @@ export const assetWorkflowRunService = {
         `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
         { assetIds: sortedIds.join(",") },
       );
-      return webCachedGet(cacheKey, async () => {
+      const inflight = inflightRunDetailsByKey.get(cacheKey);
+      if (inflight) return inflight;
+      const promise = webCachedGet(cacheKey, async () => {
         const res = await api.get<AssetWorkflowRun[]>(
           `/asset-workflow-runs/by-project/${projectId}/runs-detail`,
           { params: { assetIds: sortedIds.join(",") } },
         );
         return res.data;
-      }, { ttlMs: 60_000 });
+      }, { ttlMs: 60_000 }).finally(() => {
+        inflightRunDetailsByKey.delete(cacheKey);
+      });
+      inflightRunDetailsByKey.set(cacheKey, promise);
+      return promise;
     }
     await enqueueProjectRunHydration(projectId, sortedIds, RunHydrationPriority.urgent);
     const runs: AssetWorkflowRun[] = [];

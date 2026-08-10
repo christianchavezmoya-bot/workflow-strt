@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useServerRecovery } from "../../hooks/useServerRecovery";
 import {
   Alert,
@@ -53,8 +53,9 @@ import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import { isMobileNativePlatform } from "../../utils/platform";
 import QRUploadButton from "../../components/QRUploadButton";
 import DocThumbnail from "../../components/ui/DocThumbnail";
-import MobileDocumentPreviewDialog from "../../components/ui/MobileDocumentPreviewDialog";
 import type { Product } from "../../types/product";
+
+const MobileDocumentPreviewDialog = lazy(() => import("../../components/ui/MobileDocumentPreviewDialog"));
 
 type ContentTypeLabel =
   | "Photo"
@@ -964,7 +965,9 @@ export default function TipsAndTricksPage() {
       )}
 
       {renderAddDialog()}
-      <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
+      <Suspense fallback={null}>
+        <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
+      </Suspense>
     </Stack>
   );
 }
