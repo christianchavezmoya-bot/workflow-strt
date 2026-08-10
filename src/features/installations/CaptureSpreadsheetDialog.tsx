@@ -2,7 +2,7 @@
  * Full-screen / dialog capture spreadsheet — used on phone (popup) and reusable on web.
  */
 
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -199,7 +199,7 @@ function splitLabelIntoHeaderLines(label: string, maxLines = 3) {
   return lines.slice(0, maxLines).join("\n");
 }
 
-export default function CaptureSpreadsheetDialog({
+function CaptureSpreadsheetDialog({
   open,
   onClose,
   fullScreen = false,
@@ -1285,5 +1285,6 @@ export default function CaptureSpreadsheetDialog({
   );
 }
 
+export default memo(CaptureSpreadsheetDialog);
 
 
