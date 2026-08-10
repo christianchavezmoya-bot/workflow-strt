@@ -1016,8 +1016,9 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       setCurrentConfig(updated);
       setPublishDialogOpen(false);
       onConfigPublished?.(updated);
-    } catch {
-      console.warn("[WorkflowBuilder] publish failed");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg ?? "Publish failed. Please try again.");
     } finally {
       setPublishSaving(false);
     }

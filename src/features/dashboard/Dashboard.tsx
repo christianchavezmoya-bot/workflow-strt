@@ -5782,7 +5782,7 @@ const Dashboard = () => {
                       <ItemRow
                         label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
                         sub={`Assigned to ${f.assignedBy} - ${fmtDate(f.assignedAt)}`}
-                        onClick={() => navigate("/installations")}
+                        onClick={() => navigate("/installations/assets")}
                       />
                     </Box>
                     <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}

@@ -933,8 +933,9 @@ const WorkInstructions = () => {
     try {
       const updated = await workflowConfigService.publish(cfg.id);
       setConfigs((prev) => prev.map((c) => (c.id === cfg.id ? updated : c)));
-    } catch {
-      console.warn("[WorkInstructions] publish failed");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg ?? "Publish failed. Please try again.");
     } finally {
       setPublishingId(null);
     }
@@ -945,8 +946,9 @@ const WorkInstructions = () => {
     try {
       const cloned = await workflowConfigService.clone(cfg.id);
       setConfigs((prev) => [cloned, ...prev]);
-    } catch {
-      console.warn("[WorkInstructions] clone failed");
+    } catch (err: unknown) {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      alert(msg ?? "Clone failed. Please try again.");
     } finally {
       setCloningId(null);
     }
