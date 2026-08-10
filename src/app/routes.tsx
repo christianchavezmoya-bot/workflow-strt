@@ -128,6 +128,7 @@ const AppRoutes = () => {
         <Route path="/projects/new" element={<LazyRoute><ProjectForm /></LazyRoute>} />
         <Route path="/projects/:id" element={<LazyRoute><ProjectDetail /></LazyRoute>} />
         <Route path="/projects/:id/edit" element={<LazyRoute><ProjectForm /></LazyRoute>} />
+        <Route path="/projects/:id/inspections/inbox" element={<LazyRoute><ProjectDetail /></LazyRoute>} />
         <Route path="/projects/:id/inspections" element={<ProjectInspectionsRedirect />} />
         <Route path="/projects/:id/assets/:assetId/inspections" element={<LazyRoute><ProjectAssetInspectionPage /></LazyRoute>} />
         <Route path="/installations/assets" element={<LazyRoute><AssetInstallationPage /></LazyRoute>} />
