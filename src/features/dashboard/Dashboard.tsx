@@ -64,8 +64,7 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignmentRepository";
 import { workflowTypeService } from "../../services/workflowTypeService";
-import PhotoUploadDialog, { type MissingMediaFlag as PhotoMissingMediaFlag, type PhotoUpdateNotification } from "./PhotoUploadDialog";
-import AssetDocumentsDialog from "../installations/AssetDocumentsDialog";
+import type { MissingMediaFlag as PhotoMissingMediaFlag, PhotoUpdateNotification } from "./photoUploadTypes";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
@@ -92,6 +91,8 @@ import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services
 import { entityGetAsset } from "../../services/localDB";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
+const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
+const AssetDocumentsDialog = lazy(() => import("../installations/AssetDocumentsDialog"));
 
 function fmtDate(iso: string | null | undefined) {
   if (!iso) return "-";
@@ -2045,6 +2046,25 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNativePlatform, myInstallAssetIdsKey]);
 
+  const nativeMyJobsDisplayStateByAssetId = useMemo(() => {
+    const map = new Map<string, WorkflowDisplayState>();
+    if (!isNativePlatform) return map;
+    for (const asset of myInstallAssets) {
+      const ctx = nativeMyJobsCardContext[asset.id];
+      if (!ctx) continue;
+      map.set(asset.id, getWorkflowDisplayState(ctx.asset, ctx.runs, {
+        paused: isPausedAsset(asset.runStatus),
+        inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
+        hasRunnableWorkflowSource:
+          ctx.runs.length > 0
+          || !!ctx.asset.productConfigId
+          || !!ctx.asset.workflowTemplateId
+          || !!ctx.asset.workflowSummary?.hasWorkflow,
+      }));
+    }
+    return map;
+  }, [isNativePlatform, myInstallAssets, nativeMyJobsCardContext]);
+
   useEffect(() => {
     if (!isNativePlatform) return;
     const handler = (event: Event) => {
@@ -2269,17 +2289,8 @@ const Dashboard = () => {
 
   const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
     if (isNativePlatform) {
-      const nativeContext = nativeMyJobsCardContext[asset.id];
-      if (nativeContext) {
-        const displayState = getWorkflowDisplayState(nativeContext.asset, nativeContext.runs, {
-          paused: isPausedAsset(asset.runStatus),
-          inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
-          hasRunnableWorkflowSource:
-            nativeContext.runs.length > 0
-            || !!nativeContext.asset.productConfigId
-            || !!nativeContext.asset.workflowTemplateId
-            || !!nativeContext.asset.workflowSummary?.hasWorkflow,
-        });
+      const displayState = nativeMyJobsDisplayStateByAssetId.get(asset.id);
+      if (displayState) {
         return myJobsCardActionFromDisplayState(displayState, true);
       }
     }
@@ -2378,7 +2389,7 @@ const Dashboard = () => {
       helperText: isPendingAsset(asset.status) ? "Awaiting sign-off" : "Ready to start",
       widgets,
     };
-  }, [isNativePlatform, missingMediaFlags, nativeMyJobsCardContext, pendingSigs]);
+  }, [isNativePlatform, missingMediaFlags, nativeMyJobsDisplayStateByAssetId, pendingSigs]);
 
   type DashboardProductWorkflow = { configId: string; configName: string; workflowTypeId?: string } | null;
 
@@ -6261,6 +6272,7 @@ const Dashboard = () => {
 
       {/* Photo upload dialog - installer adds missing photos to a completed run */}
       {photoUploadTarget && (
+        <Suspense fallback={null}>
         <PhotoUploadDialog
           open={!!photoUploadTarget}
           flag={photoUploadTarget}
@@ -6283,6 +6295,7 @@ const Dashboard = () => {
             }
           }}
         />
+        </Suspense>
       )}
 
       {issueDetailTarget && (
@@ -6746,6 +6759,7 @@ const Dashboard = () => {
 
       {/* Documents Dialog for Quick Action */}
       {docsDialogOpen && docsDialogAsset && (
+        <Suspense fallback={null}>
         <AssetDocumentsDialog
           open={docsDialogOpen}
           onClose={() => setDocsDialogOpen(false)}
@@ -6765,6 +6779,7 @@ const Dashboard = () => {
           }}
           products={products}
         />
+        </Suspense>
       )}
 
       <Snackbar

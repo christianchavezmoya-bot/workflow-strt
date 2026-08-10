@@ -1,4 +1,4 @@
-﻿import { useEffect, useMemo, useRef, useState } from "react";
+﻿import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useServerRecovery } from "../../hooks/useServerRecovery";
 import {
   AddOutlined,
@@ -50,7 +50,6 @@ import {
   useMediaQuery,
   useTheme,
 } from "@mui/material";
-import MobileDocumentPreviewDialog from "../../components/ui/MobileDocumentPreviewDialog";
 import { documentService, type DocumentRecord } from "../../services/documentService";
 import QRUploadButton from "../../components/QRUploadButton";
 import { productService } from "../../services/productService";
@@ -61,6 +60,8 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+
+const MobileDocumentPreviewDialog = lazy(() => import("../../components/ui/MobileDocumentPreviewDialog"));
 
 // ------------------------------------------------------------------
 // Types
@@ -1343,7 +1344,9 @@ export default function DocumentsPage() {
       {/* ================================================================ */}
       {/* Document Preview dialog                                           */}
       {/* ================================================================ */}
-      <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
+      <Suspense fallback={null}>
+        <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
+      </Suspense>
 
       {/* ================================================================ */}
       {/* Delete confirmation dialog                                        */}

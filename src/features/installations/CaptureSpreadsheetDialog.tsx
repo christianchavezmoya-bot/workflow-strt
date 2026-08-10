@@ -2,7 +2,7 @@
  * Full-screen / dialog capture spreadsheet — used on phone (popup) and reusable on web.
  */
 
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
   Alert,
   Box,
@@ -171,6 +171,8 @@ function rowSearchMatch(row: ProjectCaptureRow, asset: ProjectAsset, query: stri
   return Boolean(findCaptureMatch(row.searchHits, query, matchesPrefixStart));
 }
 
+const EMPTY_COLUMN_FILTER_OPTIONS: Record<string, string[]> = {};
+
 function splitLabelIntoHeaderLines(label: string, maxLines = 3) {
   if (!label) return label;
   const normalized = label.replace(/\s+/g, " ").trim();
@@ -231,6 +233,7 @@ function CaptureSpreadsheetDialog({
   exportProjectLabel,
 }: CaptureSpreadsheetDialogProps) {
   const [search, setSearch] = useState("");
+  const deferredSearch = useDeferredValue(search);
   const [hiddenGroups, setHiddenGroups] = useState<Set<string>>(loadHiddenGroups);
   const [columnPickerAnchor, setColumnPickerAnchor] = useState<HTMLElement | null>(null);
   const [filterMenu, setFilterMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
@@ -407,6 +410,7 @@ function CaptureSpreadsheetDialog({
   }, [renderActions, visibleAssetJobColumns]);
 
   const columnFilterOptions = useMemo(() => {
+    if (!columnPickerAnchor && !filterMenu.anchorEl) return EMPTY_COLUMN_FILTER_OPTIONS;
     const next: Record<string, string[]> = {};
     const ensure = (key: string, value: string) => {
       if (!next[key]) next[key] = [];
@@ -427,10 +431,10 @@ function CaptureSpreadsheetDialog({
     }
     for (const key of Object.keys(next)) next[key].sort((a, b) => a.localeCompare(b));
     return next;
-  }, [getColumnFilterValue, orderedGroups, rows, visibleAssetJobColumns]);
+  }, [columnPickerAnchor, filterMenu.anchorEl, getColumnFilterValue, orderedGroups, rows, visibleAssetJobColumns]);
 
   const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
+    const query = deferredSearch.trim().toLowerCase();
     return rows.filter(({ asset, capture, mergedCells }) => {
       if (!rowSearchMatch(capture, asset, query)) return false;
       for (const [key, selectedValues] of Object.entries(columnFilters)) {
@@ -440,7 +444,7 @@ function CaptureSpreadsheetDialog({
       }
       return true;
     });
-  }, [columnFilters, getColumnFilterValue, rows, search]);
+  }, [columnFilters, deferredSearch, getColumnFilterValue, rows]);
 
   const getColumnSortValue = useCallback((
     key: string,
@@ -775,7 +779,10 @@ function CaptureSpreadsheetDialog({
           size="small"
           placeholder="Search asset, feature, P/N, serial, firmware…"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          onChange={(e) => {
+            const next = e.target.value;
+            startTransition(() => setSearch(next));
+          }}
           InputProps={{
             startAdornment: (
               <InputAdornment position="start">
