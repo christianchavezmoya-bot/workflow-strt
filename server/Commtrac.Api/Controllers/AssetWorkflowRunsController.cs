@@ -1293,6 +1293,10 @@ public class AssetWorkflowRunsController : ControllerBase
                 $"{ResolveActorName()} updated workflow issues for asset {{asset}} on job {{job}}.",
                 notifyInstaller: true);
         }
+        else
+        {
+            await BroadcastAssetUpdatedAsync(run.AssetId);
+        }
         return Ok(ToDto(run));
     }
 
