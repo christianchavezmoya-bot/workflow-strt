@@ -133,4 +133,26 @@ export const ProjectRepository = {
       ? { items: res.data, total: res.data.length }
       : res.data;
   },
+
+  /** Blocking full-catalog sync for native — merges server projects into IndexedDB. */
+  async syncCatalogFromServer(): Promise<void> {
+    if (!isMobileNativePlatform()) return;
+    if (shouldSkipBlockingFetch()) return;
+
+    try {
+      const res = await api.get<Project[] | ProjectListResponse>("/projects");
+      const items = Array.isArray(res.data) ? res.data : res.data.items;
+      const total = Array.isArray(res.data) ? res.data.length : res.data.total;
+      await entityPutProjects(items.map((p) => ({ id: p.id, data: p })));
+      await reconcileProjects(items.map((p) => p.id));
+      await syncMetaSet("projects");
+      window.dispatchEvent(new CustomEvent<ProjectRepositoryUpdateDetail>("repo:projects:updated", {
+        detail: { items, total, requestKey: buildProjectRequestKey() },
+      }));
+    } catch (err) {
+      if (isOfflineNetworkError(err)) {
+        window.dispatchEvent(new Event("repo:projects:fetch-failed"));
+      }
+    }
+  },
 };

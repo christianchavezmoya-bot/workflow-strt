@@ -161,6 +161,10 @@ interface UnlistedConsumable {
 
 const runnerDialogContentSx = {
   overflowX: "hidden",
+  overflowY: isMobileNativePlatform() ? "auto" : undefined,
+  overscrollBehavior: isMobileNativePlatform() ? "contain" : undefined,
+  flex: isMobileNativePlatform() ? 1 : undefined,
+  minHeight: isMobileNativePlatform() ? 0 : undefined,
   px: isMobileNativePlatform() ? 1.5 : 3,
 } as const;
 
@@ -3491,9 +3495,19 @@ export default function WorkOrderRunner({
         onClose={handleClose}
         maxWidth="sm"
         fullWidth
+        fullScreen={isMobileNativePlatform()}
         PaperProps={{
           sx: {
-            maxHeight: "90vh",
+            ...(isMobileNativePlatform()
+              ? {
+                  display: "flex",
+                  flexDirection: "column",
+                  maxHeight: "100%",
+                  height: "100%",
+                }
+              : {
+                  maxHeight: "90vh",
+                }),
             transform: sheetDragOffset > 0 ? `translateY(${sheetDragOffset}px)` : undefined,
             transition: sheetDragOffset > 0 ? "none" : "transform 0.18s ease-out",
           },
