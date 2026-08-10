@@ -111,6 +111,7 @@ import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, ent
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
+import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 import ProjectJobSelect from "../../components/ProjectJobSelect";
 import { buildWorkflowReportJson, createWorkflowReportDocx, workflowReportBaseFileName, type WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
@@ -718,7 +719,7 @@ const AssetInstallationPage = () => {
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
   const [reportExportOpen, setReportExportOpen] = useState(false);
   const [reportExportAsset, setReportExportAsset] = useState<ProjectAsset | null>(null);
-  const [reportPreviewUrl, setReportPreviewUrl] = useState<string | null>(null);
+  const [reportPreviewBlob, setReportPreviewBlob] = useState<Blob | null>(null);
   const [reportPreviewLoading, setReportPreviewLoading] = useState(false);
   const [reportPreviewError, setReportPreviewError] = useState<string | null>(null);
   const [reportPreviewContext, setReportPreviewContext] = useState<WorkflowReportExportContext | null>(null);
@@ -800,12 +801,6 @@ const AssetInstallationPage = () => {
     () => users.filter((item) => item.isActive).map((item) => ({ id: item.id, fullName: item.fullName })),
     [users],
   );
-
-  useEffect(() => {
-    return () => {
-      if (reportPreviewUrl) URL.revokeObjectURL(reportPreviewUrl);
-    };
-  }, [reportPreviewUrl]);
 
   // Trigger a background pull when asset data is more than 15 minutes old.
   // Uses the stable useCallback identity of the pull function to avoid re-registration.
@@ -3544,8 +3539,7 @@ ${words.slice(midpoint).join(" ")}`;
     setReportPreviewFileBase(null);
     setReportPreviewError(null);
     setReportPreviewLoading(false);
-    if (reportPreviewUrl) URL.revokeObjectURL(reportPreviewUrl);
-    setReportPreviewUrl(null);
+    setReportPreviewBlob(null);
   }
 
   async function openReportExportDialog(asset: ProjectAsset) {
@@ -3554,8 +3548,7 @@ ${words.slice(midpoint).join(" ")}`;
     setReportPreviewFileBase(null);
     setReportPreviewError(null);
     setReportPreviewLoading(true);
-    if (reportPreviewUrl) URL.revokeObjectURL(reportPreviewUrl);
-    setReportPreviewUrl(null);
+    setReportPreviewBlob(null);
     setReportExportOpen(true);
     try {
       const reportContext = await buildAssetReportContext(asset);
@@ -3569,7 +3562,7 @@ ${words.slice(midpoint).join(" ")}`;
       }
       setReportPreviewContext(reportContext);
       setReportPreviewFileBase(fileBase);
-      setReportPreviewUrl(URL.createObjectURL(pdfBlob));
+      setReportPreviewBlob(pdfBlob);
     } catch (err) {
       console.error("[AssetInstallationPage] Report preview failed", err);
       setReportPreviewError("Failed to load PDF preview.");
@@ -7005,12 +6998,10 @@ ${words.slice(midpoint).join(" ")}`;
               <Box sx={{ p: 2 }}>
                 <Alert severity="error">{reportPreviewError}</Alert>
               </Box>
-            ) : reportPreviewUrl ? (
-              <Box
-                component="iframe"
-                title="Report PDF Preview"
-                src={reportPreviewUrl}
-                sx={{ width: "100%", height: "100%", border: 0, bgcolor: "common.white" }}
+            ) : reportPreviewBlob ? (
+              <PdfBlobPreview
+                blob={reportPreviewBlob}
+                scrollHint="Scroll to view all pages"
               />
             ) : (
               <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", color: "common.white" }}>

@@ -61,6 +61,7 @@ import {
   type WorkflowReportSignatureFilter,
 } from "../../utils/workflowReportSignatureFilter";
 import { AssetReportShareDialog } from "./AssetReportShareDialog";
+import PdfBlobPreview from "./PdfBlobPreview";
 
 type LoadedReportEntry = {
   asset: ProjectAsset;
@@ -646,12 +647,10 @@ export function BulkWorkflowReportDialog({
                     <CircularProgress color="inherit" />
                     <Typography variant="body2">Building PDF previews…</Typography>
                   </Stack>
-                ) : activeLoadedEntry?.previewUrl ? (
-                  <Box
-                    component="iframe"
-                    title={`Report preview — ${assetExplorerLabel(activeLoadedEntry.asset)}`}
-                    src={activeLoadedEntry.previewUrl}
-                    sx={{ width: "100%", height: "100%", border: 0, bgcolor: "common.white" }}
+                ) : activeLoadedEntry?.blob ? (
+                  <PdfBlobPreview
+                    blob={activeLoadedEntry.blob}
+                    scrollHint="Scroll to view all pages"
                   />
                 ) : activeAssetId && failedEntries.some((item) => item.asset.id === activeAssetId) ? (
                   <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", color: "common.white", px: 2 }}>
