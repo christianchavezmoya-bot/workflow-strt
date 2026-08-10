@@ -2,7 +2,7 @@ import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.christianchavez.kinet',
-  appName: 'N-go',
+  appName: 'Strata NGo',
   webDir: 'dist',
   server: {
     androidScheme: 'http',

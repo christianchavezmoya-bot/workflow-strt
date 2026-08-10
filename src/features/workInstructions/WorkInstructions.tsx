@@ -215,16 +215,15 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
     <Dialog
       open={open}
       onClose={onClose}
-      fullScreen={isPhone}
-      maxWidth="xl"
+      maxWidth="lg"
       fullWidth
       PaperProps={{
         sx: {
-          height: isPhone ? "100%" : "92vh",
+          height: "88vh",
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
-          borderRadius: isPhone ? 0 : 4,
+          borderRadius: 4,
           background: "linear-gradient(180deg, rgba(8,18,24,0.98), rgba(8,14,19,0.99))",
           border: "1px solid rgba(45,212,191,0.18)",
         },

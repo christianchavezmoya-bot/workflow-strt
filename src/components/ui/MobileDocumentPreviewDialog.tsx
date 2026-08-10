@@ -22,8 +22,6 @@ import {
   Toolbar,
   Tooltip,
   Typography,
-  useMediaQuery,
-  useTheme,
 } from "@mui/material";
 import axios from "axios";
 import { documentService, type DocumentRecord } from "../../services/documentService";
@@ -484,8 +482,6 @@ function HtmlDocumentPreview({
 }
 
 export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Props) {
-  const theme = useTheme();
-  const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [htmlPreview, setHtmlPreview] = useState<string | null>(null);
@@ -640,13 +636,12 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
     <Dialog
       open={open}
       onClose={onClose}
-      fullScreen={isPhone}
-      maxWidth="xl"
+      maxWidth="lg"
       fullWidth
       PaperProps={{
         sx: {
-          height: isPhone ? "100%" : "92vh",
-          borderRadius: isPhone ? 0 : 4,
+          height: "88vh",
+          borderRadius: 4,
           overflow: "hidden",
           background: "linear-gradient(180deg, rgba(8,18,24,0.98), rgba(8,14,19,0.99))",
           border: "1px solid rgba(45,212,191,0.18)",
