@@ -1,6 +1,5 @@
 ﻿import { configureStore } from "@reduxjs/toolkit";
 import customersReducer from "./customersSlice";
-import installationsReducer from "./installationSlice";
 import productsReducer from "./productsSlice";
 import projectsReducer from "./projectSlice";
 import usersReducer, { fetchUsers } from "./usersSlice";
@@ -8,7 +7,6 @@ import usersReducer, { fetchUsers } from "./usersSlice";
 export const store = configureStore({
   reducer: {
     projects: projectsReducer,
-    installations: installationsReducer,
     users: usersReducer,
     customers: customersReducer,
     products: productsReducer
