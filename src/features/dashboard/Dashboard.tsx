@@ -1990,10 +1990,6 @@ const Dashboard = () => {
   const myInstallAssetIdsKey = useMemo(() => myJobsAssetIdsKey(myInstallAssets), [myInstallAssets]);
 
   useEffect(() => {
-    if (!isNativePlatform) {
-      setNativeMyJobsCardContext({});
-      return;
-    }
     if (myInstallAssets.length === 0) {
       setNativeMyJobsCardContext({});
       return;
@@ -2003,13 +1999,24 @@ const Dashboard = () => {
     void (async () => {
       const entries = await Promise.all(
         myInstallAssets.map(async (asset) => {
-          const [cachedAsset, runs] = await Promise.all([
-            entityGetAsset(asset.id),
-            assetWorkflowRunService.listLocalByAsset(asset.id),
+          if (isNativePlatform) {
+            const [cachedAsset, runs] = await Promise.all([
+              entityGetAsset(asset.id),
+              assetWorkflowRunService.listLocalByAsset(asset.id),
+            ]);
+            const data = cachedAsset?.data as ProjectAsset | undefined;
+            if (!data) return null;
+            return [asset.id, { asset: data, runs }] as const;
+          }
+
+          if (shouldSkipBlockingFetch()) return null;
+
+          const [fullAsset, runs] = await Promise.all([
+            projectAssetService.getById(asset.id).catch(() => null),
+            assetWorkflowRunService.listByAsset(asset.id).catch(() => [] as AssetWorkflowRun[]),
           ]);
-          const data = cachedAsset?.data as ProjectAsset | undefined;
-          if (!data) return null;
-          return [asset.id, { asset: data, runs }] as const;
+          if (!fullAsset) return null;
+          return [asset.id, { asset: fullAsset, runs }] as const;
         })
       );
 
@@ -2048,7 +2055,6 @@ const Dashboard = () => {
 
   const nativeMyJobsDisplayStateByAssetId = useMemo(() => {
     const map = new Map<string, WorkflowDisplayState>();
-    if (!isNativePlatform) return map;
     for (const asset of myInstallAssets) {
       const ctx = nativeMyJobsCardContext[asset.id];
       if (!ctx) continue;
@@ -2063,14 +2069,19 @@ const Dashboard = () => {
       }));
     }
     return map;
-  }, [isNativePlatform, myInstallAssets, nativeMyJobsCardContext]);
+  }, [myInstallAssets, nativeMyJobsCardContext]);
 
   useEffect(() => {
-    if (!isNativePlatform) return;
     const handler = (event: Event) => {
       const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
       if (!assetId) return;
-      void assetWorkflowRunService.listByAsset(assetId).then((runs) => {
+      const loadRuns = isNativePlatform
+        ? assetWorkflowRunService.listLocalByAsset(assetId)
+        : shouldSkipBlockingFetch()
+          ? Promise.resolve(null)
+          : assetWorkflowRunService.listByAsset(assetId);
+      void loadRuns.then((runs) => {
+        if (!runs) return;
         setNativeMyJobsCardContext((prev) => {
           const existing = prev[assetId];
           if (!existing) return prev;
@@ -2288,11 +2299,9 @@ const Dashboard = () => {
   }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
 
   const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
-    if (isNativePlatform) {
-      const displayState = nativeMyJobsDisplayStateByAssetId.get(asset.id);
-      if (displayState) {
-        return myJobsCardActionFromDisplayState(displayState, true);
-      }
+    const displayState = nativeMyJobsDisplayStateByAssetId.get(asset.id);
+    if (displayState) {
+      return myJobsCardActionFromDisplayState(displayState, isNativePlatform);
     }
 
     const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
