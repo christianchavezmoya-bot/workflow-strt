@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useRef } from "react";
+import { Typography } from "@mui/material";
 import { Card, Kpi, Tag, ActivityFeed, Avatar, ChartBox, SectionHeader, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { lineTrend, gauge } from "./ChartTheme";
@@ -86,8 +87,8 @@ export function OverviewView({ data }: { data: TimeAnalyticsSnapshot }) {
         <Card title="Today's Top Performers" sub="Ranked by productivity, install count and quality">
           <Leaderboard data={data} />
         </Card>
-        <Card title="Milestones & Alerts" sub="Auto-detected from workflows, downtime & quality signals">
-          <Milestones />
+        <Card title="Milestones & Alerts" sub="Derived from project health, recent completions and issue signals">
+          <Milestones data={data} />
         </Card>
       </div>
     </>
@@ -228,23 +229,80 @@ function Leaderboard({ data }: { data: TimeAnalyticsSnapshot }) {
   );
 }
 
-function Milestones() {
-  const items = [
-    { type: "good" as const, text: "<b>5,000th install</b> completed this quarter at Aurora Substation 12." },
-    { type: "good" as const, text: "<b>Priya Raman</b> set new personal record: 142m avg on TrioMeter X." },
-    { type: "warn" as const, text: "<b>3 weather holds</b> currently active — NSW team Alpha rescheduling." },
-    { type: "good" as const, text: "Benchmark engine updated <b>14 expected-time</b> models overnight." },
-    { type: "good" as const, text: "<b>Meridian Water</b> contract renewal signed — 460 additional assets." },
-  ];
+function Milestones({ data }: { data: TimeAnalyticsSnapshot }) {
+  const items = useMemo(() => {
+    const out: { type: "good" | "warn" | "bad"; text: string; time: string }[] = [];
+
+    for (const p of data.projects) {
+      const pct = p.totalAssets > 0 ? Math.round((p.doneAssets / p.totalAssets) * 100) : 0;
+      if (p.health === "bad") {
+        out.push({
+          type: "warn",
+          text: `<b>${p.name}</b> is behind schedule — ${pct}% complete, due ${p.due}.`,
+          time: "alert",
+        });
+      } else if (p.health === "warn") {
+        out.push({
+          type: "warn",
+          text: `<b>${p.name}</b> flagged at risk — ${pct}% complete.`,
+          time: "alert",
+        });
+      } else if (pct >= 50 && pct < 100) {
+        out.push({
+          type: "good",
+          text: `<b>${p.name}</b> passed ${pct}% completion milestone.`,
+          time: "milestone",
+        });
+      }
+    }
+
+    for (const ev of data.activity.filter(a => a.type !== "good").slice(0, 4)) {
+      out.push({
+        type: ev.type,
+        text: ev.text,
+        time: formatFeedTime(ev.timestamp),
+      });
+    }
+
+    for (const ev of data.activity.filter(a => a.type === "good").slice(0, 3)) {
+      out.push({
+        type: "good",
+        text: ev.text,
+        time: formatFeedTime(ev.timestamp),
+      });
+    }
+
+    return out.slice(0, 8);
+  }, [data]);
+
+  if (items.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 12.5, py: 1 }}>
+        No milestones or alerts in the selected period. Try widening the date range or completing workflow runs.
+      </Typography>
+    );
+  }
+
   return (
     <div className="ta-feed">
       {items.map((it, i) => (
         <div className="ta-feed-item" key={i}>
           <div className={`ico ${it.type}`}>{it.type === "good" ? "✓" : "!"}</div>
           <div className="text" dangerouslySetInnerHTML={{ __html: it.text }} />
-          <div className="time">today</div>
+          <div className="time">{it.time}</div>
         </div>
       ))}
     </div>
   );
+}
+
+function formatFeedTime(iso: string): string {
+  const ts = Date.parse(iso);
+  if (Number.isNaN(ts)) return "recent";
+  const mins = Math.round((Date.now() - ts) / 60_000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return new Date(ts).toLocaleDateString();
 }

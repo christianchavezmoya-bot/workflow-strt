@@ -600,3 +600,14 @@
   font-size: 11.5px;
   color: var(--ta-text);
 }
+
+/* ---------- View content (each tab's panel stack) ---------- */
+.ta-view-anim {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.ta-view-anim > .ta-section-h {
+  margin: 0;
+}
