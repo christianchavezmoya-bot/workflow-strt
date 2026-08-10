@@ -7,8 +7,7 @@ export type GlobalSearchEntityType =
   | "document"
   | "customer"
   | "site"
-  | "workInstruction"
-  | "workOrder";
+  | "workInstruction";
 
 export interface GlobalSearchResult {
   id: string;

@@ -57,7 +57,6 @@ const ROUTE_LABELS: Record<string, string> = {
   "/work-instructions": "Workflows",
   "/documents": "Documents",
   "/admin": "Admin",
-  "/admin/asset-registry": "Asset Registry",
   "/settings": "Settings",
   "/profile": "Profile",
 };
