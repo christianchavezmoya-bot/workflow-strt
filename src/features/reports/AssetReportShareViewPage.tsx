@@ -19,6 +19,7 @@ import {
   Typography,
 } from "@mui/material";
 import { API_BASE_URL } from "../../services/api";
+import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 import {
   assetReportShareService,
   type AssetReportShareManifest,
@@ -30,6 +31,9 @@ export default function AssetReportShareViewPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeFileName, setActiveFileName] = useState<string | null>(null);
+  const [previewBlob, setPreviewBlob] = useState<Blob | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!shareId) {
@@ -58,6 +62,37 @@ export default function AssetReportShareViewPage() {
     if (!shareId || !activeFileName) return null;
     return `${API_BASE_URL}/asset-report-shares/${encodeURIComponent(shareId)}/files/${encodeURIComponent(activeFileName)}`;
   }, [shareId, activeFileName]);
+
+  useEffect(() => {
+    if (!previewUrl) {
+      setPreviewBlob(null);
+      setPreviewError(null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreviewBlob(null);
+
+    void fetch(previewUrl)
+      .then((response) => {
+        if (!response.ok) throw new Error("Failed to load report");
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!cancelled) setPreviewBlob(blob);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewError("Could not load report preview.");
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [previewUrl]);
 
   function goRelative(delta: number) {
     if (!manifest || manifest.files.length === 0) return;
@@ -157,12 +192,19 @@ export default function AssetReportShareViewPage() {
           </Stack>
 
           <Box sx={{ flex: 1, minHeight: 0 }}>
-            {previewUrl ? (
-              <Box
-                component="iframe"
-                title="Shared report preview"
-                src={previewUrl}
-                sx={{ width: "100%", height: "100%", border: 0, bgcolor: "common.white" }}
+            {previewLoading ? (
+              <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", color: "common.white" }}>
+                <CircularProgress color="inherit" />
+                <Typography variant="body2">Loading report preview…</Typography>
+              </Stack>
+            ) : previewError ? (
+              <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", px: 2 }}>
+                <Alert severity="warning" sx={{ maxWidth: 480 }}>{previewError}</Alert>
+              </Stack>
+            ) : previewBlob ? (
+              <PdfBlobPreview
+                blob={previewBlob}
+                scrollHint="Scroll to view all pages"
               />
             ) : (
               <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", color: "common.white" }}>

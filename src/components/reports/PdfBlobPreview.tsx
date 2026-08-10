@@ -42,12 +42,19 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   useEffect(() => {
     const node = viewportRef.current;
     if (!node) return;
+    let frame = 0;
     const resizeObserver = new ResizeObserver((entries) => {
-      setContainerWidth(entries[0]?.contentRect.width ?? 0);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        setContainerWidth(entries[0]?.contentRect.width ?? 0);
+      });
     });
     resizeObserver.observe(node);
     setContainerWidth(node.getBoundingClientRect().width);
-    return () => resizeObserver.disconnect();
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+    };
   }, []);
 
   useEffect(() => {
