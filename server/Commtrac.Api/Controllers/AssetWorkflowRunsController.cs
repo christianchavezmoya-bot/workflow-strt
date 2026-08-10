@@ -1025,6 +1025,7 @@ public class AssetWorkflowRunsController : ControllerBase
             return BadRequest(new { message = "This run is locked (completed). Re-run to create a new run." });
         var previousStatus = run.Status;
         var previousIssuesJson = run.IssuesJson;
+        var previousStepResultsJson = run.StepResultsJson;
 
         run.StepResultsJson = req.StepResultsJson;
         if (req.IssuesJson is not null) run.IssuesJson = req.IssuesJson;
@@ -1048,6 +1049,7 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        var broadcasted = false;
         if (!string.Equals(previousStatus, run.Status, StringComparison.OrdinalIgnoreCase))
         {
             var eventType = run.Status switch
@@ -1072,6 +1074,7 @@ public class AssetWorkflowRunsController : ControllerBase
                 title,
                 $"{ResolveActorName()} changed workflow status to {run.Status} for asset {{asset}} on job {{job}}.",
                 notifyInstaller: run.Status is "Issue" or "Paused");
+            broadcasted = true;
         }
 
         if (req.IssuesJson is not null && CountOpenIssues(req.IssuesJson) > CountOpenIssues(previousIssuesJson))
@@ -1083,6 +1086,13 @@ public class AssetWorkflowRunsController : ControllerBase
                 "New workflow issue",
                 $"{ResolveActorName()} added or reopened issues for asset {{asset}} on job {{job}}.",
                 notifyInstaller: true);
+            broadcasted = true;
+        }
+
+        if (!broadcasted
+            && !string.Equals(previousStepResultsJson, run.StepResultsJson, StringComparison.Ordinal))
+        {
+            await BroadcastAssetUpdatedAsync(run.AssetId);
         }
         return Ok(ToDto(run));
     }
@@ -1341,6 +1351,7 @@ public class AssetWorkflowRunsController : ControllerBase
 
         await _db.SaveChangesAsync();
         // Text capture edits do not notify inbox/dashboard — keeps PM spreadsheet edits quiet.
+        await BroadcastAssetUpdatedAsync(run.AssetId);
         return Ok(ToDto(run));
     }
 
@@ -1401,6 +1412,10 @@ public class AssetWorkflowRunsController : ControllerBase
                 "Workflow media updated",
                 $"{req.AmendedByName ?? ResolveActorName()} uploaded or amended workflow media for asset {{asset}} on job {{job}}.",
                 notifyInstaller: false);
+        }
+        else
+        {
+            await BroadcastAssetUpdatedAsync(run.AssetId);
         }
         return Ok(ToDto(run));
     }
@@ -1518,6 +1533,7 @@ public class AssetWorkflowRunsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await BroadcastAssetUpdatedAsync(run.AssetId);
         return Ok(ToDto(run));
     }
 
@@ -1851,6 +1867,15 @@ public class AssetWorkflowRunsController : ControllerBase
                 ? [raw]
                 : [];
         }
+    }
+
+    private async Task BroadcastAssetUpdatedAsync(string assetId)
+    {
+        var asset = await _db.ProjectAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Id == assetId);
+        if (asset is null) return;
+        await _sse.BroadcastAsync(
+            "assets:updated",
+            new { productId = asset.ProductId, projectId = asset.ProjectId });
     }
 
     private async Task NotifyRunEventAsync(
