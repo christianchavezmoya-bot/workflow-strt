@@ -1720,6 +1720,8 @@ const Dashboard = () => {
     runId?: string;
     issueId?: string;
     issueSource?: "run" | "asset";
+    /** signature deep link — auto-open installer Sign or customer Send dialog */
+    signatureStage?: "installer" | "customer";
   }) => {
     const query = new URLSearchParams({
       project: params.projectId,
@@ -1729,6 +1731,7 @@ const Dashboard = () => {
     if (params.runId) query.set("run", params.runId);
     if (params.issueId) query.set("issue", params.issueId);
     if (params.issueSource) query.set("issueSource", params.issueSource);
+    if (params.signatureStage) query.set("stage", params.signatureStage);
     return `/installations/assets?${query.toString()}`;
   }, []);
 
@@ -1937,11 +1940,17 @@ const Dashboard = () => {
   }, [issueDetailTarget, openIssues, refreshDashboardAfterIssueUpdate]);
 
   const openSignatureRepair = useCallback((sig: PendingSignatureRecord) => {
+    const signatureStage = isPendingInstallerSignature(sig.signatureStatus)
+      ? "installer"
+      : isPendingCustomerSignature(sig.signatureStatus)
+        ? "customer"
+        : undefined;
     navigate(buildAssetRepairPath({
       projectId: sig.projectId,
       assetId: sig.assetId,
       action: "signature",
       runId: sig.runId,
+      signatureStage,
     }));
   }, [buildAssetRepairPath, navigate]);
 

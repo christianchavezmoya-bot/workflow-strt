@@ -338,7 +338,7 @@ export default function ExternalSignPage() {
           </Box>
         </Box>
 
-        <Box sx={{ flex: 1, minHeight: 0, bgcolor: "#525659" }}>
+        <Box sx={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column", overflow: "hidden", bgcolor: "#525659" }}>
           {previewLoading ? (
             <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", color: "#fff" }}>
               <CircularProgress color="inherit" />

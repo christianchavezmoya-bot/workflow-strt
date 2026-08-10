@@ -100,7 +100,12 @@ import { productConfigService, type ProductConfig } from "../../services/product
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
-import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun } from "../../services/assetWorkflowRunService";
+import {
+  assetWorkflowRunService,
+  deriveOfflineAssetStatusFromRun,
+  isPendingCustomerSignature,
+  isPendingInstallerSignature,
+} from "../../services/assetWorkflowRunService";
 import { RunHydrationPriority } from "../../services/runHydrationQueue";
 import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -608,6 +613,8 @@ const AssetInstallationPage = () => {
   // False when the run was created synthetically from a JSON import (no point re-running)
   const [runHistoryAllowRerun, setRunHistoryAllowRerun] = useState(true);
   const [runHistoryEntryMode, setRunHistoryEntryMode] = useState<"default" | "customer-sign">("default");
+  const [runHistoryInitialRunId, setRunHistoryInitialRunId] = useState<string | null>(null);
+  const [runHistoryAutoOpen, setRunHistoryAutoOpen] = useState<"installer-sign" | "customer-sign" | null>(null);
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   // Workflow type mismatch confirmation
   const [wfMismatchConfirm, setWfMismatchConfirm] = useState<{
@@ -943,7 +950,27 @@ const AssetInstallationPage = () => {
     }
 
     if (actionFromUrl === "signature" || actionFromUrl === "history" || (actionFromUrl === "issue" && issueSourceFromUrl === "run")) {
-      void openRunHistory(asset, targetRun?.workflowConfigId);
+      if (actionFromUrl === "signature" && targetRun) {
+        const stageFromUrl = searchParams.get("stage");
+        const canSendCustomer =
+          currentUser.role === "Admin" || currentUser.role === "Project Manager";
+        const autoOpen: "installer-sign" | "customer-sign" | null =
+          stageFromUrl === "installer" || isPendingInstallerSignature(targetRun.signatureStatus)
+            ? "installer-sign"
+            : (stageFromUrl === "customer" || isPendingCustomerSignature(targetRun.signatureStatus))
+              && canSendCustomer
+              ? "customer-sign"
+              : null;
+        setRunHistoryInitialRunId(targetRun.id);
+        setRunHistoryAutoOpen(autoOpen);
+        const entryMode =
+          autoOpen === "customer-sign" || isPendingCustomerSignature(targetRun.signatureStatus)
+            ? "customer-sign"
+            : "default";
+        void openRunHistory(asset, targetRun.workflowConfigId, undefined, entryMode);
+      } else {
+        void openRunHistory(asset, targetRun?.workflowConfigId);
+      }
       deepLinkHandledRef.current = key;
     }
   }, [assets, runsMap, searchParams]);
@@ -6821,13 +6848,19 @@ ${words.slice(midpoint).join(" ")}`;
       {runHistoryOpen && runHistoryAsset && (
         <WorkflowRunHistoryDialog
           open={runHistoryOpen}
-          onClose={() => { setRunHistoryOpen(false); }}
+          onClose={() => {
+            setRunHistoryOpen(false);
+            setRunHistoryInitialRunId(null);
+            setRunHistoryAutoOpen(null);
+          }}
           asset={runHistoryAsset}
           workflowConfigId={runHistoryConfigId}
           workflowConfigName={runHistoryConfigName}
           currentUserName={currentUser?.fullName ?? ""}
           canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
           entryMode={runHistoryEntryMode}
+          initialRunId={runHistoryInitialRunId}
+          autoOpenAction={runHistoryAutoOpen}
           onRerun={handleRerun}
           onContinue={handleContinueRun}
           onAddMissingMedia={(run) => openMissingMediaDialog(runHistoryAsset, run)}
