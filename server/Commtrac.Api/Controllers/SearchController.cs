@@ -217,26 +217,6 @@ public class SearchController : ControllerBase
                 });
         }
 
-        var workOrders = await _db.WorkOrders.AsNoTracking().ToListAsync();
-        foreach (var wo in workOrders)
-        {
-            TryAddResult(
-                results,
-                terms,
-                entityType: "workOrder",
-                entityId: wo.Id,
-                title: string.IsNullOrWhiteSpace(wo.JobReference) ? "(Untitled Work Order)" : wo.JobReference,
-                subtitle: wo.Status,
-                route: "/work-instructions",
-                fields: new Dictionary<string, string?>
-                {
-                    ["Job Reference"] = wo.JobReference,
-                    ["Status"] = wo.Status,
-                    ["Notes"] = wo.Notes,
-                    ["Steps"] = ExtractReadableJsonText(wo.StepsDataJson)
-                });
-        }
-
         await AddIndexedDocumentContentResultsAsync(results, terms, docs);
 
         var ordered = results

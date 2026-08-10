@@ -138,7 +138,6 @@ const AppRoutes = () => {
         <Route path="/tips" element={<LazyRoute><TipsRoute /></LazyRoute>} />
         <Route path="/admin" element={<LazyRoute><AdminRoute /></LazyRoute>} />
         <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSites /></LazyRoute>} />
-        <Route path="/admin/asset-registry" element={<Navigate to="/projects" replace />} />
         <Route path="/issues" element={<LazyRoute><IssuesBoard /></LazyRoute>} />
         <Route path="/time-analytics" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
         <Route path="/time-analytics/:view" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />

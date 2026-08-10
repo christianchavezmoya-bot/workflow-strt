@@ -54,8 +54,7 @@ const TYPE_LABELS: Record<string, string> = {
   document: "Document",
   customer: "Customer",
   site: "Site",
-  workInstruction: "Work Instruction",
-  workOrder: "Work Order"
+  workInstruction: "Work Instruction"
 };
 
 const FILTER_LABELS: Record<FilterId, string> = {
@@ -95,7 +94,6 @@ function iconForType(type: string) {
     case "customer": return <BusinessOutlinedIcon fontSize="small" />;
     case "site": return <PlaceOutlinedIcon fontSize="small" />;
     case "workInstruction": return <ChecklistOutlinedIcon fontSize="small" />;
-    case "workOrder": return <AssignmentOutlinedIcon fontSize="small" />;
     default: return <SearchOutlinedIcon fontSize="small" />;
   }
 }
@@ -309,7 +307,7 @@ const GlobalSearchDialog = ({ open, onClose }: Props) => {
       return q.filter((r) => r.entityType === "document" && r.route.includes("/installations/assets"));
     }
     if (filter === "documents") return q.filter((r) => r.entityType === "document");
-    if (filter === "workflows") return q.filter((r) => r.entityType === "workInstruction" || r.entityType === "workOrder");
+    if (filter === "workflows") return q.filter((r) => r.entityType === "workInstruction");
     if (filter === "projects") return q.filter((r) => r.entityType === "project");
     if (filter === "assets") return q.filter((r) => r.entityType === "asset");
     if (filter === "installations") return q.filter((r) => r.entityType === "installation");
