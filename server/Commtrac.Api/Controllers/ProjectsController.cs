@@ -17,14 +17,19 @@ public class ProjectsController : ControllerBase
     private readonly AppDbContext _db;
     private readonly NotificationFeedService _feed;
     private readonly ProjectLifecycleService _projectLifecycle;
+    private readonly SseHub _sse;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    public ProjectsController(AppDbContext db, NotificationFeedService feed, ProjectLifecycleService projectLifecycle)
+    public ProjectsController(AppDbContext db, NotificationFeedService feed, ProjectLifecycleService projectLifecycle, SseHub sse)
     {
         _db = db;
         _feed = feed;
         _projectLifecycle = projectLifecycle;
+        _sse = sse;
     }
+
+    private Task BroadcastProjectsUpdatedAsync(string projectId) =>
+        _sse.BroadcastAsync("projects:updated", new { projectId });
 
     [HttpGet]
     public async Task<ActionResult<ProjectListResponse>> GetAll(
@@ -224,6 +229,7 @@ public class ProjectsController : ControllerBase
                 .FirstOrDefaultAsync();
         }
 
+        await BroadcastProjectsUpdatedAsync(project.Id);
         return CreatedAtAction(nameof(GetById), new { id = project.Id }, ToDto(project, siteName));
     }
 
@@ -274,6 +280,7 @@ public class ProjectsController : ControllerBase
                 .FirstOrDefaultAsync();
         }
 
+        await BroadcastProjectsUpdatedAsync(project.Id);
         return Ok(ToDto(project, siteName));
     }
 
@@ -309,6 +316,7 @@ public class ProjectsController : ControllerBase
                     .FirstOrDefaultAsync();
             }
 
+            await BroadcastProjectsUpdatedAsync(id);
             return Ok(ToDto(closeResult.Project!, closedSiteName));
         }
 
@@ -354,6 +362,7 @@ public class ProjectsController : ControllerBase
                 .FirstOrDefaultAsync();
         }
 
+        await BroadcastProjectsUpdatedAsync(project.Id);
         return Ok(ToDto(project, siteName));
     }
 
@@ -403,6 +412,7 @@ public class ProjectsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await BroadcastProjectsUpdatedAsync(id);
         return NoContent();
     }
 
@@ -448,6 +458,7 @@ public class ProjectsController : ControllerBase
         }
 
         await _db.SaveChangesAsync();
+        await BroadcastProjectsUpdatedAsync(id);
         return NoContent();
     }
 
@@ -512,6 +523,7 @@ public class ProjectsController : ControllerBase
 
         _db.Projects.Remove(project);
         await _db.SaveChangesAsync();
+        await BroadcastProjectsUpdatedAsync(id);
         return NoContent();
     }
 

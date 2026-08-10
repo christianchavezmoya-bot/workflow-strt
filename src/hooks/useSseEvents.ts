@@ -3,7 +3,8 @@
  * push events into DOM custom events that existing page listeners already handle.
  *
  * Events dispatched:
- *   "sse:assets:updated"  — detail: { productId?, projectId? }
+ *   "sse:assets:updated"   — detail: { productId?, projectId? }
+ *   "sse:projects:updated" — detail: { projectId? }
  *
  * The hook is safe to mount at the app-shell level. It:
  *   - Does nothing if no auth token is present (not logged in)
@@ -20,6 +21,7 @@ import { probePendingConflictsFromSse } from "../services/syncConflictProbe";
 import { isMobileNativePlatform } from "../utils/platform";
 import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
 import { prefetchAssignedAssetsInProject } from "../services/assetPrefetchService";
+import { ProjectRepository } from "../repositories/ProjectRepository";
 import type { User } from "../types/user";
 
 const BASE_RETRY_MS = 3_000;
@@ -112,6 +114,19 @@ export function useSseEvents() {
             productId: typeof detail.productId === "string" ? detail.productId : undefined,
             projectId: typeof detail.projectId === "string" ? detail.projectId : undefined,
           });
+        } catch { /* malformed JSON — ignore */ }
+      });
+
+      es.addEventListener("projects:updated", (e: MessageEvent) => {
+        try {
+          const detail = JSON.parse((e as MessageEvent).data as string) as Record<string, unknown>;
+          if (!isMobileNativePlatform()) {
+            invalidateWebCacheByPrefix("/projects");
+          }
+          window.dispatchEvent(new CustomEvent("sse:projects:updated", { detail }));
+          if (isMobileNativePlatform()) {
+            void ProjectRepository.syncCatalogFromServer();
+          }
         } catch { /* malformed JSON — ignore */ }
       });
 

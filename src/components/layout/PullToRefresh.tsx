@@ -55,6 +55,7 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
+      if (dialogOpenRef.current) return;
       if (refreshingRef.current) return;
       if (window.scrollY > 2) return;
       startYRef.current   = e.touches[0].clientY;
@@ -64,6 +65,12 @@ export default function PullToRefresh({ children }: { children: React.ReactNode 
     };
 
     const onTouchMove = (e: TouchEvent) => {
+      if (dialogOpenRef.current) {
+        activePullRef.current = false;
+        setPullY(0);
+        setIsPulling(false);
+        return;
+      }
       if (!activePullRef.current) return;
       if (window.scrollY > 2) {
         activePullRef.current = false;

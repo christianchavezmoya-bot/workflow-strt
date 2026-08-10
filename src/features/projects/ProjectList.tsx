@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Box,
   Button,
@@ -50,7 +50,7 @@ import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { useWorkScope } from "../../hooks/useWorkScope";
 import { fieldService } from "../../services/fieldService";
 import { officesService } from "../../services/officesService";
-import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
+import { buildProjectRequestKey, ProjectRepository, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -63,6 +63,7 @@ import { useComplexView } from "../../contexts/ComplexViewContext";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { CACHE_SOFT_LIMIT_MS, syncMetaGet } from "../../services/localDB";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
+import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 
 // Style for field definition labels (yellow bold)
 const fieldLabelStyle = {
@@ -341,32 +342,16 @@ const ProjectList = () => {
   }, [activeOffice]);
 
   useEffect(() => {
+    setPage(0);
+  }, [showArchived, projectNumberFilter, statusFilter]);
+
+  useEffect(() => {
     if (!isMobileNativePlatform()) return;
     void syncMetaGet("projects").then((lastSync) => {
       if (!lastSync) return;
       setProjectsCacheStale(Date.now() - new Date(lastSync).getTime() > CACHE_SOFT_LIMIT_MS);
     });
   }, [items.length]);
-
-  useEffect(() => {
-    dispatch(
-      fetchProjects({
-        // Filter by country on the server so pagination doesn't hide matching projects.
-        country: activeOffice !== "All" ? activeOffice : undefined,
-        scope: "browse",
-        ownershipScope: "all",
-        status: statusFilter,
-        projectNumber: projectNumberFilter.trim() || undefined,
-        page: page + 1,
-        pageSize: rowsPerPage,
-        includeDeleted: showArchived
-      })
-    );
-  }, [dispatch, activeOffice, page, rowsPerPage, showArchived, projectNumberFilter, statusFilter]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [showArchived, projectNumberFilter, statusFilter]);
 
   const currentRequestKey = useMemo(() => buildProjectRequestKey({
     country: activeOffice !== "All" ? activeOffice : undefined,
@@ -379,15 +364,44 @@ const ProjectList = () => {
     includeDeleted: showArchived,
   }), [activeOffice, page, projectNumberFilter, rowsPerPage, showArchived, statusFilter]);
 
+  const reloadProjects = useCallback(() => {
+    dispatch(
+      fetchProjects({
+        country: activeOffice !== "All" ? activeOffice : undefined,
+        scope: "browse",
+        ownershipScope: "all",
+        status: statusFilter,
+        projectNumber: projectNumberFilter.trim() || undefined,
+        page: page + 1,
+        pageSize: rowsPerPage,
+        includeDeleted: showArchived,
+      })
+    );
+  }, [activeOffice, dispatch, page, projectNumberFilter, rowsPerPage, showArchived, statusFilter]);
+
+  useEffect(() => {
+    reloadProjects();
+  }, [reloadProjects]);
+
+  useStaleOnResume("projects", useCallback(() => {
+    void ProjectRepository.syncCatalogFromServer();
+  }, []));
+
   useEffect(() => {
     const handleUpdated = (event: Event) => {
       const detail = (event as CustomEvent<ProjectRepositoryUpdateDetail>).detail;
-      if (!detail || detail.requestKey !== currentRequestKey) return;
+      if (!detail) return;
+      if (isMobileNativePlatform()) {
+        reloadProjects();
+        setProjectsCacheStale(false);
+        return;
+      }
+      if (detail.requestKey !== currentRequestKey) return;
       dispatch(setProjects({ items: detail.items, total: detail.total }));
     };
     window.addEventListener("repo:projects:updated", handleUpdated);
     return () => window.removeEventListener("repo:projects:updated", handleUpdated);
-  }, [currentRequestKey, dispatch]);
+  }, [currentRequestKey, dispatch, reloadProjects]);
 
   useEffect(() => {
     dispatch(fetchProducts());
