@@ -135,6 +135,7 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import AssetAddDialog from "./AssetAddDialog";
+import AssetEditDialog from "./AssetEditDialog";
 import InspectionImportDialog from "../projects/InspectionImportDialog";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
 import { AssetRepository } from "../../repositories/AssetRepository";
@@ -381,38 +382,6 @@ function nextDraftConfigNumber(configs: WorkflowConfig[], productName: string) {
 }
 
 // ------------------------------------------------------------------
-// Asset form
-// ------------------------------------------------------------------
-
-interface AssetForm {
-  projectId: string;
-  configId: string;
-  assetTag: string;
-  assetName: string;
-  serialNumber: string;
-  assetModel: string;
-  manufacturer: string;
-  location: string;
-  assignedUserId: string;
-  notes: string;
-  featureValues: Record<string, string>;
-}
-
-const emptyForm = (): AssetForm => ({
-  projectId: "",
-  configId: "",
-  assetTag: "",
-  assetName: "",
-  serialNumber: "",
-  assetModel: "",
-  manufacturer: "",
-  location: "",
-  assignedUserId: "",
-  notes: "",
-  featureValues: {},
-});
-
-// ------------------------------------------------------------------
 // Report generator (type only â€" the async function lives inside the component)
 // ------------------------------------------------------------------
 
@@ -541,16 +510,8 @@ const AssetInstallationPage = () => {
   // Add dialog — form state lives in AssetAddDialog so keystrokes don't re-render this page.
   const [addOpen, setAddOpen] = useState(false);
 
-  // Edit dialog
-  const [editOpen, setEditOpen] = useState(false);
+  // Edit dialog — form state lives in AssetEditDialog so keystrokes don't re-render this page.
   const [editAsset, setEditAsset] = useState<ProjectAsset | null>(null);
-  const [editForm, setEditForm] = useState<AssetForm>(emptyForm());
-  const [editError, setEditError] = useState<string | null>(null);
-  const [editSaving, setEditSaving] = useState(false);
-  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
-  const [cancelDialogMode, setCancelDialogMode] = useState<"cancel" | "undo">("cancel");
-  const [cancelReason, setCancelReason] = useState("");
-  const [cancellingAsset, setCancellingAsset] = useState(false);
 
   // Delete (single)
   const [deleteAsset, setDeleteAsset] = useState<ProjectAsset | null>(null);
@@ -2290,120 +2251,12 @@ const AssetInstallationPage = () => {
   }
 
   function openEditAsset(asset: ProjectAsset) {
-    let fv: Record<string, string> = {};
-    try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
     setEditAsset(asset);
-    setEditForm({
-      projectId: asset.projectId,
-      configId: asset.productConfigId ?? "",
-      assetTag: asset.assetTag,
-      assetName: asset.assetName ?? "",
-      serialNumber: asset.serialNumber ?? "",
-      assetModel: asset.assetModel ?? "",
-      manufacturer: asset.manufacturer ?? "",
-      location: asset.location || getSiteLocation(projectMap.get(asset.projectId)?.siteId),
-      assignedUserId: asset.assignedUserId ?? "",
-      notes: asset.notes ?? "",
-      featureValues: fv,
-    });
-    setEditError(null);
-    setEditOpen(true);
   }
 
-  async function saveEditAsset() {
-    if (!editAsset) return;
-    const tag = editForm.assetTag.trim();
-    if (!tag) { setEditError("Asset tag is required."); return; }
-    setEditSaving(true);
-    setEditError(null);
-    try {
-      const updated = await projectAssetService.update(editAsset.id, {
-        assetTag: tag,
-        assetName: editForm.assetName.trim() || undefined,
-        serialNumber: editForm.serialNumber.trim() || undefined,
-        assetModel: editForm.assetModel.trim() || undefined,
-        manufacturer: editForm.manufacturer.trim() || undefined,
-        location: editForm.location.trim() || undefined,
-        assignedUserId: editForm.assignedUserId || undefined,
-        notes: editForm.notes.trim() || undefined,
-        productConfigId: editForm.configId,
-        featureValuesJson: Object.keys(editForm.featureValues).length
-          ? JSON.stringify(editForm.featureValues)
-          : undefined,
-      });
-      setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      setEditAsset(updated);
-      setEditForm((prev) => ({ ...prev, notes: updated.notes ?? prev.notes }));
-      setEditOpen(false);
-      setEditAsset(null);
-    } catch {
-      setEditError("Failed to update asset.");
-    } finally {
-      setEditSaving(false);
-    }
-  }
-
-  // ------------------------------------------------------------------
-  // Cancel asset
-  //
-  // Cancel is a STATUS, not a soft-delete: the asset stays visible on this page
-  // (chip + filter) instead of disappearing the way a deleted asset does. It
-  // rides the existing Admin/PM update endpoint, so no new backend route.
-  //
-  // No run surgery is needed. IsCurrentWorkspaceAsset drops a cancelled asset
-  // before it inspects the run, and every active-asset query already excludes
-  // "Cancelled" - so an in-flight run simply stops counting as current and the
-  // captured work is preserved as an audit record.
-  // ------------------------------------------------------------------
-
-  async function confirmCancelAsset() {
-    if (!editAsset) return;
-    const reason = cancelReason.trim();
-    if (!reason) return;
-    setCancellingAsset(true);
-    setEditError(null);
-    try {
-      const stamp = new Date().toISOString().slice(0, 10);
-      const existingNotes = (editForm.notes ?? "").trim();
-      const cancelNote = `[Cancelled ${stamp}] ${reason}`;
-      const updated = await projectAssetService.update(editAsset.id, {
-        status: "Cancelled",
-        notes: existingNotes ? `${existingNotes}\n${cancelNote}` : cancelNote,
-      });
-      setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      setEditAsset(updated);
-      setEditForm((prev) => ({ ...prev, notes: updated.notes ?? prev.notes }));
-      setCancelConfirmOpen(false);
-      setCancelReason("");
-    } catch {
-      setEditError("Failed to cancel asset.");
-    } finally {
-      setCancellingAsset(false);
-    }
-  }
-
-  async function confirmUndoCancelAsset() {
-    if (!editAsset) return;
-    setCancellingAsset(true);
-    setEditError(null);
-    try {
-      const stamp = new Date().toISOString().slice(0, 10);
-      const existingNotes = (editForm.notes ?? "").trim();
-      const undoNote = `[Cancellation removed ${stamp}] Restored to Not Started`;
-      const updated = await projectAssetService.update(editAsset.id, {
-        status: "NotStarted",
-        notes: existingNotes ? `${existingNotes}\n${undoNote}` : undoNote,
-      });
-      setAssets((prev) => prev.map((a) => (a.id === editAsset.id ? updated : a)));
-      setEditAsset(updated);
-      setEditForm((prev) => ({ ...prev, notes: updated.notes ?? prev.notes }));
-      setCancelConfirmOpen(false);
-      setCancelReason("");
-    } catch {
-      setEditError("Failed to restore cancelled asset.");
-    } finally {
-      setCancellingAsset(false);
-    }
+  function handleEditAssetUpdated(updated: ProjectAsset) {
+    setAssets((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
+    setEditAsset((cur) => (cur?.id === updated.id ? updated : cur));
   }
 
   // ------------------------------------------------------------------
@@ -5031,6 +4884,43 @@ ${words.slice(midpoint).join(" ")}`;
     );
   }
 
+  const getProjectById = useCallback(
+    (projectId: string) => projectMap.get(projectId),
+    [projectMap],
+  );
+
+  const captureOnRunUpdated = useCallback((run: AssetWorkflowRun) => {
+    startTransition(() => {
+      setRunsMap((prev) => {
+        const list = prev[run.assetId] ?? [];
+        const next = list.some((r) => r.id === run.id)
+          ? list.map((r) => (r.id === run.id ? run : r))
+          : [...list, run];
+        return { ...prev, [run.assetId]: next };
+      });
+    });
+  }, []);
+
+  const captureRenderStatusRef = useRef(captureTableStatusChip);
+  captureRenderStatusRef.current = captureTableStatusChip;
+  const captureRenderActionsRef = useRef(actionButton);
+  captureRenderActionsRef.current = actionButton;
+
+  const captureRenderStatus = useCallback(
+    (asset: ProjectAsset) => captureRenderStatusRef.current(asset, projectMap.get(asset.projectId)?.workflowMode),
+    [projectMap],
+  );
+
+  const captureRenderActions = useCallback(
+    (asset: ProjectAsset) => {
+      const proj = projectMap.get(asset.projectId);
+      return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
+        ? captureRenderActionsRef.current(asset, proj?.workflowMode)
+        : null;
+    },
+    [projectMap, canRunAssetWorkflow],
+  );
+
   // ------------------------------------------------------------------
   // Render
   // ------------------------------------------------------------------
@@ -5053,8 +4943,6 @@ ${words.slice(midpoint).join(" ")}`;
     }
     return { productive, downtime, downtimeEvents };
   }, [visibleAssets, runsMap]);
-
-  const isEditAssetCancelled = editAsset?.status === "Cancelled";
 
   return (
     <Stack spacing={3}>
@@ -6247,137 +6135,18 @@ ${words.slice(midpoint).join(" ")}`;
         onSaved={refreshAssets}
       />
 
-      {/* Edit asset dialog */}
-      <Dialog open={editOpen} onClose={() => !editSaving && setEditOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit Asset - {editAsset?.assetTag}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {isEditAssetCancelled && (
-              <Alert severity="warning" sx={{ fontSize: 12 }}>
-                This asset is cancelled and locked. Its details and workflow can no longer be
-                edited. The reason is recorded in Notes.
-              </Alert>
-            )}
-            {editAsset && (() => {
-              const proj = projectMap.get(editAsset.projectId);
-              if (!proj?.siteName) return null;
-              return (
-                <Stack direction="row" spacing={1.5}>
-                  <TextField
-                    label="Project #" size="small" fullWidth
-                    value={proj.jobNumber}
-                    InputProps={{ readOnly: true }}
-                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
-                  />
-                  <TextField
-                    label="Site Name" size="small" fullWidth
-                    value={proj.siteName}
-                    InputProps={{ readOnly: true }}
-                    sx={{ "& .MuiInputBase-input": { color: "text.secondary" } }}
-                  />
-                </Stack>
-              );
-            })()}
-
-            <TextField label="Asset Tag *" size="small" fullWidth required
-              value={editForm.assetTag}
-              onChange={(e) => setEditForm((p) => ({ ...p, assetTag: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Asset Name" size="small" fullWidth
-              value={editForm.assetName}
-              onChange={(e) => setEditForm((p) => ({ ...p, assetName: e.target.value }))}
-              placeholder="e.g. AGI-10, Shuttle Car, Skid Steer"
-              InputLabelProps={{ shrink: true }}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Configuration Type</InputLabel>
-              <Select
-                label="Configuration Type"
-                value={editForm.configId}
-                onChange={(e) => setEditForm((p) => ({ ...p, configId: e.target.value }))}
-                disabled={Boolean(isEditAssetCancelled)}
-              >
-                <MenuItem value="">(None)</MenuItem>
-                {latestPublishedWfConfigs.map((wc) => (
-                  <MenuItem key={wc.id} value={wc.id}>
-                    {wc.configType ? `${wc.configType} - ` : ""}{wc.name}{wc.version > 1 ? ` (v${wc.version})` : ""}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <TextField label="Serial Number" size="small" fullWidth
-              value={editForm.serialNumber}
-              onChange={(e) => setEditForm((p) => ({ ...p, serialNumber: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Asset Model" size="small" fullWidth
-              value={editForm.assetModel}
-              onChange={(e) => setEditForm((p) => ({ ...p, assetModel: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Manufacturer" size="small" fullWidth
-              value={editForm.manufacturer}
-              onChange={(e) => setEditForm((p) => ({ ...p, manufacturer: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <TextField label="Location" size="small" fullWidth
-              value={editForm.location}
-              onChange={(e) => setEditForm((p) => ({ ...p, location: e.target.value }))}
-              placeholder="i.e LV workshop, U/G"
-              InputLabelProps={{ shrink: true }}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Assigned User</InputLabel>
-              <Select label="Assigned User" value={editForm.assignedUserId}
-                onChange={(e) => setEditForm((p) => ({ ...p, assignedUserId: e.target.value }))}
-                disabled={Boolean(isEditAssetCancelled)}>
-                <MenuItem value="">(Unassigned)</MenuItem>
-                {users.filter((u) => u.isActive).map((u) => (
-                  <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Stack
-              direction={{ xs: "column", sm: "row" }}
-              spacing={1}
-              alignItems={{ xs: "stretch", sm: "center" }}
-              justifyContent="space-between"
-            >
-              <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                <Typography variant="body2" color="text.secondary">Asset status</Typography>
-                <Chip
-                  size="small"
-                  label={STATUS_LABELS[(editAsset?.status as ProjectAssetStatus) ?? "NotStarted"]}
-                  color={STATUS_COLORS[(editAsset?.status as ProjectAssetStatus) ?? "NotStarted"]}
-                />
-              </Stack>
-              {canEditAssetStatus && (
-                <Button
-                  color={isEditAssetCancelled ? "warning" : "error"}
-                  onClick={() => {
-                    setCancelDialogMode(isEditAssetCancelled ? "undo" : "cancel");
-                    setCancelReason("");
-                    setCancelConfirmOpen(true);
-                  }}
-                  disabled={editSaving}
-                >
-                  {isEditAssetCancelled ? "Undo cancel asset" : "Cancel asset"}
-                </Button>
-              )}
-            </Stack>
-            <TextField label="Notes" size="small" fullWidth multiline rows={2}
-              value={editForm.notes}
-              onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))}
-              InputProps={{ readOnly: Boolean(isEditAssetCancelled) }} />
-            {editError && <Alert severity="error" sx={{ fontSize: 12 }}>{editError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setEditOpen(false)} disabled={editSaving}>Close</Button>
-          <Button variant="contained" onClick={saveEditAsset}
-            disabled={editSaving || Boolean(isEditAssetCancelled)}
-            startIcon={editSaving ? <CircularProgress size={14} /> : undefined}>
-            {editSaving ? "Saving..." : "Save changes"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      {/* Edit asset dialog — isolated so typing doesn't re-render the operations table */}
+      <AssetEditDialog
+        open={Boolean(editAsset)}
+        asset={editAsset}
+        users={users}
+        latestPublishedWfConfigs={latestPublishedWfConfigs}
+        getProject={getProjectById}
+        getSiteLocation={getSiteLocation}
+        canEditAssetStatus={canEditAssetStatus}
+        onClose={() => setEditAsset(null)}
+        onUpdated={handleEditAssetUpdated}
+      />
 
       {/* Column sort / filter menu */}
       <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
@@ -6413,55 +6182,6 @@ ${words.slice(midpoint).join(" ")}`;
       </Menu>
 
       {/* Archive confirmation */}
-      {/* Cancel / undo cancel asset */}
-      <Dialog open={cancelConfirmOpen} onClose={() => !cancellingAsset && setCancelConfirmOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>{cancelDialogMode === "undo" ? "Undo asset cancellation?" : "Cancel this asset?"}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {cancelDialogMode === "undo" ? (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                {editAsset?.assetTag} will be restored to <strong>Not Started</strong>. The asset stays
-                visible in active lists and can be worked again.
-              </Alert>
-            ) : (
-              <>
-                <Alert severity="warning" sx={{ fontSize: 12 }}>
-                  {editAsset?.assetTag} will be marked <strong>Cancelled</strong> and locked from further
-                  editing. It stays visible on this page and is filterable by the Cancelled status.
-                  Any work already captured is kept as a record.
-                </Alert>
-                <TextField
-                  label="Reason for cancelling *"
-                  size="small"
-                  fullWidth
-                  required
-                  multiline
-                  rows={3}
-                  value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  placeholder="e.g. Equipment removed from site; job descoped by customer"
-                  helperText="Recorded in the asset's Notes."
-                />
-              </>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setCancelConfirmOpen(false)} disabled={cancellingAsset}>Back</Button>
-          <Button
-            variant="contained"
-            color={cancelDialogMode === "undo" ? "warning" : "error"}
-            onClick={cancelDialogMode === "undo" ? confirmUndoCancelAsset : confirmCancelAsset}
-            disabled={cancellingAsset || (cancelDialogMode === "cancel" && !cancelReason.trim())}
-            startIcon={cancellingAsset ? <CircularProgress size={14} /> : undefined}
-          >
-            {cancellingAsset
-              ? (cancelDialogMode === "undo" ? "Restoring..." : "Cancelling...")
-              : (cancelDialogMode === "undo" ? "Undo cancel asset" : "Cancel asset")}
-          </Button>
-        </DialogActions>
-      </Dialog>
-
       <Dialog open={Boolean(deleteAsset)} onClose={() => !deletingAsset && setDeleteAsset(null)} maxWidth="xs" fullWidth>
         <DialogTitle>Archive Asset?</DialogTitle>
         <DialogContent>
@@ -7840,25 +7560,10 @@ ${words.slice(midpoint).join(" ")}`;
           activeCountForAsset={getActiveCountForAsset}
           readOnly
           canEditCapture={false}
-          onRunUpdated={(run) => {
-            startTransition(() => {
-              setRunsMap((prev) => {
-                const list = prev[run.assetId] ?? [];
-                const next = list.some((r) => r.id === run.id)
-                  ? list.map((r) => (r.id === run.id ? run : r))
-                  : [...list, run];
-                return { ...prev, [run.assetId]: next };
-              });
-            });
-          }}
+          onRunUpdated={captureOnRunUpdated}
           assetJobColumns={assetCaptureJobColumns}
-          renderStatus={(asset) => captureTableStatusChip(asset, projectMap.get(asset.projectId)?.workflowMode)}
-          renderActions={(asset) => {
-            const proj = projectMap.get(asset.projectId);
-            return (canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
-              ? actionButton(asset, proj?.workflowMode)
-              : null;
-          }}
+          renderStatus={captureRenderStatus}
+          renderActions={captureRenderActions}
         />
         </Suspense>
       )}
