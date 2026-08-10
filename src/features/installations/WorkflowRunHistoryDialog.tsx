@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
@@ -92,6 +92,10 @@ interface Props {
   assignedTechnician?: string;
   allowRerun?: boolean;
   allowContinue?: boolean;
+  /** Deep link — expand this run instead of the latest */
+  initialRunId?: string | null;
+  /** Deep link — auto-open Sign or Send-to-customer after runs load */
+  autoOpenAction?: "installer-sign" | "customer-sign" | null;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -262,6 +266,10 @@ export default function WorkflowRunHistoryDialog({
   project,
   customerLogoBase64,
   assignedTechnician,
+  allowRerun: _allowRerun = true,
+  allowContinue: _allowContinue = true,
+  initialRunId = null,
+  autoOpenAction = null,
 }: Props) {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
@@ -288,6 +296,7 @@ export default function WorkflowRunHistoryDialog({
   const [tokenEditMode, setTokenEditMode] = useState(false);
   const [tokenSaveAsNew, setTokenSaveAsNew] = useState(false);
   const [expandedStepResultIds, setExpandedStepResultIds] = useState<Record<string, boolean>>({});
+  const autoOpenHandledRef = useRef(false);
 
   const buildDefaultMessage = () => {
     const assetLabel = asset.assetTag || asset.assetName || "this asset";
@@ -407,7 +416,10 @@ export default function WorkflowRunHistoryDialog({
   };
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      autoOpenHandledRef.current = false;
+      return;
+    }
     setExpandedRunId(null);
     setExpandedStepResultIds({});
 
@@ -420,7 +432,11 @@ export default function WorkflowRunHistoryDialog({
             new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime(),
         );
       setRuns(filtered);
-      if (filtered.length > 0) setExpandedRunId(filtered[0].id);
+      const focusId =
+        initialRunId && filtered.some((r) => r.id === initialRunId)
+          ? initialRunId
+          : filtered[0]?.id ?? null;
+      if (focusId) setExpandedRunId(focusId);
     };
 
     if (isMobileNativePlatform()) {
@@ -436,7 +452,28 @@ export default function WorkflowRunHistoryDialog({
       .listByAsset(asset.id)
       .then(applyRuns)
       .finally(() => setLoading(false));
-  }, [open, asset.id, workflowConfigId]);
+  }, [open, asset.id, workflowConfigId, initialRunId]);
+
+  useEffect(() => {
+    if (!open || !autoOpenAction || autoOpenHandledRef.current || loading) return;
+    const run = (initialRunId ? runs.find((r) => r.id === initialRunId) : runs[0]) ?? null;
+    if (!run) return;
+
+    autoOpenHandledRef.current = true;
+    setExpandedRunId(run.id);
+
+    if (autoOpenAction === "installer-sign" && run.signatureStatus === "PendingInstaller") {
+      setSignDialogRun(run);
+      return;
+    }
+    if (
+      autoOpenAction === "customer-sign"
+      && canRequestCustomerSignature
+      && run.signatureStatus === "PendingCustomer"
+    ) {
+      void openTokenDialog(run);
+    }
+  }, [open, autoOpenAction, canRequestCustomerSignature, initialRunId, loading, runs]);
 
   const latestRunNumber = runs.reduce((max, run) => Math.max(max, run.runNumber ?? 0), 0);
   const showEntryRestrictionWarning =
