@@ -53,7 +53,7 @@ function run(query) {
 }
 
 run(sql`
-DELETE FROM AssetWorkflowRuns WHERE Id = 'run-cad-0039-1';
+DELETE FROM AssetWorkflowRuns WHERE Id IN ('run-cad-0039-1','run-cc-0012-1');
 DELETE FROM AssetWorkflowAssignments WHERE Id IN ('assign-cad-0039','assign-cc-0012');
 DELETE FROM ProjectAssets WHERE Id LIKE 'asset-filler-%';
 DELETE FROM ProjectAssets WHERE Id IN ('asset-cad-0039','asset-cc-0012');
@@ -112,6 +112,19 @@ INSERT INTO AssetWorkflowRuns (
   'run-cad-0039-1', 'asset-cad-0039', 'wfconfig-smoke-1', 1,
   '${snapshotJson.replace(/'/g, "''")}', 'InProgress', 0,
   '${stepResultsJson.replace(/'/g, "''")}', '[]', '[]', 'None', 1,
+  datetime('now'), datetime('now'), datetime('now')
+);
+`);
+
+run(sql`
+INSERT INTO AssetWorkflowRuns (
+  Id, AssetId, WorkflowConfigId, WorkflowVersion, WorkflowSnapshotJson, Status, IsLocked,
+  StepResultsJson, IssuesJson, TimeTrackingJson, SignatureStatus, RunNumber,
+  StartedAt, CreatedAt, UpdatedAt
+) VALUES (
+  'run-cc-0012-1', 'asset-cc-0012', 'wfconfig-smoke-1', 1,
+  '${snapshotJson.replace(/'/g, "''")}', 'Issue', 0,
+  '[]', '${ccIssueJson.replace(/'/g, "''")}', '[]', 'None', 1,
   datetime('now'), datetime('now'), datetime('now')
 );
 `);
