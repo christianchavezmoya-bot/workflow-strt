@@ -155,9 +155,15 @@ function normalize(s: string) {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+/** BOM component rows become product features with isInventory=true. */
+export function bomRowIsInventoryFeature(cl: ClassificationResult): boolean {
+  return cl.itemType === "component";
+}
+
 /**
  * Ensures every non-ignored BOM row has a corresponding feature linked to the product.
- * Existing features are matched by name (normalized). New ones are created and linked.
+ * Component rows are created (or upgraded) as inventory features.
+ * Existing features are matched by name (normalized).
  */
 async function syncProductFeatures(
   productId: string,
@@ -166,7 +172,7 @@ async function syncProductFeatures(
   warnings: string[]
 ): Promise<void> {
   const existing = await featureService.getByProduct(productId);
-  const existingKeys = new Set(existing.map((f) => normalize(f.name)));
+  const existingByKey = new Map(existing.map((f) => [normalize(f.name), f]));
 
   const classMap = new Map(classifications.map((c) => [c.sourceRowId, c]));
 
@@ -178,18 +184,32 @@ async function syncProductFeatures(
     if (!name) continue;
 
     const key = normalize(name);
-    if (existingKeys.has(key)) continue; // already in product
+    const wantInventory = bomRowIsInventoryFeature(cl);
+    const matched = existingByKey.get(key);
+
+    if (matched) {
+      if (wantInventory && !matched.isInventory) {
+        try {
+          const updated = await featureService.update(matched.id, { isInventory: true });
+          existingByKey.set(key, updated);
+        } catch (e) {
+          warnings.push(`Could not mark feature "${name}" as inventory: ${String(e)}`);
+        }
+      }
+      continue;
+    }
 
     try {
       const created = await featureService.create({
         name,
         valueType: cl.itemType === "asset" ? "component" : "text",
+        isInventory: wantInventory,
         supplier: row.supplier ?? undefined,
         alternativePartNumber: row.partNumber ?? undefined,
         unitPrice: row.costUnit ?? undefined,
       });
       await featureService.linkToProduct(productId, created.id);
-      existingKeys.add(key);
+      existingByKey.set(key, created);
     } catch (e) {
       warnings.push(`Could not add feature "${name}" to product: ${String(e)}`);
     }
