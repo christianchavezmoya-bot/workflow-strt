@@ -54,7 +54,6 @@ import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
-import { demoCustomers, demoProducts, demoUsers } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useAuth } from "../../hooks/useAuth";
@@ -1058,11 +1057,8 @@ export const UserManagement: React.FC = () => {
     localStorage.setItem("admin_active_tab", String(tab));
   }, [tab]);
 
-  const users = useMemo(() => (usersState.items.length ? usersState.items : demoUsers), [usersState.items]);
-  const products = useMemo(
-    () => (productsState.items.length ? productsState.items : demoProducts),
-    [productsState.items]
-  );
+  const users = usersState.items;
+  const products = productsState.items;
 
   // Map office cities/states to countries
   const getCountryForOffice = useMemo(() => {

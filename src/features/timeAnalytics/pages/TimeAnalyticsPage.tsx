@@ -7,10 +7,9 @@ import { Suspense, lazy, useEffect, useMemo, useRef, type ComponentType } from "
 import { MenuItem, Select, FormControl, TextField } from "@mui/material";
 import { useLocation, useNavigate } from "react-router-dom";
 import api from "../../../services/api";
-import { useTimeAnalyticsData, defaultTimeAnalyticsFetchMode } from "../hooks/useTimeAnalyticsData";
+import { useTimeAnalyticsData } from "../hooks/useTimeAnalyticsData";
 import { applyGlobalChartTheme } from "../components/ChartTheme";
 import { ErrorState, LoadingState } from "../components/primitives";
-import type { FetchMode } from "../hooks/useTimeAnalyticsData";
 import type { TimeAnalyticsSnapshot } from "../types";
 
 type ViewComponent = ComponentType<{ data: TimeAnalyticsSnapshot }>;
@@ -51,7 +50,6 @@ const VIEW_LOADERS = {
 
 export interface TimeAnalyticsPageProps {
   api?: typeof api;
-  initialMode?: FetchMode;
   refreshIntervalMs?: number;
 }
 
@@ -73,22 +71,20 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
     return found ? found.id : "overview";
   }, [location.pathname]);
 
-  const { data, loading, error, filters, setFilters, refresh, mode, setMode, isMock } =
+  const { data, loading, error, filters, setFilters, refresh } =
     useTimeAnalyticsData({
       api: props.api ?? api,
-      mode: props.initialMode ?? defaultTimeAnalyticsFetchMode(),
       refreshIntervalMs: props.refreshIntervalMs,
     });
 
   const showSparseDataHint =
-    !!data && !isMock && data.projects.length === 0 && data.customers.length === 0;
+    !!data && data.projects.length === 0 && data.customers.length === 0;
 
   const switchView = (id: TimeAnalyticsViewId) => {
     navigate(id === "overview" ? "/time-analytics" : `/time-analytics/${id}`);
   };
 
   const ActiveView = VIEW_LOADERS[activeView];
-  const showDevModePicker = import.meta.env.DEV;
 
   return (
     <div className="ta-root">
@@ -158,28 +154,6 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
           </FormControl>
         )}
 
-        {showDevModePicker && (
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <Select
-              displayEmpty
-              value={mode}
-              onChange={e => setMode(e.target.value as FetchMode)}
-              sx={{
-                fontSize: 12.5,
-                color: "var(--ta-text-dim)",
-                background: "rgba(255,255,255,0.04)",
-                border: "1px solid var(--ta-border)",
-                borderRadius: 1.25,
-                "& .MuiSelect-select": { padding: "6px 10px" },
-              }}
-            >
-              <MenuItem value="auto">Auto (api → mock fallback)</MenuItem>
-              <MenuItem value="api">Live API</MenuItem>
-              <MenuItem value="mock">Mock data only</MenuItem>
-            </Select>
-          </FormControl>
-        )}
-
         <button
           type="button"
           className="ta-tag"
@@ -189,14 +163,9 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
         >
           ↻ Refresh
         </button>
-
-        <span className={`ta-mode-pill ${isMock ? "mock" : ""}`}>
-          <span className="dot" />
-          {isMock ? "Mock data" : "Live data"}
-        </span>
       </div>
 
-      {error && !isMock && (
+      {error && (
         <ErrorState message={error} onRetry={() => void refresh()} />
       )}
 

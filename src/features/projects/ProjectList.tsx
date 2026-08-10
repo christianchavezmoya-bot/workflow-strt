@@ -40,7 +40,6 @@ import { Link, useNavigate } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
-import { demoProducts } from "../../data/demo";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -409,7 +408,7 @@ const ProjectList = () => {
 
 
   const sourceProjects = items;
-  const products = productsState.items.length ? productsState.items : demoProducts;
+  const products = productsState.items;
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {

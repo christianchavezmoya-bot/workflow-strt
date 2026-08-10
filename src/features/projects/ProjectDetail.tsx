@@ -2,7 +2,6 @@ import { Alert, Box, Button, Chip, Dialog, DialogContent, DialogTitle, Stack, Ta
 import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
-import { demoProducts } from "../../data/demo";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import { projectAssetService } from "../../services/projectAssetService";
@@ -39,7 +38,7 @@ const ProjectDetail = () => {
   const [editOpen, setEditOpen] = useState(false);
 
   const localProject = useMemo(() => items.find((item) => item.id === id), [id, items]);
-  const products = productsState.items.length ? productsState.items : demoProducts;
+  const products = productsState.items;
   const canEditProject = useMemo(() => {
     if (!project || !user) return false;
     if (can.projects?.editScope === "all") return true;
