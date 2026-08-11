@@ -1,9 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import * as pdfjsLib from "pdfjs-dist";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
+  import.meta.url,
+).toString();
+const STANDARD_FONT_DATA_URL = new URL(
+  "pdfjs-dist/standard_fonts/",
   import.meta.url,
 ).toString();
 
@@ -19,8 +24,15 @@ type Props = {
   scrollHint?: string;
 };
 
-/** Scrollable multi-page PDF preview (pdf.js). Use instead of iframe blobs on mobile. */
+/**
+ * Scrollable PDF preview.
+ *
+ * Web uses the browser's native PDF viewer for stability on large reports and
+ * public LAN/dev links. Native mobile keeps the pdf.js canvas renderer because
+ * embedded iframe/blob viewers are less reliable inside the Capacitor shell.
+ */
 export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
+  const isNativeMobile = isMobileNativePlatform();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -28,8 +40,21 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    const nextUrl = URL.createObjectURL(blob);
+    setBlobUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [blob]);
+
+  useEffect(() => {
+    if (!isNativeMobile) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     let cancelled = false;
     void blob.arrayBuffer().then((data) => {
       if (!cancelled) setPdfData(data);
@@ -37,9 +62,11 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       if (!cancelled) setError("Could not read PDF data.");
     });
     return () => { cancelled = true; };
-  }, [blob]);
+  }, [blob, isNativeMobile]);
 
   useEffect(() => {
+    if (!isNativeMobile) return;
+
     const node = viewportRef.current;
     if (!node) return;
     let frame = 0;
@@ -55,9 +82,11 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [isNativeMobile]);
 
   useEffect(() => {
+    if (!isNativeMobile) return;
+
     let cancelled = false;
 
     async function renderPdf() {
@@ -70,13 +99,11 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       setError(null);
 
       try {
-        // Hand pdf.js a throwaway COPY, never the buffer we keep in state. getDocument
-        // transfers the ArrayBuffer to its worker, which detaches it — so the second run of
-        // this effect (the ResizeObserver settling containerWidth, or a zoom change) used to
-        // fail with "ArrayBuffer at index 0 is already detached" and leave the viewer empty
-        // or stuck on the first page. Copying keeps the source buffer reusable for every
-        // subsequent re-render.
-        const loadingTask = pdfjsLib.getDocument({ data: pdfData.slice(0), disableFontFace: true });
+        const loadingTask = pdfjsLib.getDocument({
+          data: pdfData.slice(0),
+          disableFontFace: true,
+          standardFontDataUrl: STANDARD_FONT_DATA_URL,
+        });
         const pdf = await loadingTask.promise;
         if (cancelled) {
           void loadingTask.destroy();
@@ -131,7 +158,41 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
 
     void renderPdf();
     return () => { cancelled = true; };
-  }, [pdfData, containerWidth, zoom]);
+  }, [pdfData, containerWidth, isNativeMobile, zoom]);
+
+  if (!isNativeMobile && blobUrl) {
+    return (
+      <Box
+        sx={{
+          height: "100%",
+          overflow: "auto",
+          WebkitOverflowScrolling: "touch",
+          bgcolor: "#525659",
+          px: 1,
+          py: 1.5,
+        }}
+      >
+        {scrollHint && (
+          <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
+            {scrollHint}
+          </Typography>
+        )}
+        <Box
+          component="iframe"
+          src={`${blobUrl}#view=FitH`}
+          title="PDF preview"
+          sx={{
+            width: "100%",
+            height: "100%",
+            minHeight: 640,
+            border: "none",
+            borderRadius: 2,
+            bgcolor: "#fff",
+          }}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -153,13 +214,27 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       {loading && (
         <Stack alignItems="center" justifyContent="center" spacing={1} sx={{ py: 4 }}>
           <CircularProgress size={28} sx={{ color: "#fff" }} />
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)" }}>Rendering report…</Typography>
+          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)" }}>Rendering report...</Typography>
         </Stack>
       )}
       {error && (
         <Typography variant="body2" sx={{ color: "#ffb4a2", textAlign: "center", py: 2 }}>
           {error}
         </Typography>
+      )}
+      {!loading && error && blobUrl && (
+        <Box
+          component="iframe"
+          src={`${blobUrl}#view=FitH`}
+          title="PDF preview fallback"
+          sx={{
+            width: "100%",
+            minHeight: 640,
+            border: "none",
+            borderRadius: 2,
+            bgcolor: "#fff",
+          }}
+        />
       )}
       <Box ref={pagesRef} />
     </Box>
