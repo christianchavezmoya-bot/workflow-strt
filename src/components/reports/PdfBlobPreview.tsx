@@ -70,7 +70,13 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       setError(null);
 
       try {
-        const loadingTask = pdfjsLib.getDocument({ data: pdfData, disableFontFace: true });
+        // Hand pdf.js a throwaway COPY, never the buffer we keep in state. getDocument
+        // transfers the ArrayBuffer to its worker, which detaches it — so the second run of
+        // this effect (the ResizeObserver settling containerWidth, or a zoom change) used to
+        // fail with "ArrayBuffer at index 0 is already detached" and leave the viewer empty
+        // or stuck on the first page. Copying keeps the source buffer reusable for every
+        // subsequent re-render.
+        const loadingTask = pdfjsLib.getDocument({ data: pdfData.slice(0), disableFontFace: true });
         const pdf = await loadingTask.promise;
         if (cancelled) {
           void loadingTask.destroy();

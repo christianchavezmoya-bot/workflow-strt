@@ -652,7 +652,14 @@ export const projectAssetService = {
   async remove(id: string): Promise<void> {
     if (!isMobileNativePlatform()) {
       await api.delete(`/project-assets/${id}`);
+      // Only the single-asset key used to be dropped, so the very next list fetch was
+      // served from the still-cached by-project/by-product entries and the deleted row
+      // reappeared until the user reloaded by hand. Mirror create/update: clear the list
+      // caches and announce the change so open views re-read.
       invalidateWebCache(`/project-assets/${id}`);
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { assetId: id } }));
       return;
     }
 
@@ -907,15 +914,32 @@ export const projectAssetService = {
     }
   },
 
+  // restore/purge change list membership exactly like remove does, so they need the same
+  // invalidation — otherwise a restored asset stays missing (and a purged one stays
+  // present) until a manual reload.
   async restore(id: string): Promise<ProjectAsset> {
     const res = await api.post<ProjectAsset>(`/project-assets/${id}/restore`);
-    return fromDto(res.data);
+    const asset = fromDto(res.data);
+    if (!isMobileNativePlatform()) {
+      invalidateWebCache(`/project-assets/${id}`);
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", {
+        detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
+      }));
+    }
+    return asset;
   },
 
   async purge(id: string): Promise<void> {
     await api.delete(`/project-assets/${id}/purge`);
     if (isMobileNativePlatform()) {
       await entityDeleteAsset(id);
+    } else {
+      invalidateWebCache(`/project-assets/${id}`);
+      invalidateWebCacheByPrefix("/project-assets/by-product/");
+      invalidateWebCacheByPrefix("/project-assets/by-project/");
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { assetId: id } }));
     }
   },
 };

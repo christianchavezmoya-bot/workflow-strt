@@ -3747,8 +3747,10 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <FormControl>
+              <InputLabel shrink sx={fieldLabelStyle}>Global Office</InputLabel>
               <Select
                 value={formData.office}
+                label="Global Office"
                 onChange={(event) =>
                   setFormData((prev) => ({ ...prev, office: event.target.value as User["office"] }))
                 }
