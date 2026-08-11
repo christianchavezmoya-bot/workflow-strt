@@ -1,16 +1,6 @@
 /**
  * generateProjectReport
- * Builds a comprehensive A4 "Project Completion Report" PDF and triggers a download.
- *
- * Sections:
- *  1. Header band — business logo + "Project Completion Report" + export date
- *  2. Project metadata — two-column block
- *  3. Health KPI strip — completion %, blocking issues, pending signatures, BOM %
- *  4. Asset Status table — per asset with status, technician, completion date
- *  5. Open Issues — blocking first, then observations, scope deviations
- *  6. Parts & Materials — BOM summary (delegates to same BomExportRow data)
- *  7. Signature Status — who signed, when
- *  8. Footer (every page) — page number, date, company
+ * Builds a richer A4 Project Completion Report PDF.
  */
 
 import { jsPDF } from "jspdf";
@@ -19,67 +9,93 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import type { BomExportRow, MissingBomAsset } from "./generateBomReport";
 
-// ─── Colour palette (mirrors generateWorkflowReport) ─────────────────────────
-const NAVY:       [number,number,number] = [26,  39,  68];
-const TEAL:       [number,number,number] = [0,   128, 128];
-const TEAL_LIGHT: [number,number,number] = [224, 242, 242];
-const GREY_BG:    [number,number,number] = [241, 243, 246];
-const GREY_LABEL: [number,number,number] = [100, 110, 125];
-const BLACK:      [number,number,number] = [20,  20,  20];
-const WHITE:      [number,number,number] = [255, 255, 255];
-const RED:        [number,number,number] = [211, 47,  47];
-const GREEN:      [number,number,number] = [46,  125, 50];
-const ORANGE:     [number,number,number] = [230, 119, 0];
-const BORDER:     [number,number,number] = [200, 208, 218];
+const NAVY: [number, number, number] = [26, 39, 68];
+const TEAL: [number, number, number] = [0, 128, 128];
+const TEAL_LIGHT: [number, number, number] = [224, 242, 242];
+const GREY_BG: [number, number, number] = [241, 243, 246];
+const GREY_LABEL: [number, number, number] = [100, 110, 125];
+const BLACK: [number, number, number] = [20, 20, 20];
+const WHITE: [number, number, number] = [255, 255, 255];
+const RED: [number, number, number] = [211, 47, 47];
+const GREEN: [number, number, number] = [46, 125, 50];
+const ORANGE: [number, number, number] = [230, 119, 0];
+const BLUE: [number, number, number] = [25, 118, 210];
+const BORDER: [number, number, number] = [200, 208, 218];
 
-const PAGE_W    = 210;
-const PAGE_H    = 297;
-const MARGIN    = 14;
+const PAGE_W = 210;
+const PAGE_H = 297;
+const MARGIN = 14;
 const CONTENT_W = PAGE_W - MARGIN * 2;
-const HEADER_H  = 26;
-const FOOTER_H  = 8;
-const SAFE_BOT  = PAGE_H - FOOTER_H - 10;
-const LOGO_W    = 38;
-const LOGO_H    = 16;
-
-// ─── Public types ─────────────────────────────────────────────────────────────
+const HEADER_H = 26;
+const FOOTER_H = 8;
+const SAFE_BOT = PAGE_H - FOOTER_H - 10;
+const LOGO_W = 32;
+const LOGO_H = 14;
 
 export interface ProjectReportData {
-  jobNumber:     string;
-  customerName:  string;
-  siteName:      string;
+  jobNumber: string;
+  customerName: string;
+  siteName: string;
   projectManager: string;
-  status:        string;
-  startDate:     string;
-  finishDate:    string;
-  description:   string;
-  assets:        ProjectAsset[];
-  latestRuns:    AssetWorkflowRun[];
-  bomRows:       BomExportRow[];
+  status: string;
+  startDate: string;
+  finishDate: string;
+  description: string;
+  assets: ProjectAsset[];
+  latestRuns: AssetWorkflowRun[];
+  bomRows: BomExportRow[];
   missingBomAssets: MissingBomAsset[];
   businessLogoBase64: string | null;
-  exportDate:    string;
+  customerLogoBase64?: string | null;
+  exportDate: string;
+  outputMode?: "download" | "blob";
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+type IssueRow = {
+  assetTag: string;
+  status: "Open" | "Closed";
+  type: string;
+  severity: "low" | "medium" | "high";
+  description: string;
+  stepTitle?: string;
+  reportedAt?: string;
+  resolvedAt?: string;
+  resolvedBy?: string;
+  notes?: string;
+};
 
 function detectImageFormat(dataUrl: string): string | null {
-  if (dataUrl.startsWith("data:image/png"))  return "PNG";
+  if (dataUrl.startsWith("data:image/png")) return "PNG";
   if (dataUrl.startsWith("data:image/jpeg") || dataUrl.startsWith("data:image/jpg")) return "JPEG";
   if (dataUrl.startsWith("data:image/webp")) return "WEBP";
   return null;
 }
 
 function fmtDate(iso: string | undefined | null): string {
-  if (!iso) return "—";
-  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
+  if (!iso) return "-";
+  try {
+    return new Date(iso).toLocaleDateString();
+  } catch {
+    return iso;
+  }
 }
 
 function fmtDuration(seconds: number): string {
-  if (!seconds || seconds < 60) return `${seconds}s`;
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+  const safe = Math.max(0, Math.round(seconds || 0));
+  const hours = Math.floor(safe / 3600);
+  const minutes = Math.floor((safe % 3600) / 60);
+  const secs = safe % 60;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+function issueCount(run: AssetWorkflowRun): number {
+  try {
+    return (JSON.parse(run.issuesJson || "[]") as RunIssue[]).filter((issue) => !issue.resolved).length;
+  } catch {
+    return 0;
+  }
 }
 
 function addFooter(doc: jsPDF, pageNum: number, totalPages: number, exportDate: string) {
@@ -89,25 +105,29 @@ function addFooter(doc: jsPDF, pageNum: number, totalPages: number, exportDate: 
   doc.setFontSize(7);
   doc.setTextColor(...GREY_LABEL);
   doc.text(`Page ${pageNum} of ${totalPages}`, MARGIN, y + 3);
-  doc.text("Project Completion Report — Confidential", PAGE_W / 2, y + 3, { align: "center" });
+  doc.text("Project Completion Report - Confidential", PAGE_W / 2, y + 3, { align: "center" });
   doc.text(`Generated ${exportDate}`, PAGE_W - MARGIN, y + 3, { align: "right" });
 }
 
-function addHeader(doc: jsPDF, logoBase64: string | null) {
+function addHeader(doc: jsPDF, businessLogoBase64: string | null, customerLogoBase64: string | null) {
   doc.setFillColor(...NAVY);
   doc.rect(0, 0, PAGE_W, HEADER_H, "F");
 
-  // Logo
-  if (logoBase64) {
+  const addLogo = (logoBase64: string | null | undefined, x: number, align: "left" | "right") => {
+    if (!logoBase64) return;
     const fmt = detectImageFormat(logoBase64);
-    if (fmt) {
-      try {
-        doc.addImage(logoBase64, fmt, MARGIN, (HEADER_H - LOGO_H) / 2, LOGO_W, LOGO_H, undefined, "FAST");
-      } catch { /* skip */ }
+    if (!fmt) return;
+    try {
+      const drawX = align === "left" ? x : x - LOGO_W;
+      doc.addImage(logoBase64, fmt, drawX, (HEADER_H - LOGO_H) / 2, LOGO_W, LOGO_H, undefined, "FAST");
+    } catch {
+      // Skip bad image.
     }
-  }
+  };
 
-  // Title
+  addLogo(businessLogoBase64, MARGIN, "left");
+  addLogo(customerLogoBase64, PAGE_W - MARGIN, "right");
+
   doc.setFontSize(13);
   doc.setTextColor(...WHITE);
   doc.setFont("helvetica", "bold");
@@ -125,332 +145,395 @@ function sectionBar(doc: jsPDF, y: number, title: string): number {
   doc.setFont("helvetica", "bold");
   doc.setTextColor(...WHITE);
   doc.text(title.toUpperCase(), MARGIN + 3, y + 4.2);
-  return y + 6 + 3;
+  return y + 9;
 }
 
-function checkPageBreak(doc: jsPDF, y: number, needed = 20): number {
-  if (y + needed > SAFE_BOT) {
-    doc.addPage();
-    addHeader(doc, null);
-    return HEADER_H + 4;
+function checkPageBreak(doc: jsPDF, y: number, exportDate: string, businessLogoBase64: string | null, customerLogoBase64: string | null, needed = 20): number {
+  if (y + needed <= SAFE_BOT) return y;
+  doc.addPage();
+  addHeader(doc, businessLogoBase64, customerLogoBase64);
+  return HEADER_H + 6;
+}
+
+function parseIssues(latestRuns: AssetWorkflowRun[], assets: ProjectAsset[]): IssueRow[] {
+  const assetTagById = new Map(assets.map((asset) => [asset.id, asset.assetTag || asset.assetName || asset.id]));
+  const rows: IssueRow[] = [];
+  for (const run of latestRuns) {
+    try {
+      const issues = JSON.parse(run.issuesJson || "[]") as RunIssue[];
+      for (const issue of issues) {
+        rows.push({
+          assetTag: assetTagById.get(run.assetId) ?? run.assetId,
+          status: issue.resolved ? "Closed" : "Open",
+          type: issue.isBlocking ? "Blocking" : issue.issueType === "scope-deviation" ? "Scope deviation" : "Observation",
+          severity: issue.severity,
+          description: issue.description,
+          stepTitle: issue.stepTitle,
+          reportedAt: issue.reportedAt,
+          resolvedAt: issue.resolvedAt,
+          resolvedBy: issue.resolvedBy,
+          notes: issue.resolutionNote,
+        });
+      }
+    } catch {
+      // Ignore bad issue payloads.
+    }
   }
-  return y;
+  rows.sort((a, b) => {
+    if (a.status !== b.status) return a.status === "Open" ? -1 : 1;
+    const severityRank = { high: 0, medium: 1, low: 2 };
+    return severityRank[a.severity] - severityRank[b.severity];
+  });
+  return rows;
 }
 
-// ─── Main export ──────────────────────────────────────────────────────────────
+function signatureStatusLabel(run: AssetWorkflowRun): string {
+  if (run.customerSignedAt || run.signatureStatus === "Signed") return "Fully signed";
+  if (run.installerSignedAt) return "Awaiting customer";
+  if (run.signatureStatus === "PendingInstaller") return "Awaiting installer";
+  return run.signatureStatus || "-";
+}
 
-export async function generateProjectReport(data: ProjectReportData): Promise<void> {
+export async function generateProjectReport(data: ProjectReportData): Promise<Blob | void> {
   const {
-    jobNumber, customerName, siteName, projectManager,
-    status, startDate, finishDate, description,
-    assets, latestRuns, bomRows, missingBomAssets,
-    businessLogoBase64, exportDate,
+    jobNumber,
+    customerName,
+    siteName,
+    projectManager,
+    status,
+    startDate,
+    finishDate,
+    description,
+    assets,
+    latestRuns,
+    bomRows,
+    missingBomAssets,
+    businessLogoBase64,
+    customerLogoBase64 = null,
+    exportDate,
+    outputMode = "download",
   } = data;
 
   const doc = new jsPDF({ unit: "mm", format: "a4" });
-
-  addHeader(doc, businessLogoBase64);
+  addHeader(doc, businessLogoBase64, customerLogoBase64);
 
   let y = HEADER_H + 6;
 
-  // ── 1. Project Metadata ────────────────────────────────────────────────────
+  const runByAsset = new Map(latestRuns.map((run) => [run.assetId, run]));
+  const issueRows = parseIssues(latestRuns, assets);
+  const openIssues = issueRows.filter((issue) => issue.status === "Open");
+  const closedIssues = issueRows.filter((issue) => issue.status === "Closed");
+
+  const totalAssets = assets.length;
+  const completeAssets = assets.filter((asset) => asset.status === "Complete").length;
+  const inProgressAssets = assets.filter((asset) => asset.status === "InProgress").length;
+  const completionPct = totalAssets > 0 ? Math.round((completeAssets / totalAssets) * 100) : 0;
+  const pendingSignatures = latestRuns.filter((run) => run.isLocked && !run.customerSignedAt && run.signatureStatus !== "WaivedCustomer").length;
+  const lockedRuns = latestRuns.filter((run) => run.isLocked).length;
+  const bomRecorded = latestRuns.filter((run) => run.isLocked && run.bomActualJson && run.bomActualJson !== "[]").length;
+  const totalProductive = latestRuns.reduce((sum, run) => sum + (run.productiveSeconds || 0), 0);
+  const totalDowntime = latestRuns.reduce((sum, run) => sum + (run.downtimeSeconds || 0), 0);
+  const totalDowntimeEvents = latestRuns.reduce((sum, run) => sum + (run.downtimeEvents || 0), 0);
+
+  const highIssues = openIssues.filter((issue) => issue.severity === "high").length;
+  const mediumIssues = openIssues.filter((issue) => issue.severity === "medium").length;
+  const lowIssues = openIssues.filter((issue) => issue.severity === "low").length;
+  const highObservations = openIssues.filter((issue) => issue.type === "Observation" && issue.severity === "high").length;
+
   y = sectionBar(doc, y, "Project Details");
-
-  const metaLeft: [string, string][] = [
-    ["Job Number",       jobNumber || "—"],
-    ["Customer",         customerName || "—"],
-    ["Site",             siteName || "—"],
-    ["Project Manager",  projectManager || "—"],
+  const metadataRows = [
+    ["Job Number", jobNumber || "-", "Status", status || "-"],
+    ["Customer", customerName || "-", "Start Date", fmtDate(startDate)],
+    ["Site", siteName || "-", "Finish Date", fmtDate(finishDate)],
+    ["Project Manager", projectManager || "-", "Description", description || "-"],
   ];
-  const metaRight: [string, string][] = [
-    ["Status",           status || "—"],
-    ["Start Date",       fmtDate(startDate)],
-    ["Finish Date",      fmtDate(finishDate)],
-    ["Description",      description || "—"],
-  ];
-
-  const colW = CONTENT_W / 2 - 2;
-  const metaRowH = 5.5;
-  metaLeft.forEach(([label, value], i) => {
-    const ry = y + i * metaRowH;
-    doc.setFillColor(...(i % 2 === 0 ? GREY_BG : WHITE));
-    doc.rect(MARGIN, ry, colW, metaRowH, "F");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...GREY_LABEL);
-    doc.setFont("helvetica", "normal");
-    doc.text(label, MARGIN + 2, ry + metaRowH * 0.65);
-    doc.setTextColor(...BLACK);
-    doc.setFont("helvetica", "bold");
-    doc.text(value, MARGIN + 38, ry + metaRowH * 0.65);
+  autoTable(doc, {
+    startY: y,
+    body: metadataRows,
+    margin: { left: MARGIN, right: MARGIN },
+    theme: "plain",
+    styles: { fontSize: 8, cellPadding: 2, textColor: BLACK },
+    columnStyles: {
+      0: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: 26 },
+      1: { cellWidth: 64 },
+      2: { fontStyle: "bold", textColor: GREY_LABEL, cellWidth: 26 },
+      3: { cellWidth: 64 },
+    },
+    alternateRowStyles: { fillColor: GREY_BG },
   });
-  metaRight.forEach(([label, value], i) => {
-    const ry = y + i * metaRowH;
-    const rx = MARGIN + colW + 4;
-    doc.setFillColor(...(i % 2 === 0 ? GREY_BG : WHITE));
-    doc.rect(rx, ry, colW, metaRowH, "F");
-    doc.setFontSize(7.5);
-    doc.setTextColor(...GREY_LABEL);
-    doc.setFont("helvetica", "normal");
-    doc.text(label, rx + 2, ry + metaRowH * 0.65);
-    doc.setTextColor(...BLACK);
-    doc.setFont("helvetica", "bold");
-    doc.text(value, rx + 38, ry + metaRowH * 0.65);
-  });
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
 
-  y += metaLeft.length * metaRowH + 5;
-
-  // ── 2. Health KPI strip ────────────────────────────────────────────────────
-  const runByAsset = new Map(latestRuns.map(r => [r.assetId, r]));
-  const totalAssets    = assets.length;
-  const completeAssets = assets.filter(a => a.status === "Complete" || a.status === "Closed").length;
-  const pctComplete    = totalAssets > 0 ? Math.round((completeAssets / totalAssets) * 100) : 0;
-
-  const blockingIssues = latestRuns.reduce((acc, r) => {
-    try {
-      const issues = JSON.parse(r.issuesJson || "[]") as RunIssue[];
-      return acc + issues.filter(i => !i.resolved && i.isBlocking).length;
-    } catch { return acc; }
-  }, 0);
-
-  const pendingSignatures = latestRuns.filter(r => r.isLocked && !r.customerSignedAt && r.signatureStatus !== "WaivedCustomer").length;
-  const lockedRuns        = latestRuns.filter(r => r.isLocked).length;
-  const bomComplete       = latestRuns.filter(r => r.isLocked && r.bomActualJson).length;
-
-  y = checkPageBreak(doc, y, 22);
+  y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 28);
   y = sectionBar(doc, y, "Health Summary");
-
-  const kpis = [
-    { label: "Assets Complete", value: `${completeAssets}/${totalAssets} (${pctComplete}%)`, color: pctComplete === 100 ? GREEN : TEAL },
-    { label: "Blocking Issues", value: `${blockingIssues}`, color: blockingIssues > 0 ? RED : GREEN },
-    { label: "Pending Signatures", value: `${pendingSignatures}`, color: pendingSignatures > 0 ? ORANGE : GREEN },
-    { label: "BOM Recorded", value: lockedRuns > 0 ? `${bomComplete}/${lockedRuns}` : "N/A", color: TEAL },
+  const healthCards = [
+    { label: "Assets Complete", value: `${completeAssets}/${totalAssets} (${completionPct}%)`, color: completionPct === 100 ? GREEN : TEAL },
+    { label: "Assets In Progress", value: `${inProgressAssets}`, color: inProgressAssets > 0 ? BLUE : GREY_LABEL },
+    { label: "Assets Pending Signatures", value: `${pendingSignatures}`, color: pendingSignatures > 0 ? ORANGE : GREEN },
+    { label: "BOM Recorded", value: lockedRuns > 0 ? `${bomRecorded}/${lockedRuns}` : "N/A", color: TEAL },
+    { label: "Open Issues", value: `${openIssues.length}`, color: openIssues.length > 0 ? RED : GREEN },
   ];
-
-  const kpiW = CONTENT_W / kpis.length;
-  kpis.forEach(({ label, value, color }, i) => {
-    const rx = MARGIN + i * kpiW;
+  const cardW = CONTENT_W / healthCards.length;
+  healthCards.forEach((card, index) => {
+    const x = MARGIN + index * cardW;
     doc.setFillColor(...GREY_BG);
-    doc.roundedRect(rx + 1, y, kpiW - 2, 14, 1.5, 1.5, "F");
+    doc.roundedRect(x + 0.8, y, cardW - 1.6, 15, 1.4, 1.4, "F");
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(...GREY_LABEL);
-    doc.text(label, rx + kpiW / 2, y + 4.5, { align: "center" });
-    doc.setFontSize(12);
+    doc.text(card.label, x + cardW / 2, y + 4.8, { align: "center" });
+    doc.setFontSize(11.5);
     doc.setFont("helvetica", "bold");
-    doc.setTextColor(...color);
-    doc.text(value, rx + kpiW / 2, y + 11, { align: "center" });
+    doc.setTextColor(...card.color);
+    doc.text(card.value, x + cardW / 2, y + 10.6, { align: "center" });
   });
+  y += 21;
 
-  y += 14 + 6;
-
-  // ── 3. Asset Status Table ──────────────────────────────────────────────────
-  y = checkPageBreak(doc, y, 30);
-  y = sectionBar(doc, y, `Asset Status (${totalAssets} assets)`);
-
-  const assetRows = assets.map(a => {
-    const run = runByAsset.get(a.id);
-    const issues = (() => {
-      try { return JSON.parse(run?.issuesJson || "[]") as RunIssue[]; } catch { return []; }
-    })();
-    const openBlocking = issues.filter(i => !i.resolved && i.isBlocking).length;
-    const statusLabel =
-      run?.isLocked && run.signatureStatus === "PendingInstaller" ? "Pending Installer" :
-      run?.isLocked && run.signatureStatus === "PendingCustomer" ? "Pending Customer" :
-      a.status === "Closed"     ? "Closed"     :
-      a.status === "Complete"   ? "Complete"   :
-      a.status === "InProgress" ? "In Progress" :
-      a.status === "Issue"      ? "Issue"       : a.status;
-
-    return [
-      a.assetName ?? a.assetTag,
-      a.assetTag,
-      a.location ?? "—",
-      run?.completedByName ?? "—",
-      statusLabel,
-      fmtDate(run?.completedAt),
-      openBlocking > 0 ? `${openBlocking} blocking` : "—",
-    ];
+  y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 24);
+  y = sectionBar(doc, y, "Issue Summary");
+  const issueCards = [
+    { label: "High", value: `${highIssues}`, color: RED },
+    { label: "Medium", value: `${mediumIssues}`, color: ORANGE },
+    { label: "Low", value: `${lowIssues}`, color: BLUE },
+    { label: "High Observations", value: `${highObservations}`, color: TEAL },
+  ];
+  const issueCardW = CONTENT_W / issueCards.length;
+  issueCards.forEach((card, index) => {
+    const x = MARGIN + index * issueCardW;
+    doc.setFillColor(...TEAL_LIGHT);
+    doc.roundedRect(x + 0.8, y, issueCardW - 1.6, 15, 1.4, 1.4, "F");
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...GREY_LABEL);
+    doc.text(card.label, x + issueCardW / 2, y + 4.8, { align: "center" });
+    doc.setFontSize(11.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...card.color);
+    doc.text(card.value, x + issueCardW / 2, y + 10.6, { align: "center" });
   });
+  y += 21;
 
-  autoTable(doc, {
-    startY: y,
-    head: [["Asset Name", "Tag", "Location", "Technician", "Status", "Completed", "Issues"]],
-    body: assetRows,
-    margin: { left: MARGIN, right: MARGIN },
-    styles: { fontSize: 7.5, cellPadding: 2, textColor: BLACK },
-    headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.5 },
-    alternateRowStyles: { fillColor: GREY_BG },
-    columnStyles: {
-      0: { cellWidth: 34 },
-      1: { cellWidth: 22 },
-      2: { cellWidth: 28 },
-      3: { cellWidth: 28 },
-      4: { cellWidth: 26 },
-      5: { cellWidth: 20 },
-      6: { cellWidth: 24 },
-    },
-    didParseCell: (hookData) => {
-      if (hookData.section === "body" && hookData.column.index === 4) {
-        const val = String(hookData.cell.raw);
-        if (val === "Complete") hookData.cell.styles.textColor = GREEN;
-        else if (val === "Closed") hookData.cell.styles.textColor = TEAL;
-        else if (val === "Issue" || val === "Pending Installer" || val === "Pending Customer") hookData.cell.styles.textColor = ORANGE;
-        else if (val === "In Progress") hookData.cell.styles.textColor = TEAL;
-      }
-      if (hookData.section === "body" && hookData.column.index === 6) {
-        const val = String(hookData.cell.raw);
-        if (val !== "—") hookData.cell.styles.textColor = RED;
-      }
-    },
-  });
-
-  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7;
-
-  // ── 4. Open Issues ────────────────────────────────────────────────────────
-  const allIssues: Array<{ issue: RunIssue; assetTag: string; run: AssetWorkflowRun }> = [];
-  for (const run of latestRuns) {
-    const asset = assets.find(a => a.id === run.assetId);
-    try {
-      const issues = JSON.parse(run.issuesJson || "[]") as RunIssue[];
-      for (const iss of issues) {
-        if (!iss.resolved) allIssues.push({ issue: iss, assetTag: asset?.assetTag ?? run.assetId, run });
-      }
-    } catch { /* skip */ }
-  }
-  allIssues.sort((a, b) => (a.issue.isBlocking === b.issue.isBlocking ? 0 : a.issue.isBlocking ? -1 : 1));
-
-  if (allIssues.length > 0) {
-    y = checkPageBreak(doc, y, 30);
-    y = sectionBar(doc, y, `Open Issues (${allIssues.length})`);
-
-    const issueRows = allIssues.map(({ issue, assetTag }) => [
-      issue.isBlocking ? "BLOCKING" : issue.issueType === "scope-deviation" ? "SCOPE" : "OBS",
-      issue.severity?.toUpperCase() ?? "—",
-      issue.description,
-      issue.stepTitle ?? "—",
-      assetTag,
-      fmtDate(issue.reportedAt),
-    ]);
-
+  if (issueRows.length > 0) {
+    y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 34);
+    y = sectionBar(doc, y, `Issue Register (${issueRows.length})`);
     autoTable(doc, {
       startY: y,
-      head: [["Type", "Severity", "Description", "Step", "Asset", "Reported"]],
-      body: issueRows,
+      head: [["Status", "Severity", "Type", "Asset", "Description", "Step", "When"]],
+      body: issueRows.map((issue) => [
+        issue.status,
+        issue.severity.toUpperCase(),
+        issue.type,
+        issue.assetTag,
+        issue.description,
+        issue.stepTitle || "-",
+        issue.status === "Closed" ? fmtDate(issue.resolvedAt || issue.reportedAt) : fmtDate(issue.reportedAt),
+      ]),
       margin: { left: MARGIN, right: MARGIN },
-      styles: { fontSize: 7.5, cellPadding: 2, textColor: BLACK },
-      headStyles: { fillColor: RED, textColor: WHITE, fontStyle: "bold", fontSize: 7.5 },
+      styles: { fontSize: 7.2, cellPadding: 2, textColor: BLACK, overflow: "linebreak" },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.2 },
       alternateRowStyles: { fillColor: GREY_BG },
       columnStyles: {
-        0: { cellWidth: 18, fontStyle: "bold" },
+        0: { cellWidth: 15 },
         1: { cellWidth: 16 },
-        2: { cellWidth: 62 },
-        3: { cellWidth: 32 },
-        4: { cellWidth: 22 },
+        2: { cellWidth: 26 },
+        3: { cellWidth: 20 },
+        4: { cellWidth: 70 },
         5: { cellWidth: 22 },
+        6: { cellWidth: 20 },
       },
       didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 0) {
+        if (hookData.section !== "body") return;
+        if (hookData.column.index === 0) {
           const val = String(hookData.cell.raw);
-          hookData.cell.styles.textColor = val === "BLOCKING" ? RED : val === "SCOPE" ? ORANGE : TEAL;
+          hookData.cell.styles.textColor = val === "Open" ? RED : GREEN;
+          hookData.cell.styles.fontStyle = "bold";
         }
-        if (hookData.section === "body" && hookData.column.index === 1) {
+        if (hookData.column.index === 1) {
           const val = String(hookData.cell.raw);
-          hookData.cell.styles.textColor = val === "HIGH" ? RED : val === "MEDIUM" ? ORANGE : GREY_LABEL;
+          hookData.cell.styles.textColor = val === "HIGH" ? RED : val === "MEDIUM" ? ORANGE : BLUE;
+          hookData.cell.styles.fontStyle = "bold";
         }
       },
     });
-
-    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7;
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
   }
 
-  // ── 5. Parts & Materials (BOM) ────────────────────────────────────────────
-  if (bomRows.length > 0) {
-    y = checkPageBreak(doc, y, 30);
-    y = sectionBar(doc, y, `Parts & Materials (${bomRows.length} line items)`);
+  y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 28);
+  y = sectionBar(doc, y, "Time Tracker");
+  const timeCards = [
+    { label: "Productive Time", value: fmtDuration(totalProductive), color: GREEN },
+    { label: "Downtime", value: fmtDuration(totalDowntime), color: ORANGE },
+    { label: "Downtime Events", value: `${totalDowntimeEvents}`, color: RED },
+  ];
+  const timeCardW = CONTENT_W / timeCards.length;
+  timeCards.forEach((card, index) => {
+    const x = MARGIN + index * timeCardW;
+    doc.setFillColor(...GREY_BG);
+    doc.roundedRect(x + 0.8, y, timeCardW - 1.6, 15, 1.4, 1.4, "F");
+    doc.setFontSize(7);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...GREY_LABEL);
+    doc.text(card.label, x + timeCardW / 2, y + 4.8, { align: "center" });
+    doc.setFontSize(11.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...card.color);
+    doc.text(card.value, x + timeCardW / 2, y + 10.6, { align: "center" });
+  });
+  y += 21;
 
-    const bomTableRows = bomRows.map(row => {
-      const diff = row.totalActual - row.totalExpected;
+  const timeRows = latestRuns
+    .filter((run) => (run.productiveSeconds || 0) > 0 || (run.downtimeSeconds || 0) > 0)
+    .map((run) => {
+      const asset = assets.find((candidate) => candidate.id === run.assetId);
       return [
-        row.description,
-        row.isInventory ? "Inventory" : "Consumable",
-        row.totalExpected > 0 ? `${row.totalExpected} ${row.unitOfMeasure}` : "—",
-        `${row.totalActual} ${row.unitOfMeasure}`,
-        diff === 0 ? "—" : diff > 0 ? `+${diff}` : `${diff}`,
+        asset?.assetTag || asset?.assetName || run.assetId,
+        fmtDuration(run.productiveSeconds || 0),
+        fmtDuration(run.downtimeSeconds || 0),
+        `${run.downtimeEvents || 0}`,
       ];
     });
-
+  if (timeRows.length > 0) {
     autoTable(doc, {
       startY: y,
-      head: [["Item", "Type", "Expected", "Actual", "Variance"]],
-      body: bomTableRows,
+      head: [["Asset", "Productive", "Downtime", "Events"]],
+      body: timeRows,
       margin: { left: MARGIN, right: MARGIN },
-      styles: { fontSize: 7.5, cellPadding: 2, textColor: BLACK },
-      headStyles: { fillColor: TEAL, textColor: WHITE, fontStyle: "bold", fontSize: 7.5 },
-      alternateRowStyles: { fillColor: TEAL_LIGHT },
-      columnStyles: {
-        0: { cellWidth: 82 },
-        1: { cellWidth: 22 },
-        2: { cellWidth: 22 },
-        3: { cellWidth: 22 },
-        4: { cellWidth: 18 },
-      },
-      didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index === 4) {
-          const val = String(hookData.cell.raw);
-          if (val.startsWith("+")) hookData.cell.styles.textColor = GREEN;
-          else if (val !== "—") hookData.cell.styles.textColor = RED;
-        }
-      },
+      styles: { fontSize: 7.4, cellPadding: 2, textColor: BLACK },
+      headStyles: { fillColor: TEAL, textColor: WHITE, fontStyle: "bold", fontSize: 7.4 },
+      alternateRowStyles: { fillColor: GREY_BG },
     });
-
-    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 7;
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
   }
 
-  // ── 6. Signature Status ───────────────────────────────────────────────────
-  const signRows = latestRuns.filter(r => r.isLocked).map(r => {
-    const asset = assets.find(a => a.id === r.assetId);
-    const custStatus =
-      r.signatureStatus === "WaivedCustomer" ? "Waived" :
-      r.customerSignedAt ? `Signed ${fmtDate(r.customerSignedAt)}` :
-      "Pending";
-    return [
-      asset?.assetTag ?? r.assetId,
-      r.completedByName ?? "—",
-      r.installerSignedAt ? fmtDate(r.installerSignedAt) : "Pending",
-      custStatus,
-    ];
+  y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 36);
+  y = sectionBar(doc, y, `Asset Status (${totalAssets} assets)`);
+  autoTable(doc, {
+    startY: y,
+    head: [["Asset", "Tag", "Location", "Technician", "Status", "Completed", "Signature", "Open Issues"]],
+    body: assets.map((asset) => {
+      const run = runByAsset.get(asset.id);
+      const technician = run?.completedByName || "-";
+      return [
+        asset.assetName || asset.assetTag || asset.id,
+        asset.assetTag || "-",
+        asset.location || "-",
+        technician,
+        asset.status,
+        fmtDate(run?.completedAt),
+        run ? signatureStatusLabel(run) : "-",
+        run ? `${issueCount(run)}` : "0",
+      ];
+    }),
+    margin: { left: MARGIN, right: MARGIN },
+    styles: { fontSize: 7.1, cellPadding: 2, textColor: BLACK },
+    headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.1 },
+    alternateRowStyles: { fillColor: GREY_BG },
+    didParseCell: (hookData) => {
+      if (hookData.section !== "body") return;
+      if (hookData.column.index === 4) {
+        const val = String(hookData.cell.raw);
+        if (val === "Closed") hookData.cell.styles.textColor = TEAL;
+        else if (val === "Complete") hookData.cell.styles.textColor = GREEN;
+        else if (val === "InProgress") hookData.cell.styles.textColor = BLUE;
+        else if (val === "Issue" || val === "Paused" || val === "Pending") hookData.cell.styles.textColor = ORANGE;
+      }
+      if (hookData.column.index === 6) {
+        const val = String(hookData.cell.raw);
+        if (val === "Fully signed") hookData.cell.styles.textColor = GREEN;
+        else if (val === "Awaiting customer" || val === "Awaiting installer") hookData.cell.styles.textColor = ORANGE;
+      }
+      if (hookData.column.index === 7 && Number(String(hookData.cell.raw)) > 0) {
+        hookData.cell.styles.textColor = RED;
+      }
+    },
   });
+  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
 
-  if (signRows.length > 0) {
-    y = checkPageBreak(doc, y, 30);
+  if (bomRows.length > 0 || missingBomAssets.length > 0) {
+    y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 32);
+    y = sectionBar(doc, y, "Parts & Materials");
+    if (bomRows.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["Item", "Type", "Expected", "Actual", "Variance"]],
+        body: bomRows.map((row) => {
+          const diff = row.totalActual - row.totalExpected;
+          return [
+            row.description,
+            row.isInventory ? "Inventory" : "Consumable",
+            row.totalExpected > 0 ? `${row.totalExpected} ${row.unitOfMeasure}` : "-",
+            `${row.totalActual} ${row.unitOfMeasure}`,
+            diff === 0 ? "-" : diff > 0 ? `+${diff}` : `${diff}`,
+          ];
+        }),
+        margin: { left: MARGIN, right: MARGIN },
+        styles: { fontSize: 7.2, cellPadding: 2, textColor: BLACK },
+        headStyles: { fillColor: TEAL, textColor: WHITE, fontStyle: "bold", fontSize: 7.2 },
+        alternateRowStyles: { fillColor: TEAL_LIGHT },
+        didParseCell: (hookData) => {
+          if (hookData.section === "body" && hookData.column.index === 4) {
+            const val = String(hookData.cell.raw);
+            if (val.startsWith("+")) hookData.cell.styles.textColor = GREEN;
+            else if (val !== "-") hookData.cell.styles.textColor = RED;
+          }
+        },
+      });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 4;
+    }
+
+    if (missingBomAssets.length > 0) {
+      autoTable(doc, {
+        startY: y,
+        head: [["Missing BOM Asset", "Location", "Status"]],
+        body: missingBomAssets.map((asset) => [asset.assetTag, asset.location || "-", asset.status]),
+        margin: { left: MARGIN, right: MARGIN },
+        styles: { fontSize: 7.2, cellPadding: 2, textColor: BLACK },
+        headStyles: { fillColor: RED, textColor: WHITE, fontStyle: "bold", fontSize: 7.2 },
+        alternateRowStyles: { fillColor: GREY_BG },
+      });
+      y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+    }
+  }
+
+  if (latestRuns.some((run) => run.isLocked)) {
+    y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 30);
     y = sectionBar(doc, y, "Signature Status");
-
     autoTable(doc, {
       startY: y,
       head: [["Asset", "Technician", "Installer Sign-off", "Customer Sign-off"]],
-      body: signRows,
+      body: latestRuns.filter((run) => run.isLocked).map((run) => {
+        const asset = assets.find((candidate) => candidate.id === run.assetId);
+        return [
+          asset?.assetTag || asset?.assetName || run.assetId,
+          run.completedByName || "-",
+          run.installerSignedAt ? fmtDate(run.installerSignedAt) : "Pending",
+          run.customerSignedAt ? fmtDate(run.customerSignedAt) : run.signatureStatus === "WaivedCustomer" ? "Waived" : "Pending",
+        ];
+      }),
       margin: { left: MARGIN, right: MARGIN },
-      styles: { fontSize: 7.5, cellPadding: 2, textColor: BLACK },
-      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.5 },
+      styles: { fontSize: 7.4, cellPadding: 2, textColor: BLACK },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.4 },
       alternateRowStyles: { fillColor: GREY_BG },
       didParseCell: (hookData) => {
-        if (hookData.section === "body" && hookData.column.index >= 2) {
-          const val = String(hookData.cell.raw);
-          if (val === "Pending") hookData.cell.styles.textColor = ORANGE;
-          else if (val === "Waived") hookData.cell.styles.textColor = GREY_LABEL;
-          else hookData.cell.styles.textColor = GREEN;
-        }
+        if (hookData.section !== "body" || hookData.column.index < 2) return;
+        const val = String(hookData.cell.raw);
+        if (val === "Pending") hookData.cell.styles.textColor = ORANGE;
+        else if (val === "Waived") hookData.cell.styles.textColor = GREY_LABEL;
+        else hookData.cell.styles.textColor = GREEN;
       },
     });
   }
 
-  // ── Footers on every page ─────────────────────────────────────────────────
   const totalPages = doc.getNumberOfPages();
-  for (let p = 1; p <= totalPages; p++) {
-    doc.setPage(p);
-    addFooter(doc, p, totalPages, exportDate);
+  for (let page = 1; page <= totalPages; page += 1) {
+    doc.setPage(page);
+    addFooter(doc, page, totalPages, exportDate);
+  }
+
+  if (outputMode === "blob") {
+    return doc.output("blob");
   }
 
   const filename = `ProjectReport_${jobNumber || "export"}_${new Date().toISOString().slice(0, 10)}.pdf`;
   doc.save(filename);
 }
+

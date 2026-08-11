@@ -893,6 +893,12 @@ const ProjectList = () => {
                       projectCustomer={project.customerName}
                       projectSite={project.siteName}
                       projectManager={project.projectManager}
+                      projectStatus={project.status}
+                      projectStartDate={project.startDate}
+                      projectFinishDate={project.finishDate}
+                      projectDescription={project.description}
+                      projectCustomerId={project.customerId}
+                      projectTimeZoneId={project.timeZoneId}
                     />
                   </Box>
                 </Collapse>
@@ -1108,7 +1114,13 @@ const ProjectList = () => {
                             projectCustomer={project.customerName}
                             projectSite={project.siteName}
                             projectManager={project.projectManager}
-                          />
+                      projectStatus={project.status}
+                      projectStartDate={project.startDate}
+                      projectFinishDate={project.finishDate}
+                      projectDescription={project.description}
+                      projectCustomerId={project.customerId}
+                      projectTimeZoneId={project.timeZoneId}
+                    />
                         </Box>
                       </Collapse>
                     </TableCell>
@@ -1398,3 +1410,7 @@ const ProjectList = () => {
 };
 
 export default ProjectList;
+
+
+
+

@@ -502,6 +502,7 @@ export const documentService = {
     const response = await api.post<DocumentRecord>("/documents/upload", formData, {
       headers: { "Content-Type": "multipart/form-data" }
     });
+    invalidateWebCache("/documents");
     return hydrateCustomValues(response.data);
   },
 

@@ -59,6 +59,7 @@ import { assetWorkflowRunService } from "../../services/assetWorkflowRunService"
 import { quickbaseService } from "../../services/quickbaseService";
 import { settingsService } from "../../services/settingsService";
 import { brandSettingsService } from "../../services/brandSettingsService";
+import { customerService } from "../../services/customerService";
 import type {
   InboundCondition,
   InboundItemType,
@@ -84,8 +85,10 @@ import {
   generateProjectReport,
   type ProjectReportData,
 } from "../../utils/generateProjectReport";
+import { resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { signatureService } from "../../services/signatureService";
 import type { SignatureToken } from "../../types/signature";
+import ClosedSignedAssetsDialog from "./ClosedSignedAssetsDialog";
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
@@ -248,12 +251,28 @@ interface Props {
   projectCustomer?: string;
   projectSite?: string;
   projectManager?: string;
+  projectStatus?: string;
+  projectStartDate?: string;
+  projectFinishDate?: string;
+  projectDescription?: string;
+  projectCustomerId?: string;
+  projectTimeZoneId?: string;
 }
 type TabId = "contacts" | "installations" | "goodsMovements" | "inbound" | "bom" | "history";
 
 export default function ProjectChevronPanel({
-  projectId, productId,
-  projectJobNumber = "", projectCustomer = "", projectSite = "", projectManager = ""
+  projectId,
+  productId,
+  projectJobNumber = "",
+  projectCustomer = "",
+  projectSite = "",
+  projectManager = "",
+  projectStatus = "",
+  projectStartDate = "",
+  projectFinishDate = "",
+  projectDescription = "",
+  projectCustomerId,
+  projectTimeZoneId,
 }: Props) {
   const navigate = useNavigate();
   const users = useAppSelector((s) => s.users.items);
@@ -480,9 +499,11 @@ export default function ProjectChevronPanel({
   const [pdfLogoOpen,      setPdfLogoOpen]      = useState(false);
   const [includeLogo,      setIncludeLogo]       = useState(true);
   const [exportingPdf,     setExportingPdf]      = useState(false);
-  const [reportLogoOpen,   setReportLogoOpen]   = useState(false);
-  const [reportLogo,       setReportLogo]        = useState(true);
-  const [exportingReport,  setExportingReport]   = useState(false);
+  const [reportLogoOpen, setReportLogoOpen] = useState(false);
+  const [reportLogo, setReportLogo] = useState(true);
+  const [reportCustomerLogo, setReportCustomerLogo] = useState(true);
+  const [signedAssetsOpen, setSignedAssetsOpen] = useState(false);
+  const [exportingReport, setExportingReport] = useState(false);
 
   const buildExportData = async (withLogo: boolean): Promise<BomExportData> => {
     await ensureFullRunDetails();
@@ -504,29 +525,49 @@ export default function ProjectChevronPanel({
     };
   };
 
-  const handleGenerateProjectReport = async (withLogo: boolean) => {
+  const handleGenerateProjectReport = async (withBusinessLogo: boolean, withCustomerLogo: boolean) => {
     setExportingReport(true);
     try {
       await ensureFullRunDetails();
-      let logoBase64: string | null = null;
-      if (withLogo) {
-        try { logoBase64 = (await brandSettingsService.get()).logoBase64 ?? null; } catch { /* ignore */ }
+
+      let businessLogoBase64: string | null = null;
+      let customerLogoBase64: string | null = null;
+
+      if (withBusinessLogo) {
+        try {
+          const brand = await brandSettingsService.get();
+          businessLogoBase64 = brand.logoBase64 ? await resolveImageToDataUrl(brand.logoBase64) : null;
+        } catch {
+          businessLogoBase64 = null;
+        }
       }
+
+      if (withCustomerLogo && projectCustomerId) {
+        try {
+          const customers = await customerService.getCustomers();
+          const rawLogo = customers.find((customer) => customer.customerId === projectCustomerId || customer.id === projectCustomerId)?.logo ?? null;
+          customerLogoBase64 = rawLogo ? await resolveImageToDataUrl(rawLogo) : null;
+        } catch {
+          customerLogoBase64 = null;
+        }
+      }
+
       const data: ProjectReportData = {
-        jobNumber:          projectJobNumber,
-        customerName:       projectCustomer,
-        siteName:           projectSite,
-        projectManager:     projectManager,
-        status:             "",           // caller can enrich if needed
-        startDate:          "",
-        finishDate:         "",
-        description:        "",
-        assets:             installAssets,
+        jobNumber: projectJobNumber,
+        customerName: projectCustomer,
+        siteName: projectSite,
+        projectManager,
+        status: projectStatus,
+        startDate: projectStartDate,
+        finishDate: projectFinishDate,
+        description: projectDescription,
+        assets: installAssets,
         latestRuns,
-        bomRows:            bomSummary,
+        bomRows: bomSummary,
         missingBomAssets,
-        businessLogoBase64: logoBase64,
-        exportDate:         new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+        businessLogoBase64,
+        customerLogoBase64,
+        exportDate: new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
       };
       await generateProjectReport(data);
     } finally {
@@ -534,7 +575,6 @@ export default function ProjectChevronPanel({
       setReportLogoOpen(false);
     }
   };
-
   const handleExportCsv = async () => {
     exportBomCsv(await buildExportData(false));
   };
@@ -812,7 +852,7 @@ export default function ProjectChevronPanel({
 
           <Box sx={{ flex: 1 }} />
 
-          {/* Project Report button */}
+                    {/* Project Report button */}
           <Tooltip title="Generate Project Completion Report (PDF)">
             <span>
               <Button
@@ -824,6 +864,21 @@ export default function ProjectChevronPanel({
                 sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
               >
                 Project Report
+              </Button>
+            </span>
+          </Tooltip>
+
+          <Tooltip title="Save closed signed asset PDFs into the document library">
+            <span>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<PictureAsPdfOutlined sx={{ fontSize: 14 }} />}
+                disabled={installAssets.length === 0}
+                onClick={() => setSignedAssetsOpen(true)}
+                sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
+              >
+                Closed & Signed Assets
               </Button>
             </span>
           </Tooltip>
@@ -1614,29 +1669,48 @@ export default function ProjectChevronPanel({
       })()}
 
       {/* ── Project Report dialog ──────────────────────────────────────────── */}
-      <Dialog open={reportLogoOpen} onClose={() => setReportLogoOpen(false)} maxWidth="xs" fullWidth>
+            <Dialog open={reportLogoOpen} onClose={() => setReportLogoOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle sx={{ fontSize: "0.95rem", pb: 1 }}>Project Completion Report</DialogTitle>
         <DialogContent>
           <FormControlLabel
             control={<Checkbox checked={reportLogo} onChange={e => setReportLogo(e.target.checked)} size="small" />}
             label={<Typography variant="body2">Include business logo in header</Typography>}
           />
+          <FormControlLabel
+            control={<Checkbox checked={reportCustomerLogo} onChange={e => setReportCustomerLogo(e.target.checked)} size="small" />}
+            label={<Typography variant="body2">Include customer logo in header</Typography>}
+          />
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-            Includes assets, open issues, BOM, and signature status.
+            Includes project details, health summary, issues, time tracking, BOM, assets, and signature status.
           </Typography>
         </DialogContent>
         <DialogActions>
           <Button size="small" onClick={() => setReportLogoOpen(false)}>Cancel</Button>
           <Button
-            size="small" variant="contained"
+            size="small"
+            variant="contained"
             disabled={exportingReport}
             startIcon={exportingReport ? <CircularProgress size={12} /> : <AssessmentOutlined sx={{ fontSize: 14 }} />}
-            onClick={() => handleGenerateProjectReport(reportLogo)}
+            onClick={() => handleGenerateProjectReport(reportLogo, reportCustomerLogo)}
           >
-            {exportingReport ? "Generating…" : "Generate PDF"}
+            {exportingReport ? "Generating..." : "Generate PDF"}
           </Button>
         </DialogActions>
       </Dialog>
+
+      <ClosedSignedAssetsDialog
+        open={signedAssetsOpen}
+        onClose={() => setSignedAssetsOpen(false)}
+        projectId={projectId}
+        projectJobNumber={projectJobNumber}
+        projectCustomer={projectCustomer}
+        projectSite={projectSite}
+        projectCustomerId={projectCustomerId}
+        projectTimeZoneId={projectTimeZoneId}
+        assets={installAssets}
+        latestRuns={latestRuns}
+        users={users}
+      />
 
       {/* ── PDF logo dialog ────────────────────────────────────────────────── */}
       <Dialog open={pdfLogoOpen} onClose={() => setPdfLogoOpen(false)} maxWidth="xs" fullWidth>
@@ -1671,3 +1745,8 @@ export default function ProjectChevronPanel({
     </Box>
   );
 }
+
+
+
+
+
