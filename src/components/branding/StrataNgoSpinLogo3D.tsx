@@ -11,6 +11,10 @@ const GREY_FRONT = "#5C6670";
 const DEPTH_PX = 14;
 const SLICE_COUNT = 13;
 
+/** Matches original STRATA N-GO lockup proportions (symbol + wordmark). */
+const VIEWBOX_W = 260;
+const VIEWBOX_H = 210;
+
 function mixHex(hex: string, toward: string, amount: number): string {
   const parse = (value: string) => {
     const raw = value.replace("#", "");
@@ -43,47 +47,47 @@ function StrataNgoLogoFace({ depthT, emphasize = false }: FaceProps) {
 
   return (
     <svg
-      viewBox="0 0 240 132"
+      viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
       width="100%"
       height="100%"
       aria-hidden
       style={{ display: "block" }}
     >
-      {/* Blue mountain / wave mark — three stacked tiers */}
+      {/*
+        Original mark = exactly two blue shapes:
+        1) Centered peak with a slightly convex base
+        2) Wide upward arch beneath, tapering to points at the sides
+      */}
       <path
-        d="M 42 51 Q 120 41 198 51 L 198 55 Q 120 45 42 55 Z"
+        d="M 130 8 L 176 44 Q 130 40 84 44 Z"
         fill={blue}
       />
       <path
-        d="M 60 42 Q 120 32 180 42 L 180 45 Q 120 35 60 45 Z"
-        fill={blue}
-      />
-      <path
-        d="M 90 39 Q 120 11 150 39 Q 120 24 90 39 Z"
+        d="M 22 66 Q 130 52 238 66 L 232 74 Q 130 60 28 74 Z"
         fill={blue}
       />
 
       <text
-        x="120"
-        y="82"
+        x="130"
+        y="112"
         textAnchor="middle"
         fill={grey}
         fontFamily="Georgia, 'Times New Roman', serif"
         fontWeight={700}
-        fontSize="34"
-        letterSpacing="3"
+        fontSize="38"
+        letterSpacing="4"
       >
         STRATA
       </text>
       <text
-        x="120"
-        y="104"
+        x="130"
+        y="144"
         textAnchor="middle"
         fill={grey}
         fontFamily="Arial, Helvetica, sans-serif"
         fontWeight={700}
-        fontSize="17"
-        letterSpacing="5"
+        fontSize="19"
+        letterSpacing="6"
       >
         N-GO
       </text>
@@ -101,7 +105,7 @@ type Props = {
  */
 export default function StrataNgoSpinLogo3D({
   width = { xs: 148, sm: 168 },
-  height = { xs: 82, sm: 92 },
+  height = { xs: 120, sm: 136 },
 }: Props) {
   const halfDepth = DEPTH_PX / 2;
   const slices = Array.from({ length: SLICE_COUNT }, (_, index) => {
@@ -117,6 +121,7 @@ export default function StrataNgoSpinLogo3D({
         perspectiveOrigin: "center center",
         width,
         height,
+        aspectRatio: `${VIEWBOX_W} / ${VIEWBOX_H}`,
       }}
     >
       <Box
