@@ -1086,6 +1086,26 @@ public record CompleteRunRequest(
     bool UseStoredStepResults = false
 );
 
+public record SyncRunBundleSignatureRequest(
+    string SignerRole,
+    SubmitSignatureRequest Payload
+);
+
+public record SyncRunBundleRequest(
+    string StepResultsJson,
+    string IssuesJson,
+    string? CompletedByName,
+    string? CompletedAtUtc,
+    string? BomActualJson,
+    List<SyncRunBundleSignatureRequest>? Signatures,
+    string? IdempotencyKey
+);
+
+public record SyncRunBundleResponse(
+    AssetWorkflowRunDto Run,
+    List<SignatureEventDto> Signatures
+);
+
 public record PatchTimeEntriesRequest(string TimeEntriesJson);
 public record PatchStepResultsRequest(string StepResultsJson, string? AmendedByName, string? AmendedAt, bool CaptureDataAmend = false);
 public record PatchCaptureCellRequest(

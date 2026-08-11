@@ -20,6 +20,7 @@ public class AssetWorkflowRunsController : ControllerBase
     private readonly ILogger<AssetWorkflowRunsController> _logger;
     private readonly ProjectLifecycleService _projectLifecycle;
     private readonly NotificationService _notifications;
+    private readonly WorkflowCompletenessService _completeness;
 
     public AssetWorkflowRunsController(
         AppDbContext db,
@@ -27,7 +28,8 @@ public class AssetWorkflowRunsController : ControllerBase
         SseHub sse,
         ILogger<AssetWorkflowRunsController> logger,
         ProjectLifecycleService projectLifecycle,
-        NotificationService notifications)
+        NotificationService notifications,
+        WorkflowCompletenessService completeness)
     {
         _db     = db;
         _feed   = feed;
@@ -35,6 +37,7 @@ public class AssetWorkflowRunsController : ControllerBase
         _logger = logger;
         _projectLifecycle = projectLifecycle;
         _notifications = notifications;
+        _completeness = completeness;
     }
 
     private sealed class RunTimeEntry
@@ -1216,6 +1219,177 @@ public class AssetWorkflowRunsController : ControllerBase
         }
         return Ok(ToDto(run));
     }
+
+    // POST api/asset-workflow-runs/{id}/sync-bundle — atomic complete + signatures (offline field sync)
+    [HttpPost("{id}/sync-bundle")]
+    public async Task<IActionResult> SyncBundle(string id, [FromBody] SyncRunBundleRequest req)
+    {
+        var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        if (run is null) return NotFound();
+
+        var signatures = req.Signatures ?? [];
+        var wantsInstaller = signatures.Any(s => string.Equals(s.SignerRole, "Installer", StringComparison.OrdinalIgnoreCase));
+
+        // Idempotent replay — bundle already landed.
+        if (run.IsLocked)
+        {
+            var existingEvents = await _db.SignatureEvents
+                .Where(e => e.RunId == id)
+                .OrderBy(e => e.SignedAtUtc)
+                .ToListAsync();
+            var allRequestedPresent = signatures.All(sig =>
+                existingEvents.Any(e => string.Equals(e.SignerRole, sig.SignerRole, StringComparison.OrdinalIgnoreCase)));
+            if (allRequestedPresent)
+            {
+                return Ok(new SyncRunBundleResponse(
+                    ToDto(run),
+                    existingEvents.Select(SignatureEventToDto).ToList()));
+            }
+        }
+
+        var terminalReject = RejectIfTerminalSignedClosed(run);
+        if (terminalReject is not null) return terminalReject;
+
+        if (wantsInstaller)
+        {
+            var missingMedia = _completeness.GetMissingRequiredMediaLabels(run.WorkflowSnapshotJson, req.StepResultsJson);
+            if (missingMedia.Count > 0)
+            {
+                return UnprocessableEntity(new
+                {
+                    message = "Required photos or videos are missing before installer sign-off.",
+                    missingItems = missingMedia,
+                });
+            }
+        }
+
+        var completeReq = new CompleteRunRequest(
+            req.StepResultsJson,
+            req.IssuesJson,
+            req.CompletedByName,
+            req.BomActualJson,
+            req.CompletedAtUtc,
+            UseStoredStepResults: false);
+
+        if (!run.IsLocked)
+        {
+            var completeResult = await CompleteRun(id, completeReq);
+            if (completeResult is not OkObjectResult)
+                return completeResult;
+
+            run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+            if (run is null) return NotFound();
+        }
+
+        var appliedSignatures = new List<SignatureEventDto>();
+        foreach (var sig in signatures.OrderBy(s => s.SignerRole == "Installer" ? 0 : 1))
+        {
+            var role = sig.SignerRole?.Trim() ?? "";
+            if (role != "Installer" && role != "Customer") continue;
+
+            var existingForRole = await _db.SignatureEvents
+                .AsNoTracking()
+                .Where(e => e.RunId == id && e.SignerRole == role)
+                .OrderByDescending(e => e.SignedAtUtc)
+                .FirstOrDefaultAsync();
+            if (existingForRole is not null)
+            {
+                appliedSignatures.Add(SignatureEventToDto(existingForRole));
+                continue;
+            }
+
+            var payload = sig.Payload;
+            if (!payload.ConsentConfirmed)
+                return BadRequest(new { message = "Consent must be confirmed before signing." });
+            if (string.IsNullOrWhiteSpace(payload.SignerName))
+                return BadRequest(new { message = "Signer name is required." });
+
+            if (role == "Installer" && run!.SignatureStatus != "PendingInstaller")
+                return UnprocessableEntity(new { message = "Run is not awaiting installer signature." });
+            if (role == "Customer" && run!.SignatureStatus != "PendingCustomer")
+                return UnprocessableEntity(new { message = "Installer must sign before customer." });
+            if (payload.ReasonCode == "Declined" && string.IsNullOrWhiteSpace(payload.Notes))
+                return BadRequest(new { message = "Notes are required when declining." });
+
+            var now = DateTime.UtcNow;
+            var entity = new SignatureEventEntity
+            {
+                RunId         = id,
+                SignerRole    = role,
+                SignerName    = payload.SignerName,
+                SignerEmail   = payload.SignerEmail,
+                SignerTitle   = payload.SignerTitle,
+                SignedAtUtc   = now,
+                SignatureData = payload.SignatureData,
+                DeviceInfo    = Request.Headers["User-Agent"].ToString().Length > 400
+                    ? Request.Headers["User-Agent"].ToString()[..400]
+                    : Request.Headers["User-Agent"].ToString(),
+                IpAddress     = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                ReasonCode    = payload.ReasonCode,
+                Notes         = payload.Notes,
+            };
+            _db.SignatureEvents.Add(entity);
+
+            var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run!.AssetId);
+            if (role == "Installer")
+            {
+                run!.SignatureStatus   = "PendingCustomer";
+                run.InstallerSignedAt = now;
+                if (asset is not null)
+                {
+                    asset.Status = "Complete";
+                    asset.UpdatedAt = now;
+                }
+            }
+            else
+            {
+                run!.SignatureStatus  = payload.ReasonCode == "Declined" ? "Declined" : "Signed";
+                run.CustomerSignedAt = now;
+                if (asset is not null)
+                {
+                    asset.Status = payload.ReasonCode == "Declined" ? "Complete" : "Closed";
+                    asset.UpdatedAt = now;
+                }
+            }
+
+            run.UpdatedAt = now;
+            await _db.SaveChangesAsync();
+            appliedSignatures.Add(SignatureEventToDto(entity));
+
+            if (asset is not null)
+            {
+                var actorUserId = User.FindFirst("sub")?.Value
+                    ?? User.FindFirst("nameid")?.Value
+                    ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+                var actorName = User.Identity?.Name
+                    ?? User.FindFirst("email")?.Value
+                    ?? payload.SignerName
+                    ?? "Unknown user";
+                await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, actorName);
+                await _sse.BroadcastAsync("assets:updated", new { projectId = asset.ProjectId });
+            }
+        }
+
+        run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
+        return Ok(new SyncRunBundleResponse(ToDto(run!), appliedSignatures));
+    }
+
+    private static SignatureEventDto SignatureEventToDto(SignatureEventEntity e) => new(
+        e.Id,
+        e.RunId,
+        e.SignerRole,
+        e.SignerName,
+        e.SignerEmail,
+        e.SignerTitle,
+        e.SignedAtUtc,
+        !string.IsNullOrEmpty(e.SignatureData),
+        e.SignatureData,
+        e.DeviceInfo,
+        e.IpAddress,
+        e.ReasonCode,
+        e.Notes,
+        e.TokenId
+    );
 
     // PATCH api/asset-workflow-runs/{id}/issues — update issues on any run (inc. locked)
     [HttpPatch("{id}/issues")]

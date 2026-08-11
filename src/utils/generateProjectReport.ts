@@ -8,6 +8,7 @@ import autoTable from "jspdf-autotable";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import type { BomExportRow, MissingBomAsset } from "./generateBomReport";
+import { formatInstant } from "./datetime";
 
 const NAVY: [number, number, number] = [26, 39, 68];
 const TEAL: [number, number, number] = [0, 128, 128];
@@ -48,6 +49,7 @@ export interface ProjectReportData {
   businessLogoBase64: string | null;
   customerLogoBase64?: string | null;
   exportDate: string;
+  projectTimeZoneId?: string | null;
   outputMode?: "download" | "blob";
 }
 
@@ -71,13 +73,9 @@ function detectImageFormat(dataUrl: string): string | null {
   return null;
 }
 
-function fmtDate(iso: string | undefined | null): string {
+function fmtDate(iso: string | undefined | null, timeZoneId?: string | null): string {
   if (!iso) return "-";
-  try {
-    return new Date(iso).toLocaleDateString();
-  } catch {
-    return iso;
-  }
+  return formatInstant(iso, timeZoneId, { time: false, withZone: false }) || iso;
 }
 
 function fmtDuration(seconds: number): string {
@@ -211,8 +209,11 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
     businessLogoBase64,
     customerLogoBase64 = null,
     exportDate,
+    projectTimeZoneId,
     outputMode = "download",
   } = data;
+
+  const fmt = (iso: string | undefined | null) => fmtDate(iso, projectTimeZoneId);
 
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   addHeader(doc, businessLogoBase64, customerLogoBase64);
@@ -243,8 +244,8 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
   y = sectionBar(doc, y, "Project Details");
   const metadataRows = [
     ["Job Number", jobNumber || "-", "Status", status || "-"],
-    ["Customer", customerName || "-", "Start Date", fmtDate(startDate)],
-    ["Site", siteName || "-", "Finish Date", fmtDate(finishDate)],
+    ["Customer", customerName || "-", "Start Date", fmt(startDate)],
+    ["Site", siteName || "-", "Finish Date", fmt(finishDate)],
     ["Project Manager", projectManager || "-", "Description", description || "-"],
   ];
   autoTable(doc, {
@@ -325,7 +326,7 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
         issue.assetTag,
         issue.description,
         issue.stepTitle || "-",
-        issue.status === "Closed" ? fmtDate(issue.resolvedAt || issue.reportedAt) : fmtDate(issue.reportedAt),
+        issue.status === "Closed" ? fmt(issue.resolvedAt || issue.reportedAt) : fmt(issue.reportedAt),
       ]),
       margin: { left: MARGIN, right: MARGIN },
       styles: { fontSize: 7.2, cellPadding: 2, textColor: BLACK, overflow: "linebreak" },
@@ -418,7 +419,7 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
         asset.location || "-",
         technician,
         asset.status,
-        fmtDate(run?.completedAt),
+        fmt(run?.completedAt),
         run ? signatureStatusLabel(run) : "-",
         run ? `${issueCount(run)}` : "0",
       ];
@@ -505,8 +506,8 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
         return [
           asset?.assetTag || asset?.assetName || run.assetId,
           run.completedByName || "-",
-          run.installerSignedAt ? fmtDate(run.installerSignedAt) : "Pending",
-          run.customerSignedAt ? fmtDate(run.customerSignedAt) : run.signatureStatus === "WaivedCustomer" ? "Waived" : "Pending",
+          run.installerSignedAt ? fmt(run.installerSignedAt) : "Pending",
+          run.customerSignedAt ? fmt(run.customerSignedAt) : run.signatureStatus === "WaivedCustomer" ? "Waived" : "Pending",
         ];
       }),
       margin: { left: MARGIN, right: MARGIN },

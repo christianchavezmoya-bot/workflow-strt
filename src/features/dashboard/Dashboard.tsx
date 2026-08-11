@@ -3471,7 +3471,8 @@ const Dashboard = () => {
   async function handleGenerateTechReport(w: TechnicianWorkloadSummaryItem) {
     setReportingTechId(w.userId);
     try {
-      const exportDate = new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+      const reportTz = resolveReportTimeZone(projects.find((project) => project.id === techAssets[0]?.projectId));
+      const exportDate = formatInstant(new Date().toISOString(), reportTz, { time: false, withZone: false });
       const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
       const assetIds = new Set(techAssets.map((a) => a.id));
 
@@ -3524,6 +3525,7 @@ const Dashboard = () => {
           totalSteps: a.totalSteps,
         })),
         exportDate,
+        projectTimeZoneId: reportTz,
       };
       await generateTechnicianReport(reportData);
     } catch {

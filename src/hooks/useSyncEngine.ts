@@ -37,6 +37,8 @@ import {
   pendingRetryNow,
   pendingSetStatus,
   syncMetaSet,
+  droppedActionsGetAll,
+  droppedActionExists,
   type PendingAction,
   type PendingActionMethod,
 } from "../services/localDB";
@@ -77,6 +79,8 @@ import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { markOfflinePerf } from "../utils/offlinePerf";
 import { isOfflineModeActive, isManualOfflineModeActive } from "../services/offlineModeState";
 import { getSyncOpTimeoutMs, FIELD_SYNC_FORCE_HEADER, FIELD_SYNC_FORCE_VALUE, isPhoneWinsFieldSync } from "../utils/syncPolicy";
+import { classifySyncFailure, syncDiagnosticAppend } from "../services/syncDiagnosticsLog";
+import { buildRunSyncBundleRequest, collectBundledActionIds, isRunBundleCandidate } from "../services/runSyncBundleService";
 import {
   fromWorkInstructionDto,
   removeLocalWorkInstruction,
@@ -486,6 +490,38 @@ async function refreshOpenIssuesCacheFromServer(): Promise<void> {
   }
 }
 
+async function processSyncedBundleAction(
+  runEntityId: string,
+  _bundledActionIds: string[],
+  responseData: unknown,
+): Promise<void> {
+  const data = responseData as { run?: AssetWorkflowRun; signatures?: SignatureEvent[] } | AssetWorkflowRun;
+  const pending = await pendingGetByEntityId(runEntityId);
+  const runPayload = (data && typeof data === "object" && "run" in data)
+    ? (data as { run?: AssetWorkflowRun }).run
+    : (data as AssetWorkflowRun | undefined);
+  const signatures = (data && typeof data === "object" && "signatures" in data)
+    ? (data as { signatures?: SignatureEvent[] }).signatures
+    : undefined;
+
+  const completeAction = pending.find((item) => item.opType === "RUN_COMPLETE");
+  if (runPayload && completeAction) {
+    await processSyncedAction(completeAction, runPayload);
+  }
+
+  if (signatures?.length) {
+    for (const signature of signatures) {
+      const sigAction = pending.find((item) =>
+        item.opType === "SIGNATURE_SUBMIT"
+        && (item.body as SubmitSignaturePayload | undefined)?.signerRole === signature.signerRole,
+      );
+      if (sigAction) {
+        await processSyncedAction(sigAction, signature);
+      }
+    }
+  }
+}
+
 async function processSyncedAction(action: PendingAction, responseData: unknown): Promise<void> {
   if (action.opType === "ASSET_DOCUMENT_LINK_ATTACH" || action.opType === "ASSET_DOCUMENT_LINK_UPLOAD") {
     const syncedLink = responseData as AssetDocumentLink | undefined;
@@ -807,6 +843,36 @@ export function useSyncEngine(): SyncState {
         const all = await pendingGetAll();
         const depStillPending = all.some((a) => a.id === action.dependsOnOpId);
         if (depStillPending) continue;
+        const depWasDropped = await droppedActionExists(action.dependsOnOpId);
+        if (depWasDropped) {
+          const dropped = (await droppedActionsGetAll()).find((d) => d.id === action.dependsOnOpId);
+          const message = dropped?.lastError
+            ? `Blocked: required step permanently failed (${dropped.lastError})`
+            : "Blocked: required earlier sync step permanently failed";
+          await syncDiagnosticAppend({
+            actionId: action.id,
+            opType: action.opType,
+            entityType: action.entityType,
+            entityId: action.entityId,
+            reason: "DEPENDENCY_DROPPED",
+            message,
+            retries: action.retries,
+          });
+          await pendingMarkConflict(action.id, {
+            conflictKind: "business_rule",
+            conflictMessage: message,
+          });
+          if (action.entityType === "workflow-run") {
+            await markRunSyncFailed(action.entityId, message);
+          }
+          anyError = true;
+          continue;
+        }
+      }
+
+      // Signatures for this run flush atomically with RUN_COMPLETE when both are queued.
+      if (action.opType === "SIGNATURE_SUBMIT" && await isRunBundleCandidate(action.entityId)) {
+        continue;
       }
 
       // If an earlier op for this run was rejected this pass, don't run
@@ -857,12 +923,92 @@ export function useSyncEngine(): SyncState {
       let mappedRunId: string | null = null;
       let requestUrl = action.url;
       let requestData: unknown = action.body;
-      if (action.opType === "ASSET_DOCUMENT_LINK_UPLOAD") {
+      let bundledActionIds: string[] = [];
+
+      if (action.opType === "RUN_BUNDLE" || (action.opType === "RUN_COMPLETE" && await isRunBundleCandidate(action.entityId))) {
+        const bundle = await buildRunSyncBundleRequest(action.entityId);
+        if (bundle) {
+          requestUrl = `/asset-workflow-runs/${encodeURIComponent(bundle.runId)}/sync-bundle`;
+          bundledActionIds = collectBundledActionIds(bundle);
+          const apiRequest = {
+            stepResultsJson: bundle.request.stepResultsJson,
+            issuesJson: bundle.request.issuesJson,
+            completedByName: bundle.request.completedByName,
+            completedAtUtc: bundle.request.completedAtUtc,
+            bomActualJson: bundle.request.bomActualJson,
+            idempotencyKey: bundle.request.idempotencyKey,
+            signatures: bundle.request.signatures.map(({ signerRole, payload }) => ({ signerRole, payload })),
+          };
+          const { payload, missingMedia } = await mediaStore.resolveUploadPayloadWithDiagnostics(apiRequest);
+          if (missingMedia.length > 0) {
+            const message = `Missing ${missingMedia.length} media file(s) on disk`;
+            await syncDiagnosticAppend({
+              actionId: action.id,
+              opType: action.opType ?? "RUN_BUNDLE",
+              entityType: action.entityType,
+              entityId: action.entityId,
+              reason: "MEDIA_MISSING",
+              message,
+              mediaPathsInvolved: missingMedia.map((m) => m.path),
+              retries: action.retries,
+            });
+            await pendingMarkRetry(action.id, message, buildSyncAttemptDiagnostics({
+              action,
+              requestUrl,
+              requestMethod: "POST",
+              mappedRunId: bundle.runId,
+              requestData: payload,
+              durationMs: Date.now() - attemptStartedAt,
+              timeoutMs: getSyncOpTimeoutMs("RUN_BUNDLE"),
+              error: new Error(message),
+              serverReachable: getServerReachable(),
+              connectivity: connectivityRef.current,
+            }));
+            if (action.entityType === "workflow-run") {
+              await markRunSyncFailed(action.entityId, message);
+            }
+            anyError = true;
+            continue;
+          }
+          requestData = payload;
+        }
+      } else if (action.opType === "ASSET_DOCUMENT_LINK_UPLOAD") {
         requestData = await buildAssetDocumentLinkUploadRequest(action.body);
       } else if (action.opType === "STEP_MEDIA_UPLOAD") {
         requestData = await buildStepMediaUploadRequest(action.body);
       } else {
-        requestData = await mediaStore.resolveUploadPayload(action.body);
+        const { payload, missingMedia } = await mediaStore.resolveUploadPayloadWithDiagnostics(action.body);
+        requestData = payload;
+        if (missingMedia.length > 0) {
+          const message = `Missing ${missingMedia.length} media file(s) on disk`;
+          await syncDiagnosticAppend({
+            actionId: action.id,
+            opType: action.opType,
+            entityType: action.entityType,
+            entityId: action.entityId,
+            reason: "MEDIA_MISSING",
+            message,
+            mediaPathsInvolved: missingMedia.map((m) => m.path),
+            retries: action.retries,
+          });
+          await pendingMarkRetry(action.id, message, buildSyncAttemptDiagnostics({
+            action,
+            requestUrl,
+            requestMethod: action.method,
+            mappedRunId,
+            requestData: payload,
+            durationMs: Date.now() - attemptStartedAt,
+            timeoutMs: getSyncOpTimeoutMs(action.opType, measurePayload(payload).payloadBytes),
+            error: new Error(message),
+            serverReachable: getServerReachable(),
+            connectivity: connectivityRef.current,
+          }));
+          if (action.entityType === "workflow-run") {
+            await markRunSyncFailed(action.entityId, message);
+          }
+          anyError = true;
+          continue;
+        }
       }
       const { payloadBytes } = measurePayload(requestData);
       const timeoutMs = getSyncOpTimeoutMs(action.opType, payloadBytes);
@@ -875,23 +1021,34 @@ export function useSyncEngine(): SyncState {
         mappedRunId = action.entityType === "workflow-run"
           ? await offlineStore.getMappedId("workflow-run", action.entityId)
           : null;
-        requestUrl = mappedRunId
-          ? remapRunIdInUrl(action.url, action.entityId, mappedRunId)
-          : action.url;
+        const usingBundle = bundledActionIds.length > 0;
+        if (usingBundle) {
+          const serverRunId = mappedRunId ?? action.entityId;
+          requestUrl = `/asset-workflow-runs/${encodeURIComponent(serverRunId)}/sync-bundle`;
+        } else {
+          requestUrl = mappedRunId
+            ? remapRunIdInUrl(action.url, action.entityId, mappedRunId)
+            : action.url;
+        }
         const response = await api.request({
           url: requestUrl,
-          method: action.method,
+          method: usingBundle ? "POST" : action.method,
           data: requestData,
           timeout: timeoutMs,
           headers: fieldSyncRequestHeaders(action),
           syncMeta: {
             source: "sync-engine",
-            opType: action.opType,
+            opType: usingBundle ? "RUN_BUNDLE" : action.opType,
             payloadBytes,
           },
         });
-        await processSyncedAction(action, response.data);
-        await pendingRemove(action.id);
+        if (usingBundle) {
+          await processSyncedBundleAction(action.entityId, bundledActionIds, response.data);
+          await Promise.all(bundledActionIds.map((id) => pendingRemove(id)));
+        } else {
+          await processSyncedAction(action, response.data);
+          await pendingRemove(action.id);
+        }
         await syncMetaSet(action.entityType);
         syncedAny = true;
       } catch (e: unknown) {

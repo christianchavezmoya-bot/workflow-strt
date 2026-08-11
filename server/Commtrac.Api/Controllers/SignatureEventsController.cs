@@ -16,17 +16,20 @@ public class SignatureEventsController : ControllerBase
     private readonly NotificationFeedService _feed;
     private readonly SseHub _sse;
     private readonly ProjectLifecycleService _projectLifecycle;
+    private readonly WorkflowCompletenessService _completeness;
 
     public SignatureEventsController(
         AppDbContext db,
         NotificationFeedService feed,
         SseHub sse,
-        ProjectLifecycleService projectLifecycle)
+        ProjectLifecycleService projectLifecycle,
+        WorkflowCompletenessService completeness)
     {
         _db = db;
         _feed = feed;
         _sse = sse;
         _projectLifecycle = projectLifecycle;
+        _completeness = completeness;
     }
 
     // GET /api/signature-events?runId=xxx
@@ -97,6 +100,19 @@ public class SignatureEventsController : ControllerBase
                     return Ok(ToDto(existingInstaller));
             }
             return UnprocessableEntity(new { message = "Run is not awaiting installer signature." });
+        }
+
+        if (role == "Installer")
+        {
+            var missingMedia = _completeness.GetMissingRequiredMediaLabels(run.WorkflowSnapshotJson, run.StepResultsJson);
+            if (missingMedia.Count > 0)
+            {
+                return UnprocessableEntity(new
+                {
+                    message = "Required photos or videos are missing before installer sign-off.",
+                    missingItems = missingMedia,
+                });
+            }
         }
 
         // Declined requires notes

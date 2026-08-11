@@ -85,6 +85,7 @@ import {
   generateProjectReport,
   type ProjectReportData,
 } from "../../utils/generateProjectReport";
+import { formatInstant } from "../../utils/datetime";
 import { resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
 import { signatureService } from "../../services/signatureService";
 import type { SignatureToken } from "../../types/signature";
@@ -516,12 +517,13 @@ export default function ProjectChevronPanel({
       projectCustomer:    projectCustomer,
       projectSite:        projectSite,
       projectManager:     projectManager,
-      exportDate:         new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+      exportDate:         formatInstant(new Date().toISOString(), projectTimeZoneId, { time: false, withZone: false }),
       totalAssets:        installAssets.length,
       assetsWithBom:      latestRuns.filter(r => r.isLocked && r.bomActualJson && r.bomActualJson !== "[]").length,
       rows:               bomSummary,
       missingBomAssets,
       businessLogoBase64: logoBase64,
+      projectTimeZoneId,
     };
   };
 
@@ -567,7 +569,8 @@ export default function ProjectChevronPanel({
         missingBomAssets,
         businessLogoBase64,
         customerLogoBase64,
-        exportDate: new Date().toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }),
+        exportDate: formatInstant(new Date().toISOString(), projectTimeZoneId, { time: false, withZone: false }),
+        projectTimeZoneId,
       };
       await generateProjectReport(data);
     } finally {
