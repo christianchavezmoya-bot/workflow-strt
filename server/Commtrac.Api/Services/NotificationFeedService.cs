@@ -1,6 +1,7 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 
 namespace Commtrac.Api.Services;
 
@@ -8,6 +9,7 @@ public sealed class NotificationFeedService
 {
     private readonly AppDbContext _db;
     private readonly PushNotificationDeliveryService _push;
+    private readonly ILogger<NotificationFeedService> _logger;
     private static readonly HashSet<string> SuppressedRoles = new(StringComparer.OrdinalIgnoreCase)
     {
         "Viewer",
@@ -15,10 +17,11 @@ public sealed class NotificationFeedService
         "Customer",
     };
 
-    public NotificationFeedService(AppDbContext db, PushNotificationDeliveryService push)
+    public NotificationFeedService(AppDbContext db, PushNotificationDeliveryService push, ILogger<NotificationFeedService> logger)
     {
         _db = db;
         _push = push;
+        _logger = logger;
     }
 
     public async Task<List<NotificationInboxDto>> ListForUserAsync(string userId, string role, bool includeRead, int take)
@@ -121,7 +124,17 @@ public sealed class NotificationFeedService
 
         if (recipientUserIds.Count > 0)
         {
-            await _push.SendToUsersAsync(recipientUserIds, request.Title.Trim(), request.Message.Trim());
+            try
+            {
+                await _push.SendToUsersAsync(recipientUserIds, request.Title.Trim(), request.Message.Trim());
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "Push delivery failed for notification event {EventType}; inbox records were saved successfully.",
+                    request.EventType);
+            }
         }
     }
 

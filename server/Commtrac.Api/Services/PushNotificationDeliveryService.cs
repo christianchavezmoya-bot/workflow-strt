@@ -194,7 +194,18 @@ public sealed class PushNotificationDeliveryService
             return;
         }
 
-        var authToken = await BuildApnsJwtAsync(_settings.Apns.AuthKeyPath, _settings.Apns.TeamId, _settings.Apns.KeyId, cancellationToken);
+        string authToken;
+        try
+        {
+            authToken = await BuildApnsJwtAsync(_settings.Apns.AuthKeyPath, _settings.Apns.TeamId, _settings.Apns.KeyId, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "APNs auth token generation failed. Skipping {Count} iOS push token(s).",
+                targets.Count);
+            return;
+        }
         var client = _httpClientFactory.CreateClient();
         client.BaseAddress = _settings.Apns.UseSandbox ? ApnsSandboxBaseUri : ApnsProductionBaseUri;
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("bearer", authToken);
@@ -251,10 +262,12 @@ public sealed class PushNotificationDeliveryService
         CancellationToken cancellationToken)
     {
         var pem = await File.ReadAllTextAsync(authKeyPath, cancellationToken);
-        using var ecdsa = ECDsa.Create();
-        ecdsa.ImportFromPem(pem);
+        using var importedKey = ECDsa.Create();
+        importedKey.ImportFromPem(pem);
+        var parameters = importedKey.ExportParameters(true);
+        using var signingEcdsa = ECDsa.Create(parameters);
 
-        var signingKey = new ECDsaSecurityKey(ecdsa) { KeyId = keyId };
+        var signingKey = new ECDsaSecurityKey(signingEcdsa) { KeyId = keyId };
         var credentials = new SigningCredentials(signingKey, SecurityAlgorithms.EcdsaSha256);
         var now = DateTimeOffset.UtcNow;
 
@@ -293,4 +306,6 @@ public sealed class PushNotificationDeliveryService
         Ios,
     }
 }
+
+
 
