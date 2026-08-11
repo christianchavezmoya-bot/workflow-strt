@@ -17,6 +17,8 @@ import { secureGet } from "./secureStorage";
 import { isMobileNativePlatform } from "../utils/platform";
 import { getOfflinePerfLog, type OfflinePerfEntry } from "../utils/offlinePerf";
 import { safeApiHost, toAllowlistedDiagnostics } from "../utils/syncDiagnostics";
+import { syncDiagnosticList, type SyncDiagnosticEntry } from "./syncDiagnosticsLog";
+import { checkPendingMediaIntegrity, type PendingMediaIntegrityRow } from "./pendingMediaIntegrity";
 
 export const SUPPORT_BUNDLE_SCHEMA_VERSION = 1;
 
@@ -49,6 +51,8 @@ export interface SyncSupportBundle {
   droppedActions: DroppedAction[];
   apiLogs: SanitizedApiLog[];
   offlinePerf?: OfflinePerfEntry[];
+  syncDiagnostics?: SyncDiagnosticEntry[];
+  pendingMediaIntegrity?: PendingMediaIntegrityRow[];
 }
 
 /** Strip auth tokens and sensitive query params from URLs. */
@@ -116,10 +120,12 @@ function pendingExportRow(action: PendingAction): Record<string, unknown> {
 }
 
 export async function buildSyncSupportBundle(): Promise<SyncSupportBundle> {
-  const [pending, dropped, bootstrap] = await Promise.all([
+  const [pending, dropped, bootstrap, diagnostics, mediaIntegrity] = await Promise.all([
     pendingGetAll(),
     droppedActionsGetAll(),
     isMobileNativePlatform() ? offlineBootstrapService.getStatus() : Promise.resolve(null),
+    syncDiagnosticList(50),
+    isMobileNativePlatform() ? checkPendingMediaIntegrity() : Promise.resolve([]),
   ]);
 
   const conflicts = pending.filter((a) => a.conflictDetected);
@@ -149,6 +155,8 @@ export async function buildSyncSupportBundle(): Promise<SyncSupportBundle> {
     droppedActions: dropped,
     apiLogs: readApiDebugLogs().map(sanitizeApiLog),
     offlinePerf: isMobileNativePlatform() ? getOfflinePerfLog().slice(-40) : undefined,
+    syncDiagnostics: diagnostics,
+    pendingMediaIntegrity: mediaIntegrity.filter((row) => row.missingPaths.length > 0),
   };
 }
 

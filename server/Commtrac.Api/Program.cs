@@ -55,6 +55,7 @@ builder.Services.AddScoped<NotificationFeedService>();
 builder.Services.Configure<PushSettings>(builder.Configuration.GetSection(PushSettings.SectionName));
 builder.Services.AddScoped<PushNotificationDeliveryService>();
 builder.Services.AddScoped<ProjectLifecycleService>();
+builder.Services.AddScoped<WorkflowCompletenessService>();
 builder.Services.AddScoped<RolePermissionService>();
 builder.Services.AddSingleton<SseHub>();
 builder.Services.AddSingleton<SqliteBackupService>();

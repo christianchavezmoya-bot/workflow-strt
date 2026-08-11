@@ -2,6 +2,7 @@ import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { OfflineMediaRef } from "./offlineStore";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
+import { MediaMissingError } from "./mediaErrors";
 
 /**
  * Native media filesystem policy:
@@ -122,12 +123,16 @@ function parseStoredMediaValue(value: string): Pick<OfflineMediaRef, "kind" | "m
   };
 }
 
-async function resolveUploadValue(value: unknown, key?: string): Promise<unknown> {
+async function resolveUploadValue(
+  value: unknown,
+  key?: string,
+  missingMedia?: Array<{ path: string; fieldKey?: string; error: string }>,
+): Promise<unknown> {
   if (typeof value === "string") {
     if (JSON_MEDIA_FIELDS.has(key ?? "")) {
       try {
         const parsed = JSON.parse(value);
-        const resolved = await resolveUploadValue(parsed);
+        const resolved = await resolveUploadValue(parsed, key, missingMedia);
         return JSON.stringify(resolved);
       } catch {
         return value;
@@ -135,25 +140,36 @@ async function resolveUploadValue(value: unknown, key?: string): Promise<unknown
     }
     const ref = parseStoredMediaValue(value);
     if (ref) {
-      return await mediaStore.readMedia(ref.path, ref.mimeType);
+      try {
+        return await mediaStore.readMedia(ref.path, ref.mimeType);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        missingMedia?.push({ path: ref.path, fieldKey: key, error: message });
+        return "";
+      }
     }
     return value;
   }
 
   if (Array.isArray(value)) {
-    return await Promise.all(value.map((item) => resolveUploadValue(item)));
+    return await Promise.all(value.map((item) => resolveUploadValue(item, key, missingMedia)));
   }
 
   if (value && typeof value === "object") {
     const entries = await Promise.all(
       Object.entries(value as Record<string, unknown>).map(async ([entryKey, entryValue]) => {
-        return [entryKey, await resolveUploadValue(entryValue, entryKey)] as const;
+        return [entryKey, await resolveUploadValue(entryValue, entryKey, missingMedia)] as const;
       }),
     );
     return Object.fromEntries(entries);
   }
 
   return value;
+}
+
+export interface ResolveUploadPayloadResult<T> {
+  payload: T;
+  missingMedia: Array<{ path: string; fieldKey?: string; error: string }>;
 }
 
 export const mediaStore = {
@@ -170,12 +186,16 @@ export const mediaStore = {
   },
 
   async readMedia(path: string, mimeType = "application/octet-stream"): Promise<string> {
-    const result = await Filesystem.readFile({
-      path,
-      directory: Directory.Data,
-    });
-    const base64 = typeof result.data === "string" ? result.data : "";
-    return toDataUrl(base64, mimeType);
+    try {
+      const result = await Filesystem.readFile({
+        path,
+        directory: Directory.Data,
+      });
+      const base64 = typeof result.data === "string" ? result.data : "";
+      return toDataUrl(base64, mimeType);
+    } catch (error) {
+      throw new MediaMissingError(path, { cause: error });
+    }
   },
 
   async deleteMedia(path: string): Promise<void> {
@@ -228,8 +248,15 @@ export const mediaStore = {
     return toStoredMediaValue(ref);
   },
 
+  async resolveUploadPayloadWithDiagnostics<T>(payload: T): Promise<ResolveUploadPayloadResult<T>> {
+    const missingMedia: Array<{ path: string; fieldKey?: string; error: string }> = [];
+    const resolved = await resolveUploadValue(payload, undefined, missingMedia);
+    return { payload: resolved as T, missingMedia };
+  },
+
   async resolveUploadPayload<T>(payload: T): Promise<T> {
-    return await resolveUploadValue(payload) as T;
+    const { payload: resolved } = await this.resolveUploadPayloadWithDiagnostics(payload);
+    return resolved;
   },
 
   /**

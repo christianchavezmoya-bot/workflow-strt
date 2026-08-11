@@ -15,6 +15,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import * as XLSX from "xlsx";
+import { formatInstant } from "./datetime";
 
 // ─── Colour palette (mirrors generateWorkflowReport) ─────────────────────────
 const NAVY:       [number,number,number] = [26,  39,  68];
@@ -76,15 +77,14 @@ export interface BomExportData {
   rows:                BomExportRow[];
   missingBomAssets:    MissingBomAsset[];
   businessLogoBase64:  string | null;
+  projectTimeZoneId?:  string | null;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
 
-function fmtDate(iso: string): string {
+function fmtDate(iso: string, timeZoneId?: string | null): string {
   if (!iso) return "—";
-  try {
-    return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
-  } catch { return iso; }
+  return formatInstant(iso, timeZoneId, { time: false, withZone: false }) || iso;
 }
 
 function varianceLabel(expected: number, actual: number): string {
@@ -119,7 +119,7 @@ function detectImageFormat(dataUrl: string): string | null {
   return null;
 }
 
-function drawPageHeader(doc: jsPDF, logoBase64: string | null, pageNum: number, totalPages?: number) {
+function drawPageHeader(doc: jsPDF, logoBase64: string | null, pageNum: number, timeZoneId?: string | null, totalPages?: number) {
   const p = doc.internal.pageSize;
   const w = p.getWidth();
 
@@ -152,7 +152,7 @@ function drawPageHeader(doc: jsPDF, logoBase64: string | null, pageNum: number, 
   doc.setTextColor(...GREY_LABEL);
   doc.setFontSize(7);
   doc.setFont("helvetica", "normal");
-  doc.text(`Generated ${new Date().toLocaleString()}`, MARGIN, PAGE_H - 2.5);
+  doc.text(`Generated ${formatInstant(new Date().toISOString(), timeZoneId, { withZone: true })}`, MARGIN, PAGE_H - 2.5);
   const pageLabel = totalPages ? `Page ${pageNum} of ${totalPages}` : `Page ${pageNum}`;
   doc.text(pageLabel, w - MARGIN, PAGE_H - 2.5, { align: "right" });
 }
@@ -171,7 +171,7 @@ export async function exportBomPdf(data: BomExportData): Promise<void> {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   let y = HEADER_H + 8;
 
-  drawPageHeader(doc, data.businessLogoBase64, 1);
+  drawPageHeader(doc, data.businessLogoBase64, 1, data.projectTimeZoneId);
 
   // ── Project metadata block ────────────────────────────────────────────────
   const meta: [string, string][] = [
@@ -202,7 +202,7 @@ export async function exportBomPdf(data: BomExportData): Promise<void> {
   y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 8;
 
   // ── Parts Summary table ───────────────────────────────────────────────────
-  if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages()); }
+  if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages(), data.projectTimeZoneId); }
   y = sectionBar(doc, y, "Parts Summary");
 
   const summaryBody = data.rows.map(row => {
@@ -254,7 +254,7 @@ export async function exportBomPdf(data: BomExportData): Promise<void> {
   // ── Inventory Register ────────────────────────────────────────────────────
   const inventoryRows = data.rows.filter(r => r.isInventory && r.captures.length > 0);
   if (inventoryRows.length > 0) {
-    if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages()); }
+    if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages(), data.projectTimeZoneId); }
     y = sectionBar(doc, y, "Inventory Register — Captured Unit Data");
 
     const captureFields = allCaptureFields(data.rows);
@@ -270,7 +270,7 @@ export async function exportBomPdf(data: BomExportData): Promise<void> {
           `Unit ${cap.unitIdx}`,
           ...captureFields.map(f => cap.fields[f] || "—"),
           cap.installedBy || "—",
-          cap.installedAt ? fmtDate(cap.installedAt) : "—",
+          cap.installedAt ? fmtDate(cap.installedAt, data.projectTimeZoneId) : "—",
         ]);
       }
     }
@@ -293,7 +293,7 @@ export async function exportBomPdf(data: BomExportData): Promise<void> {
   // ── Variance Report ───────────────────────────────────────────────────────
   const varRows = data.rows.filter(r => r.totalActual !== r.totalExpected && r.totalExpected > 0);
   if (varRows.length > 0) {
-    if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages()); }
+    if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages(), data.projectTimeZoneId); }
     y = sectionBar(doc, y, "Variance Report — Actual vs Expected");
 
     autoTable(doc, {
@@ -333,7 +333,7 @@ export async function exportBomPdf(data: BomExportData): Promise<void> {
 
   // ── Missing BOM assets ────────────────────────────────────────────────────
   if (data.missingBomAssets.length > 0) {
-    if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages()); }
+    if (y > SAFE_BOT - 20) { doc.addPage(); y = HEADER_H + 8; drawPageHeader(doc, data.businessLogoBase64, doc.getNumberOfPages(), data.projectTimeZoneId); }
     y = sectionBar(doc, y, `Assets — BOM Not Recorded (${data.missingBomAssets.length})`);
 
     autoTable(doc, {
@@ -401,7 +401,7 @@ export function exportBomExcel(data: BomExportData): void {
         cap.unitIdx,
         ...captureFields.map(f => cap.fields[f] || ""),
         cap.installedBy || "",
-        cap.installedAt ? fmtDate(cap.installedAt) : "",
+        cap.installedAt ? fmtDate(cap.installedAt, data.projectTimeZoneId) : "",
       ]);
     }
   }
@@ -468,7 +468,7 @@ export function exportBomCsv(data: BomExportData): void {
           cap.unitIdx,
           ...captureFields.map(f => `"${cap.fields[f] || ""}"`),
           `"${cap.installedBy || ""}"`,
-          `"${cap.installedAt ? fmtDate(cap.installedAt) : ""}"`,
+          `"${cap.installedAt ? fmtDate(cap.installedAt, data.projectTimeZoneId) : ""}"`,
         ].join(","));
       }
     }

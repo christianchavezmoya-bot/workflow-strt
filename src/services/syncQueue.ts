@@ -10,6 +10,7 @@ export type SyncOpType =
   | "RUN_CREATE"
   | "RUN_UPDATE"
   | "RUN_COMPLETE"
+  | "RUN_BUNDLE"
   | "RUN_ABANDON"
   | "STEP_RESULTS"
   | "STEP_MEDIA_UPLOAD"

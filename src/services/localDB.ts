@@ -79,6 +79,8 @@ export interface DroppedAction {
   method?: PendingActionMethod;
   body?: unknown;
   optimisticPatch?: Record<string, unknown>;
+  /** When set, dependents blocked/cascaded if this op was permanently dropped. */
+  dependsOnOpId?: string;
 }
 
 // ── Cache age thresholds ──────────────────────────────────────────────────────
@@ -195,6 +197,24 @@ interface CommtracDB extends DBSchema {
     key: string;
     value: DroppedAction;
   };
+  sync_diagnostics: {
+    key: string;
+    value: {
+      id: string;
+      ts: string;
+      actionId?: string;
+      opType?: string;
+      entityType?: string;
+      entityId?: string;
+      httpStatus?: number;
+      errorCode?: string;
+      reason: string;
+      message: string;
+      payloadBytes?: number;
+      retries?: number;
+      mediaPathsInvolved?: string[];
+    };
+  };
   workflow_assignments: {
     key: string;
     value: WorkflowAssignmentRecord;
@@ -241,8 +261,8 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   // v2 (schema version 2) adds offline-bootstrap stores: workflow_assignments,
   // features, reference_data, config_media. The upgrade is additive and
   // idempotent so existing v1 databases migrate without data loss.
-  _db = await openDB<CommtracDB>("commtrac_offline_v2", 2, {
-    upgrade(db) {
+  _db = await openDB<CommtracDB>("commtrac_offline_v2", 3, {
+    upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains("cache")) {
         db.createObjectStore("cache", { keyPath: "key" });
       }
@@ -287,6 +307,9 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       if (!db.objectStoreNames.contains("config_media")) {
         const store = db.createObjectStore("config_media", { keyPath: "id" });
         store.createIndex("by_config", "configId");
+      }
+      if (oldVersion < 3 && !db.objectStoreNames.contains("sync_diagnostics")) {
+        db.createObjectStore("sync_diagnostics", { keyPath: "id" });
       }
     },
   });
@@ -499,9 +522,11 @@ export async function pendingMarkRetry(
         method: item.method,
         body: item.body,
         optimisticPatch: item.optimisticPatch,
+        dependsOnOpId: item.dependsOnOpId,
       };
       await db.put("dropped_actions", dropped);
       await db.delete("pending_actions", id);
+      await cascadeDropDependents(id, error || item.lastError);
       window.dispatchEvent(new Event("sync-pending-changed"));
       window.dispatchEvent(new CustomEvent("sync-action-dropped", {
         detail: dropped,
@@ -535,6 +560,56 @@ export async function droppedActionsGetAll(): Promise<DroppedAction[]> {
     const db = await getDB();
     return await db.getAll("dropped_actions");
   } catch { return []; }
+}
+
+/** True when a pending op id was permanently dropped from the queue. */
+export async function droppedActionExists(id: string): Promise<boolean> {
+  try {
+    const db = await getDB();
+    const row = await db.get("dropped_actions", id);
+    return row != null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * When an op is permanently dropped, drop any still-pending ops that depend on it
+ * (directly or transitively) so signatures cannot sync after a failed RUN_COMPLETE.
+ */
+export async function cascadeDropDependents(droppedOpId: string, rootError?: string): Promise<void> {
+  try {
+    const db = await getDB();
+    const pending = await db.getAll("pending_actions");
+    const direct = pending.filter((item) => item.dependsOnOpId === droppedOpId);
+    for (const item of direct) {
+      const dropped: DroppedAction = {
+        id: item.id,
+        opType: item.opType ?? item.method,
+        entityType: item.entityType,
+        entityId: item.entityId,
+        lastError: rootError
+          ? `Blocked: required step failed (${rootError})`
+          : "Blocked: required earlier sync step permanently failed",
+        createdAt: item.createdAt,
+        droppedAt: new Date().toISOString(),
+        url: item.url,
+        method: item.method,
+        body: item.body,
+        optimisticPatch: item.optimisticPatch,
+        dependsOnOpId: item.dependsOnOpId,
+      };
+      await db.put("dropped_actions", dropped);
+      await db.delete("pending_actions", item.id);
+      window.dispatchEvent(new CustomEvent("sync-action-dropped", { detail: dropped }));
+      await cascadeDropDependents(item.id, rootError ?? dropped.lastError);
+    }
+    if (direct.length > 0) {
+      window.dispatchEvent(new Event("sync-pending-changed"));
+    }
+  } catch {
+    // Non-fatal.
+  }
 }
 
 /** Dismiss (remove) a single dropped action after the user has acknowledged it. */
@@ -573,6 +648,7 @@ export async function droppedActionRequeue(id: string): Promise<boolean> {
       retries: 0,
       status: "pending",
       opType: dropped.opType,
+      dependsOnOpId: dropped.dependsOnOpId,
     };
     await db.put("pending_actions", pending);
     await db.delete("dropped_actions", id);

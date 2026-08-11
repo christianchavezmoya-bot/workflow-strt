@@ -55,6 +55,16 @@ import {
   downloadSyncSupportBundle,
 } from "../../services/syncSupportBundleService";
 import {
+  syncDiagnosticClear,
+  syncDiagnosticList,
+  type SyncDiagnosticEntry,
+} from "../../services/syncDiagnosticsLog";
+import {
+  checkPendingMediaIntegrity,
+  type PendingMediaIntegrityRow,
+} from "../../services/pendingMediaIntegrity";
+import { isMobileNativePlatform } from "../../utils/platform";
+import {
   describeSyncOpType,
   formatPendingActionTechnicalDetail,
   resolvePendingActionLabel,
@@ -597,14 +607,19 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   const [expandedDiagIds, setExpandedDiagIds] = useState<Record<string, boolean>>({});
   const [copiedDiagId, setCopiedDiagId] = useState<string | null>(null);
   const [exportState, setExportState] = useState<"idle" | "copying" | "downloading" | "copied" | "error">("idle");
+  const [syncDiagnostics, setSyncDiagnostics] = useState<SyncDiagnosticEntry[]>([]);
+  const [mediaIntegrity, setMediaIntegrity] = useState<PendingMediaIntegrityRow[] | null>(null);
+  const [mediaIntegrityRunning, setMediaIntegrityRunning] = useState(false);
 
   const loadQueue = async () => setQueue(await pendingGetAll());
   const loadDropped = async () => setDroppedActions(await droppedActionsGetAll());
+  const loadSyncDiagnostics = async () => setSyncDiagnostics(await syncDiagnosticList(50));
 
   useEffect(() => {
     if (open) {
       void loadQueue();
       void loadDropped();
+      void loadSyncDiagnostics();
     }
   }, [open]);
 
@@ -619,12 +634,16 @@ export default function SyncCenterPage({ open, onClose }: Props) {
   useEffect(() => {
     void loadQueue();
     void loadDropped();
+    void loadSyncDiagnostics();
     const h = () => { void loadQueue(); void loadDropped(); };
+    const diagH = () => { void loadSyncDiagnostics(); };
     window.addEventListener("sync-pending-changed", h);
     window.addEventListener("sync-conflict-detected", h);
+    window.addEventListener("sync-diagnostics-changed", diagH);
     return () => {
       window.removeEventListener("sync-pending-changed", h);
       window.removeEventListener("sync-conflict-detected", h);
+      window.removeEventListener("sync-diagnostics-changed", diagH);
     };
   }, []);
 
@@ -1235,6 +1254,81 @@ export default function SyncCenterPage({ open, onClose }: Props) {
             </Stack>
             <Collapse in={diagnosticsOpen}>
               <Stack spacing={2} sx={{ pt: 0.5 }}>
+                {isMobileNativePlatform() && (
+                  <Stack spacing={1}>
+                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+                      <Button
+                        variant="outlined"
+                        size="small"
+                        disabled={mediaIntegrityRunning}
+                        onClick={() => {
+                          setMediaIntegrityRunning(true);
+                          void checkPendingMediaIntegrity()
+                            .then(setMediaIntegrity)
+                            .finally(() => setMediaIntegrityRunning(false));
+                        }}
+                      >
+                        {mediaIntegrityRunning ? "Checking files…" : "Check pending files"}
+                      </Button>
+                      {syncDiagnostics.length > 0 && (
+                        <Button
+                          variant="text"
+                          size="small"
+                          color="inherit"
+                          onClick={() => void syncDiagnosticClear().then(loadSyncDiagnostics)}
+                        >
+                          Clear sync log
+                        </Button>
+                      )}
+                    </Stack>
+                    {mediaIntegrity && mediaIntegrity.length > 0 && (
+                      <Alert severity="error" sx={{ fontSize: "0.75rem", py: 0.5 }}>
+                        {mediaIntegrity.length} queued action{mediaIntegrity.length !== 1 ? "s" : ""} reference missing media on disk.
+                        {mediaIntegrity.slice(0, 3).map((row) => (
+                          <Typography key={row.actionId} variant="caption" display="block" sx={{ mt: 0.5 }}>
+                            {row.opType ?? "sync"} · {row.missingPaths.length} missing
+                          </Typography>
+                        ))}
+                      </Alert>
+                    )}
+                    {mediaIntegrity && mediaIntegrity.length === 0 && (
+                      <Alert severity="success" sx={{ fontSize: "0.75rem", py: 0.5 }}>
+                        All media referenced by the pending queue exists on disk.
+                      </Alert>
+                    )}
+                  </Stack>
+                )}
+
+                {syncDiagnostics.length > 0 && (
+                  <Stack spacing={0.75}>
+                    <Typography variant="caption" color="text.secondary" fontWeight={600}>
+                      Recent sync failures ({syncDiagnostics.length})
+                    </Typography>
+                    {syncDiagnostics.slice(0, 8).map((entry) => (
+                      <Box
+                        key={entry.id}
+                        sx={{
+                          border: "1px solid",
+                          borderColor: "divider",
+                          borderRadius: 1,
+                          px: 1,
+                          py: 0.75,
+                        }}
+                      >
+                        <Typography variant="caption" sx={{ fontWeight: 600, display: "block" }}>
+                          {entry.reason} · {entry.opType ?? entry.entityType ?? "sync"}
+                        </Typography>
+                        <Typography variant="caption" color="text.secondary" sx={{ display: "block" }}>
+                          {entry.message}
+                        </Typography>
+                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem" }}>
+                          {formatTime(entry.ts)}
+                        </Typography>
+                      </Box>
+                    ))}
+                  </Stack>
+                )}
+
                 <ConnectivityPerfReadout />
                 <Typography variant="caption" color="text.secondary" display="block">
                   Support bundle excludes tokens, passwords, and step/photo content. Attach the JSON to tickets per{" "}

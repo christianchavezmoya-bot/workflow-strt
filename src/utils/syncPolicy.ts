@@ -21,6 +21,7 @@ export function getSyncOpTimeoutMs(opType?: string | null, payloadBytes?: number
   const isRunMutation = opType === "RUN_CREATE"
     || opType === "RUN_UPDATE"
     || opType === "RUN_COMPLETE"
+    || opType === "RUN_BUNDLE"
     || opType === "STEP_RESULTS"
     || opType === "STEP_MEDIA_UPLOAD"
     || opType === "TIME_ENTRY"

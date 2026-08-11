@@ -6,6 +6,7 @@
 import { jsPDF } from "jspdf";
 import autoTable from "jspdf-autotable";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
+import { formatInstant } from "./datetime";
 
 // ── Colour palette ────────────────────────────────────────────────────────────
 const NAVY: [number, number, number]       = [26,  39,  68];
@@ -60,6 +61,7 @@ export interface TechnicianReportData {
   assets: TechnicianReportAsset[];
   businessLogoBase64?: string | null;
   exportDate: string;
+  projectTimeZoneId?: string | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -87,9 +89,9 @@ const fmtSecs = (s: number): string => {
   return h > 0 ? `${h}h ${m}m` : `${m}m`;
 };
 
-function fmtDate(iso: string | undefined): string {
+function fmtDate(iso: string | undefined, timeZoneId?: string | null): string {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" });
+  return formatInstant(iso, timeZoneId, { time: false, withZone: false }) || iso;
 }
 
 function parseOpenIssueCount(issuesJson: string): number {
@@ -150,7 +152,8 @@ function resolveAssetLabel(assetId: string, assets: TechnicianReportAsset[]): st
 // ── Main export ───────────────────────────────────────────────────────────────
 
 export async function generateTechnicianReport(data: TechnicianReportData): Promise<void> {
-  const { technicianName, technicianEmail, reportPeriod, runs, assets, businessLogoBase64, exportDate } = data;
+  const { technicianName, technicianEmail, reportPeriod, runs, assets, businessLogoBase64, exportDate, projectTimeZoneId } = data;
+  const fmt = (iso: string | undefined) => fmtDate(iso, projectTimeZoneId);
 
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const totalPages = () =>
@@ -322,7 +325,7 @@ export async function generateTechnicianReport(data: TechnicianReportData): Prom
     const openIssues   = parseOpenIssueCount(run.issuesJson);
     return [
       assetLabel,
-      fmtDate(run.startedAt),
+      fmt(run.startedAt),
       fmtSecs(totalSecs),
       fmtSecs(run.productiveSeconds ?? 0),
       fmtSecs(run.downtimeSeconds ?? 0),
@@ -386,7 +389,7 @@ export async function generateTechnicianReport(data: TechnicianReportData): Prom
       i.issueType === "blocking" ? "Blocking"
         : i.issueType === "scope-deviation" ? "Scope Dev."
         : "Observation",
-      fmtDate(i.reportedAt),
+      fmt(i.reportedAt),
       i.resolved ? "Resolved" : "Open",
     ]);
 
