@@ -26,7 +26,22 @@ export default function AttentionItemList<T>({
       sx={{
         mt: 1,
         ...(expanded && overflow > 0
-          ? { maxHeight: expandedMaxHeight, overflowY: "auto", pr: 0.5 }
+          ? {
+            maxHeight: expandedMaxHeight,
+            overflowY: "auto",
+            pr: 0.5,
+            // Slim, card-toned scrollbar. The default chrome bar is wide and light, which
+            // reads as a foreign element sitting on top of the Needs Attention cards.
+            scrollbarWidth: "thin",
+            scrollbarColor: "rgba(255,255,255,0.22) transparent",
+            "&::-webkit-scrollbar": { width: 6 },
+            "&::-webkit-scrollbar-track": { background: "transparent" },
+            "&::-webkit-scrollbar-thumb": {
+              backgroundColor: "rgba(255,255,255,0.22)",
+              borderRadius: 3,
+            },
+            "&::-webkit-scrollbar-thumb:hover": { backgroundColor: "rgba(255,255,255,0.35)" },
+          }
           : {}),
       }}
     >

@@ -266,6 +266,7 @@ export default function ProjectChevronPanel({
   const [contactForm,      setContactForm]      = useState<ContactFormState>(emptyContact());
   const [primaryContactId, setPrimaryContactId] = useState<string | null>(null);
   const [contactSaving,    setContactSaving]    = useState(false);
+  const [contactSaved,     setContactSaved]     = useState(false);
 
   // ── Signature Tokens (send + track customer signature requests) ────────────
   const [sigTokens,        setSigTokens]        = useState<Record<string, SignatureToken[]>>({});
@@ -611,8 +612,18 @@ export default function ProjectChevronPanel({
         setContacts(prev => [...prev, c]);
         setPrimaryContactId(c.id);
       }
+      // Confirm the write landed. Without this the button snaps straight back to
+      // "Save changes" and the user cannot tell whether anything happened.
+      setContactSaved(true);
     } finally { setContactSaving(false); }
   };
+
+  // Clear the "Saved" confirmation after a beat, or as soon as the user edits again.
+  useEffect(() => {
+    if (!contactSaved) return;
+    const timer = setTimeout(() => setContactSaved(false), 2000);
+    return () => clearTimeout(timer);
+  }, [contactSaved]);
 
   const deleteContact = async (id: string) => {
     await projectContactService.deleteContact(id);
@@ -647,7 +658,10 @@ export default function ProjectChevronPanel({
   };
 
   // ── Field setters ──────────────────────────────────────────────────────────
-  const setCF = (f: keyof ContactFormState, v: unknown) => setContactForm(p => ({ ...p, [f]: v }));
+  const setCF = (f: keyof ContactFormState, v: unknown) => {
+    setContactSaved(false); // editing again invalidates the "Saved" confirmation
+    setContactForm(p => ({ ...p, [f]: v }));
+  };
   const setIF = (f: keyof InboundFormState, v: unknown) => setInboundForm(p => ({ ...p, [f]: v }));
 
   // ── Shared spinner ─────────────────────────────────────────────────────────
@@ -1001,9 +1015,12 @@ export default function ProjectChevronPanel({
                   </Button>
                 )}
                 <Button variant="contained" size="small"
+                  color={contactSaved ? "success" : "primary"}
+                  startIcon={contactSaved ? <CheckCircleOutlineOutlined sx={{ fontSize: 15 }} /> : undefined}
                   disabled={contactSaving || !contactForm.name.trim()}
                   onClick={savePrimaryContact}>
                   {contactSaving ? <CircularProgress size={14} />
+                    : contactSaved ? "Saved"
                     : primaryContactId ? "Save changes" : "Save contact"}
                 </Button>
               </Stack>

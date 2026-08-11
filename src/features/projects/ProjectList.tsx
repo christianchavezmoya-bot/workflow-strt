@@ -114,7 +114,17 @@ const DEFAULT_PROJECT_COLUMN_ORDER = [
 ];
 
 const PROJECT_CHEVRON_W = 40;
-const PROJECT_JOB_STICKY_LEFT = PROJECT_CHEVRON_W;
+const PROJECT_INDEX_W = 56;
+// "#" and Job Number are both pinned, so the row stays identifiable while the table is
+// scrolled horizontally. Job Number therefore has to clear the chevron AND the index.
+const PROJECT_INDEX_STICKY_LEFT = PROJECT_CHEVRON_W;
+const PROJECT_JOB_STICKY_LEFT = PROJECT_CHEVRON_W + PROJECT_INDEX_W;
+const stickyCol = (left: number, zIndex: number) => ({
+  position: "sticky" as const,
+  left,
+  zIndex,
+  bgcolor: "background.paper",
+});
 
 const builtInColumnConfigs: ColumnConfig[] = [
   {
@@ -932,7 +942,12 @@ const ProjectList = () => {
                 zIndex: 5,
                 bgcolor: 'background.paper',
               }} />
-              <TableCell sx={{ minWidth: 50, padding: '8px 12px' }}>#</TableCell>
+              <TableCell sx={{
+                minWidth: PROJECT_INDEX_W,
+                width: PROJECT_INDEX_W,
+                padding: '8px 12px',
+                ...stickyCol(PROJECT_INDEX_STICKY_LEFT, 5),
+              }}>#</TableCell>
               {orderedColumns.map((column) => (
                 <TableCell
                   key={column.id}
@@ -989,7 +1004,13 @@ const ProjectList = () => {
                         {isExpanded ? <ExpandLess fontSize="small" /> : <ExpandMore fontSize="small" />}
                       </IconButton>
                     </TableCell>
-                    <TableCell sx={{ whiteSpace: 'nowrap', padding: '8px 12px' }}>{project.seq}</TableCell>
+                    <TableCell sx={{
+                      whiteSpace: 'nowrap',
+                      padding: '8px 12px',
+                      minWidth: PROJECT_INDEX_W,
+                      width: PROJECT_INDEX_W,
+                      ...stickyCol(PROJECT_INDEX_STICKY_LEFT, 2),
+                    }}>{project.seq}</TableCell>
                     {orderedColumns.map((column) => (
                       <TableCell
                         key={`${project.id}-${column.id}`}

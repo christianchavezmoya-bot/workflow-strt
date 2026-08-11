@@ -773,7 +773,7 @@ const IssuesBoard = () => {
               <TableRow>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
-                {(["type","severity","description","step","asset","project","reported","by"] as const).map((k) => (
+                {(["asset","project","type","severity","description","step","reported","by"] as const).map((k) => (
                   <TableCell key={k} sx={{ py: 1 }}>
                     <Stack direction="row" alignItems="center" spacing={0.25}>
                       <Typography sx={{ fontWeight: 700, fontSize: "0.75rem" }}>
@@ -822,6 +822,26 @@ const IssuesBoard = () => {
                         ) : null}
                       </TableCell>
                       <TableCell sx={{ py: 0.75 }}>
+                        <Typography variant="body2" fontWeight={600}>{iss.assetTag}</Typography>
+                        {iss.assetLocation && (
+                          <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>
+                        )}
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
+                        <Button
+                          component={Link}
+                          to={`/projects?open=${encodeURIComponent(iss.projectId)}`}
+                          size="small"
+                          sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <Stack>
+                            <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
+                            <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
+                          </Stack>
+                        </Button>
+                      </TableCell>
+                      <TableCell sx={{ py: 0.75 }}>
                         <Chip
                           label={typeLabel(iss.issueType)}
                           size="small"
@@ -852,26 +872,6 @@ const IssuesBoard = () => {
                       </TableCell>
                       <TableCell sx={{ py: 0.75 }}>
                         <Typography variant="caption" color="text.secondary">{iss.stepTitle || "—"}</Typography>
-                      </TableCell>
-                      <TableCell sx={{ py: 0.75 }}>
-                        <Typography variant="body2" fontWeight={600}>{iss.assetTag}</Typography>
-                        {iss.assetLocation && (
-                          <Typography variant="caption" color="text.disabled" display="block">{iss.assetLocation}</Typography>
-                        )}
-                      </TableCell>
-                      <TableCell sx={{ py: 0.75 }}>
-                        <Button
-                          component={Link}
-                          to={`/projects?open=${encodeURIComponent(iss.projectId)}`}
-                          size="small"
-                          sx={{ p: 0, minWidth: "auto", textAlign: "left", textTransform: "none" }}
-                          onClick={e => e.stopPropagation()}
-                        >
-                          <Stack>
-                            <Typography variant="caption" fontWeight={700}>{iss.jobNumber}</Typography>
-                            <Typography variant="caption" color="text.secondary">{iss.customerName}</Typography>
-                          </Stack>
-                        </Button>
                       </TableCell>
                       <TableCell sx={{ py: 0.75 }}>
                         <Typography variant="caption">{fmtDate(iss.reportedAt)}</Typography>
