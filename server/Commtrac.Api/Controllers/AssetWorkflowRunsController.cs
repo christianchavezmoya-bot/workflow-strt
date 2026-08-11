@@ -1021,7 +1021,9 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
-        if (run.IsLocked)
+        var terminalReject = RejectIfTerminalSignedClosed(run);
+        if (terminalReject is not null) return terminalReject;
+        if (run.IsLocked && !IsFieldSyncForce())
             return BadRequest(new { message = "This run is locked (completed). Re-run to create a new run." });
         var previousStatus = run.Status;
         var previousIssuesJson = run.IssuesJson;
@@ -1103,7 +1105,9 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
-        if (run.IsLocked)
+        var terminalReject = RejectIfTerminalSignedClosed(run);
+        if (terminalReject is not null) return terminalReject;
+        if (run.IsLocked && !IsFieldSyncForce())
             return BadRequest(new { message = "This run is already locked." });
 
         // Check for unresolved BLOCKING issues
@@ -1112,7 +1116,7 @@ public class AssetWorkflowRunsController : ControllerBase
             i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
             i.TryGetProperty("resolved",   out var r) && !r.GetBoolean());
 
-        if (blockingOpen > 0)
+        if (blockingOpen > 0 && !IsFieldSyncForce())
             return UnprocessableEntity(new
             {
                 message = $"Cannot complete: {blockingOpen} blocking issue(s) must be resolved first.",
@@ -1377,12 +1381,14 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var terminalReject = RejectIfTerminalSignedClosed(run);
+        if (terminalReject is not null) return terminalReject;
 
         if (req.CaptureDataAmend)
         {
             var finalized = run.CustomerSignedAt.HasValue
                 || run.SignatureStatus is "Signed" or "Declined" or "WaivedCustomer";
-            if (finalized)
+            if (finalized && !IsFieldSyncForce())
             {
                 return UnprocessableEntity(new
                 {
@@ -1437,6 +1443,8 @@ public class AssetWorkflowRunsController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
+        var terminalReject = RejectIfTerminalSignedClosed(run);
+        if (terminalReject is not null) return terminalReject;
 
         List<StepMediaUploadItem> items;
         try
@@ -2370,5 +2378,33 @@ public class AssetWorkflowRunsController : ControllerBase
                 runId: run.Id);
         }
         return Ok(ToDto(run));
+    }
+
+    private bool IsFieldSyncForce()
+    {
+        if (Request.Headers.TryGetValue("X-Field-Sync", out var header)
+            && string.Equals(header.ToString(), "force", StringComparison.OrdinalIgnoreCase))
+            return true;
+        return string.Equals(Request.Query["fieldSync"], "force", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsTerminalSignedClosed(AssetWorkflowRunEntity run)
+    {
+        if (!run.IsLocked) return false;
+        if (string.Equals(run.SignatureStatus, "Signed", StringComparison.OrdinalIgnoreCase))
+            return true;
+        if (run.CustomerSignedAt.HasValue
+            && run.SignatureStatus is "Signed" or "Declined" or "WaivedCustomer")
+            return true;
+        return false;
+    }
+
+    private IActionResult? RejectIfTerminalSignedClosed(AssetWorkflowRunEntity run)
+    {
+        if (!IsTerminalSignedClosed(run)) return null;
+        return UnprocessableEntity(new
+        {
+            message = "This workflow run is signed and closed. Start a new workflow run to change captured data.",
+        });
     }
 }

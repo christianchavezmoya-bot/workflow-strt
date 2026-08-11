@@ -34,12 +34,26 @@ function timeAgo(date: Date): string {
 }
 
 export default function SyncStatusBadge() {
-  const { status, pendingCount, conflictCount, lastSyncAt, syncing, canSync, triggerSync, connectivity } = useSyncEngine();
+  const { status, pendingCount, conflictCount, lastSyncAt, syncing, canSync, triggerSync, connectivity, bootstrapProgress } = useSyncEngine();
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
 
   const iconSx = { fontSize: 13 };
+  const downloadPct = bootstrapProgress && bootstrapProgress.total > 0
+    ? Math.round((bootstrapProgress.done / bootstrapProgress.total) * 100)
+    : null;
 
   const badge = (() => {
+    if (downloadPct !== null) {
+      return (
+        <Stack direction="row" alignItems="center" spacing={0.5}>
+          <CircularProgress size={11} thickness={5} />
+          <Typography variant="caption" sx={{ fontSize: "0.68rem", color: "text.secondary" }}>
+            Downloading {downloadPct}%
+          </Typography>
+        </Stack>
+      );
+    }
+
     if (conflictCount > 0) {
       return (
         <Tooltip title={`${conflictCount} conflict${conflictCount !== 1 ? "s" : ""} need review — tap to open Sync Center`}>

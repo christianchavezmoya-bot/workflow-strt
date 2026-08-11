@@ -57,7 +57,7 @@ export function scheduleBootstrapAfterUploadDrain(
       const lastMs = offlineBootstrapService.getLastCompletedAtMs();
       if (lastMs !== null && Date.now() - lastMs < FULL_BOOTSTRAP_COOLDOWN_MS) return;
     }
-    void offlineBootstrapService.runAfterUploadDrain({ scope });
+    void offlineBootstrapService.runAfterUploadDrain({ scope, force });
   };
 
   const now = Date.now();

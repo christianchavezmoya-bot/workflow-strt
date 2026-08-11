@@ -342,7 +342,7 @@ export function sortDocumentsForLibraryPrefetch(records: DocumentPrefetchRecord[
 
 async function prefetchDocumentBlobs(
   records: Array<Pick<DocumentRecord, "downloadUrl" | "contentType" | "fileSize">>,
-  options?: { maxTotalBytes?: number; maxFiles?: number },
+  options?: { maxTotalBytes?: number; maxFiles?: number; onProgress?: (done: number, total: number) => void },
 ): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
   const maxBytes = options?.maxTotalBytes ?? DOCUMENT_PREFETCH_MAX_BYTES;
   const maxFiles = options?.maxFiles ?? DOCUMENT_PREFETCH_MAX_FILES;
@@ -350,6 +350,13 @@ async function prefetchDocumentBlobs(
   let prefetched = 0;
   let skipped = 0;
   const seen = new Set<string>();
+  const eligible = records.filter((record) => {
+    const downloadUrl = record.downloadUrl;
+    return downloadUrl && isBackendDocumentUrl(downloadUrl);
+  });
+  const total = eligible.length;
+  let processed = 0;
+  options?.onProgress?.(0, total);
 
   for (const record of records) {
     const downloadUrl = record.downloadUrl;
@@ -363,17 +370,23 @@ async function prefetchDocumentBlobs(
     const cached = await readCachedDocumentFile(downloadUrl);
     if (cached?.storedValue) {
       prefetched += 1;
+      processed += 1;
+      options?.onProgress?.(processed, total);
       continue;
     }
 
     if (prefetched >= maxFiles) {
       skipped += 1;
+      processed += 1;
+      options?.onProgress?.(processed, total);
       continue;
     }
 
     const estimatedSize = record.fileSize ?? 0;
     if (estimatedSize > 0 && bytesUsed + estimatedSize > maxBytes) {
       skipped += 1;
+      processed += 1;
+      options?.onProgress?.(processed, total);
       continue;
     }
 
@@ -384,6 +397,8 @@ async function prefetchDocumentBlobs(
     } catch {
       skipped += 1;
     }
+    processed += 1;
+    options?.onProgress?.(processed, total);
   }
 
   return { prefetched, skipped, bytesUsed };
@@ -392,7 +407,7 @@ async function prefetchDocumentBlobs(
 /** Bounded prefetch for documents linked to assigned assets (bootstrap pass). */
 export async function prefetchAssetLinkedDocuments(
   links: AssetDocumentPrefetchLink[],
-  options?: { maxTotalBytes?: number; maxFiles?: number },
+  options?: { maxTotalBytes?: number; maxFiles?: number; onProgress?: (done: number, total: number) => void },
 ): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
   if (!isMobileNativePlatform()) {
     return { prefetched: 0, skipped: links.length, bytesUsed: 0 };
@@ -408,7 +423,7 @@ export async function prefetchAssetLinkedDocuments(
 /** Bounded prefetch for Documents library + Tips & Tricks (bootstrap pass). */
 export async function prefetchLibraryDocuments(
   records: DocumentRecord[],
-  options?: { maxTotalBytes?: number; maxFiles?: number },
+  options?: { maxTotalBytes?: number; maxFiles?: number; onProgress?: (done: number, total: number) => void },
 ): Promise<{ prefetched: number; skipped: number; bytesUsed: number }> {
   if (!isMobileNativePlatform()) {
     return { prefetched: 0, skipped: records.length, bytesUsed: 0 };
