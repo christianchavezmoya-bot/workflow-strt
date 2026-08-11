@@ -105,4 +105,21 @@ describe("resolveOpenRunId", () => {
     }]);
     await expect(resolveOpenRunId("asset-1", "cfg-1", runs)).resolves.toBe("run-pending-sync");
   });
+
+  it("returns locked run when only conflict-flagged sync ops remain", async () => {
+    const runs = [sampleRun({
+      id: "run-conflict-sync",
+      isLocked: true,
+      status: "Complete",
+      signatureStatus: "None",
+    })];
+    pendingGetAll.mockResolvedValue([{
+      id: "pending-1",
+      entityType: "workflow-run",
+      entityId: "run-conflict-sync",
+      opType: "SIGNATURE_SUBMIT",
+      conflictDetected: true,
+    }]);
+    await expect(resolveOpenRunId("asset-1", "cfg-1", runs)).resolves.toBe("run-conflict-sync");
+  });
 });

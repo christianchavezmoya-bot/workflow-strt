@@ -419,10 +419,16 @@ function toOfflineRun(run: AssetWorkflowRun, projectId: string, overrides: Parti
 async function hasPendingRunSyncOps(runId: string, localRunId?: string): Promise<boolean> {
   const pending = await pendingGetAll();
   return pending.some((item) =>
-    !item.conflictDetected
-    && item.entityType === "workflow-run"
+    item.entityType === "workflow-run"
     && (item.entityId === runId || (localRunId && item.entityId === localRunId))
-    && (item.opType === "RUN_COMPLETE" || item.opType === "SIGNATURE_SUBMIT" || item.opType === "RUN_UPDATE" || item.opType === "STEP_RESULTS"),
+    && (
+      item.opType === "RUN_COMPLETE"
+      || item.opType === "SIGNATURE_SUBMIT"
+      || item.opType === "RUN_UPDATE"
+      || item.opType === "STEP_RESULTS"
+      || item.opType === "STEP_MEDIA_UPLOAD"
+      || item.opType === "CAPTURE_CELL"
+    ),
   );
 }
 
@@ -900,7 +906,7 @@ async function listPendingSignaturesLocalImpl(userId?: string): Promise<PendingS
 async function enqueueRunMutation(
   runId: string,
   input: {
-    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "RUN_ABANDON" | "STEP_RESULTS" | "CAPTURE_CELL" | "ISSUE_UPDATE";
+    opType: "RUN_UPDATE" | "RUN_COMPLETE" | "RUN_ABANDON" | "STEP_RESULTS" | "STEP_MEDIA_UPLOAD" | "CAPTURE_CELL" | "ISSUE_UPDATE";
     method: "PUT" | "POST" | "PATCH";
     url: string;
     body: Record<string, unknown>;
@@ -1476,11 +1482,16 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
+      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId);
+      const persistedIssues = issuesJson
+        ? await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId)
+        : undefined;
+
       const now = new Date().toISOString();
       const offlineRun: OfflineRun = {
         ...cachedRun,
-        stepResultsJson,
-        issuesJson: issuesJson ?? cachedRun.issuesJson,
+        stepResultsJson: persistedStepResults,
+        issuesJson: persistedIssues ?? cachedRun.issuesJson,
         status: (status as AssetWorkflowRun["status"] | undefined) ?? cachedRun.status,
         updatedAt: now,
         lastLocalSavedAt: now,
@@ -1492,9 +1503,6 @@ export const assetWorkflowRunService = {
       await offlineStore.saveRun(offlineRun);
       signalLocalRunUpdate(offlineRun);
       await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
-      // Sync issues store so Issues Board reflects any issue changes from progress saves.
-      // Fix: must call this even when openRecords is empty - entityReplaceIssuesForAsset
-      // correctly removes stale closed entries, unlike the old entityPutIssues-only call.
       const openRecords = await deriveOpenIssuesFromRun(offlineRun);
       await entityReplaceIssuesForAsset(offlineRun.assetId, openRecords);
       window.dispatchEvent(new Event("repo:issues:updated"));
@@ -1502,10 +1510,14 @@ export const assetWorkflowRunService = {
         opType: "RUN_UPDATE",
         method: "PUT",
         url: `/asset-workflow-runs/${resolvedRunId}`,
-        body,
+        body: {
+          stepResultsJson: persistedStepResults,
+          issuesJson: persistedIssues ?? null,
+          status: status ?? null,
+        },
         optimisticPatch: {
-          stepResultsJson,
-          issuesJson: issuesJson ?? cachedRun.issuesJson,
+          stepResultsJson: persistedStepResults,
+          issuesJson: persistedIssues ?? cachedRun.issuesJson,
           status: status ?? cachedRun.status,
           updatedAt: now,
         },
@@ -1653,6 +1665,9 @@ export const assetWorkflowRunService = {
 
       assertNoBlockingIssuesForComplete(issuesJson);
 
+      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId);
+      const persistedIssues = await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId);
+
       const now = new Date().toISOString();
 
       // Mirror what the server's CompleteRun does (AssetWorkflowRunsController.cs:807-808) —
@@ -1665,8 +1680,8 @@ export const assetWorkflowRunService = {
 
       const offlineRun: OfflineRun = {
         ...cachedRun,
-        stepResultsJson,
-        issuesJson,
+        stepResultsJson: persistedStepResults,
+        issuesJson: persistedIssues,
         completedByName,
         bomActualJson: bomActualJson ?? cachedRun.bomActualJson,
         status: "Complete",
@@ -1715,10 +1730,10 @@ export const assetWorkflowRunService = {
         url: `/asset-workflow-runs/${resolvedRunId}/complete`,
         // Send the real completion instant so the server closes the final time segment at
         // that moment instead of at sync time (which would inflate the last segment).
-        body: { ...body, completedAtUtc: now },
+        body: { ...body, stepResultsJson: persistedStepResults, issuesJson: persistedIssues, completedAtUtc: now },
         optimisticPatch: {
-          stepResultsJson,
-          issuesJson,
+          stepResultsJson: persistedStepResults,
+          issuesJson: persistedIssues,
           status: "Complete",
           isLocked: true,
           completedAt: now,
@@ -1992,10 +2007,12 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
+      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId);
+
       const now = new Date().toISOString();
       const offlineRun: OfflineRun = {
         ...cachedRun,
-        stepResultsJson,
+        stepResultsJson: persistedStepResults,
         updatedAt: now,
         lastLocalSavedAt: now,
         dirty: true,
@@ -2010,9 +2027,14 @@ export const assetWorkflowRunService = {
         opType: "STEP_RESULTS",
         method: "PATCH",
         url: `/asset-workflow-runs/${resolvedRunId}/step-results`,
-        body,
+        body: {
+          stepResultsJson: persistedStepResults,
+          amendedByName: amendedByName ?? null,
+          amendedAt,
+          captureDataAmend,
+        },
         optimisticPatch: {
-          stepResultsJson,
+          stepResultsJson: persistedStepResults,
           updatedAt: now,
         },
       });
@@ -2056,7 +2078,55 @@ export const assetWorkflowRunService = {
     }
 
     if (shouldSkipBlockingFetch()) {
-      throw new Error("skip-network-offline");
+      const cachedRun = await getCachedRun(runId);
+      if (!cachedRun) throw new Error("skip-network-offline");
+
+      const fileEntries = await Promise.all(
+        uploads.map(async (upload, index) => {
+          const fileRef = await mediaStore.persistMediaValue(
+            upload.file,
+            upload.file.type.startsWith("video/") ? "video" : "photo",
+            "run-step",
+            `${resolvedRunId}:${upload.stepId}:${upload.inputId}:${index}`,
+            upload.file.name,
+          );
+          return {
+            fileName: upload.file.name,
+            fileRef,
+            mimeType: upload.file.type || "application/octet-stream",
+          };
+        }),
+      );
+
+      const offlineRun: OfflineRun = {
+        ...cachedRun,
+        updatedAt: amendedAt,
+        lastLocalSavedAt: amendedAt,
+        dirty: true,
+        localStatus: "PendingSync",
+        syncError: undefined,
+      };
+      await offlineStore.saveRun(offlineRun);
+      signalLocalRunUpdate(offlineRun);
+      await syncOfflineAssetWorkflowStateFromRun(offlineRun, deriveOfflineAssetStatusFromRun(offlineRun));
+
+      await syncQueue.enqueue({
+        opType: "STEP_MEDIA_UPLOAD",
+        url: `/asset-workflow-runs/${resolvedRunId}/step-media`,
+        method: "POST",
+        entityType: "workflow-run",
+        entityId: resolvedRunId,
+        body: {
+          itemsJson: JSON.stringify(uploads.map(({ stepId, inputId }) => ({ stepId, inputId }))),
+          files: fileEntries,
+          amendedAt,
+          amendedByName: amendedByName ?? null,
+        },
+        optimisticPatch: { updatedAt: amendedAt },
+      });
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
+      return offlineRun;
     }
 
     const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/step-media`, formData, {

@@ -12,6 +12,7 @@ export type SyncOpType =
   | "RUN_COMPLETE"
   | "RUN_ABANDON"
   | "STEP_RESULTS"
+  | "STEP_MEDIA_UPLOAD"
   | "CAPTURE_CELL"
   | "ISSUE_CREATE"
   | "ISSUE_UPDATE"
@@ -146,7 +147,7 @@ export const syncQueue = {
       optimisticPatch: updates.optimisticPatch ?? op.optimisticPatch,
       serverEntityId: updates.serverEntityId ?? op.serverEntityId,
       dependsOnOpId: updates.dependsOnOpId ?? op.dependsOnOpId,
-      createdAt: new Date().toISOString(),
+      // Preserve queue order — coalescing must not bump createdAt ahead of RUN_COMPLETE.
       status: "pending",
       nextRetryAt: undefined,
       lastError: undefined,

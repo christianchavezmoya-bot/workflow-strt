@@ -14,6 +14,7 @@ import offlineStore from "./offlineStore";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { ProjectAsset } from "../types/projectAsset";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isPhoneWinsFieldSync } from "../utils/syncPolicy";
 
 export type SseAssetUpdateDetail = {
   productId?: string;
@@ -22,6 +23,7 @@ export type SseAssetUpdateDetail = {
 
 export async function probePendingConflictsFromSse(detail: SseAssetUpdateDetail): Promise<void> {
   if (!isMobileNativePlatform()) return;
+  if (isPhoneWinsFieldSync()) return;
 
   const pending = await pendingGetAll();
   const candidates = pending.filter(
@@ -118,7 +120,9 @@ export async function revertLocalEntityForConflict(action: {
         dirty: false,
         syncError: undefined,
       });
-      window.dispatchEvent(new Event("workflow-runs-cache-updated"));
+      window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+        detail: { assetId: run.assetId, runs: [run], mergeById: true },
+      }));
     } catch {
       // Keep local state if server fetch fails.
     }

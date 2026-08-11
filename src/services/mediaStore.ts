@@ -274,6 +274,75 @@ export const mediaStore = {
     return changed ? JSON.stringify(next) : issuesJson;
   },
 
+  /**
+   * Persist capture photo/video blobs in stepResultsJson before queuing offline.
+   */
+  async persistStepMediaInJson(stepResultsJson: string, scopeId: string): Promise<string> {
+    if (!this.isNativeFilesystemAvailable()) return stepResultsJson;
+    let steps: Array<{ stepId?: string; values?: Record<string, string> }>;
+    try {
+      const parsed = JSON.parse(stepResultsJson);
+      if (!Array.isArray(parsed)) return stepResultsJson;
+      steps = parsed;
+    } catch {
+      return stepResultsJson;
+    }
+
+    let changed = false;
+    const next = await Promise.all(
+      steps.map(async (step, stepIndex) => {
+        if (!step?.values) return step;
+        const stepKey = step.stepId ?? String(stepIndex);
+        const valueEntries = await Promise.all(
+          Object.entries(step.values).map(async ([inputId, raw]) => {
+            const persisted = await this.persistCaptureValueMedia(raw, scopeId, stepKey, inputId);
+            if (persisted !== raw) changed = true;
+            return [inputId, persisted] as const;
+          }),
+        );
+        return { ...step, values: Object.fromEntries(valueEntries) };
+      }),
+    );
+
+    return changed ? JSON.stringify(next) : stepResultsJson;
+  },
+
+  async persistCaptureValueMedia(
+    value: string,
+    scopeId: string,
+    stepKey: string,
+    inputId: string,
+  ): Promise<string> {
+    if (this.isStoredMediaValue(value)) return value;
+    if (value.startsWith("data:") || value.startsWith("blob:")) {
+      const kind = value.startsWith("data:video") ? "video" : "photo";
+      return this.persistMediaValue(value, kind, "run-step", `${scopeId}:${stepKey}:${inputId}`);
+    }
+    try {
+      const parsed = JSON.parse(value);
+      if (!Array.isArray(parsed)) return value;
+      let arrayChanged = false;
+      const next = await Promise.all(
+        parsed.map(async (item, index) => {
+          if (typeof item !== "string") return item;
+          if (this.isStoredMediaValue(item)) return item;
+          if (!item.startsWith("data:") && !item.startsWith("blob:")) return item;
+          arrayChanged = true;
+          const kind = item.startsWith("data:video") ? "video" : "photo";
+          return this.persistMediaValue(
+            item,
+            kind,
+            "run-step",
+            `${scopeId}:${stepKey}:${inputId}:${index}`,
+          );
+        }),
+      );
+      return arrayChanged ? JSON.stringify(next) : value;
+    } catch {
+      return value;
+    }
+  },
+
   isNativeFilesystemAvailable(): boolean {
     return isMobileNativePlatform();
   },

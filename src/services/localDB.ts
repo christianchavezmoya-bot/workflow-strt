@@ -661,13 +661,16 @@ export async function entityGetAllProjects(): Promise<unknown[]> {
 export async function entityPutAsset(record: { id: string; productId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
   try {
     const db = await getDB();
+    const existing = await db.get("assets", record.id) as { syncedAt?: string } | undefined;
+    const dirty = record.dirty ?? false;
     await db.put("assets", {
       id: record.id,
       productId: record.productId,
       projectId: record.projectId,
       data: record.data,
-      syncedAt: new Date().toISOString(),
-      dirty: record.dirty ?? false,
+      // Local optimistic writes must not bump syncedAt — that causes false upload conflicts.
+      syncedAt: dirty && existing?.syncedAt ? existing.syncedAt : new Date().toISOString(),
+      dirty,
     });
   } catch { /* ignore */ }
 }

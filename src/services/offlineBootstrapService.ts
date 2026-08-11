@@ -24,7 +24,7 @@ import {
   prefetchLibraryDocuments,
   type AssetDocumentPrefetchLink,
 } from "./documentService";
-import { MEDIA_STORE_LIMITS } from "./mediaStore";
+import { getBootstrapPrefetchLimits } from "../utils/syncPolicy";
 import offlineStore from "./offlineStore";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { User } from "../types/user";
@@ -51,6 +51,8 @@ export interface BootstrapProgress {
 export interface BootstrapRunOptions {
   /** "all" (default) caches every project asset; "assigned" limits deep workflow prefetch. */
   scope?: BootstrapScope;
+  /** User Sync Now — skip prefetch byte/file caps and cooldowns. */
+  force?: boolean;
 }
 
 export interface BootstrapSummary {
@@ -210,6 +212,8 @@ export const offlineBootstrapService = {
     if (!canRunBootstrap()) return;
 
     const scope = options?.scope ?? "all";
+    const force = options?.force ?? false;
+    const prefetchLimits = getBootstrapPrefetchLimits(force);
     const userId = currentUserId();
 
     _running = true;
@@ -232,8 +236,11 @@ export const offlineBootstrapService = {
       emit("bootstrap:progress", { phase: "library-documents", done: 0, total: 1 } satisfies BootstrapProgress);
       const libraryDocs = await documentService.refreshDocumentsCache({ prefetchFiles: false }).catch(() => []);
       const libraryPrefetch = await prefetchLibraryDocuments(libraryDocs, {
-        maxTotalBytes: MEDIA_STORE_LIMITS.bootstrapLibraryDocumentPrefetchMaxBytes,
-        maxFiles: MEDIA_STORE_LIMITS.bootstrapLibraryDocumentPrefetchMaxFiles,
+        maxTotalBytes: prefetchLimits.libraryMaxTotalBytes,
+        maxFiles: prefetchLimits.libraryMaxFiles,
+        onProgress: (done, total) => {
+          emit("bootstrap:progress", { phase: "library-documents", done, total } satisfies BootstrapProgress);
+        },
       });
       emit("bootstrap:progress", { phase: "library-documents", done: 1, total: 1 } satisfies BootstrapProgress);
 
@@ -316,12 +323,19 @@ export const offlineBootstrapService = {
         emit("bootstrap:progress", { phase: "asset-documents", done: docMetaDone, total: deepAssets.length } satisfies BootstrapProgress);
       });
 
-      emit("bootstrap:progress", { phase: "document-files", done: 0, total: 1 } satisfies BootstrapProgress);
+      emit("bootstrap:progress", { phase: "document-files", done: 0, total: Math.max(docLinks.length, 1) } satisfies BootstrapProgress);
       const docPrefetch = await prefetchAssetLinkedDocuments(docLinks, {
-        maxTotalBytes: MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxBytes,
-        maxFiles: MEDIA_STORE_LIMITS.bootstrapDocumentPrefetchMaxFiles,
+        maxTotalBytes: prefetchLimits.maxTotalBytes,
+        maxFiles: prefetchLimits.maxFiles,
+        onProgress: (done, total) => {
+          emit("bootstrap:progress", { phase: "document-files", done, total } satisfies BootstrapProgress);
+        },
       });
-      emit("bootstrap:progress", { phase: "document-files", done: 1, total: 1 } satisfies BootstrapProgress);
+      emit("bootstrap:progress", {
+        phase: "document-files",
+        done: docPrefetch.prefetched + docPrefetch.skipped,
+        total: Math.max(docLinks.length, 1),
+      } satisfies BootstrapProgress);
 
       // ── Phase 9: workflow-config reference media ──────────────────────────
       const relevantConfigs: WorkflowConfig[] = [];

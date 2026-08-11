@@ -75,8 +75,8 @@ import {
 } from "../utils/syncDiagnostics";
 import { isOfflineNetworkError } from "../utils/offlineNetworkError";
 import { markOfflinePerf } from "../utils/offlinePerf";
-import { isOfflineModeActive } from "../services/offlineModeState";
-import { getSyncOpTimeoutMs } from "../utils/syncPolicy";
+import { isOfflineModeActive, isManualOfflineModeActive } from "../services/offlineModeState";
+import { getSyncOpTimeoutMs, FIELD_SYNC_FORCE_HEADER, FIELD_SYNC_FORCE_VALUE, isPhoneWinsFieldSync } from "../utils/syncPolicy";
 import {
   fromWorkInstructionDto,
   removeLocalWorkInstruction,
@@ -92,7 +92,7 @@ import {
   setSyncConnectivitySyncing,
   shouldSuppressUnreachableOffline,
 } from "../utils/syncConnectivityGuard";
-import { isManualOfflineModeActive } from "../services/offlineModeState";
+import type { BootstrapProgress } from "../services/offlineBootstrapService";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -128,6 +128,8 @@ export interface SyncState {
   canSync: boolean;
   /** Manually trigger a sync flush */
   triggerSync: () => Promise<void>;
+  /** Live bootstrap download progress (native Sync Now / reconnect prefetch). */
+  bootstrapProgress: BootstrapProgress | null;
   /** Force-proceed a conflicted action (overwrite server version). */
   resolveConflictKeep: (actionId: string) => Promise<void>;
   /** Discard a conflicted action (accept server version). */
@@ -253,7 +255,7 @@ async function markRunSyncedFromServer(
 ): Promise<void> {
   const cachedRun = await offlineStore.getRun(fallbackRunId);
   const otherPending = (await pendingGetByEntityId(fallbackRunId))
-    .filter((item) => item.id !== syncedActionId && !item.conflictDetected);
+    .filter((item) => item.id !== syncedActionId);
   const hasFollowUpOps = otherPending.length > 0;
   const preserveLocal = Boolean(
     cachedRun
@@ -549,22 +551,25 @@ async function processSyncedAction(action: PendingAction, responseData: unknown)
   if (action.opType === "SIGNATURE_SUBMIT") {
     const cachedRun = await offlineStore.getRun(action.entityId);
     const signature = responseData as SignatureEvent | undefined;
-    const payload = action.body as { signerRole?: "Installer" | "Customer" } | undefined;
+    const payload = action.body as SubmitSignaturePayload | undefined;
     if (cachedRun && payload?.signerRole) {
       const signedAt = signature?.signedAtUtc ?? new Date().toISOString();
-      const syncedSignedRun = {
-        ...cachedRun,
-        installerSignedAt: payload.signerRole === "Installer" ? signedAt : cachedRun.installerSignedAt,
-        customerSignedAt: payload.signerRole === "Customer" ? signedAt : cachedRun.customerSignedAt,
-        signatureStatus: payload.signerRole === "Customer" ? "Signed" : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
-        localStatus: "Synced" as const,
-        dirty: false,
-        syncError: undefined,
-        lastLocalSavedAt: signedAt,
+      const signedRun = await buildSignatureStatusAfterSubmit(
+        cachedRun,
+        payload.signerRole,
+        payload,
+        signedAt,
+      );
+      const otherPending = (await pendingGetByEntityId(action.entityId))
+        .filter((item) => item.id !== action.id);
+      const hasFollowUpOps = otherPending.length > 0;
+      const syncedSignedRun: OfflineRun = {
+        ...signedRun,
+        localStatus: hasFollowUpOps ? "PendingSync" : "Synced",
+        dirty: hasFollowUpOps,
       };
       await offlineStore.saveRun(syncedSignedRun);
       await refreshAssetAfterRunSync(syncedSignedRun.assetId);
-      // Refresh the display after a signature syncs (mergeById preserves siblings).
       window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
         detail: { assetId: syncedSignedRun.assetId, runs: [syncedSignedRun], mergeById: true },
       }));
@@ -642,6 +647,56 @@ async function tryCompleteSignatureFromServer(
   }
 }
 
+async function buildStepMediaUploadRequest(body: unknown): Promise<FormData> {
+  const payload = body as {
+    itemsJson: string;
+    files: Array<{ fileName: string; fileRef: string; mimeType: string }>;
+    amendedAt: string;
+    amendedByName?: string | null;
+  };
+  const form = new FormData();
+  form.append("itemsJson", payload.itemsJson);
+  form.append("amendedAt", payload.amendedAt);
+  if (payload.amendedByName) form.append("amendedByName", payload.amendedByName);
+  for (const fileEntry of payload.files) {
+    const fileDataUrl = await mediaStore.resolveMediaValue(fileEntry.fileRef);
+    const response = await fetch(fileDataUrl);
+    const fileBlob = await response.blob();
+    form.append(
+      "files",
+      new Blob([await fileBlob.arrayBuffer()], {
+        type: fileEntry.mimeType || fileBlob.type || "application/octet-stream",
+      }),
+      fileEntry.fileName,
+    );
+  }
+  return form;
+}
+
+function fieldSyncRequestHeaders(action: PendingAction): Record<string, string> | undefined {
+  if (!isMobileNativePlatform() || !isPhoneWinsFieldSync()) return undefined;
+  if (action.entityType !== "workflow-run") return undefined;
+  return { [FIELD_SYNC_FORCE_HEADER]: FIELD_SYNC_FORCE_VALUE };
+}
+
+async function buildSignatureStatusAfterSubmit(
+  cachedRun: OfflineRun,
+  signerRole: "Installer" | "Customer",
+  payload: SubmitSignaturePayload,
+  signedAt: string,
+): Promise<OfflineRun> {
+  const declined = payload.reasonCode === "Declined";
+  return {
+    ...cachedRun,
+    installerSignedAt: signerRole === "Installer" ? signedAt : cachedRun.installerSignedAt,
+    customerSignedAt: signerRole === "Customer" ? signedAt : cachedRun.customerSignedAt,
+    signatureStatus: signerRole === "Customer"
+      ? (declined ? "Declined" : "Signed")
+      : (cachedRun.customerSignedAt ? "Signed" : "PendingCustomer"),
+    syncError: undefined,
+    lastLocalSavedAt: signedAt,
+  };
+}
 async function buildAssetDocumentLinkUploadRequest(body: unknown): Promise<FormData> {
   const payload = body as AssetDocumentLinkUploadBody;
   const fileDataUrl = await mediaStore.resolveMediaValue(payload.fileData);
@@ -681,6 +736,7 @@ export function useSyncEngine(): SyncState {
   // to complete. See services/connectivityMonitor.ts for why this lives
   // outside this hook rather than as its own timer in here.
   const [serverReachable, setServerReachable] = useState<boolean | null>(null);
+  const [bootstrapProgress, setBootstrapProgress] = useState<BootstrapProgress | null>(null);
 
   const connectivityRef = useRef(connectivity);
   connectivityRef.current = connectivity;
@@ -760,26 +816,28 @@ export function useSyncEngine(): SyncState {
         continue;
       }
 
-      // User must resolve flagged conflicts in Sync Center — do not re-send blindly.
+      // Phone-wins field sync auto-retries conflict-flagged ops instead of blocking in Sync Center.
       if (action.conflictDetected) {
-        anyError = true;
-        continue;
+        if (isPhoneWinsFieldSync() && isMobileNativePlatform()) {
+          await pendingClearConflict(action.id);
+        } else {
+          anyError = true;
+          continue;
+        }
       }
 
       // ── Conflict detection (PATCH / PUT only) ─────────────────────────────
       if (
-        (action.method === "PATCH" || action.method === "PUT") &&
-        action.snapshotUpdatedAt &&
-        action.entityType === "asset"
+        !isPhoneWinsFieldSync()
+        && (action.method === "PATCH" || action.method === "PUT")
+        && action.snapshotUpdatedAt
+        && action.entityType === "asset"
       ) {
-        const cached = await entityGetAsset(action.entityId);
-        if (cached) {
-          const cachedRecord = cached as { syncedAt?: string };
-          const syncedAt  = cachedRecord.syncedAt ? new Date(cachedRecord.syncedAt).getTime() : 0;
-          const queuedAt  = new Date(action.createdAt).getTime();
-          // If the entity was refreshed from the server MORE THAN 5s after we queued
-          // the action, another device/user has written to it — flag as conflict.
-          if (syncedAt > queuedAt + 5_000) {
+        try {
+          const response = await api.get<ProjectAsset>(`/project-assets/${action.entityId}`);
+          const serverUpdated = new Date(response.data.updatedAt).getTime();
+          const snapshot = new Date(action.snapshotUpdatedAt).getTime();
+          if (Number.isFinite(serverUpdated) && Number.isFinite(snapshot) && serverUpdated > snapshot) {
             await pendingMarkConflict(action.id, {
               conflictKind: "concurrency",
               conflictMessage: "Another update arrived while this change was queued.",
@@ -790,6 +848,8 @@ export function useSyncEngine(): SyncState {
             anyError = true;
             continue;
           }
+        } catch {
+          // Offline or fetch failed — attempt upload anyway.
         }
       }
 
@@ -797,9 +857,13 @@ export function useSyncEngine(): SyncState {
       let mappedRunId: string | null = null;
       let requestUrl = action.url;
       let requestData: unknown = action.body;
-      requestData = action.opType === "ASSET_DOCUMENT_LINK_UPLOAD"
-        ? await buildAssetDocumentLinkUploadRequest(action.body)
-        : await mediaStore.resolveUploadPayload(action.body);
+      if (action.opType === "ASSET_DOCUMENT_LINK_UPLOAD") {
+        requestData = await buildAssetDocumentLinkUploadRequest(action.body);
+      } else if (action.opType === "STEP_MEDIA_UPLOAD") {
+        requestData = await buildStepMediaUploadRequest(action.body);
+      } else {
+        requestData = await mediaStore.resolveUploadPayload(action.body);
+      }
       const { payloadBytes } = measurePayload(requestData);
       const timeoutMs = getSyncOpTimeoutMs(action.opType, payloadBytes);
 
@@ -819,6 +883,7 @@ export function useSyncEngine(): SyncState {
           method: action.method,
           data: requestData,
           timeout: timeoutMs,
+          headers: fieldSyncRequestHeaders(action),
           syncMeta: {
             source: "sync-engine",
             opType: action.opType,
@@ -835,6 +900,22 @@ export function useSyncEngine(): SyncState {
         const timedOutAgainstReachableServer =
           errorCode === "ECONNABORTED" && getServerReachable();
         if (httpStatus === 409 || httpStatus === 412) {
+          if (isPhoneWinsFieldSync() && isMobileNativePlatform() && action.entityType === "workflow-run") {
+            await pendingClearConflict(action.id);
+            await pendingMarkRetry(action.id, extractServerErrorMessage(e, `Conflict (${httpStatus})`), buildSyncAttemptDiagnostics({
+              action,
+              requestUrl,
+              requestMethod: action.method,
+              mappedRunId,
+              requestData,
+              durationMs: Date.now() - attemptStartedAt,
+              timeoutMs,
+              error: e,
+              serverReachable: getServerReachable(),
+              connectivity: connectivityRef.current,
+            }));
+            anyError = true;
+          } else {
           const conflictMessage = extractServerErrorMessage(e, `Conflict (${httpStatus})`);
           await pendingMarkConflict(action.id, {
             conflictKind: "concurrency",
@@ -851,6 +932,7 @@ export function useSyncEngine(): SyncState {
             },
           }));
           anyError = true;
+          }
         } else if (httpStatus === 401) {
           // Session expired mid-flush — keep queued work for post-login retry.
           await pendingSetStatus(action.id, "pending");
@@ -903,10 +985,23 @@ export function useSyncEngine(): SyncState {
               await pendingRemove(action.id);
             }
           } else if (isWorkflowRunOp && isRejectableStatus) {
-            // Server rejected a workflow op (e.g. RUN_COMPLETE with open blocking
-            // issues). This is NOT "malformed/deleted" — it's a rejection the user
-            // must see, and dependent ops (signatures after a rejected complete)
-            // must not proceed against a run the server never completed.
+            const terminalSigned = /signed and closed|customer-signed|signed.*closed/i.test(rejectMessage);
+            if (isPhoneWinsFieldSync() && isMobileNativePlatform() && !terminalSigned) {
+              const diagnostics = buildSyncAttemptDiagnostics({
+                action,
+                requestUrl,
+                requestMethod: action.method,
+                mappedRunId,
+                requestData,
+                durationMs: Date.now() - attemptStartedAt,
+                timeoutMs,
+                error: e,
+                serverReachable: getServerReachable(),
+                connectivity: connectivityRef.current,
+              });
+              await pendingMarkRetry(action.id, rejectMessage, diagnostics);
+              anyError = true;
+            } else {
             await pendingMarkConflict(action.id, {
               conflictKind: "business_rule",
               conflictHttpStatus: httpStatus,
@@ -924,6 +1019,7 @@ export function useSyncEngine(): SyncState {
             }));
             droppedRunEntityIds.add(action.entityId);
             anyError = true;
+            }
           } else {
             // Other 4xx: drop — entity deleted or request malformed
             await pendingRemove(action.id);
@@ -1257,6 +1353,22 @@ export function useSyncEngine(): SyncState {
     }
   }, []);
 
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    const onProgress = (event: Event) => {
+      setBootstrapProgress((event as CustomEvent<BootstrapProgress>).detail);
+    };
+    const onDone = () => setBootstrapProgress(null);
+    window.addEventListener("bootstrap:progress", onProgress);
+    window.addEventListener("bootstrap:complete", onDone);
+    window.addEventListener("bootstrap:error", onDone);
+    return () => {
+      window.removeEventListener("bootstrap:progress", onProgress);
+      window.removeEventListener("bootstrap:complete", onDone);
+      window.removeEventListener("bootstrap:error", onDone);
+    };
+  }, []);
+
   // ── Derived status ────────────────────────────────────────────────────────
   const isOnline = connectivity !== "offline" && !isOfflineModeActive();
 
@@ -1296,5 +1408,6 @@ export function useSyncEngine(): SyncState {
     retryPendingAction,
     dismissPendingKeepLocal,
     queueOrSend,
+    bootstrapProgress,
   };
 }
