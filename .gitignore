@@ -76,3 +76,9 @@ server/**/objbuildcheck2*/
 # Windows oddities
 nul
 .gradle-local
+
+# Local push notification secrets
+secrets/
+*.p8
+firebase-service-account*.json
+android/app/google-services.json

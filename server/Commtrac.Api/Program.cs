@@ -52,6 +52,7 @@ builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdap
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
 builder.Services.AddScoped<NotificationFeedService>();
+builder.Services.Configure<PushSettings>(builder.Configuration.GetSection(PushSettings.SectionName));
 builder.Services.AddScoped<PushNotificationDeliveryService>();
 builder.Services.AddScoped<ProjectLifecycleService>();
 builder.Services.AddScoped<RolePermissionService>();
@@ -242,3 +243,5 @@ app.Run();
 
 // Exposes the implicit Program class to the test project's WebApplicationFactory<Program>.
 public partial class Program { }
+
+
