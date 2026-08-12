@@ -965,11 +965,23 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             const drawH  = media.isSig ? Math.min(IMG_H, drawW / aspect) : IMG_H;
 
             y = ensureSpace(y, drawH + 4);
+            let embedded = false;
             try {
               doc.addImage(resolved, fmt, imgX, y, drawW, drawH, undefined, "FAST");
+              embedded = true;
             } catch {
-              continue;
+              const converted = await loadDataUrlAsPng(resolved);
+              const convertedFmt = converted ? detectImageFormat(converted) : null;
+              if (converted && convertedFmt) {
+                try {
+                  doc.addImage(converted, convertedFmt, imgX, y, drawW, drawH, undefined, "FAST");
+                  embedded = true;
+                } catch {
+                  /* fall through */
+                }
+              }
             }
+            if (!embedded) continue;
             // Thin border around image
             doc.setDrawColor(...BORDER);
             doc.setLineWidth(0.2);
