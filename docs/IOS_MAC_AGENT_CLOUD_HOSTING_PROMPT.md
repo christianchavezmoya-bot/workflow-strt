@@ -134,4 +134,8 @@ Blockers: none / <list>
 
 **Rules:** Do not commit `.env.production.local`. Do not merge. Report blockers before fixing S0 crashes in `src/` / `ios/`.
 
+### Before AWS deploy (mandatory gate)
+
+After Windows confirms staging API + web are up, run the **phone section (P1–P8)** in **[`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)**. Both web and phone must PASS before production cutover.
+
 ## PROMPT END

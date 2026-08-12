@@ -21,7 +21,7 @@ Cloud migration plan: `docs/CLOUD_HOSTING_AWS_PLAN.md`
 ## Database
 - **Default:** SQLite file `commtrac.db` (created on first run)
 - **Optional:** `Database:Provider=Postgres` + Postgres connection string (cloud prep; Sqlite remains default)
-- Migrations applied automatically at startup via `DbInitializer`
+- Migrations applied at startup by default (`Database:RunMigrationsOnStartup=true`)
 
 ### Local Postgres parity (optional)
 ```bash
@@ -52,6 +52,11 @@ COMMTRAC_POSTGRES_TEST=1 dotnet test server/Commtrac.Api.Tests
 ## Migrations (EF Core)
 - Add a migration: `dotnet tool run dotnet-ef migrations add <Name>`
 - Update DB: `dotnet tool run dotnet-ef database update`
+- **Cloud / Production:** set `Database:RunMigrationsOnStartup=false`; run `scripts/cloud-migrate.ps1` (or `.sh`) from CI before instances boot.
+
+## Pre-deploy verification
+
+Before AWS cutover, complete [`docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](../docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) — full web + phone sign-off on staging.
 
 ## IIS / production environment variables
 - `ConnectionStrings__DefaultConnection`

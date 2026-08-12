@@ -28,7 +28,14 @@ public class HealthController : ControllerBase
                 return StatusCode(503, new { status = "unhealthy", database = "disconnected" });
             }
 
-            return Ok(new { status = "healthy", database = "connected" });
+            return Ok(new
+            {
+                status = "healthy",
+                database = "connected",
+                databaseProvider = _db.Database.IsNpgsql() ? "Postgres"
+                    : _db.Database.IsSqlite() ? "Sqlite"
+                    : "unknown",
+            });
         }
         catch
         {
