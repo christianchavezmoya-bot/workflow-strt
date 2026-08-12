@@ -1,38 +1,28 @@
 import { Fragment, useMemo, useRef } from "react";
-import { Card, Kpi, Tag, Avatar, ChartBox, SectionHeader, MiniBar } from "./primitives";
+import { Card, Kpi, Tag, Avatar, ChartBox, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { barH } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { formatRangeLabel } from "../utils/datePresets";
 
 export function InstallersView({ data }: { data: TimeAnalyticsSnapshot }) {
   const k = data.kpis;
+  const rangeLabel = formatRangeLabel(data.range.from, data.range.to);
+  const fastest = [...data.installers].sort((a, b) => a.avgInstallMinutes - b.avgInstallMinutes)[0];
 
   return (
     <>
-      {/* KPI strip */}
       <div className="ta-grid cols-5">
-        <Kpi label="Active Installers" value={k.activeInstallers} icon="⚒" tone="default" hint="across 5 teams" />
+        <Kpi label="Active Installers" value={k.activeInstallers} icon="⚒" tone="default" hint={rangeLabel} />
         <Kpi label="Avg Productivity" value={avg(data.installers.map(i => i.productivityPct)).toFixed(1)} unit="%" icon="◈" tone="good" hint="team-wide" />
-        <Kpi label="Top Avg Speed" value={Math.min(...data.installers.map(i => i.avgInstallMinutes))} unit="min" icon="⏲" tone="violet" hint={`${[...data.installers].sort((a,b) => a.avgInstallMinutes - b.avgInstallMinutes)[0]?.name}`} />
-        <Kpi label="Total Completions" value={data.installers.reduce((a, b) => a + b.completions, 0)} icon="✓" tone="good" delta={{ dir: "up", text: "22 vs last mo" }} />
-        <Kpi label="Reworks" value={data.installers.reduce((a, b) => a + b.defects, 0)} icon="↺" tone="warn" delta={{ dir: "down", text: "6 improving" }} />
+        <Kpi label="Top Avg Speed" value={fastest?.avgInstallMinutes ?? 0} unit="min" icon="⏲" tone="violet" hint={fastest?.name ?? "—"} />
+        <Kpi label="Total Completions" value={data.installers.reduce((a, b) => a + b.completions, 0)} icon="✓" tone="good" hint={rangeLabel} />
+        <Kpi label="Issues Logged" value={data.installers.reduce((a, b) => a + b.defects, 0)} icon="↺" tone="warn" hint="from workflow runs" />
       </div>
 
-      {/* Filters bar */}
-      <div className="ta-filters">
-        <span className="label">Filters</span>
-        <FilterChip label="Customer" value="All Customers" />
-        <FilterChip label="Project" value="All Projects" />
-        <FilterChip label="Product" value="All Products" />
-        <FilterChip label="Asset Type" value="All Asset Types" />
-        <FilterChip label="Period" value="Last 30 days" />
-        <button className="ta-tag" style={{ marginLeft: "auto", cursor: "pointer" }}>Apply</button>
-      </div>
-
-      {/* Main grid */}
       <div className="ta-grid cols-12">
         <div className="span-8">
-          <Card title="Installer Performance Ranking" sub="Sorted by productivity · last 30 days" action={<span style={{ fontSize: 11 }}>Sort: Productivity ▾ · Export</span>}>
+          <Card title="Installer Performance Ranking" sub={`Sorted by productivity · ${rangeLabel}`}>
             <InstallerTable data={data} />
           </Card>
         </div>
@@ -46,14 +36,13 @@ export function InstallersView({ data }: { data: TimeAnalyticsSnapshot }) {
         </div>
       </div>
 
-      {/* Bottom row */}
       <div className="ta-grid cols-2">
         <Card title="Productivity Ranking" sub="Productive / (Productive + Downtime)">
           <ChartBox height="lg">
             <ProductivityChart data={data} />
           </ChartBox>
         </Card>
-        <Card title="Downtime Ranking" sub="Hours of non-productive time · last 30 days">
+        <Card title="Downtime Ranking" sub={`Non-productive hours · ${rangeLabel}`}>
           <ChartBox height="lg">
             <DowntimeChart data={data} />
           </ChartBox>
@@ -67,16 +56,6 @@ function avg(arr: number[]): number {
   return arr.length ? arr.reduce((a, b) => a + b, 0) / arr.length : 0;
 }
 
-function FilterChip({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="ta-tag" style={{ cursor: "pointer" }}>
-      <span style={{ color: "var(--ta-text-mute)" }}>▾</span>&nbsp;
-      <span style={{ color: "var(--ta-text-mute)" }}>{label}:</span>&nbsp;
-      <span>{value}</span>
-    </div>
-  );
-}
-
 function InstallerTable({ data }: { data: TimeAnalyticsSnapshot }) {
   const rows = [...data.installers].sort((a, b) => b.productivityPct - a.productivityPct);
   return (
@@ -87,7 +66,7 @@ function InstallerTable({ data }: { data: TimeAnalyticsSnapshot }) {
             <th>Installer</th><th>Team</th><th>Region</th>
             <th className="num">Completions</th><th>Productivity</th>
             <th className="num">Avg Duration</th><th className="num">Productive h</th>
-            <th className="num">Downtime h</th><th className="num">Defects</th>
+            <th className="num">Downtime h</th><th className="num">Issues</th>
           </tr>
         </thead>
         <tbody>

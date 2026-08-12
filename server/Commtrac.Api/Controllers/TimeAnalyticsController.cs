@@ -1,3 +1,4 @@
+using Commtrac.Api.Models;
 using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -32,11 +33,20 @@ public class TimeAnalyticsController : ControllerBase
         [FromQuery] string? customerId,
         [FromQuery] string? productId,
         [FromQuery] string? projectId,
+        [FromQuery] double? hourlyRate,
+        [FromQuery] double? revenueMultiplier,
+        [FromQuery] double? quotedRatio,
         CancellationToken ct)
     {
         if (!await _perm.HasAsync(User, "analytics", "view", ct)) return Forbid();
 
-        var snapshot = await _snapshot.BuildAsync(from, to, customerId, productId, projectId, ct);
+        var finance = new TimeAnalyticsFinanceParamsDto(
+            HourlyRate: hourlyRate is > 0 ? hourlyRate.Value : 85,
+            RevenueMultiplier: revenueMultiplier is > 0 ? revenueMultiplier.Value : 1.35,
+            QuotedRatio: quotedRatio is > 0 and <= 1 ? quotedRatio.Value : 0.92);
+
+        var snapshot = await _snapshot.BuildAsync(
+            from, to, customerId, productId, projectId, finance, ct);
         return Ok(snapshot);
     }
 }

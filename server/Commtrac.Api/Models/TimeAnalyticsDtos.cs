@@ -27,7 +27,14 @@ public record TimeAnalyticsSnapshotDto(
     IReadOnlyList<TimeAnalyticsHeatmapDto> Heatmap,
     IReadOnlyList<TimeAnalyticsQualitySpeedDto> QualitySpeed,
     IReadOnlyList<TimeAnalyticsProductTrendDto> ProductTrend,
-    IReadOnlyList<TimeAnalyticsBurndownDto> Burndown
+    IReadOnlyList<TimeAnalyticsBurndownDto> Burndown,
+    IReadOnlyList<TimeAnalyticsThroughputDayDto> ThroughputDaily
+);
+
+public record TimeAnalyticsFinanceParamsDto(
+    double HourlyRate,
+    double RevenueMultiplier,
+    double QuotedRatio
 );
 
 public record TimeAnalyticsRangeDto(string From, string To);
@@ -135,6 +142,7 @@ public record TimeAnalyticsFinanceDto(
     double LabourCost,
     double MarginPct,
     double BillablePct,
+    TimeAnalyticsFinanceParamsDto Params,
     IReadOnlyList<TimeAnalyticsFinanceInstallerDto> ByInstaller,
     IReadOnlyList<TimeAnalyticsFinanceProjectDto> ByProject
 );
@@ -193,3 +201,5 @@ public record TimeAnalyticsQualitySpeedDto(
 public record TimeAnalyticsProductTrendDto(string Month, Dictionary<string, double> Series);
 
 public record TimeAnalyticsBurndownDto(string Week, int Ideal, int Actual);
+
+public record TimeAnalyticsThroughputDayDto(string Date, int Completions);
