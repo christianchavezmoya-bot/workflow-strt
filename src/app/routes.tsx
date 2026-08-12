@@ -159,8 +159,6 @@ const AppRoutes = () => {
             <Route path="/admin/bom-project/upload" element={<LazyRoute><BomUploadPage /></LazyRoute>} />
             <Route path="/admin/bom-project/imports/:id/mapping" element={<LazyRoute><BomMappingPage /></LazyRoute>} />
             <Route path="/admin/bom-project/imports/:id/classification" element={<LazyRoute><BomClassificationPage /></LazyRoute>} />
-            <Route path="/admin/bom-project/imports/:id/compare" element={<Navigate to="/admin/bom-project" replace />} />
-            <Route path="/admin/bom-project/imports/:id/preview" element={<Navigate to="/admin/bom-project" replace />} />
             <Route path="/admin/bom-project/imports/:id/commit" element={<LazyRoute><BomCommitPage /></LazyRoute>} />
           </Route>
         )}

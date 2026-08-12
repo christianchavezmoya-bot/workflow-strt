@@ -117,7 +117,7 @@ export const PAGE_HINTS: HintDefinition[] = [
     pageKey: "/admin",
     roleTargets: ["Admin"],
     title: "Admin panel",
-    body: "Manage users, customers, products, assets, and reference data.",
+    body: "Manage users, customers, offices, roles, and reference data. Product catalog lives in Settings.",
     placement: "bottom",
     dismissible: true,
     showOnce: true,

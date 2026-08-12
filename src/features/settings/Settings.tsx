@@ -467,7 +467,6 @@ const Settings = () => {
   const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
   const [productSaving, setProductSaving] = useState(false);
   const [productError, setProductError] = useState<string | null>(null);
-  const [productsLoadError, setProductsLoadError] = useState<string | null>(null);
   const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
   const [featurePickerProductId, setFeaturePickerProductId] = useState<string | null>(null);
   const [featurePickerAnchor, setFeaturePickerAnchor] = useState<HTMLElement | null>(null);
@@ -2230,10 +2229,6 @@ const Settings = () => {
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
               </Stack>
-            ) : productsLoadError ? (
-              <Alert severity="error" action={<Button size="small" color="inherit" onClick={loadProducts}>Retry</Button>}>
-                {productsLoadError}
-              </Alert>
             ) : products.length === 0 ? (
               <Alert severity="info">
                 No products yet.{" "}
