@@ -2,14 +2,18 @@
  * Decides when a native field download (bootstrap) is needed vs when live reads suffice.
  */
 
-import { syncMetaGet } from "../services/localDB";
+import { syncMetaGet, syncMetaSet, syncMetaDelete } from "../services/localDB";
 import offlineBootstrapService, { type BootstrapScope } from "../services/offlineBootstrapService";
+import { getManualDownloadOnly } from "./syncPreferences";
 
 export const BOOTSTRAP_META_KEY = "bootstrap";
 export const SERVER_CHANGE_META_KEY = "server-change";
 
 /** Minimum gap between automatic full bootstraps when no server changes detected. */
-export const FULL_BOOTSTRAP_COOLDOWN_MS = 10 * 60_000;
+export const FULL_BOOTSTRAP_COOLDOWN_MS = 15 * 60_000;
+
+/** Assigned-scope reconnect without server changes — wait at least this long. */
+export const RECONNECT_ASSIGNED_COOLDOWN_MS = 5 * 60_000;
 
 export type BootstrapReason =
   | "first-login"
@@ -21,10 +25,13 @@ export type BootstrapReason =
   | "pull-sync"
   | "readiness-panel";
 
+export type BootstrapMode = "full" | "light";
+
 export type ShouldBootstrapInput = {
   reason: BootstrapReason;
   scope: BootstrapScope;
   force?: boolean;
+  mode?: BootstrapMode;
 };
 
 async function getMetaMs(key: string): Promise<number | null> {
@@ -36,8 +43,12 @@ async function getMetaMs(key: string): Promise<number | null> {
 
 /** Record that server-side data may have changed since the last bootstrap. */
 export async function markServerDataChanged(): Promise<void> {
-  const { syncMetaSet } = await import("../services/localDB");
   await syncMetaSet(SERVER_CHANGE_META_KEY);
+}
+
+/** Clear server-change flag after targeted prefetch or delta sync handled the update. */
+export async function clearServerChangeFlag(): Promise<void> {
+  await syncMetaDelete(SERVER_CHANGE_META_KEY);
 }
 
 export async function hasEverBootstrapped(): Promise<boolean> {
@@ -71,6 +82,27 @@ export async function isWithinFullBootstrapCooldown(): Promise<boolean> {
   return Date.now() - lastMs < FULL_BOOTSTRAP_COOLDOWN_MS;
 }
 
+export async function isWithinReconnectCooldown(): Promise<boolean> {
+  const lastMs =
+    offlineBootstrapService.getLastCompletedAtMs()
+    ?? await getLastBootstrapMs();
+  if (lastMs === null) return false;
+  return Date.now() - lastMs < RECONNECT_ASSIGNED_COOLDOWN_MS;
+}
+
+export function inferBootstrapMode(
+  reason: BootstrapReason,
+  scope: BootstrapScope,
+  force: boolean,
+): BootstrapMode {
+  if (force || reason === "sync-now" || reason === "first-login") return "full";
+  if (scope === "all") return "full";
+  if (reason === "reconnect" || reason === "pull-sync" || reason === "flush-complete" || reason === "sse-fallback") {
+    return "light";
+  }
+  return "full";
+}
+
 /**
  * Whether a bootstrap download should run for this trigger.
  * Upload sync is handled separately — this gate is download-only.
@@ -79,11 +111,16 @@ export async function shouldScheduleBootstrap(input: ShouldBootstrapInput): Prom
   const { reason, scope, force } = input;
   if (force) return true;
 
-  const [ever, stale, serverChanged, inCooldown] = await Promise.all([
+  if (getManualDownloadOnly() && reason !== "sync-now" && reason !== "readiness-panel") {
+    return false;
+  }
+
+  const [ever, stale, serverChanged, inFullCooldown, inReconnectCooldown] = await Promise.all([
     hasEverBootstrapped(),
     offlineBootstrapService.isStale(),
     hasServerChangesSinceBootstrap(),
     isWithinFullBootstrapCooldown(),
+    isWithinReconnectCooldown(),
   ]);
 
   if (!ever || reason === "first-login") return true;
@@ -99,11 +136,10 @@ export async function shouldScheduleBootstrap(input: ShouldBootstrapInput): Prom
   }
 
   if (reason === "reconnect" || reason === "flush-complete") {
-    if (serverChanged || stale) {
-      if (scope === "all" && inCooldown && !serverChanged) return false;
-      return true;
-    }
-    return false;
+    if (!serverChanged && !stale) return false;
+    if (scope === "assigned" && inReconnectCooldown && !serverChanged && !stale) return false;
+    if (scope === "all" && inFullCooldown && !serverChanged && !stale) return false;
+    return true;
   }
 
   if (reason === "stale-foreground") {

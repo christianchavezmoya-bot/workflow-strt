@@ -675,6 +675,13 @@ export async function syncMetaGet(entity: string): Promise<string | null> {
   } catch { return null; }
 }
 
+export async function syncMetaDelete(entity: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("sync_meta", entity);
+  } catch { /* ignore */ }
+}
+
 // ── Project entity helpers ────────────────────────────────────────────────────
 
 export async function entityPutProject(record: { id: string; data: unknown; dirty?: boolean }): Promise<void> {
