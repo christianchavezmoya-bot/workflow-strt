@@ -2,6 +2,7 @@ using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc;
@@ -22,13 +23,13 @@ public class DocumentsController : ControllerBase
         "Project Manager"
     };
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
 
-    public DocumentsController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
+    public DocumentsController(AppDbContext db, IFileStorageService files, IDocumentSearchIndexQueue searchIndexQueue)
     {
         _db = db;
-        _env = env;
+        _files = files;
         _searchIndexQueue = searchIndexQueue;
     }
 
@@ -83,17 +84,11 @@ public class DocumentsController : ControllerBase
             return BadRequest("File is required.");
         }
 
-        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
-        Directory.CreateDirectory(storageRoot);
-
         var extension = Path.GetExtension(request.File.FileName);
         var storedName = $"{Guid.NewGuid()}{extension}";
-        var storedPath = Path.Combine(storageRoot, storedName);
+        var relativePath = _files.BuildRelativePath("Storage", "Documents", storedName);
 
-        await using (var stream = System.IO.File.Create(storedPath))
-        {
-            await request.File.CopyToAsync(stream);
-        }
+        await _files.SaveAsync(relativePath, request.File.OpenReadStream());
 
         var doc = new DocumentEntity
         {
@@ -101,7 +96,7 @@ public class DocumentsController : ControllerBase
             Type = request.Type ?? string.Empty,
             LinkedTo = request.LinkedTo ?? string.Empty,
             UploadedAt = DateTime.UtcNow.ToString("s"),
-            FilePath = Path.Combine("Storage", "Documents", storedName),
+            FilePath = relativePath,
             ContentType = request.File.ContentType,
             FileSize = request.File.Length,
             CreatedBy = User.Identity?.Name ?? request.CreatedBy,
@@ -123,8 +118,8 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
-        var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
-        if (!System.IO.File.Exists(fullPath))
+        var fullPath = _files.GetAbsolutePath(doc.FilePath);
+        if (!_files.Exists(doc.FilePath))
         {
             return NotFound();
         }
@@ -185,9 +180,7 @@ public class DocumentsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(doc.FilePath))
         {
-            var fullPath = Path.Combine(_env.ContentRootPath, doc.FilePath);
-            if (System.IO.File.Exists(fullPath))
-                System.IO.File.Delete(fullPath);
+            _files.Delete(doc.FilePath);
         }
 
         _db.Documents.Remove(doc);

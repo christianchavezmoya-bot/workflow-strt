@@ -2,6 +2,7 @@ using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Schemas;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,18 +19,18 @@ namespace Commtrac.Api.Controllers;
 public class InspectionImportsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
     private readonly IInspectionImportAdapterService _adapter;
     private readonly IInspectionImportValidatorService _validator;
 
     public InspectionImportsController(
         AppDbContext db,
-        IWebHostEnvironment env,
+        IFileStorageService files,
         IInspectionImportAdapterService adapter,
         IInspectionImportValidatorService validator)
     {
         _db = db;
-        _env = env;
+        _files = files;
         _adapter = adapter;
         _validator = validator;
     }
@@ -188,11 +189,10 @@ public class InspectionImportsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(item.RawPath))
         {
-            var fullPath = Path.Combine(_env.ContentRootPath, item.RawPath);
-            if (!System.IO.File.Exists(fullPath))
+            if (!_files.Exists(item.RawPath))
                 return NotFound(new { error = "Stored file not found on disk." });
 
-            var content = await System.IO.File.ReadAllTextAsync(fullPath);
+            var content = await _files.ReadTextAsync(item.RawPath);
             return Content(content, "application/json");
         }
 
@@ -251,9 +251,8 @@ public class InspectionImportsController : ControllerBase
 
         if (!string.IsNullOrWhiteSpace(item.RawPath))
         {
-            var fullPath = Path.Combine(_env.ContentRootPath, item.RawPath);
-            if (System.IO.File.Exists(fullPath))
-                System.IO.File.Delete(fullPath);
+            if (_files.Exists(item.RawPath))
+                _files.Delete(item.RawPath);
         }
 
         _db.InspectionImports.Remove(item);
