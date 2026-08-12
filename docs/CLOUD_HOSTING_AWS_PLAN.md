@@ -212,4 +212,4 @@ dotnet user-secrets set "SeedAdmin:Password" "YourStrongPassword!"
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Data Source=C:\path\to\commtrac.db"
 ```
 
-See also: `docs/RESEND_EMAIL_SETUP.md`, `server/README.md`.
+See also: `docs/RESEND_EMAIL_SETUP.md`, `server/README.md`, `docs/WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`.
