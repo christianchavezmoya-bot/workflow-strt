@@ -35,6 +35,7 @@ import {
   ErrorOutlineOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
+  FileDownloadOutlined,
   FilterListOutlined,
   HistoryOutlined,
   OpenInNewOutlined,
@@ -49,6 +50,7 @@ import type { AssetIssue } from "../../types/projectAsset";
 import MediaCapture from "../../components/ui/MediaCapture";
 import { useAuth } from "../../hooks/useAuth";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { exportIssuesExcel, exportIssuesPdf } from "../../utils/exportIssuesBoard";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -194,6 +196,7 @@ const IssuesBoard = () => {
   const [autoSort,    setAutoSort]    = useState({ key: "", dir: "asc" as "asc" | "desc" });
   const [autoFilters, setAutoFilters] = useState<Record<string, Set<string>>>({});
   const [autoMenu,    setAutoMenu]    = useState<{ anchorEl: HTMLElement | null; key: string }>({ anchorEl: null, key: "" });
+  const [exportAnchor, setExportAnchor] = useState<HTMLElement | null>(null);
 
   const n = (v: string | null | undefined) => String(v ?? "");
 
@@ -324,6 +327,27 @@ const IssuesBoard = () => {
     setExpandedKey(prev => prev === key ? null : key);
   }
 
+  const exportRows = activeTab === "history" ? sortedHistory : sortedFiltered;
+  const exportDateLabel = new Date().toLocaleDateString();
+
+  const handleExportPdf = () => {
+    setExportAnchor(null);
+    exportIssuesPdf({
+      mode: activeTab === "history" ? "history" : "open",
+      exportDate: exportDateLabel,
+      rows: exportRows,
+    });
+  };
+
+  const handleExportExcel = () => {
+    setExportAnchor(null);
+    exportIssuesExcel({
+      mode: activeTab === "history" ? "history" : "open",
+      exportDate: exportDateLabel,
+      rows: exportRows,
+    });
+  };
+
   return (
     <Stack spacing={3}>
       {/* ── Header ── */}
@@ -439,6 +463,29 @@ const IssuesBoard = () => {
               Clear
             </Button>
           )}
+          <Button
+            size="small"
+            variant="outlined"
+            startIcon={<FileDownloadOutlined sx={{ fontSize: 16 }} />}
+            endIcon={<ArrowDropDown sx={{ fontSize: 18 }} />}
+            onClick={(e) => setExportAnchor(e.currentTarget)}
+            disabled={exportRows.length === 0}
+            sx={{ flexShrink: 0, ml: "auto" }}
+          >
+            Export
+          </Button>
+          <Menu
+            anchorEl={exportAnchor}
+            open={Boolean(exportAnchor)}
+            onClose={() => setExportAnchor(null)}
+          >
+            <MenuItem onClick={handleExportPdf}>
+              <ListItemText primary="Export PDF" secondary={`${exportRows.length} visible issue${exportRows.length === 1 ? "" : "s"}`} />
+            </MenuItem>
+            <MenuItem onClick={handleExportExcel}>
+              <ListItemText primary="Export Excel" secondary={`${exportRows.length} visible issue${exportRows.length === 1 ? "" : "s"}`} />
+            </MenuItem>
+          </Menu>
         </Stack>
         <Typography variant="caption" color="text.secondary">
           {activeTab === "history"

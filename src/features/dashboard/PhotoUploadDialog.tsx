@@ -32,6 +32,7 @@ import {
 import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
+import { mediaStore } from "../../services/mediaStore";
 import { settingsService } from "../../services/settingsService";
 import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import { randomId } from "../../utils/randomId";
@@ -106,6 +107,55 @@ function parseCaptures(raw: string | undefined): string[] {
     const arr = JSON.parse(raw ?? "[]");
     return Array.isArray(arr) ? arr : [];
   } catch { return []; }
+}
+
+function CaptureThumbnail({ capture, kind, alt }: { capture: string; kind: "photo" | "video"; alt: string }) {
+  const [resolvedSrc, setResolvedSrc] = useState<string | null>(
+    mediaStore.isStoredMediaValue(capture) ? null : capture,
+  );
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!mediaStore.isStoredMediaValue(capture)) {
+      setResolvedSrc(capture);
+      setFailed(false);
+      return;
+    }
+    setResolvedSrc(null);
+    setFailed(false);
+    mediaStore.resolveMediaValue(capture)
+      .then((resolved) => { if (!cancelled) setResolvedSrc(resolved); })
+      .catch(() => { if (!cancelled) setFailed(true); });
+    return () => { cancelled = true; };
+  }, [capture]);
+
+  if (failed) {
+    return (
+      <Stack alignItems="center" justifyContent="center" sx={{ width: "100%", height: "100%" }}>
+        <WarningAmberOutlined sx={{ fontSize: 20, color: "common.white" }} />
+      </Stack>
+    );
+  }
+
+  if (!resolvedSrc) {
+    return (
+      <Stack alignItems="center" justifyContent="center" sx={{ width: "100%", height: "100%" }}>
+        <CircularProgress size={18} sx={{ color: "common.white" }} />
+      </Stack>
+    );
+  }
+
+  return kind === "video" ? (
+    <video src={resolvedSrc} controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+  ) : (
+    <img
+      src={resolvedSrc}
+      alt={alt}
+      style={{ width: "100%", height: "100%", objectFit: "cover" }}
+      onError={() => setFailed(true)}
+    />
+  );
 }
 
 function parseSnapshotSteps(workflowSnapshotJson: string): Array<{
@@ -612,7 +662,21 @@ export default function PhotoUploadDialog({
   const installerSteps = allPhotoSteps;
 
   return (
-    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth="sm"
+      fullWidth
+      sx={isMobileNativePlatform() ? { zIndex: 1200 } : undefined}
+      PaperProps={{
+        sx: isMobileNativePlatform()
+          ? {
+              maxHeight: "calc(100vh - calc(64px + env(safe-area-inset-bottom)))",
+              mb: "calc(64px + env(safe-area-inset-bottom))",
+            }
+          : undefined,
+      }}
+    >
       <DialogTitle>
         <Stack direction="row" alignItems="center" spacing={1}>
           <PhotoCameraOutlined sx={{ color: "warning.main" }} />
@@ -871,17 +935,13 @@ export default function PhotoUploadDialog({
                     {currentCount > 0 && (
                       <Stack spacing={1} mt={1.25}>
                         {getCurrentCaptures(stepId, inputId).map((capture, captureIndex) => {
-                          const looksLikeVideo = capture.startsWith("data:video/");
+                          const kind = mediaStore.getMediaKind(capture) === "video" ? "video" : "photo";
                           return (
                             <Card key={`${key}-capture-${captureIndex}`} variant="outlined" sx={{ borderColor: "divider", bgcolor: "background.default" }}>
                               <CardContent sx={{ py: 1, "&:last-child": { pb: 1 } }}>
                                 <Stack direction="row" spacing={1.5} alignItems="center" justifyContent="space-between">
                                   <Box sx={{ width: 92, height: 68, borderRadius: 1, overflow: "hidden", bgcolor: "common.black", flexShrink: 0 }}>
-                                    {looksLikeVideo ? (
-                                      <video src={capture} controls style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                    ) : (
-                                      <img src={capture} alt={`${inputLabel} ${captureIndex + 1}`} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                                    )}
+                                    <CaptureThumbnail capture={capture} kind={kind} alt={`${inputLabel} ${captureIndex + 1}`} />
                                   </Box>
                                   <Button
                                     size="small"
@@ -894,7 +954,7 @@ export default function PhotoUploadDialog({
                                   </Button>
                                 </Stack>
                                 <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 1 }}>
-                                  {looksLikeVideo ? `Video ${captureIndex + 1}` : `Photo ${captureIndex + 1}`} — remove to replace, then add a new one.
+                                  {kind === "video" ? `Video ${captureIndex + 1}` : `Photo ${captureIndex + 1}`} — remove to replace, then add a new one.
                                 </Typography>
                               </CardContent>
                             </Card>
