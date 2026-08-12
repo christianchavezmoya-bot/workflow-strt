@@ -48,12 +48,13 @@ import {
   UploadFileOutlined,
   DownloadOutlined,
 } from "@mui/icons-material";
-import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
-import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
+import GlobalOfficeMap, { type Office } from "../../components/GlobalOfficeMap";
+import AdminOfficesTab from "./AdminOfficesTab";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useAuth } from "../../hooks/useAuth";
@@ -71,309 +72,25 @@ import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2f
 import { Customer } from "../../types/customer";
 import { User, UserRole } from "../../types/user";
 import { randomId } from "../../utils/randomId";
+import {
+  applyAutoFilter,
+  applyAutoSort,
+  createDefaultCustomRow,
+  defaultCustomColumns,
+  DraggablePaper,
+  fieldLabelStyle,
+  getDefaultColumnType,
+  normalize,
+  resolveErrorMessage,
+  toggleFilterValue,
+} from "./adminShared";
+import {
+  buildNormalizedRolesConfig,
+  KNOWN_ROLE_ORDER,
+  resolveRoleName,
+} from "./adminRoleDefaults";
 
-// Style for field definition labels (yellow bold)
-const fieldLabelStyle = {
-  color: '#FFD700',
-  fontWeight: 'bold'
-};
 
-const KNOWN_ROLE_ORDER = [
-  "Admin",
-  "Project Manager",
-  "Engineer",
-  "Viewer",
-  "Installer",
-  "Supervisor",
-  "Technician",
-  "QA Inspector",
-  "Client",
-] as const;
-
-const createRolePermissions = (
-  base: Omit<RolePermissions, "domains">,
-  documentOverrides?: Partial<DomainPermissions["documents"]>
-): RolePermissions => ({
-  ...base,
-  domains: {
-    ...defaultDomains(base),
-    documents: {
-      ...defaultDomains(base).documents,
-      ...(documentOverrides ?? {}),
-    },
-  },
-});
-
-const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
-  Admin: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: true,
-    createUsers: true,
-    editFields: true,
-    modifyData: true,
-    editForms: true,
-  }, { upload: true, delete: true }),
-  "Project Manager": createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: true,
-    createUsers: false,
-    editFields: true,
-    modifyData: true,
-    editForms: true,
-  }, { upload: true, delete: true }),
-  Engineer: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: true,
-    editForms: false,
-  }, { upload: false, delete: false }),
-  Viewer: createRolePermissions({
-    viewOnly: true,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: false,
-    editForms: false,
-  }, { upload: false, delete: false }),
-  Installer: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: true,
-    modifyData: false,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  Supervisor: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: true,
-    modifyData: true,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  Technician: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: true,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  "QA Inspector": createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: true,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  Client: createRolePermissions({
-    viewOnly: true,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: false,
-    editForms: false,
-  }, { upload: false, delete: false }),
-};
-
-const getRoleTemplate = (roleName: string): RolePermissions =>
-  KNOWN_ROLE_DEFAULTS[roleName] ?? KNOWN_ROLE_DEFAULTS.Viewer;
-
-const normalizeRolePermissions = (roleName: string, permissions: RolePermissions): RolePermissions => ({
-  viewOnly: permissions.viewOnly,
-  createDeleteTables: permissions.createDeleteTables,
-  createUsers: permissions.createUsers,
-  editFields: permissions.editFields,
-  modifyData: permissions.modifyData,
-  editForms: permissions.editForms,
-  domains: permissions.domains ?? getRoleTemplate(roleName).domains ?? defaultDomains({
-    viewOnly: permissions.viewOnly,
-    createDeleteTables: permissions.createDeleteTables,
-    createUsers: permissions.createUsers,
-    editFields: permissions.editFields,
-    modifyData: permissions.modifyData,
-    editForms: permissions.editForms,
-  }),
-});
-
-const buildNormalizedRolesConfig = (
-  current: Record<string, RolePermissions>,
-  extraRoleNames: string[] = []
-) => {
-  const merged: Record<string, RolePermissions> = {};
-  const requestedNames = Array.from(new Set([...KNOWN_ROLE_ORDER, ...extraRoleNames]));
-
-  requestedNames.forEach((roleName) => {
-    merged[roleName] = normalizeRolePermissions(roleName, current[roleName] ?? getRoleTemplate(roleName));
-  });
-
-  Object.entries(current).forEach(([roleName, permissions]) => {
-    if (!merged[roleName]) {
-      merged[roleName] = normalizeRolePermissions(roleName, permissions);
-    }
-  });
-
-  return merged;
-};
-
-const resolveRoleName = (roleName: string, availableRoles: string[]) => {
-  const trimmed = roleName.trim();
-  if (!trimmed) return "";
-  const exact = availableRoles.find((role) => role === trimmed);
-  if (exact) return exact;
-  const caseInsensitive = availableRoles.find(
-    (role) => role.toLowerCase() === trimmed.toLowerCase()
-  );
-  return caseInsensitive ?? trimmed;
-};
-
-const defaultCustomColumns = ["ID", "Name", "Created Date"];
-const getDefaultColumnType = (name: string) => {
-  if (name === "ID") return "lookup field";
-  if (name === "Created Date") return "date";
-  return "text";
-};
-const createDefaultCustomRow = (index: number) => ({
-  ID: `ID-${String(index).padStart(3, "0")}`,
-  Name: "New item",
-  "Created Date": new Date().toISOString().slice(0, 10)
-});
-
-const normalize = (value: string | number | boolean | undefined | null) => String(value ?? "");
-
-const resolveErrorMessage = (error: unknown, fallback: string) => {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object") {
-    const anyError = error as {
-      message?: string;
-      response?: {
-        data?: string | {
-          title?: string;
-          detail?: string;
-          message?: string;
-          errors?: Record<string, string[]>;
-        }
-      }
-    };
-
-    // Handle .NET ProblemDetails response
-    if (anyError.response?.data && typeof anyError.response.data === "object") {
-      const data = anyError.response.data;
-
-      // If there are validation errors, format them nicely
-      if (data.errors && typeof data.errors === "object") {
-        const errorMessages = Object.entries(data.errors)
-          .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(", ") : messages}`)
-          .join("; ");
-        if (errorMessages) {
-          return `${data.title || "Validation error"} - ${errorMessages}`;
-        }
-      }
-
-      return data.title || data.detail || data.message || fallback;
-    }
-
-    // Handle string response data
-    if (anyError.response?.data && typeof anyError.response.data === "string") {
-      return anyError.response.data;
-    }
-
-    return anyError.message || fallback;
-  }
-  return fallback;
-};
-
-const applyAutoSort = <T,>(
-  rows: T[],
-  sort: { key: string; dir: "asc" | "desc" },
-  accessorMap: Record<string, (row: T) => string>
-) => {
-  if (!sort.key || !accessorMap[sort.key]) return rows;
-  const accessor = accessorMap[sort.key];
-  return [...rows].sort((a, b) => {
-    const aVal = accessor(a).toLowerCase();
-    const bVal = accessor(b).toLowerCase();
-    if (aVal < bVal) return sort.dir === "asc" ? -1 : 1;
-    if (aVal > bVal) return sort.dir === "asc" ? 1 : -1;
-    return 0;
-  });
-};
-
-const applyAutoFilter = <T,>(
-  rows: T[],
-  filters: Record<string, Set<string>>,
-  accessorMap: Record<string, (row: T) => string>
-) => {
-  return rows.filter((row) =>
-    Object.entries(filters).every(([key, selected]) => {
-      if (!selected || selected.size === 0) return true;
-      const value = accessorMap[key]?.(row) ?? "";
-      return selected.has(value);
-    })
-  );
-};
-
-// Draggable Paper component for Dialog
-function DraggablePaper(props: any) {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-
-  const handleMouseDown = (e: ReactMouseEvent) => {
-    // Only allow dragging from the title area
-    const target = e.target as HTMLElement;
-    if (target.closest('.MuiDialogTitle-root')) {
-      setIsDragging(true);
-      setDragStart({
-        x: e.clientX - position.x,
-        y: e.clientY - position.y,
-      });
-    }
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        setPosition({
-          x: e.clientX - dragStart.x,
-          y: e.clientY - dragStart.y,
-        });
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }, [isDragging, dragStart.x, dragStart.y, position.x, position.y]);
-
-  return (
-    <Paper
-      {...props}
-      onMouseDown={handleMouseDown}
-      sx={{
-        ...props.sx,
-        transform: `translate(${position.x}px, ${position.y}px)`,
-        cursor: isDragging ? 'grabbing' : 'default',
-        '& .MuiDialogTitle-root': {
-          cursor: 'grab',
-          userSelect: 'none',
-        },
-      }}
-    />
-  );
-}
 
 export const UserManagement: React.FC = () => {
   const VIRTUAL_SITE_PREFIX = "virtual-site-for-customer:";
@@ -1173,9 +890,17 @@ export const UserManagement: React.FC = () => {
   // On first load with no URL param, pushes the current tab type to the URL so
   // Favorites always captures the correct sub-page.
   useEffect(() => {
+    if (searchParams.get("tab") === "products") {
+      navigate("/settings?tab=products", { replace: true });
+      return;
+    }
     if (adminTabsConfig.length === 0) return;
     const stateWithOpenTab = location.state as { openTab?: string } | null;
     const tabType = stateWithOpenTab?.openTab ?? searchParams.get("tab");
+    if (tabType === "products") {
+      navigate("/settings?tab=products", { replace: true });
+      return;
+    }
     if (tabType) {
       const tabIndex = adminTabsConfig.findIndex((t) => t.type === tabType);
       if (tabIndex >= 0) setTab(tabIndex);
@@ -1751,21 +1476,6 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  const toggleFilterValue = (
-    setter: Dispatch<SetStateAction<Record<string, Set<string>>>>,
-    key: string,
-    value: string
-  ) => {
-    setter((prev) => {
-      const current = new Set(prev[key] ?? []);
-      if (current.has(value)) {
-        current.delete(value);
-      } else {
-        current.add(value);
-      }
-      return { ...prev, [key]: current };
-    });
-  };
 
   const toggleCustomTabFilterValue = (tabId: string, key: string, value: string) => {
     setCustomTabFilters((prev) => {
@@ -3094,16 +2804,13 @@ export const UserManagement: React.FC = () => {
         </Stack>
       )}
 
-      {/* Global Offices Tab */}
       {adminTabsConfig[tab]?.type === "offices" && (
-        <Box>
-          <GlobalOfficeMap
-            offices={globalOffices}
-            onAddOffice={handleAddOffice}
-            onUpdateOffice={handleUpdateOffice}
-            onDeleteOffice={handleDeleteOffice}
-          />
-        </Box>
+        <AdminOfficesTab
+          offices={globalOffices}
+          onAddOffice={handleAddOffice}
+          onUpdateOffice={handleUpdateOffice}
+          onDeleteOffice={handleDeleteOffice}
+        />
       )}
 
       {/* Custom Tabs - Dynamically Rendered */}
