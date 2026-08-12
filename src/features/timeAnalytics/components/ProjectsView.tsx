@@ -3,6 +3,7 @@ import { Card, Kpi, Tag, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
 import { multiLine, barV, comboFan } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 
 export function ProjectsView({ data }: { data: TimeAnalyticsSnapshot }) {
   const k = data.kpis;
@@ -97,7 +98,7 @@ function BurndownChart({ data }: { data: TimeAnalyticsSnapshot }) {
       { label: "Ideal",  data: data.burndown.map(d => d.ideal),  borderColor: "#aab1c8", borderDash: [4, 4] },
       { label: "Actual", data: data.burndown.map(d => d.actual), borderColor: "#2dd4bf" },
     ],
-  ), [data.burndown.length]);
+  ), chartDeps(data, data.burndown.map(d => `${d.week}:${d.ideal}:${d.actual}`).join("|")));
   return <canvas ref={ref} />;
 }
 
@@ -107,7 +108,7 @@ function ThroughputChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const recent = daily.slice(-28);
   const labels = recent.map(d => d.date.slice(5));
   const series = recent.map(d => d.completions);
-  useChart(ref, () => barV(labels, [{ label: "Assets installed", data: series }]), [labels.join(","), series.join(",")]);
+  useChart(ref, () => barV(labels, [{ label: "Assets installed", data: series }]), chartDeps(data, labels.join("|"), series.join(",")));
   return <canvas ref={ref} />;
 }
 
@@ -117,7 +118,7 @@ function ForecastChart({ data }: { data: TimeAnalyticsSnapshot }) {
     data.forecast.completion.map(c => c.week),
     data.forecast.completion,
     data.forecast.completion.map(c => c.mid * 0.6),
-  ), [data.forecast.completion.length]);
+  ), chartDeps(data, data.forecast.completion.map(c => `${c.week}:${c.mid}`).join("|")));
   return <canvas ref={ref} />;
 }
 

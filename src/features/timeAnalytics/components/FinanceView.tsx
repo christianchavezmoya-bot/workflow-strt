@@ -4,6 +4,7 @@ import { Card, Kpi, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
 import { barH, barV, doughnut } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 import type { FinanceSettings } from "../utils/financeSettings";
 import { DEFAULT_FINANCE_SETTINGS } from "../utils/financeSettings";
 
@@ -166,7 +167,7 @@ function InstallerCostChart({ data }: { data: TimeAnalyticsSnapshot }) {
     data.finance.byInstaller.map(i => i.name.split(" ")[0]),
     data.finance.byInstaller.map(i => i.cost),
     "#ff9f45",
-  ), [data.finance.byInstaller.length, data.finance.params.hourlyRate]);
+  ), chartDeps(data, data.finance.byInstaller.map(i => `${i.id}:${i.cost}`).join("|"), data.finance.params.hourlyRate));
   return <canvas ref={ref} />;
 }
 
@@ -178,7 +179,7 @@ function QuotedActualChart({ data }: { data: TimeAnalyticsSnapshot }) {
       { label: "Quoted", data: data.finance.byProject.map(p => +(p.quoted).toFixed(1)), backgroundColor: "#2dd4bf" },
       { label: "Actual", data: data.finance.byProject.map(p => +(p.actual).toFixed(1)), backgroundColor: "#fbbf24" },
     ],
-  ), [data.finance.byProject.length, data.finance.params.quotedRatio]);
+  ), chartDeps(data, data.finance.byProject.map(p => `${p.id}:${p.quoted}:${p.actual}`).join("|"), data.finance.params.quotedRatio));
   return <canvas ref={ref} />;
 }
 
@@ -213,6 +214,6 @@ function ProfitabilityChart({ data }: { data: TimeAnalyticsSnapshot }) {
       // @ts-expect-error chart.js accepts string[] for per-bar colors
       backgroundColor: data.finance.byProject.slice(0, 6).map((p): string => (p.actual > p.quoted) ? "#f87171" : "#34d399"),
     }],
-  ), [data.finance.byProject.length]);
+  ), chartDeps(data, data.finance.byProject.slice(0, 6).map(p => `${p.id}:${p.quoted}:${p.actual}`).join("|")));
   return <canvas ref={ref} />;
 }

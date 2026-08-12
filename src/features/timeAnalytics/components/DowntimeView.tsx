@@ -1,13 +1,16 @@
 import { useMemo, useRef } from "react";
 import { Card, Kpi, ChartBox, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
-import { pareto, doughnut, multiLine, dualAxisLine } from "./ChartTheme";
+import { pareto, doughnut, dualAxisLine } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps, productiveDowntimeTrend } from "../utils/chartSeries";
+import { formatRangeLabel } from "../utils/datePresets";
 
 export function DowntimeView({ data }: { data: TimeAnalyticsSnapshot }) {
   const totalMin = data.downtime.reasons.reduce((a, b) => a + b.totalMinutes, 0);
   const occ = data.downtime.reasons.reduce((a, b) => a + b.occurrences, 0);
   const top = data.downtime.reasons[0];
+  const trendMeta = productiveDowntimeTrend(data);
 
   return (
     <>
@@ -33,7 +36,7 @@ export function DowntimeView({ data }: { data: TimeAnalyticsSnapshot }) {
 
       <div className="ta-grid cols-12">
         <div className="span-12">
-          <Card title="Downtime Trends — 12 Months" sub="Monthly downtime vs productive hours · dual axis">
+          <Card title={`Downtime Trends — ${formatRangeLabel(data.range.from, data.range.to)}`} sub={`${trendMeta.subtitle} · dual axis`}>
             <ChartBox height="lg"><TrendChart data={data} /></ChartBox>
           </Card>
         </div>
@@ -60,7 +63,7 @@ function ParetoChart({ data }: { data: TimeAnalyticsSnapshot }) {
     const cumPct = totals.map(t => ((acc += t) / sum) * 100);
     return { labels, totals, cumPct };
   }, [data]);
-  useChart(ref, () => pareto(labels, totals, cumPct), [labels.length]);
+  useChart(ref, () => pareto(labels, totals, cumPct), chartDeps(data, labels.join("|"), totals.join(",")));
   return <canvas ref={ref} />;
 }
 
@@ -70,7 +73,7 @@ function ReasonDonut({ data }: { data: TimeAnalyticsSnapshot }) {
   useChart(ref, () => doughnut(
     data.downtime.reasons.map(r => r.reason),
     data.downtime.reasons.map(r => r.totalMinutes),
-  ), [data.downtime.reasons.length]);
+  ), chartDeps(data, data.downtime.reasons.map(r => `${r.reason}:${r.totalMinutes}`).join("|")));
   return (
     <div className="ta-donut-row">
       <div style={{ position: "relative", width: 160, height: 160 }}>
@@ -94,11 +97,16 @@ function ReasonDonut({ data }: { data: TimeAnalyticsSnapshot }) {
 
 function TrendChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  useChart(ref, () => dualAxisLine(
-    data.downtime.trendMonthly.map(t => t.month),
-    { label: "Productive hours", data: data.downtime.trendMonthly.map(t => t.productive), color: "#2dd4bf" },
-    { label: "Downtime hours",   data: data.downtime.trendMonthly.map(t => t.downtime),   color: "#f87171" },
-  ), [data.downtime.trendMonthly.length]);
+  const series = useMemo(() => productiveDowntimeTrend(data), [data]);
+  useChart(
+    ref,
+    () => dualAxisLine(
+      series.labels,
+      { label: "Productive hours", data: series.productive, color: "#2dd4bf" },
+      { label: "Downtime hours", data: series.downtime, color: "#f87171" },
+    ),
+    chartDeps(data, series.granularity, series.labels.join("|"), series.productive.join(","), series.downtime.join(",")),
+  );
   return <canvas ref={ref} />;
 }
 

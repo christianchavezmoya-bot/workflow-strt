@@ -179,6 +179,8 @@ export interface TimeAnalyticsSnapshot {
   downtime: {
     reasons: DowntimeReason[];
     trendMonthly: { month: string; productive: number; downtime: number }[];
+    /** Daily productive/downtime hours — populated for all ranges; charts use when window ≤ 31 days. */
+    trendDaily?: { date: string; productive: number; downtime: number }[];
   };
   finance: FinanceRollup;
   forecast: ForecastRow;

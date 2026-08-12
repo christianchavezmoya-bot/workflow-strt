@@ -238,7 +238,9 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
             ↻ Refresh
           </button>
 
-          <span className="ta-range-hint">{rangeLabel}</span>
+          <span className="ta-range-hint">
+            {loading && data ? "Updating… · " : ""}{rangeLabel}
+          </span>
         </div>
 
         {data && (
@@ -265,10 +267,19 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
           </div>
         )}
 
+        {loading && data && (
+          <div className="ta-refetch-bar" role="status" aria-live="polite">
+            Refreshing charts for {formatRangeLabel(filters.from ?? "", filters.to ?? "")}…
+          </div>
+        )}
+
         {loading && !data ? (
           <LoadingState label="Loading time analytics…" />
         ) : data ? (
-          <div key={activeView} className="ta-view-anim">
+          <div
+            key={`${activeView}-${data.generatedAt}-${data.range.from}-${data.range.to}`}
+            className={`ta-view-anim${loading ? " ta-view-dimmed" : ""}`}
+          >
             <Suspense fallback={<LoadingState label="Loading view…" />}>
               <ActiveView
                 data={data}

@@ -3,6 +3,7 @@ import { Card, Kpi, Tag, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
 import { barH, scatter } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 
 export function AssetsView({ data }: { data: TimeAnalyticsSnapshot }) {
   const easiest = data.assets.length
@@ -91,7 +92,7 @@ function AssetTable({ data }: { data: TimeAnalyticsSnapshot }) {
 
 function AssetBarChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  useChart(ref, () => barH(data.assets.map(a => a.type), data.assets.map(a => a.avgMinutes)), [data.assets.length]);
+  useChart(ref, () => barH(data.assets.map(a => a.type), data.assets.map(a => a.avgMinutes)), chartDeps(data, data.assets.map(a => `${a.type}:${a.avgMinutes}`).join("|")));
   return <canvas ref={ref} />;
 }
 
@@ -104,7 +105,7 @@ function AssetScatterChart({ data }: { data: TimeAnalyticsSnapshot }) {
       name: a.type,
       color: a.difficulty > 12 ? "#f87171" : a.difficulty > 6 ? "#fbbf24" : "#34d399",
     })),
-  ), [data.assets.length]);
+  ), chartDeps(data, data.assets.map(a => `${a.type}:${a.avgMinutes}:${a.installs}`).join("|")));
   return <canvas ref={ref} />;
 }
 

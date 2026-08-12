@@ -3,6 +3,7 @@ import { Card, Kpi, Tag, ChartBox, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { barH, stacked } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 
 export function CustomersView({ data }: { data: TimeAnalyticsSnapshot }) {
   return (
@@ -84,12 +85,12 @@ function StackedCustomerChart({ data }: { data: TimeAnalyticsSnapshot }) {
       { label: "Productive", data: data.customers.map(c => c.productiveHours), backgroundColor: "#2dd4bf" },
       { label: "Downtime",   data: data.customers.map(c => c.downtimeHours),   backgroundColor: "#f87171" },
     ],
-  ), [data.customers.length]);
+  ), chartDeps(data, data.customers.map(c => `${c.id}:${c.productiveHours}:${c.downtimeHours}`).join("|")));
   return <canvas ref={ref} />;
 }
 
 function AvgCustomerChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  useChart(ref, () => barH(data.customers.map(c => c.name), data.customers.map(c => c.avgInstallMinutes), "#818cf8"), [data.customers.length]);
+  useChart(ref, () => barH(data.customers.map(c => c.name), data.customers.map(c => c.avgInstallMinutes), "#818cf8"), chartDeps(data, data.customers.map(c => `${c.id}:${c.avgInstallMinutes}`).join("|")));
   return <canvas ref={ref} />;
 }

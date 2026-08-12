@@ -3,6 +3,7 @@ import { Card, Kpi, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
 import { scatter } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 
 export function BenchmarksView({ data }: { data: TimeAnalyticsSnapshot }) {
   const avgConfidence = data.benchmarks.length
@@ -123,7 +124,7 @@ function QualitySpeedChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useChart(ref, () => scatter(
     data.qualitySpeed.map(p => ({ x: p.avgMinutes, y: p.defects, name: p.name, color: p.color })),
-  ), [data.qualitySpeed.length]);
+  ), chartDeps(data, data.qualitySpeed.map(p => `${p.installerId}:${p.avgMinutes}:${p.defects}`).join("|")));
   return <canvas ref={ref} />;
 }
 
