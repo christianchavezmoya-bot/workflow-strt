@@ -21,17 +21,33 @@ vi.mock("../services/offlineBootstrapService", () => ({
 
 vi.mock("./bootstrapFreshness", () => ({
   shouldScheduleBootstrap: vi.fn(async () => true),
+  inferBootstrapMode: vi.fn(() => "full" as const),
+}));
+
+vi.mock("../services/syncDeltaService", () => ({
+  tryApplySyncDelta: vi.fn(async () => false),
 }));
 
 import offlineBootstrapService from "../services/offlineBootstrapService";
 import { getServerReachable, subscribeServerReachable } from "../services/connectivityMonitor";
-import { scheduleBootstrapAfterUploadDrain } from "./bootstrapAfterDrain";
+import { inferBootstrapMode } from "./bootstrapFreshness";
+import { tryApplySyncDelta } from "../services/syncDeltaService";
+import { scheduleBootstrapAfterUploadDrain, resetBootstrapCoordinatorForTests } from "./bootstrapAfterDrain";
+
+async function flushAsyncWork(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+  await new Promise((r) => setTimeout(r, 0));
+}
 
 describe("scheduleBootstrapAfterUploadDrain", () => {
   beforeEach(() => {
+    resetBootstrapCoordinatorForTests();
     vi.mocked(getServerReachable).mockReturnValue(null);
     vi.mocked(subscribeServerReachable).mockReset();
     vi.mocked(offlineBootstrapService.runAfterUploadDrain).mockReset();
+    vi.mocked(inferBootstrapMode).mockReturnValue("full");
+    vi.mocked(tryApplySyncDelta).mockResolvedValue(false);
   });
 
   it("does not start bootstrap until /health confirms reachable", () => {
@@ -45,8 +61,26 @@ describe("scheduleBootstrapAfterUploadDrain", () => {
     vi.mocked(getServerReachable).mockReturnValue(true);
 
     scheduleBootstrapAfterUploadDrain("all", 0, false, "first-login");
-    await Promise.resolve();
+    await flushAsyncWork();
 
-    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({ scope: "all", force: false });
+    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({
+      scope: "all",
+      force: false,
+      mode: "full",
+    });
+  });
+
+  it("passes light mode for reconnect triggers", async () => {
+    vi.mocked(getServerReachable).mockReturnValue(true);
+    vi.mocked(inferBootstrapMode).mockReturnValue("light");
+
+    scheduleBootstrapAfterUploadDrain("assigned", 0, false, "reconnect");
+    await flushAsyncWork();
+
+    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({
+      scope: "assigned",
+      force: false,
+      mode: "light",
+    });
   });
 });

@@ -28,9 +28,43 @@
 
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 0;
   padding: 16px 20px 24px;
   min-height: 100%;
+  max-height: calc(100dvh - var(--app-header-offset, 64px) - 72px);
+  overflow: hidden;
+}
+
+/* ---------- Sticky header stack (tabs + filters + stats) ---------- */
+.ta-sticky-header {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: sticky;
+  top: 0;
+  z-index: 120;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  background: linear-gradient(180deg, rgba(11, 20, 24, 0.98) 0%, rgba(11, 20, 24, 0.92) 85%, rgba(11, 20, 24, 0) 100%);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--ta-border);
+}
+
+@media (max-width: 768px) {
+  .ta-sticky-header {
+    top: var(--app-header-offset, 56px);
+  }
+}
+
+.ta-scroll-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding-bottom: 8px;
 }
 
 /* ---------- Sub-tab bar (top of page) ---------- */
@@ -42,9 +76,6 @@
   background: var(--ta-bg-card);
   border: 1px solid var(--ta-border);
   border-radius: 12px;
-  position: sticky;
-  top: 0;
-  z-index: 4;
   backdrop-filter: blur(18px);
 }
 .ta-tab {
@@ -268,6 +299,41 @@
 .ta-tag.violet { color: var(--ta-violet); border-color: rgba(167, 139, 250, 0.30); background: rgba(167, 139, 250, 0.08); }
 .ta-tag.active { color: var(--ta-accent); border-color: rgba(45, 212, 191, 0.35); background: rgba(45, 212, 191, 0.10); }
 .ta-range-hint { margin-left: auto; font-size: 11px; color: var(--ta-text-mute); align-self: center; }
+
+.ta-stats-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--ta-bg-card);
+  border: 1px solid var(--ta-border);
+  border-radius: 10px;
+}
+.ta-stat-chip {
+  display: inline-flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 88px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--ta-border);
+}
+.ta-stat-chip .l {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ta-text-mute);
+}
+.ta-stat-chip .v {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ta-text);
+}
+.ta-stat-chip.good .v { color: var(--ta-good); }
+.ta-stat-chip.warn .v { color: var(--ta-warn); }
 
 .ta-finance-settings {
   display: grid;

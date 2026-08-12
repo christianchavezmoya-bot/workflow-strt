@@ -12,11 +12,17 @@ vi.mock("../services/offlineBootstrapService", () => ({
   },
 }));
 
+vi.mock("./syncPreferences", () => ({
+  getManualDownloadOnly: vi.fn(() => false),
+}));
+
 import { syncMetaGet } from "../services/localDB";
 import offlineBootstrapService from "../services/offlineBootstrapService";
+import { getManualDownloadOnly } from "./syncPreferences";
 import {
   hasEverBootstrapped,
   hasServerChangesSinceBootstrap,
+  inferBootstrapMode,
   shouldScheduleBootstrap,
 } from "./bootstrapFreshness";
 
@@ -25,6 +31,7 @@ describe("bootstrapFreshness", () => {
     vi.mocked(syncMetaGet).mockReset();
     vi.mocked(offlineBootstrapService.isStale).mockReset();
     vi.mocked(offlineBootstrapService.getLastCompletedAtMs).mockReturnValue(null);
+    vi.mocked(getManualDownloadOnly).mockReturnValue(false);
   });
 
   it("requires bootstrap on first login when never bootstrapped", async () => {
@@ -66,5 +73,20 @@ describe("bootstrapFreshness", () => {
       scope: "all",
       force: true,
     })).toBe(true);
+  });
+
+  it("skips automatic downloads when manual-download-only is enabled", async () => {
+    vi.mocked(getManualDownloadOnly).mockReturnValue(true);
+    vi.mocked(syncMetaGet).mockResolvedValue(new Date().toISOString());
+    vi.mocked(offlineBootstrapService.isStale).mockResolvedValue(true);
+
+    expect(await shouldScheduleBootstrap({ reason: "reconnect", scope: "assigned" })).toBe(false);
+    expect(await shouldScheduleBootstrap({ reason: "sync-now", scope: "all" })).toBe(true);
+  });
+
+  it("infers light mode for routine reconnect", () => {
+    expect(inferBootstrapMode("reconnect", "assigned", false)).toBe("light");
+    expect(inferBootstrapMode("sync-now", "assigned", false)).toBe("full");
+    expect(inferBootstrapMode("flush-complete", "all", false)).toBe("full");
   });
 });

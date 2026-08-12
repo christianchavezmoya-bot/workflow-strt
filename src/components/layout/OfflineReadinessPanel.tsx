@@ -21,6 +21,7 @@ import {
   type BootstrapStatus,
 } from "../../services/offlineBootstrapService";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { getManualDownloadOnly, setManualDownloadOnly } from "../../utils/syncPreferences";
 
 function formatWhen(date: Date | null): string {
   if (!date) return "Never";
@@ -36,6 +37,7 @@ export default function OfflineReadinessPanel() {
   const { triggerSync, canSync, syncing } = useSyncEngine();
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
+  const [manualDownloadOnly, setManualDownloadOnlyState] = useState(getManualDownloadOnly);
 
   const reload = useCallback(async () => {
     const next = await offlineBootstrapService.getStatus();
@@ -134,6 +136,25 @@ export default function OfflineReadinessPanel() {
             Connect to Wi‑Fi or cellular and tap Download now to refresh cached projects, workflows, and reference photos.
           </Alert>
         )}
+
+        <FormControlLabel
+          control={
+            <Switch
+              size="small"
+              checked={manualDownloadOnly}
+              onChange={(_, checked) => {
+                setManualDownloadOnly(checked);
+                setManualDownloadOnlyState(checked);
+              }}
+            />
+          }
+          label={
+            <Typography variant="body2" color="text.secondary">
+              Manual download only — skip automatic field-data downloads
+            </Typography>
+          }
+          sx={{ ml: 0, alignSelf: "flex-start" }}
+        />
 
         <FormControlLabel
           control={

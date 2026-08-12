@@ -132,11 +132,11 @@ export function useSseEvents() {
           window.dispatchEvent(new CustomEvent("sse:projects:updated", { detail }));
           if (isMobileNativePlatform()) {
             void markServerDataChanged();
-            void ProjectRepository.syncCatalogFromServer().then(() => {
+            void ProjectRepository.syncCatalogFromServer().then(async () => {
               const projectId = typeof detail.projectId === "string" ? detail.projectId : undefined;
               const userId = currentUserId();
               if (projectId && userId) {
-                void prefetchAssignedAssetsInProject(projectId, userId);
+                await prefetchAssignedAssetsInProject(projectId, userId);
               }
             });
           }
