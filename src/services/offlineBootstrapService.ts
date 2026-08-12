@@ -42,6 +42,8 @@ import type { WorkflowConfig } from "../types/workflowConfig";
 
 export type BootstrapScope = "assigned" | "all";
 
+export type BootstrapMode = "full" | "light";
+
 export interface BootstrapProgress {
   phase: string;
   done: number;
@@ -53,6 +55,8 @@ export interface BootstrapRunOptions {
   scope?: BootstrapScope;
   /** User Sync Now — skip prefetch byte/file caps and cooldowns. */
   force?: boolean;
+  /** light skips heavy document/media prefetch (routine reconnect). */
+  mode?: BootstrapMode;
 }
 
 export interface BootstrapSummary {
@@ -213,6 +217,8 @@ export const offlineBootstrapService = {
 
     const scope = options?.scope ?? "all";
     const force = options?.force ?? false;
+    const mode = options?.mode ?? (force ? "full" : "full");
+    const light = mode === "light" && !force;
     const prefetchLimits = getBootstrapPrefetchLimits(force);
     const userId = currentUserId();
 
@@ -235,13 +241,16 @@ export const offlineBootstrapService = {
       // ── Phase 1b: Documents library + Tips & Tricks file blobs ─────────────
       emit("bootstrap:progress", { phase: "library-documents", done: 0, total: 1 } satisfies BootstrapProgress);
       const libraryDocs = await documentService.refreshDocumentsCache({ prefetchFiles: false }).catch(() => []);
-      const libraryPrefetch = await prefetchLibraryDocuments(libraryDocs, {
-        maxTotalBytes: prefetchLimits.libraryMaxTotalBytes,
-        maxFiles: prefetchLimits.libraryMaxFiles,
-        onProgress: (done, total) => {
-          emit("bootstrap:progress", { phase: "library-documents", done, total } satisfies BootstrapProgress);
-        },
-      });
+      let libraryPrefetch = { prefetched: 0, skipped: 0 };
+      if (!light) {
+        libraryPrefetch = await prefetchLibraryDocuments(libraryDocs, {
+          maxTotalBytes: prefetchLimits.libraryMaxTotalBytes,
+          maxFiles: prefetchLimits.libraryMaxFiles,
+          onProgress: (done, total) => {
+            emit("bootstrap:progress", { phase: "library-documents", done, total } satisfies BootstrapProgress);
+          },
+        });
+      }
       emit("bootstrap:progress", { phase: "library-documents", done: 1, total: 1 } satisfies BootstrapProgress);
 
       // ── Phase 2: projects ─────────────────────────────────────────────────
@@ -324,13 +333,16 @@ export const offlineBootstrapService = {
       });
 
       emit("bootstrap:progress", { phase: "document-files", done: 0, total: Math.max(docLinks.length, 1) } satisfies BootstrapProgress);
-      const docPrefetch = await prefetchAssetLinkedDocuments(docLinks, {
-        maxTotalBytes: prefetchLimits.maxTotalBytes,
-        maxFiles: prefetchLimits.maxFiles,
-        onProgress: (done, total) => {
-          emit("bootstrap:progress", { phase: "document-files", done, total } satisfies BootstrapProgress);
-        },
-      });
+      let docPrefetch = { prefetched: 0, skipped: docLinks.length };
+      if (!light && docLinks.length > 0) {
+        docPrefetch = await prefetchAssetLinkedDocuments(docLinks, {
+          maxTotalBytes: prefetchLimits.maxTotalBytes,
+          maxFiles: prefetchLimits.maxFiles,
+          onProgress: (done, total) => {
+            emit("bootstrap:progress", { phase: "document-files", done, total } satisfies BootstrapProgress);
+          },
+        });
+      }
       emit("bootstrap:progress", {
         phase: "document-files",
         done: docPrefetch.prefetched + docPrefetch.skipped,
@@ -358,11 +370,13 @@ export const offlineBootstrapService = {
       }
 
       let mediaDone = 0;
-      await runPool(relevantConfigs, 3, async (cfg) => {
-        await configMediaCache.prefetchConfig(cfg).catch(() => {});
-        mediaDone++;
-        emit("bootstrap:progress", { phase: "media", done: mediaDone, total: relevantConfigs.length } satisfies BootstrapProgress);
-      });
+      if (!light) {
+        await runPool(relevantConfigs, 3, async (cfg) => {
+          await configMediaCache.prefetchConfig(cfg).catch(() => {});
+          mediaDone++;
+          emit("bootstrap:progress", { phase: "media", done: mediaDone, total: relevantConfigs.length } satisfies BootstrapProgress);
+        });
+      }
 
       const summary: BootstrapSummary = {
         completedAt: new Date().toISOString(),

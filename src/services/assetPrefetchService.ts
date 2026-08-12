@@ -3,6 +3,7 @@
  */
 
 import { isMobileNativePlatform } from "../utils/platform";
+import { clearServerChangeFlag } from "../utils/bootstrapFreshness";
 import { entityGetAsset } from "./localDB";
 import { assetWorkflowAssignmentService } from "./assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "./assetWorkflowRunService";
@@ -64,6 +65,7 @@ export async function prefetchAssetIds(assetIds: string[]): Promise<void> {
   if (!isMobileNativePlatform() || assetIds.length === 0) return;
   const unique = [...new Set(assetIds)];
   await Promise.allSettled(unique.map((id) => prefetchAssetWorkflowData(id)));
+  await clearServerChangeFlag();
 }
 
 function assignedAssetIdsFromWorkspace(workspace: DashboardWorkspace, projectId: string, userId: string): string[] {

@@ -122,148 +122,163 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
 
   return (
     <div className="ta-root">
-      <nav className="ta-tabs" role="tablist" aria-label="Time Analytics views">
-        {TIME_ANALYTICS_VIEWS.map(v => (
-          <button
-            key={v.id}
-            type="button"
-            role="tab"
-            aria-selected={v.id === activeView}
-            className={`ta-tab ${v.id === activeView ? "active" : ""}`}
-            onClick={() => switchView(v.id)}
-            data-tour={`ta-tab-${v.id}`}
-          >
-            <span className="ico">{v.icon}</span>
-            <span>{v.label}</span>
-          </button>
-        ))}
-      </nav>
-
-      <div className="ta-filters">
-        <span className="label">Period</span>
-        {DATE_PRESETS.map(p => (
-          <button
-            key={p.id}
-            type="button"
-            className={`ta-tag ${activePreset === p.id ? "active" : ""}`}
-            style={{ cursor: "pointer" }}
-            onClick={() => applyPreset(p.id)}
-          >
-            {p.label}
-          </button>
-        ))}
-
-        <DateChip
-          label="From"
-          value={filters.from ?? ""}
-          onChange={v => setFilters({ ...filters, from: v })}
-        />
-        <DateChip
-          label="To"
-          value={filters.to ?? ""}
-          onChange={v => setFilters({ ...filters, to: v })}
-        />
-
-        {data && data.customers.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 180 }}>
-            <Select
-              displayEmpty
-              value={filters.customerId ?? ""}
-              onChange={e => setFilters({ ...filters, customerId: e.target.value as string, projectId: "" })}
-              sx={filterSelectSx}
+      <div className="ta-sticky-header">
+        <nav className="ta-tabs" role="tablist" aria-label="Time Analytics views">
+          {TIME_ANALYTICS_VIEWS.map(v => (
+            <button
+              key={v.id}
+              type="button"
+              role="tab"
+              aria-selected={v.id === activeView}
+              className={`ta-tab ${v.id === activeView ? "active" : ""}`}
+              onClick={() => switchView(v.id)}
+              data-tour={`ta-tab-${v.id}`}
             >
-              <MenuItem value="">All customers</MenuItem>
-              {data.customers.map(c => (
-                <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
+              <span className="ico">{v.icon}</span>
+              <span>{v.label}</span>
+            </button>
+          ))}
+        </nav>
 
-        {data && data.products.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 160 }}>
-            <Select
-              displayEmpty
-              value={filters.productId ?? ""}
-              onChange={e => setFilters({ ...filters, productId: e.target.value as string })}
-              sx={filterSelectSx}
+        <div className="ta-filters">
+          <span className="label">Period</span>
+          {DATE_PRESETS.map(p => (
+            <button
+              key={p.id}
+              type="button"
+              className={`ta-tag ${activePreset === p.id ? "active" : ""}`}
+              style={{ cursor: "pointer" }}
+              onClick={() => applyPreset(p.id)}
             >
-              <MenuItem value="">All products</MenuItem>
-              {data.products.map(p => (
-                <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
+              {p.label}
+            </button>
+          ))}
 
-        {data && data.projects.length > 0 && (
-          <FormControl size="small" sx={{ minWidth: 180 }}>
-            <Select
-              displayEmpty
-              value={filters.projectId ?? ""}
-              onChange={e => setFilters({ ...filters, projectId: e.target.value as string })}
-              sx={filterSelectSx}
+          <DateChip
+            label="From"
+            value={filters.from ?? ""}
+            onChange={v => setFilters({ ...filters, from: v })}
+          />
+          <DateChip
+            label="To"
+            value={filters.to ?? ""}
+            onChange={v => setFilters({ ...filters, to: v })}
+          />
+
+          {data && data.customers.length > 0 && (
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <Select
+                displayEmpty
+                value={filters.customerId ?? ""}
+                onChange={e => setFilters({ ...filters, customerId: e.target.value as string, projectId: "" })}
+                sx={filterSelectSx}
+              >
+                <MenuItem value="">All customers</MenuItem>
+                {data.customers.map(c => (
+                  <MenuItem key={c.id} value={c.id}>{c.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {data && data.products.length > 0 && (
+            <FormControl size="small" sx={{ minWidth: 160 }}>
+              <Select
+                displayEmpty
+                value={filters.productId ?? ""}
+                onChange={e => setFilters({ ...filters, productId: e.target.value as string })}
+                sx={filterSelectSx}
+              >
+                <MenuItem value="">All products</MenuItem>
+                {data.products.map(p => (
+                  <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {data && data.projects.length > 0 && (
+            <FormControl size="small" sx={{ minWidth: 180 }}>
+              <Select
+                displayEmpty
+                value={filters.projectId ?? ""}
+                onChange={e => setFilters({ ...filters, projectId: e.target.value as string })}
+                sx={filterSelectSx}
+              >
+                <MenuItem value="">All projects</MenuItem>
+                {(filters.customerId
+                  ? data.projects.filter(p => p.customerId === filters.customerId)
+                  : data.projects
+                ).map(p => (
+                  <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          )}
+
+          {data && (
+            <button
+              type="button"
+              className="ta-tag"
+              style={{ cursor: "pointer" }}
+              onClick={() => exportSnapshotCsv(data, activeView)}
+              title="Export current view as CSV"
             >
-              <MenuItem value="">All projects</MenuItem>
-              {(filters.customerId
-                ? data.projects.filter(p => p.customerId === filters.customerId)
-                : data.projects
-              ).map(p => (
-                <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        )}
+              ↓ CSV
+            </button>
+          )}
 
-        {data && (
           <button
             type="button"
             className="ta-tag"
             style={{ cursor: "pointer" }}
-            onClick={() => exportSnapshotCsv(data, activeView)}
-            title="Export current view as CSV"
+            onClick={() => void refresh()}
+            title="Refresh"
           >
-            ↓ CSV
+            ↻ Refresh
           </button>
+
+          <span className="ta-range-hint">{rangeLabel}</span>
+        </div>
+
+        {data && (
+          <div className="ta-stats-bar" role="region" aria-label="Summary statistics">
+            <StatChip label="Installers" value={String(data.kpis.activeInstallers)} />
+            <StatChip label="Projects" value={String(data.kpis.projectsActive)} />
+            <StatChip label="Productive" value={`${data.kpis.productiveHours.toFixed(1)}h`} />
+            <StatChip label="Downtime" value={`${data.kpis.downtimeHours.toFixed(1)}h`} />
+            <StatChip label="Productivity" value={`${data.kpis.productivityPct}%`} tone={data.kpis.productivityPct >= 80 ? "good" : "warn"} />
+            <StatChip label="Completed today" value={String(data.kpis.completedToday)} />
+          </div>
         )}
-
-        <button
-          type="button"
-          className="ta-tag"
-          style={{ cursor: "pointer" }}
-          onClick={() => void refresh()}
-          title="Refresh"
-        >
-          ↻ Refresh
-        </button>
-
-        <span className="ta-range-hint">{rangeLabel}</span>
       </div>
 
-      {error && (
-        <ErrorState message={error} onRetry={() => void refresh()} />
-      )}
+      <div className="ta-scroll-body">
+        {error && (
+          <ErrorState message={error} onRetry={() => void refresh()} />
+        )}
 
-      {showSparseDataHint && (
-        <div className="ta-sparse-hint" role="status">
-          Snapshot returned no projects or customers for the selected filters.
-          Widen the date range or complete workflow runs to populate analytics.
-        </div>
-      )}
+        {showSparseDataHint && (
+          <div className="ta-sparse-hint" role="status">
+            Snapshot returned no projects or customers for the selected filters.
+            Widen the date range or complete workflow runs to populate analytics.
+          </div>
+        )}
 
-      {loading && !data ? (
-        <LoadingState label="Loading time analytics…" />
-      ) : data ? (
-        <div key={activeView} className="ta-view-anim">
-          <Suspense fallback={<LoadingState label="Loading view…" />}>
-            <ActiveView
-              data={data}
-              financeSettings={financeSettings}
-              onFinanceSettingsChange={setFinanceSettings}
-            />
-          </Suspense>
-        </div>
-      ) : null}
+        {loading && !data ? (
+          <LoadingState label="Loading time analytics…" />
+        ) : data ? (
+          <div key={activeView} className="ta-view-anim">
+            <Suspense fallback={<LoadingState label="Loading view…" />}>
+              <ActiveView
+                data={data}
+                financeSettings={financeSettings}
+                onFinanceSettingsChange={setFinanceSettings}
+              />
+            </Suspense>
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -298,5 +313,22 @@ function DateChip({ label, value, onChange }: { label: string; value: string; on
         "& .MuiOutlinedInput-input": { padding: "6px 10px" },
       }}
     />
+  );
+}
+
+function StatChip({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone?: "good" | "warn";
+}) {
+  return (
+    <div className={`ta-stat-chip ${tone ?? ""}`}>
+      <span className="l">{label}</span>
+      <span className="v">{value}</span>
+    </div>
   );
 }
