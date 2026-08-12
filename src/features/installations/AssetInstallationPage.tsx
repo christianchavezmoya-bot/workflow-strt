@@ -121,7 +121,7 @@ import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/p
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
-import { mergeRunsIntoMap, mergeRunRecord } from "../../types/assetWorkflowRunSummary";
+import { mergeRunsIntoMap, mergeRunRecord, runHasCaptureBlobs } from "../../types/assetWorkflowRunSummary";
 import type { BomItem, StepInput, Workflow } from "../../types/workflow";
 import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
@@ -3541,8 +3541,23 @@ ${words.slice(midpoint).join(" ")}`;
       try { runs = await assetWorkflowRunService.listByAsset(asset.id); } catch { runs = []; }
     }
 
-    const sorted = [...(runs ?? [])].sort((a, b) => (b.runNumber ?? 0) - (a.runNumber ?? 0));
-    const run = sorted.find((r) => r.isLocked) ?? sorted[0] ?? null;
+    let run = pickCaptureRun(runs ?? []);
+
+    // Web perf loads slim run summaries (empty stepResultsJson). Hydrate before report export.
+    if (run && !runHasCaptureBlobs(run)) {
+      try {
+        const full = await assetWorkflowRunService.getById(run.id);
+        if (full && runHasCaptureBlobs(full)) {
+          run = full;
+        } else {
+          const loaded = await assetWorkflowRunService.loadRunDetailsForAssets(asset.projectId, [asset.id]);
+          const hydrated = pickCaptureRun(loaded.filter((r) => r.assetId === asset.id));
+          if (hydrated && runHasCaptureBlobs(hydrated)) run = hydrated;
+        }
+      } catch {
+        /* keep best available run */
+      }
+    }
 
     const effectiveRun: AssetWorkflowRun = run ?? {
       id: "", assetId: asset.id,

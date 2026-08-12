@@ -1,16 +1,15 @@
 /**
  * Compact native sync/consistency dot beside the business logo.
  * Green = in sync; amber = uploads pending; blue = downloading; spinner = active sync.
+ * Status detail lives in the tooltip and SyncStatusBadge — no caption text beside the dot.
  */
 
-import { Box, CircularProgress, Stack, Tooltip, Typography } from "@mui/material";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Box, CircularProgress, Tooltip } from "@mui/material";
+import { useEffect, useState } from "react";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { isOfflineModeActive } from "../../services/offlineModeState";
 import { isMobileNativePlatform } from "../../utils/platform";
 import SyncCenterPage from "../../features/sync/SyncCenterPage";
-
-const LABEL_TIMEOUT_MS = 3_000;
 
 type BootstrapState = { running: boolean };
 
@@ -63,39 +62,10 @@ function indicatorTitle(
   return "In sync with server";
 }
 
-function busyActivityLabel(
-  bootstrapRunning: boolean,
-  syncing: boolean,
-  pendingCount: number,
-): string | null {
-  if (bootstrapRunning) return "Downloading…";
-  if (syncing && pendingCount > 0) {
-    return `Uploading ${pendingCount} change${pendingCount === 1 ? "" : "s"}…`;
-  }
-  if (syncing) return "Syncing…";
-  return null;
-}
-
 export default function DataConsistencyIndicator() {
   const { status, pendingCount, conflictCount, syncing, serverReachable } = useSyncEngine();
   const [bootstrap, setBootstrap] = useState<BootstrapState | null>(null);
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
-  const [activityLabel, setActivityLabel] = useState<string | null>(null);
-  const hideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const showLabel = useCallback((text: string | null, persistent = false) => {
-    if (hideTimerRef.current) {
-      clearTimeout(hideTimerRef.current);
-      hideTimerRef.current = null;
-    }
-    setActivityLabel(text);
-    if (text && !persistent) {
-      hideTimerRef.current = setTimeout(() => {
-        setActivityLabel(null);
-        hideTimerRef.current = null;
-      }, LABEL_TIMEOUT_MS);
-    }
-  }, []);
 
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
@@ -111,68 +81,6 @@ export default function DataConsistencyIndicator() {
       window.removeEventListener("bootstrap:complete", onDone);
       window.removeEventListener("bootstrap:error", onDone);
     };
-  }, []);
-
-  useEffect(() => {
-    const onUpToDate = (event: Event) => {
-      const uploaded = (event as CustomEvent<{ uploaded?: boolean }>).detail?.uploaded === true;
-      showLabel(uploaded ? "Changes uploaded" : "Up to date");
-    };
-    window.addEventListener("sync:up-to-date", onUpToDate);
-    return () => window.removeEventListener("sync:up-to-date", onUpToDate);
-  }, [showLabel]);
-
-  useEffect(() => {
-    if (!isMobileNativePlatform()) return;
-
-    const bootstrapRunning = bootstrap?.running === true;
-    const busyLabel = busyActivityLabel(bootstrapRunning, syncing, pendingCount);
-
-    if (busyLabel) {
-      showLabel(busyLabel, true);
-      return;
-    }
-
-    if (conflictCount > 0) {
-      showLabel(`${conflictCount} conflict${conflictCount === 1 ? "" : "s"}`, true);
-      return;
-    }
-
-    if (isOfflineModeActive()) {
-      showLabel(pendingCount > 0 ? `Offline · ${pendingCount} queued` : "Offline", true);
-      return;
-    }
-
-    if (status === "offline" || serverReachable === false) {
-      showLabel("Server unreachable", true);
-      return;
-    }
-
-    if (pendingCount > 0) {
-      showLabel(`${pendingCount} waiting to upload`, true);
-      return;
-    }
-
-    if (activityLabel && !hideTimerRef.current) {
-      return;
-    }
-
-    if (status === "synced") {
-      showLabel(null);
-    }
-  }, [
-    activityLabel,
-    bootstrap?.running,
-    conflictCount,
-    pendingCount,
-    serverReachable,
-    showLabel,
-    status,
-    syncing,
-  ]);
-
-  useEffect(() => () => {
-    if (hideTimerRef.current) clearTimeout(hideTimerRef.current);
   }, []);
 
   if (!isMobileNativePlatform()) return null;
@@ -192,65 +100,45 @@ export default function DataConsistencyIndicator() {
   return (
     <>
       <Tooltip title={title} arrow>
-        <Stack
-          direction="row"
-          spacing={0.75}
-          alignItems="center"
+        <Box
           onClick={() => setSyncCenterOpen(true)}
-          sx={{ cursor: "pointer", minWidth: 0, flexShrink: 1 }}
+          sx={{
+            width: 22,
+            height: 22,
+            borderRadius: "50%",
+            border: "1px solid",
+            borderColor: color,
+            display: "inline-flex",
+            alignItems: "center",
+            justifyContent: "center",
+            flexShrink: 0,
+            bgcolor: "rgba(255,255,255,0.04)",
+            cursor: "pointer",
+          }}
+          aria-label={title}
         >
-          <Box
-            sx={{
-              width: 22,
-              height: 22,
-              borderRadius: "50%",
-              border: "1px solid",
-              borderColor: color,
-              display: "inline-flex",
-              alignItems: "center",
-              justifyContent: "center",
-              flexShrink: 0,
-              bgcolor: "rgba(255,255,255,0.04)",
-            }}
-            aria-label={title}
-          >
-            {busy ? (
-              <CircularProgress size={12} thickness={5} sx={{ color }} />
-            ) : (
-              <Box
-                sx={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: "50%",
-                  bgcolor: color,
-                  ...(pendingCount > 0 || bootstrapRunning
-                    ? {
-                        animation: "consistency-pulse 1.6s ease-in-out infinite",
-                        "@keyframes consistency-pulse": {
-                          "0%, 100%": { opacity: 1 },
-                          "50%": { opacity: 0.35 },
-                        },
-                      }
-                    : {}),
-                }}
-              />
-            )}
-          </Box>
-          {activityLabel && (
-            <Typography
-              variant="caption"
-              noWrap
+          {busy ? (
+            <CircularProgress size={12} thickness={5} sx={{ color }} />
+          ) : (
+            <Box
               sx={{
-                color: "text.secondary",
-                fontSize: "0.68rem",
-                maxWidth: 120,
-                lineHeight: 1.2,
+                width: 9,
+                height: 9,
+                borderRadius: "50%",
+                bgcolor: color,
+                ...(pendingCount > 0 || bootstrapRunning
+                  ? {
+                      animation: "consistency-pulse 1.6s ease-in-out infinite",
+                      "@keyframes consistency-pulse": {
+                        "0%, 100%": { opacity: 1 },
+                        "50%": { opacity: 0.35 },
+                      },
+                    }
+                  : {}),
               }}
-            >
-              {activityLabel}
-            </Typography>
+            />
           )}
-        </Stack>
+        </Box>
       </Tooltip>
       <SyncCenterPage open={syncCenterOpen} onClose={() => setSyncCenterOpen(false)} />
     </>

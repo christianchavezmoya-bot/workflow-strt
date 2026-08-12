@@ -126,6 +126,37 @@ const stickyCol = (left: number, zIndex: number) => ({
   bgcolor: "background.paper",
 });
 
+const PROJECT_JOB_LABEL_W = 132;
+const projectJobLabelSx = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minWidth: PROJECT_JOB_LABEL_W,
+  width: PROJECT_JOB_LABEL_W,
+  minHeight: 28,
+  borderRadius: 1,
+  px: 0.75,
+  py: 0.25,
+  background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
+  border: "1px solid rgba(45,212,191,0.3)",
+} as const;
+
+const projectAssetCountBadgeSx = {
+  ml: 0.5,
+  minWidth: 22,
+  px: 0.5,
+  py: 0.1,
+  borderRadius: 1,
+  fontSize: "0.6rem",
+  fontWeight: 700,
+  lineHeight: 1.6,
+  textAlign: "center" as const,
+  background: "rgba(45,212,191,0.25)",
+  color: "rgba(45,212,191,1)",
+  border: "1px solid rgba(45,212,191,0.4)",
+  letterSpacing: "0.02em",
+};
+
 const builtInColumnConfigs: ColumnConfig[] = [
   {
     id: "jobNumber",
@@ -133,42 +164,16 @@ const builtInColumnConfigs: ColumnConfig[] = [
     required: true,
     minWidth: 120,
     renderCell: (project: Project) => (
-      <Box
-        component="span"
-        sx={{
-          display: "inline-flex",
-          alignItems: "center",
-          borderRadius: 999,
-          px: 0.5,
-          py: 0.25,
-          background: "linear-gradient(135deg, rgba(45,212,191,0.2), rgba(45,212,191,0.1))",
-          border: "1px solid rgba(45,212,191,0.3)"
-        }}
-      >
+      <Box component="span" sx={projectJobLabelSx}>
         <Button
           component={Link}
           to={`/installations/assets?product=${encodeURIComponent(project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`}
-          sx={{ minWidth: "auto", padding: 0 }}
+          sx={{ minWidth: 0, padding: 0, fontSize: "0.8125rem", fontWeight: 700, flex: 1, textAlign: "center" }}
         >
           {project.jobNumber}
         </Button>
         {(project.assetCount ?? 0) > 0 && (
-          <Box
-            component="span"
-            sx={{
-              ml: 0.75,
-              px: 0.75,
-              py: 0.1,
-              borderRadius: 999,
-              fontSize: "0.6rem",
-              fontWeight: 700,
-              lineHeight: 1.6,
-              background: "rgba(45,212,191,0.25)",
-              color: "rgba(45,212,191,1)",
-              border: "1px solid rgba(45,212,191,0.4)",
-              letterSpacing: "0.02em",
-            }}
-          >
+          <Box component="span" sx={projectAssetCountBadgeSx}>
             {project.assetCount}
           </Box>
         )}
@@ -798,14 +803,13 @@ const ProjectList = () => {
                     <Box sx={{ flex: 1, minWidth: 0 }}>
                       {/* Job number (plain) + asset count badge (always) + status */}
                       <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.4 }}>
-                        <Typography variant="body2" fontWeight={700}>{project.jobNumber}</Typography>
-                        <Box component="span" sx={{
-                          px: 0.75, py: 0.1, borderRadius: 999,
-                          fontSize: "0.6rem", fontWeight: 700, lineHeight: 1.6,
-                          background: "rgba(45,212,191,0.25)", color: "rgba(45,212,191,1)",
-                          border: "1px solid rgba(45,212,191,0.4)",
-                        }}>
-                          {project.assetCount ?? 0}
+                        <Box sx={projectJobLabelSx}>
+                          <Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1, textAlign: "center" }}>
+                            {project.jobNumber}
+                          </Typography>
+                          <Box component="span" sx={projectAssetCountBadgeSx}>
+                            {project.assetCount ?? 0}
+                          </Box>
                         </Box>
                         <Box sx={{ ml: "auto", flexShrink: 0 }}><StatusChip status={project.status} /></Box>
                       </Stack>
