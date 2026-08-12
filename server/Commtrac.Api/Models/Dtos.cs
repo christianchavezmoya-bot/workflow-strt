@@ -1336,6 +1336,10 @@ public record PublicRunSummaryDto(
     DateTime? InstallerSignedAt,
     // Project site timezone so the customer-facing PDF renders wall-clock times consistently.
     string? TimeZoneId = null,
+    string? Office = null,
+    string? Region = null,
+    string? OfficeCountry = null,
+    string? OfficeState = null,
     // Full run + asset metadata for report parity with internal View/Export
     DateTime? StartedAt = null,
     string? TimeTrackingJson = null,
