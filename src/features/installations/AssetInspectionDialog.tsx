@@ -297,9 +297,10 @@ const AssetInspectionDialog = ({ asset, open, onClose }: Props) => {
                             <Tooltip title="Open in runner">
                               <IconButton
                                 size="small"
-                                onClick={() =>
-                                  navigate(`/installations/assets?project=${encodeURIComponent(asset?.projectId ?? "")}&run=${encodeURIComponent(run.id)}`)
-                                }
+                                onClick={() => {
+                                  if (!asset) return;
+                                  navigate(`/installations/assets?project=${encodeURIComponent(asset.projectId ?? "")}&asset=${encodeURIComponent(asset.id)}&action=history&run=${encodeURIComponent(run.id)}`);
+                                }}
                               >
                                 <OpenInNewOutlinedIcon fontSize="small" />
                               </IconButton>
