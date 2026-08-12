@@ -19,4 +19,9 @@ describe("getDocumentPreviewFileType", () => {
       ),
     ).toBe("docx");
   });
+
+  it("detects dwg and dxf CAD extensions", () => {
+    expect(getDocumentPreviewFileType("application/octet-stream", "panel-layout.dwg")).toBe("dwg");
+    expect(getDocumentPreviewFileType(null, "export.dxf")).toBe("dxf");
+  });
 });

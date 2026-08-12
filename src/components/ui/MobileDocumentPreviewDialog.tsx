@@ -31,6 +31,7 @@ import {
   DOCX_PAGE_WIDTH_PX,
   getDocumentPreviewFileType,
 } from "../../utils/documentPreview";
+import { isDownloadOnlyPreviewExtension } from "../../utils/documentFileTypes";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 let pdfjsModulePromise: Promise<PdfJsModule> | null = null;
@@ -48,7 +49,7 @@ async function loadPdfJs(): Promise<PdfJsModule> {
   return pdfjsModulePromise;
 }
 
-type PreviewMode = "pdf" | "image" | "video" | "html" | "iframe" | "unsupported";
+type PreviewMode = "pdf" | "image" | "video" | "html" | "iframe" | "notes" | "unsupported";
 
 interface Props {
   doc: DocumentRecord | null;
@@ -174,6 +175,34 @@ function buildXlsxPreviewHtml(rawHtml: string): string {
     );
   }
   return buildDocxPreviewHtml(rawHtml);
+}
+
+function buildDownloadOnlyPreviewHtml(title: string, message: string): string {
+  return `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
+    body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fff;color:#444}
+    .wrap{max-width:520px;padding:32px;text-align:center}
+    .title{font-size:18px;font-weight:700;color:#222;margin:0 0 10px}
+    .copy{font-size:14px;line-height:1.6}
+  </style></head><body><div class="wrap"><p class="title">${title}</p><p class="copy">${message}</p></div></body></html>`;
+}
+
+function downloadOnlyPreviewHtml(fileType?: string): string {
+  if (fileType === "doc") {
+    return buildDownloadOnlyPreviewHtml(
+      "Preview unavailable for .doc files",
+      "Open or download this file locally, or resave it as .docx to enable in-app preview.",
+    );
+  }
+  if (fileType === "dwg" || fileType === "dxf") {
+    return buildDownloadOnlyPreviewHtml(
+      `Preview unavailable for .${fileType} drawings`,
+      "CAD files must be opened in AutoCAD or another drawing app. Use Download to save the file to your device.",
+    );
+  }
+  return buildDownloadOnlyPreviewHtml(
+    "Preview is not available for this file type",
+    "Use Download to open this file in another app. Offline access works for files already synced to the phone.",
+  );
 }
 
 function PdfCanvasPreview({
@@ -498,19 +527,32 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
 
   const previewMode = useMemo<PreviewMode>(() => {
     if (!doc) return "unsupported";
+    if (!doc.downloadUrl) {
+      return doc.notes || doc.name ? "notes" : "unsupported";
+    }
     if (isPdf(doc.contentType, doc.name)) return "pdf";
     if (doc.contentType?.startsWith("image/")) return "image";
     if (doc.contentType?.startsWith("video/")) return "video";
-    if (fileType === "docx" || fileType === "doc" || fileType === "xlsx" || fileType === "xls") return "html";
+    if (
+      fileType === "docx" ||
+      fileType === "doc" ||
+      fileType === "xlsx" ||
+      fileType === "xls" ||
+      fileType === "dwg" ||
+      fileType === "dxf" ||
+      isDownloadOnlyPreviewExtension(fileType)
+    ) {
+      return "html";
+    }
     if (fileType === "json" || (doc.contentType?.startsWith("text/") ?? false)) return "iframe";
-    return doc.downloadUrl ? "iframe" : "unsupported";
+    if (fileType === "csv" || fileType === "txt") return "iframe";
+    return "iframe";
   }, [doc, fileType]);
 
   useEffect(() => {
     const activeDoc = doc;
-    const activeDownloadUrl = activeDoc?.downloadUrl ?? null;
 
-    if (!open || !activeDownloadUrl) {
+    if (!open || !activeDoc) {
       setLoading(false);
       setError(null);
       setHtmlPreview(null);
@@ -525,6 +567,26 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         if (current) URL.revokeObjectURL(current);
         return null;
       });
+      return;
+    }
+
+    if (previewMode === "notes") {
+      setLoading(false);
+      setError(null);
+      setHtmlPreview(null);
+      setPdfData(null);
+      setBlobUrl((current) => {
+        if (current) URL.revokeObjectURL(current);
+        return null;
+      });
+      setZoom(1);
+      setPageCount(0);
+      return;
+    }
+
+    const activeDownloadUrl = doc.downloadUrl ?? null;
+    if (!activeDownloadUrl) {
+      setLoading(false);
       return;
     }
 
@@ -566,6 +628,17 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         }
 
         if (previewMode === "html") {
+          if (
+            fileType === "doc" ||
+            fileType === "dwg" ||
+            fileType === "dxf" ||
+            isDownloadOnlyPreviewExtension(fileType)
+          ) {
+            if (cancelled) return;
+            setHtmlPreview(downloadOnlyPreviewHtml(fileType));
+            return;
+          }
+
           const buffer = await documentService.openDocumentAsBuffer(activeDownloadUrl!);
           if (buffer.byteLength === 0) throw new Error("This file is empty.");
 
@@ -577,19 +650,6 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
               ? sanitizeNativeDocxBodyHtml(result.value)
               : result.value;
             setHtmlPreview(buildDocxPreviewHtml(bodyHtml, { native: isMobileNativePlatform() }));
-            return;
-          }
-
-          if (fileType === "doc") {
-            if (cancelled) return;
-            setHtmlPreview(
-              `<!DOCTYPE html><html><head><meta charset="utf-8" /><style>
-                body{font-family:Arial,sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#fff;color:#444}
-                .wrap{max-width:520px;padding:32px;text-align:center}
-                .title{font-size:18px;font-weight:700;color:#222;margin:0 0 10px}
-                .copy{font-size:14px;line-height:1.6}
-              </style></head><body><div class="wrap"><p class="title">Preview unavailable for .doc files</p><p class="copy">Open or download this file locally, or resave it as .docx to enable in-app preview.</p></div></body></html>`,
-            );
             return;
           }
 
@@ -915,6 +975,21 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
               }}
             />
           </Box>
+        )}
+
+        {!loading && !error && previewMode === "notes" && doc && (
+          <Stack alignItems="center" justifyContent="center" spacing={1.5} sx={{ flex: 1, px: 3, py: 4, textAlign: "center" }}>
+            <DescriptionOutlined sx={{ fontSize: 42, color: "#f59e0b" }} />
+            <Typography variant="h6" sx={{ color: "#f8fafc" }}>
+              {doc.name}
+            </Typography>
+            {doc.customValues?.contentType && (
+              <Chip label={doc.customValues.contentType} size="small" sx={{ bgcolor: "rgba(245,158,11,0.12)", color: "#fcd34d" }} />
+            )}
+            <Typography variant="body1" sx={{ color: "rgba(226,232,240,0.82)", maxWidth: 520, whiteSpace: "pre-wrap" }}>
+              {doc.notes || "This tip has no attached file. Notes and metadata are shown here."}
+            </Typography>
+          </Stack>
         )}
 
         {!loading && !error && previewMode === "unsupported" && (

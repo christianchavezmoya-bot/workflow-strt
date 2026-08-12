@@ -53,6 +53,7 @@ import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import { isMobileNativePlatform } from "../../utils/platform";
 import QRUploadButton from "../../components/QRUploadButton";
 import DocThumbnail from "../../components/ui/DocThumbnail";
+import { TIPS_UPLOAD_ACCEPT } from "../../utils/documentFileTypes";
 import type { Product } from "../../types/product";
 
 const MobileDocumentPreviewDialog = lazy(() => import("../../components/ui/MobileDocumentPreviewDialog"));
@@ -453,7 +454,7 @@ export default function TipsAndTricksPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/*,application/pdf,.dwg"
+                accept={TIPS_UPLOAD_ACCEPT}
                 style={{ display: "none" }}
                 onChange={handleFileInput}
               />
@@ -474,7 +475,7 @@ export default function TipsAndTricksPage() {
                     Drag & drop or click to browse
                   </Typography>
                   <Typography variant="caption" color="text.secondary">
-                    Accepts: images, videos, PDF, .dwg
+                    Accepts: images, videos, PDF, Office docs, spreadsheets, JSON, CAD (.dwg/.dxf)
                   </Typography>
                 </Stack>
               )}

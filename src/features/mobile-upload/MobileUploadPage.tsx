@@ -14,6 +14,7 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import { useSearchParams } from "react-router-dom";
 import api from "../../services/api";
+import { TIPS_UPLOAD_ACCEPT } from "../../utils/documentFileTypes";
 
 interface TokenInfo {
   type: string;
@@ -345,7 +346,7 @@ export default function MobileUploadPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept="image/*,video/*,application/pdf,.dwg"
+                accept={TIPS_UPLOAD_ACCEPT}
                 multiple
                 style={{ display: "none" }}
                 onChange={handleFileChange}
