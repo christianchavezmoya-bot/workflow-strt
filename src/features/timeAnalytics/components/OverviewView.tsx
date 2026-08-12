@@ -5,11 +5,13 @@ import { useChart } from "./useChart";
 import { lineTrend, gauge } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
 import { formatRangeLabel } from "../utils/datePresets";
+import { chartDeps, productiveDowntimeTrend } from "../utils/chartSeries";
 
 export function OverviewView({ data }: { data: TimeAnalyticsSnapshot }) {
   const k = data.kpis;
   const rangeLabel = formatRangeLabel(data.range.from, data.range.to);
   const timelineDay = data.range.to;
+  const trendMeta = productiveDowntimeTrend(data);
 
   return (
     <>
@@ -52,7 +54,7 @@ export function OverviewView({ data }: { data: TimeAnalyticsSnapshot }) {
 
       <div className="ta-grid cols-12">
         <div className="span-8">
-          <Card title={`Productive vs Downtime — ${rangeLabel}`} sub="Monthly aggregates from workflow time tracking">
+          <Card title={`Productive vs Downtime — ${rangeLabel}`} sub={trendMeta.subtitle}>
             <ChartBox height="lg">
               <TrendChart data={data} />
             </ChartBox>
@@ -106,12 +108,12 @@ function Gauge({ pct }: { pct: number }) {
 
 function TrendChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const series = useMemo(() => ({
-    labels: data.downtime.trendMonthly.map(t => t.month),
-    prod: data.downtime.trendMonthly.map(t => t.productive),
-    down: data.downtime.trendMonthly.map(t => t.downtime),
-  }), [data.downtime.trendMonthly]);
-  useChart(ref, () => lineTrend(series.labels, series.prod, series.down), [series.labels.join(",")]);
+  const series = useMemo(() => productiveDowntimeTrend(data), [data]);
+  useChart(
+    ref,
+    () => lineTrend(series.labels, series.productive, series.downtime),
+    chartDeps(data, series.granularity, series.labels.join("|"), series.productive.join(","), series.downtime.join(",")),
+  );
   return <canvas ref={ref} />;
 }
 

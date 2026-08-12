@@ -3,6 +3,7 @@ import { Card, Kpi, Tag, ChartBox, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { barH, multiLine } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 
 export function ProductsView({ data }: { data: TimeAnalyticsSnapshot }) {
   const families = new Set(data.products.map(p => p.family)).size;
@@ -100,13 +101,13 @@ function ProductTrendChart({ data }: { data: TimeAnalyticsSnapshot }) {
       label: name,
       data: data.productTrend.map(p => p.series[name] ?? 0),
     })),
-  ), [seriesNames.length, data.productTrend.length]);
+  ), chartDeps(data, seriesNames.join("|"), data.productTrend.map(p => JSON.stringify(p.series)).join(";")));
   return <canvas ref={ref} />;
 }
 
 function ProductBarChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  useChart(ref, () => barH(data.products.map(p => p.name), data.products.map(p => p.avgMinutes)), [data.products.length]);
+  useChart(ref, () => barH(data.products.map(p => p.name), data.products.map(p => p.avgMinutes)), chartDeps(data, data.products.map(p => `${p.id}:${p.avgMinutes}`).join("|")));
   return <canvas ref={ref} />;
 }
 
@@ -116,7 +117,7 @@ function ProductInstallsChart({ data }: { data: TimeAnalyticsSnapshot }) {
     data.products.map(p => p.name.split(" ")[0]),
     data.products.map(p => p.installs),
     "#3aa1ff",
-  ), [data.products.length]);
+  ), chartDeps(data, data.products.map(p => `${p.id}:${p.installs}`).join("|")));
   return <canvas ref={ref} />;
 }
 
