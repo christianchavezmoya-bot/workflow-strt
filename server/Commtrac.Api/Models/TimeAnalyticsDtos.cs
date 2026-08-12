@@ -121,7 +121,8 @@ public record TimeAnalyticsCustomerDto(
 
 public record TimeAnalyticsDowntimeDto(
     IReadOnlyList<TimeAnalyticsDowntimeReasonDto> Reasons,
-    IReadOnlyList<TimeAnalyticsMonthlyTrendDto> TrendMonthly
+    IReadOnlyList<TimeAnalyticsMonthlyTrendDto> TrendMonthly,
+    IReadOnlyList<TimeAnalyticsDailyTrendDto> TrendDaily
 );
 
 public record TimeAnalyticsDowntimeReasonDto(
@@ -133,6 +134,12 @@ public record TimeAnalyticsDowntimeReasonDto(
 
 public record TimeAnalyticsMonthlyTrendDto(
     string Month,
+    double Productive,
+    double Downtime
+);
+
+public record TimeAnalyticsDailyTrendDto(
+    string Date,
     double Productive,
     double Downtime
 );

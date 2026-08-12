@@ -3,6 +3,7 @@ import { Card, Kpi, Tag, Avatar, ChartBox, MiniBar } from "./primitives";
 import { useChart } from "./useChart";
 import { barH } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 import { formatRangeLabel } from "../utils/datePresets";
 
 export function InstallersView({ data }: { data: TimeAnalyticsSnapshot }) {
@@ -157,13 +158,13 @@ function Heatmap({ data }: { data: TimeAnalyticsSnapshot }) {
 function ProductivityChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const sorted = useMemo(() => [...data.installers].sort((a, b) => b.productivityPct - a.productivityPct), [data]);
-  useChart(ref, () => barH(sorted.map(i => i.name.split(" ")[0]), sorted.map(i => i.productivityPct), "#2dd4bf"), [sorted.map(s => s.id).join(",")]);
+  useChart(ref, () => barH(sorted.map(i => i.name.split(" ")[0]), sorted.map(i => i.productivityPct), "#2dd4bf"), chartDeps(data, sorted.map(s => `${s.id}:${s.productivityPct}`).join("|")));
   return <canvas ref={ref} />;
 }
 
 function DowntimeChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
   const sorted = useMemo(() => [...data.installers].sort((a, b) => b.downtimeHours - a.downtimeHours), [data]);
-  useChart(ref, () => barH(sorted.map(i => i.name.split(" ")[0]), sorted.map(i => i.downtimeHours), "#f87171"), [sorted.map(s => s.id).join(",")]);
+  useChart(ref, () => barH(sorted.map(i => i.name.split(" ")[0]), sorted.map(i => i.downtimeHours), "#f87171"), chartDeps(data, sorted.map(s => `${s.id}:${s.downtimeHours}`).join("|")));
   return <canvas ref={ref} />;
 }

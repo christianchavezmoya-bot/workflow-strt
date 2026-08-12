@@ -3,6 +3,7 @@ import { Card, Kpi, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
 import { comboFan, barV } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { chartDeps } from "../utils/chartSeries";
 
 export function ForecastsView({ data }: { data: TimeAnalyticsSnapshot }) {
   const f = data.forecast;
@@ -56,7 +57,7 @@ function FanChart({ data }: { data: TimeAnalyticsSnapshot }) {
     data.forecast.completion.map(c => c.week),
     data.forecast.completion,
     data.forecast.completion.map(c => c.mid * 0.6),
-  ), [data.forecast.completion.length]);
+  ), chartDeps(data, data.forecast.completion.map(c => `${c.week}:${c.mid}`).join("|")));
   return <canvas ref={ref} />;
 }
 
@@ -67,7 +68,7 @@ function HistoryChart({ data }: { data: TimeAnalyticsSnapshot }) {
     [
       { label: "Actual", data: data.forecast.history.map(h => h.actual), backgroundColor: "#2dd4bf" },
     ],
-  ), [data.forecast.history.length]);
+  ), chartDeps(data, data.forecast.history.map(h => `${h.period}:${h.actual}`).join("|")));
   return <canvas ref={ref} />;
 }
 

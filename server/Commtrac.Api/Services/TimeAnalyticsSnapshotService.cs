@@ -196,7 +196,7 @@ public class TimeAnalyticsSnapshotService
         var productRows = BuildProducts(products, divisions, assets, runs, fromUtc, toUtc);
         var customerRows = BuildCustomers(projects, assets, runs, customerByBizId);
 
-        var downtime = BuildDowntime(runs, fromUtc, toUtc);
+        var downtime = BuildDowntime(runs, fromDate, toDate);
         var finance = BuildFinance(installerRows, projectRows, runs, financeParams);
         var rangeDays = Math.Max(1, (toDate - fromDate).Days + 1);
         var forecast = BuildForecast(projectRows, runs, toDate, rangeDays);
@@ -483,11 +483,15 @@ public class TimeAnalyticsSnapshotService
 
     private static TimeAnalyticsDowntimeDto BuildDowntime(
         List<RunSlice> runs,
-        DateTime fromUtc,
-        DateTime toUtc)
+        DateTime fromDate,
+        DateTime toDate)
     {
         var reasonMap = new Dictionary<string, (int Count, int TotalMin)>(StringComparer.OrdinalIgnoreCase);
         var monthly = new Dictionary<string, (double Prod, double Down)>();
+        var daily = new Dictionary<DateTime, (double Prod, double Down)>();
+
+        for (var d = fromDate.Date; d <= toDate.Date; d = d.AddDays(1))
+            daily[d] = (0, 0);
 
         foreach (var run in runs)
         {
@@ -497,6 +501,15 @@ public class TimeAnalyticsSnapshotService
             m.Prod += run.ProductiveSeconds / 3600.0;
             m.Down += run.DowntimeSeconds / 3600.0;
             monthly[monthKey] = m;
+
+            var day = run.StartedAt.Date;
+            if (daily.ContainsKey(day))
+            {
+                var dd = daily[day];
+                dd.Prod += run.ProductiveSeconds / 3600.0;
+                dd.Down += run.DowntimeSeconds / 3600.0;
+                daily[day] = dd;
+            }
 
             foreach (var entry in ParseTimeEntries(run.TimeTrackingJson))
             {
@@ -527,7 +540,7 @@ public class TimeAnalyticsSnapshotService
             .Take(12)
             .ToList();
 
-        var trend = monthly
+        var trendMonthly = monthly
             .OrderBy(kv => DateTime.ParseExact(kv.Key, "MMM yyyy", CultureInfo.InvariantCulture))
             .Select(kv => new TimeAnalyticsMonthlyTrendDto(
                 kv.Key,
@@ -535,7 +548,15 @@ public class TimeAnalyticsSnapshotService
                 Math.Round(kv.Value.Down, 1)))
             .ToList();
 
-        return new TimeAnalyticsDowntimeDto(reasons, trend);
+        var trendDaily = daily
+            .OrderBy(kv => kv.Key)
+            .Select(kv => new TimeAnalyticsDailyTrendDto(
+                kv.Key.ToString("yyyy-MM-dd"),
+                Math.Round(kv.Value.Prod, 1),
+                Math.Round(kv.Value.Down, 1)))
+            .ToList();
+
+        return new TimeAnalyticsDowntimeDto(reasons, trendMonthly, trendDaily);
     }
 
     private static TimeAnalyticsFinanceDto BuildFinance(
@@ -912,7 +933,7 @@ public class TimeAnalyticsSnapshotService
             filters,
             new TimeAnalyticsKpiDto(0, 0, 0, 0, 0, 0, "—", 0, 0, 0, 0),
             [], [], [], [], [],
-            new TimeAnalyticsDowntimeDto([], []),
+            new TimeAnalyticsDowntimeDto([], [], []),
             new TimeAnalyticsFinanceDto(0, 0, 0, 0, financeParams, [], []),
             new TimeAnalyticsForecastDto(0, toDate.ToString("yyyy-MM-dd"), "low", 0, 0, [], []),
             [], [], [], [], [], [], [], []);
