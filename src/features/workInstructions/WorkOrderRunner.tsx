@@ -282,6 +282,8 @@ export default function WorkOrderRunner({
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const sheetDragStartY = useRef(0);
+  const sheetDragStartTime = useRef(0);
+  const sheetDragOffsetRef = useRef(0);
   const [sheetDragOffset, setSheetDragOffset] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [validationDialogOpen, setValidationDialogOpen] = useState(false);
@@ -354,20 +356,32 @@ export default function WorkOrderRunner({
   function handleSheetTouchStart(clientY: number) {
     if (!isMobileNativePlatform() || !activeRunId || stage !== "running") return;
     sheetDragStartY.current = clientY;
+    sheetDragStartTime.current = performance.now();
   }
 
   function handleSheetTouchMove(clientY: number) {
     if (!isMobileNativePlatform() || !activeRunId || stage !== "running") return;
     const delta = clientY - sheetDragStartY.current;
-    if (delta > 0) setSheetDragOffset(Math.min(delta, 160));
+    if (delta > 0) {
+      const next = Math.min(delta, 220);
+      sheetDragOffsetRef.current = next;
+      setSheetDragOffset(next);
+    }
   }
 
   function handleSheetTouchEnd() {
-    if (sheetDragOffset > 72) {
+    const offset = sheetDragOffsetRef.current;
+    const elapsedMs = Math.max(1, performance.now() - sheetDragStartTime.current);
+    const velocity = offset / elapsedMs;
+    const dismiss = offset > 44 || (offset > 24 && velocity > 0.55);
+    if (dismiss) {
       void handleClose();
     }
+    sheetDragOffsetRef.current = 0;
     setSheetDragOffset(0);
   }
+
+  const nativeBottomInset = "calc(64px + env(safe-area-inset-bottom))";
 
   const runEditPerms = useMemo(
     () => (activeRun && user ? canEditRun(activeRun, user.role) : { time: true, data: true, finalized: false }),
@@ -3535,9 +3549,17 @@ export default function WorkOrderRunner({
         onClose={handleClose}
         maxWidth="sm"
         fullWidth
+        sx={isMobileNativePlatform() ? { zIndex: 1200 } : undefined}
         PaperProps={{
           sx: {
-            maxHeight: "90vh",
+            ...(isMobileNativePlatform()
+              ? {
+                  maxHeight: `calc(100vh - ${nativeBottomInset})`,
+                  mb: nativeBottomInset,
+                  borderBottomLeftRadius: 0,
+                  borderBottomRightRadius: 0,
+                }
+              : { maxHeight: "90vh" }),
             transform: sheetDragOffset > 0 ? `translateY(${sheetDragOffset}px)` : undefined,
             transition: sheetDragOffset > 0 ? "none" : "transform 0.18s ease-out",
           },

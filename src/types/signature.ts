@@ -66,6 +66,11 @@ export interface PublicRunSummary {
   installerSignedAt?: string;
   /** Project site IANA timezone so the customer PDF renders wall-clock times consistently. */
   timeZoneId?: string;
+  /** Fallback timezone inference when timeZoneId is missing. */
+  office?: string;
+  region?: string;
+  officeCountry?: string;
+  officeState?: string;
   /** Full run timing + metadata for report parity with internal View/Export. */
   startedAt?: string;
   timeTrackingJson?: string;

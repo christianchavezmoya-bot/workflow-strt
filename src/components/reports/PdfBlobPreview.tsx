@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import * as pdfjsLib from "pdfjs-dist";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
   import.meta.url,
 ).toString();
-const STANDARD_FONT_DATA_URL = new URL(
-  "pdfjs-dist/standard_fonts/",
-  import.meta.url,
-).toString();
+
+/** pdf.js requires this URL to end with a trailing slash. */
+const STANDARD_FONT_DATA_URL = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${pdfjsLib.version}/standard_fonts/`;
 
 function previewLoadErrorMessage(err: unknown): string {
   if (err instanceof Error && err.message) return err.message;
@@ -24,10 +24,14 @@ type Props = {
 };
 
 /**
- * Scrollable PDF preview using pdf.js canvas rendering on all platforms.
- * Avoids browser iframe PDF chrome showing blob UUIDs as the document title.
+ * Scrollable PDF preview.
+ *
+ * Web uses the browser's native PDF viewer (iframe) — stable on LAN/dev links and
+ * avoids pdf.js standard-font URL issues in Vite dev. Native mobile uses pdf.js canvas
+ * rendering because embedded iframe/blob viewers are less reliable in Capacitor.
  */
 export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
+  const isNativeMobile = isMobileNativePlatform();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -35,8 +39,21 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
+    const nextUrl = URL.createObjectURL(blob);
+    setBlobUrl(nextUrl);
+    return () => URL.revokeObjectURL(nextUrl);
+  }, [blob]);
+
+  useEffect(() => {
+    if (!isNativeMobile) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -46,9 +63,11 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       if (!cancelled) setError("Could not read PDF data.");
     });
     return () => { cancelled = true; };
-  }, [blob]);
+  }, [blob, isNativeMobile]);
 
   useEffect(() => {
+    if (!isNativeMobile) return;
+
     const node = viewportRef.current;
     if (!node) return;
     let frame = 0;
@@ -64,9 +83,11 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, []);
+  }, [isNativeMobile]);
 
   useEffect(() => {
+    if (!isNativeMobile) return;
+
     let cancelled = false;
 
     async function renderPdf() {
@@ -138,7 +159,41 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
 
     void renderPdf();
     return () => { cancelled = true; };
-  }, [pdfData, containerWidth, zoom]);
+  }, [pdfData, containerWidth, isNativeMobile, zoom]);
+
+  if (!isNativeMobile && blobUrl) {
+    return (
+      <Box
+        sx={{
+          height: "100%",
+          overflow: "auto",
+          WebkitOverflowScrolling: "touch",
+          bgcolor: "#525659",
+          px: 1,
+          py: 1.5,
+        }}
+      >
+        {scrollHint && (
+          <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
+            {scrollHint}
+          </Typography>
+        )}
+        <Box
+          component="iframe"
+          src={`${blobUrl}#view=FitH`}
+          title="PDF preview"
+          sx={{
+            width: "100%",
+            height: "100%",
+            minHeight: 640,
+            border: "none",
+            borderRadius: 2,
+            bgcolor: "#fff",
+          }}
+        />
+      </Box>
+    );
+  }
 
   return (
     <Box
@@ -167,6 +222,20 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
         <Typography variant="body2" sx={{ color: "#ffb4a2", textAlign: "center", py: 2 }}>
           {error}
         </Typography>
+      )}
+      {!loading && error && blobUrl && (
+        <Box
+          component="iframe"
+          src={`${blobUrl}#view=FitH`}
+          title="PDF preview fallback"
+          sx={{
+            width: "100%",
+            minHeight: 640,
+            border: "none",
+            borderRadius: 2,
+            bgcolor: "#fff",
+          }}
+        />
       )}
       <Box ref={pagesRef} />
     </Box>

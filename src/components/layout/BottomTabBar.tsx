@@ -79,7 +79,7 @@ const BottomTabBar = () => {
           bottom: 0,
           left: 0,
           right: 0,
-          zIndex: 200,
+          zIndex: 1400,
           borderTop: "1px solid",
           borderColor: "divider",
           bgcolor: "background.paper",

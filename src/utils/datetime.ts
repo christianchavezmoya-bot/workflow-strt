@@ -132,14 +132,31 @@ export interface FormatInstantOptions {
  * @param timeZoneId  IANA zone (e.g. "Australia/Sydney"); invalid/empty falls back to UTC.
  * @returns e.g. "2 Aug 2026, 2:30 PM AEST" — or "" if the instant can't be parsed.
  */
+/** Parse an API/DB instant as UTC even when the string omits a Z suffix (common ASP.NET DateTime). */
+export function parseUtcInstant(
+  isoUtc: string | number | Date | null | undefined,
+): Date | null {
+  if (isoUtc === null || isoUtc === undefined || isoUtc === "") return null;
+  if (isoUtc instanceof Date) return Number.isNaN(isoUtc.getTime()) ? null : isoUtc;
+  if (typeof isoUtc === "number") {
+    const d = new Date(isoUtc);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  const trimmed = isoUtc.trim();
+  if (!trimmed) return null;
+  const hasZone = /[zZ]$|[+-]\d{2}:\d{2}$/.test(trimmed);
+  const d = new Date(hasZone ? trimmed : `${trimmed}Z`);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
 export function formatInstant(
   isoUtc: string | number | Date | null | undefined,
   timeZoneId?: string | null,
   options: FormatInstantOptions = {},
 ): string {
   if (isoUtc === null || isoUtc === undefined || isoUtc === "") return "";
-  const d = isoUtc instanceof Date ? isoUtc : new Date(isoUtc);
-  if (Number.isNaN(d.getTime())) return "";
+  const d = parseUtcInstant(isoUtc);
+  if (!d) return "";
 
   const { date = true, time = true, withZone = true, locale } = options;
   const zone = resolveProjectTimeZone(timeZoneId);
