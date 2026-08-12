@@ -141,6 +141,8 @@ interface WorkOrderRunnerProps {
   teamMembers?: { id: string; fullName: string }[];
   /** All active users â€" fallback when no team is assigned to the project. */
   allUsers?: { id: string; fullName: string }[];
+  /** When opening a locked run for installer sign-off review, show summary before signature. */
+  signoffReviewMode?: boolean;
 }
 
 type Stage = "setup" | "running" | "summary" | "bom" | "consumables" | "installer-sign" | "customer-sign";
@@ -262,6 +264,7 @@ export default function WorkOrderRunner({
   featureSelections,
   teamMembers,
   allUsers,
+  signoffReviewMode = false,
 }: WorkOrderRunnerProps) {
   const resolvedTimeZone = useProjectTimeZone(projectIdProp) ?? timeZoneIdProp;
   const userSelectOptions = (teamMembers && teamMembers.length > 0 ? teamMembers : (allUsers ?? [])).map((u) => u.fullName);
@@ -1236,8 +1239,14 @@ export default function WorkOrderRunner({
     setActiveRun(run);
     setActiveRunId(run.id);
     syncRunTimeState(run);
+    applyRunProgressFromRun(run);
     setSaved(true);
     onComplete?.(extractFeatureValues());
+
+    if (signoffReviewMode && run.signatureStatus === "PendingInstaller") {
+      setStage("summary");
+      return;
+    }
 
     if (run.signatureStatus === "PendingInstaller") {
       setInstName(currentUserName ?? "");
@@ -2817,7 +2826,17 @@ export default function WorkOrderRunner({
                 Review recorded time and captured fields before locking. Use <strong>Adjust time</strong> or <strong>Back to steps</strong> if anything needs correction. After you sign as installer, you will not be able to edit time or field captures (Project Managers and Admins may still correct data until customer sign-off).
               </Alert>
             )}
-            {saved && (
+            {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" && (
+              <Alert severity="info" sx={{ fontSize: 12 }}>
+                Review recorded time and captured fields, then continue to installer sign-off.
+              </Alert>
+            )}
+            {saved && !signoffReviewMode && (
+              <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
+                Run locked and saved successfully.
+              </Alert>
+            )}
+            {saved && signoffReviewMode && activeRun?.signatureStatus !== "PendingInstaller" && (
               <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
                 Run locked and saved successfully.
               </Alert>
@@ -2860,8 +2879,29 @@ export default function WorkOrderRunner({
                 Adjust time
               </Button>
             )}
+            {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" && runEditPerms.time && (
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => setTimeEditorOpen(true)}
+              >
+                Adjust time
+              </Button>
+            )}
           </Stack>
-          {!saved && (
+          {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" ? (
+            <Button
+              variant="contained"
+              size={isMobileNativePlatform() ? "small" : "medium"}
+              onClick={() => {
+                setInstName(currentUserName ?? "");
+                setInstConsent(false);
+                setStage("installer-sign");
+              }}
+            >
+              Continue to sign-off
+            </Button>
+          ) : !saved && (
             <>
               {(primaryBlockingIssue || hasMissingCaptures) && (
                 <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
@@ -3341,11 +3381,11 @@ export default function WorkOrderRunner({
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={handleClose}>Skip &amp; close</Button>
+          <Button onClick={handleClose}>Skip & close</Button>
           <Button variant="contained" onClick={handleInstallerSign}
             disabled={instSaving || !instName.trim() || !instConsent}
             startIcon={instSaving ? <CircularProgress size={14} /> : undefined}>
-            {instSaving ? "Signing..." : "Sign &amp; continue"}
+            {instSaving ? "Signing..." : "Sign & continue"}
           </Button>
         </DialogActions>
       </>

@@ -2061,7 +2061,7 @@ public class AssetWorkflowRunsController : ControllerBase
         if (asset is null) return;
         await _sse.BroadcastAsync(
             "assets:updated",
-            new { productId = asset.ProductId, projectId = asset.ProjectId });
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
     }
 
     private async Task NotifyRunEventAsync(

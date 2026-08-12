@@ -649,7 +649,7 @@ public class ProjectAssetsController : ControllerBase
         await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
         var currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         await _sse.BroadcastExceptAsync(currentUserId, "assets:updated",
-            new { productId = asset.ProductId, projectId = asset.ProjectId });
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
         return CreatedAtAction(nameof(GetById), new { id = asset.Id }, await ToDtoAsync(asset));
     }
 
@@ -686,10 +686,10 @@ public class ProjectAssetsController : ControllerBase
             await NotifyAssetAssignmentChangeAsync(asset, null, asset.AssignedUserId, "asset-created");
         }
         var bulkUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
-        if (created.Count > 0)
+        foreach (var createdAsset in created)
         {
             await _sse.BroadcastExceptAsync(bulkUserId, "assets:updated",
-                new { productId = request.ProductId, projectId = request.ProjectId });
+                new { assetId = createdAsset.Id, productId = request.ProductId, projectId = request.ProjectId });
         }
         return Ok(await MapAssetsToDtosAsync(created));
     }
@@ -727,7 +727,7 @@ public class ProjectAssetsController : ControllerBase
         }
         var putUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         await _sse.BroadcastExceptAsync(putUserId, "assets:updated",
-            new { productId = asset.ProductId, projectId = asset.ProjectId });
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -773,7 +773,7 @@ public class ProjectAssetsController : ControllerBase
         await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, actorName);
         var patchUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         await _sse.BroadcastExceptAsync(patchUserId, "assets:updated",
-            new { productId = asset.ProductId, projectId = asset.ProjectId });
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
         return Ok(await ToDtoAsync(asset));
     }
 
@@ -820,7 +820,7 @@ public class ProjectAssetsController : ControllerBase
             await NotifyAssetAssignmentChangeAsync(asset, previousAssignedUserId, asset.AssignedUserId, "asset-assignment-updated");
         }
         await _sse.BroadcastExceptAsync(callerId, "assets:updated",
-            new { productId = asset.ProductId, projectId = asset.ProjectId });
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
 
         return Ok(await ToDtoAsync(asset));
     }
@@ -882,7 +882,7 @@ public class ProjectAssetsController : ControllerBase
         await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId, actorName);
         var delUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         await _sse.BroadcastExceptAsync(delUserId, "assets:updated",
-            new { productId = asset.ProductId, projectId = asset.ProjectId });
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
         return NoContent();
     }
 

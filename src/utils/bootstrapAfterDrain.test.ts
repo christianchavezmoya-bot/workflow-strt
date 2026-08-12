@@ -19,6 +19,10 @@ vi.mock("../services/offlineBootstrapService", () => ({
   },
 }));
 
+vi.mock("./bootstrapFreshness", () => ({
+  shouldScheduleBootstrap: vi.fn(async () => true),
+}));
+
 import offlineBootstrapService from "../services/offlineBootstrapService";
 import { getServerReachable, subscribeServerReachable } from "../services/connectivityMonitor";
 import { scheduleBootstrapAfterUploadDrain } from "./bootstrapAfterDrain";
@@ -37,11 +41,12 @@ describe("scheduleBootstrapAfterUploadDrain", () => {
     expect(subscribeServerReachable).toHaveBeenCalled();
   });
 
-  it("starts bootstrap immediately when server is confirmed reachable", () => {
+  it("starts bootstrap immediately when server is confirmed reachable", async () => {
     vi.mocked(getServerReachable).mockReturnValue(true);
 
-    scheduleBootstrapAfterUploadDrain("all", 0);
+    scheduleBootstrapAfterUploadDrain("all", 0, false, "first-login");
+    await Promise.resolve();
 
-    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({ scope: "all" });
+    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({ scope: "all", force: false });
   });
 });
