@@ -60,6 +60,13 @@ Before AWS cutover, complete [`docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](../d
 
 Deploy steps: [`docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`](../docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md).
 
+Staging standup: [`docs/CLOUD_HOSTING_STAGING_STANDUP.md`](../docs/CLOUD_HOSTING_STAGING_STANDUP.md).
+
+```powershell
+# Local Docker staging (Postgres + MinIO + API on :8080)
+.\scripts\standup-staging.ps1 -BuildWeb
+```
+
 ### Cloud web / native builds
 
 ```bash

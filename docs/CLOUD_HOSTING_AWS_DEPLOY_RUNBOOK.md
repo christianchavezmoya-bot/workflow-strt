@@ -228,7 +228,17 @@ Do **not** promote to production until staging sign-off.
 
 ## Local parity (before AWS)
 
-Test profiles without AWS account:
+Test profiles without AWS account — **start here:**
+
+```bash
+./scripts/standup-staging.sh --build-web    # Mac/Linux
+# or
+.\scripts\standup-staging.ps1 -BuildWeb      # Windows
+```
+
+See [`docs/CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md).
+
+Legacy single-service parity:
 
 ```bash
 docker compose up -d postgres minio
