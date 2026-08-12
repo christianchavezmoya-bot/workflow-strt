@@ -1,19 +1,27 @@
 import { useMemo, useRef } from "react";
-import { Card, Kpi, Tag, Avatar, ChartBox, MiniBar } from "./primitives";
+import { Card, Kpi, Tag, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
-import { multiLine, barV, TA_COLORS } from "./ChartTheme";
+import { multiLine, barV, comboFan } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
 
 export function ProjectsView({ data }: { data: TimeAnalyticsSnapshot }) {
   const k = data.kpis;
+  const installed = data.projects.reduce((a, b) => a + b.doneAssets, 0);
+  const totalAssets = data.projects.reduce((a, b) => a + b.totalAssets, 0);
+  const onTimePct = totalAssets > 0
+    ? Math.round(data.projects.filter(p => p.health === "good").length / Math.max(data.projects.length, 1) * 100)
+    : 0;
+  const customerCount = new Set(data.projects.map(p => p.customerId)).size;
+  const focusProject = data.projects[0]?.name ?? "—";
+
   return (
     <>
       <div className="ta-grid cols-5">
-        <Kpi label="Active Projects" value={k.projectsActive} icon="▣" tone="default" hint="across 5 customers" />
-        <Kpi label="Assets Installed" value={data.projects.reduce((a, b) => a + b.doneAssets, 0)} icon="✓" tone="good" delta={{ dir: "up", text: "142 this mo" }} />
-        <Kpi label="Assets Remaining" value={k.assetsRemaining} icon="◌" tone="violet" hint="across all projects" />
-        <Kpi label="Productive Hours" value={(data.projects.reduce((a, b) => a + b.productiveHours, 0) / 1000).toFixed(1) + "k"} unit="h" icon="⏱" hint="month-to-date" />
-        <Kpi label="On-Time Delivery" value="88" unit="%" icon="◈" tone="good" delta={{ dir: "up", text: "4 vs target 85%" }} />
+        <Kpi label="Active Projects" value={k.projectsActive} icon="▣" tone="default" hint={`${customerCount} customers`} />
+        <Kpi label="Assets Installed" value={installed} icon="✓" tone="good" hint="in selected period scope" />
+        <Kpi label="Assets Remaining" value={k.assetsRemaining} icon="◌" tone="violet" hint="across filtered projects" />
+        <Kpi label="Productive Hours" value={data.projects.reduce((a, b) => a + b.productiveHours, 0).toFixed(1)} unit="h" icon="⏱" hint="selected period" />
+        <Kpi label="On Track" value={onTimePct} unit="%" icon="◈" tone="good" hint="projects with good health" />
       </div>
 
       <div className="ta-grid cols-2">
@@ -24,12 +32,12 @@ export function ProjectsView({ data }: { data: TimeAnalyticsSnapshot }) {
 
       <div className="ta-grid cols-12">
         <div className="span-7">
-          <Card title={`Burn-Down Chart — ${data.projects[0]?.name ?? ""}`} sub="Assets remaining vs ideal plan · 24-week project">
+          <Card title={`Burn-Down Chart — ${focusProject}`} sub="Assets remaining vs ideal plan">
             <ChartBox height="lg"><BurndownChart data={data} /></ChartBox>
           </Card>
         </div>
         <div className="span-5">
-          <Card title="Daily Throughput" sub="Assets installed per day · last 4 weeks">
+          <Card title="Daily Throughput" sub="Completed assets per day in selected period">
             <ChartBox height="lg"><ThroughputChart data={data} /></ChartBox>
           </Card>
         </div>
@@ -37,12 +45,12 @@ export function ProjectsView({ data }: { data: TimeAnalyticsSnapshot }) {
 
       <div className="ta-grid cols-12">
         <div className="span-7">
-          <Card title="Completion Forecast — All Projects" sub="Monte-Carlo estimate · 80% confidence band">
+          <Card title="Completion Forecast" sub="Cumulative installs · low / mid / high band from recent throughput">
             <ChartBox height="lg"><ForecastChart data={data} /></ChartBox>
           </Card>
         </div>
         <div className="span-5">
-          <Card title="Project Leaderboard" sub="Closest to delivery · ranked by % complete">
+          <Card title="Project Leaderboard" sub="Ranked by % complete">
             <ProjectLeaderboard data={data} />
           </Card>
         </div>
@@ -95,33 +103,20 @@ function BurndownChart({ data }: { data: TimeAnalyticsSnapshot }) {
 
 function ThroughputChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const labels = data.burndown.slice(-21).map(d => d.week);
-  const series = useMemo(
-    () => labels.map((label, i) => stableThroughput(label, i)),
-    [labels],
-  );
-  useChart(ref, () => barV(labels, [{ label: "Assets installed", data: series }]), [labels, series]);
+  const daily = data.throughputDaily ?? [];
+  const recent = daily.slice(-28);
+  const labels = recent.map(d => d.date.slice(5));
+  const series = recent.map(d => d.completions);
+  useChart(ref, () => barV(labels, [{ label: "Assets installed", data: series }]), [labels.join(","), series.join(",")]);
   return <canvas ref={ref} />;
-}
-
-/** Deterministic daily throughput for mock/demo charts (no Math.random re-render flicker). */
-function stableThroughput(label: string, index: number): number {
-  let hash = index * 17;
-  for (let i = 0; i < label.length; i++) {
-    hash = (hash * 31 + label.charCodeAt(i)) | 0;
-  }
-  return 8 + (Math.abs(hash) % 7);
 }
 
 function ForecastChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  useChart(ref, () => multiLine(
+  useChart(ref, () => comboFan(
     data.forecast.completion.map(c => c.week),
-    [
-      { label: "Optimistic", data: data.forecast.completion.map((_, i) => 10 + i * 13), borderColor: "#34d399" },
-      { label: "Plan",       data: data.forecast.completion.map((_, i) => 12 + i * 18), borderColor: "#2dd4bf" },
-      { label: "Pessimistic",data: data.forecast.completion.map((_, i) => 14 + i * 25), borderColor: "#f87171" },
-    ],
+    data.forecast.completion,
+    data.forecast.completion.map(c => c.mid * 0.6),
   ), [data.forecast.completion.length]);
   return <canvas ref={ref} />;
 }

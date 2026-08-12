@@ -1,20 +1,24 @@
-import { useMemo, useRef } from "react";
-import { Card, Kpi, Tag, ChartBox, MiniBar } from "./primitives";
+import { useRef } from "react";
+import { Card, Kpi, Tag, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
-import { barH, multiLine } from "./ChartTheme";
+import { barH, scatter } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
 
 export function AssetsView({ data }: { data: TimeAnalyticsSnapshot }) {
+  const easiest = data.assets.length
+    ? [...data.assets].sort((a, b) => a.avgMinutes - b.avgMinutes)[0]
+    : null;
+
   return (
     <>
       <div className="ta-grid cols-4">
-        <Kpi label="Asset Models" value={data.assets.length} icon="▦" tone="default" hint="in active catalogue" />
+        <Kpi label="Asset Models" value={data.assets.length} icon="▦" tone="default" hint="in selected scope" />
         <Kpi label="Avg Install" value={data.assets.length ? Math.round(avg(data.assets.map(a => a.avgMinutes))) : 0} unit="min" icon="⏲" tone="violet" hint="across all assets" />
         <Kpi label="Std Deviation" value={data.assets.length ? (avg(data.assets.map(a => a.std))).toFixed(1) : "0"} unit="min" icon="σ" tone="warn" hint="lower is more consistent" />
-        <Kpi label="Easiest Asset" value={data.assets.length ? [...data.assets].sort((a, b) => a.avgMinutes - b.avgMinutes)[0].type : "—"} icon="✓" tone="good" />
+        <Kpi label="Easiest Asset" value={easiest?.type ?? "—"} icon="✓" tone="good" />
       </div>
 
-      <Card title="Average Installation Time by Asset Type" sub="Min · Max · Std Deviation · Sample size across all projects" action={<span style={{ fontSize: 11 }}>Compare across projects ▾</span>}>
+      <Card title="Average Installation Time by Asset Type" sub="Min · Max · Std Deviation · Sample size">
         <AssetTable data={data} />
       </Card>
 
@@ -25,17 +29,17 @@ export function AssetsView({ data }: { data: TimeAnalyticsSnapshot }) {
           </Card>
         </div>
         <div className="span-5">
-          <Card title="Model Comparison — Across Projects" sub="Normalised speed per project · 100 = project average">
-            <ChartBox height="lg"><AssetComparisonChart data={data} /></ChartBox>
+          <Card title="Difficulty vs Duration" sub="Install count vs average minutes">
+            <ChartBox height="lg"><AssetScatterChart data={data} /></ChartBox>
           </Card>
         </div>
       </div>
 
       <div className="ta-grid cols-2">
-        <Card title="Hardest Assets to Install" sub="Highest average install time · high variation">
+        <Card title="Hardest Assets to Install" sub="Highest average install time">
           <AssetList data={data} mode="hardest" />
         </Card>
-        <Card title="Easiest Assets to Install" sub="Lowest average install time · most consistent">
+        <Card title="Easiest Assets to Install" sub="Lowest average install time">
           <AssetList data={data} mode="easiest" />
         </Card>
       </div>
@@ -75,7 +79,7 @@ function AssetTable({ data }: { data: TimeAnalyticsSnapshot }) {
                 <td className="num muted">{a.maxMinutes}m</td>
                 <td className="num">{a.std.toFixed(1)}</td>
                 <td className="num">{a.installs}</td>
-                <td><Tag tone={cls as any}>{lbl}<span style={{ color: "var(--ta-text-mute)", marginLeft: 6 }}>· {a.difficulty.toFixed(1)}</span></Tag></td>
+                <td><Tag tone={cls as "good" | "warn" | "bad"}>{lbl}<span style={{ color: "var(--ta-text-mute)", marginLeft: 6 }}>· {a.difficulty.toFixed(1)}%</span></Tag></td>
               </tr>
             );
           })}
@@ -91,26 +95,23 @@ function AssetBarChart({ data }: { data: TimeAnalyticsSnapshot }) {
   return <canvas ref={ref} />;
 }
 
-function AssetComparisonChart({ data }: { data: TimeAnalyticsSnapshot }) {
+function AssetScatterChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const labels = data.assets.map(a => a.model);
-  // Build three mock project series — replace with real data
-  const projects = data.projects.slice(0, 3);
-  useChart(ref, () => multiLine(
-    labels,
-    projects.map((p, i) => ({
-      label: p.name,
-      data: data.assets.map((a, j) => Math.round(a.avgMinutes * (0.92 + i * 0.06 + ((j * 7 + i * 3) % 10) * 0.008))),
-      borderColor: ["#2dd4bf", "#ff9f45", "#3aa1ff"][i],
+  useChart(ref, () => scatter(
+    data.assets.map(a => ({
+      x: a.avgMinutes,
+      y: a.installs,
+      name: a.type,
+      color: a.difficulty > 12 ? "#f87171" : a.difficulty > 6 ? "#fbbf24" : "#34d399",
     })),
-  ), [labels.length, projects.length, data.assets]);
+  ), [data.assets.length]);
   return <canvas ref={ref} />;
 }
 
 function AssetList({ data, mode }: { data: TimeAnalyticsSnapshot; mode: "hardest" | "easiest" }) {
   const sorted = [...data.assets].sort((a, b) => mode === "hardest" ? b.avgMinutes - a.avgMinutes : a.avgMinutes - b.avgMinutes);
   const slice = mode === "hardest" ? sorted.slice(0, 4) : sorted.slice(-4).reverse();
-  const max = Math.max(...data.assets.map(a => a.avgMinutes));
+  const max = Math.max(...data.assets.map(a => a.avgMinutes), 1);
   return (
     <div className="ta-barlist">
       {slice.map(a => (
