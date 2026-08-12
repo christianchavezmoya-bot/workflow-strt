@@ -110,6 +110,7 @@ import { assetDocumentLinkService } from "../../services/assetDocumentLinkServic
 import { entityGetAssetCacheAgeMs, CACHE_SOFT_LIMIT_MS, CACHE_HARD_LIMIT_MS, entityReplaceIssuesForAsset } from "../../services/localDB";
 import type { WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { resolveReportTimeZone } from "../../utils/datetime";
+import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
 import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 import ProjectJobSelect from "../../components/ProjectJobSelect";
@@ -557,6 +558,7 @@ const AssetInstallationPage = () => {
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>(undefined);
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>(undefined);
+  const [runnerSignoffReviewMode, setRunnerSignoffReviewMode] = useState(false);
   const [runnerFeatureSelections, setRunnerFeatureSelections] = useState<import("../../services/productConfigService").FeatureSelection[] | undefined>(undefined);
   // Tracks paused workflow progress per asset: { done, total, completedTitles }
   const [pausedProgress, setPausedProgress] = useState<Record<string, { done: number; total: number; completedTitles: string[] }>>({});
@@ -960,7 +962,7 @@ const AssetInstallationPage = () => {
     }
 
     if (actionFromUrl === "signature") {
-      if (!isNativePlatform && targetRun) {
+      if (targetRun) {
         void openSignatureFlow(asset, targetRun);
         deepLinkHandledRef.current = key;
         return;
@@ -2915,6 +2917,36 @@ const AssetInstallationPage = () => {
     void openRunHistory(asset);
   }
 
+  async function openRunnerForSignoffReview(asset: ProjectAsset, run: AssetWorkflowRun) {
+    markWorkflowOpenTap("assets-signoff-review", run.workflowConfigId);
+    setRunnerLoading(asset.id);
+    try {
+      const cfgFromMemory = wfConfigMap.get(run.workflowConfigId) ?? null;
+      const payload = await loadWorkflowOpenPayload(run.workflowConfigId, asset, {
+        configFromMemory: cfgFromMemory,
+        runs: runsMap[asset.id],
+        mergeMedia: true,
+      });
+      if (!payload) {
+        alert("Workflow config not found.");
+        return;
+      }
+
+      setRunnerExistingRunId(run.id);
+      setRunnerSignoffReviewMode(true);
+      setRunnerAsset(asset);
+      setRunnerWorkflow(payload.workflow);
+      setRunnerWorkflowConfigId(run.workflowConfigId);
+      setRunnerFeatureSelections(parseFeatureSelectionsForConfig(run.workflowConfigId));
+      setRunnerOpen(true);
+      refreshWorkflowOpenDataInBackground(asset.id, run.workflowConfigId);
+    } catch {
+      alert("Failed to load workflow.");
+    } finally {
+      setRunnerLoading(null);
+    }
+  }
+
   async function openSignatureFlow(asset: ProjectAsset, preferredRun?: AssetWorkflowRun | null) {
     let run = preferredRun ?? null;
     if (!run) {
@@ -2932,13 +2964,14 @@ const AssetInstallationPage = () => {
         .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0] ?? null;
     }
     const canRequestCustomer = currentUser.role === "Admin" || currentUser.role === "Project Manager";
+    if (run && isPendingInstallerSignature(run.signatureStatus)) {
+      await openRunnerForSignoffReview(asset, run);
+      return;
+    }
     if (
-      !isNativePlatform
-      && run
-      && (
-        isPendingInstallerSignature(run.signatureStatus)
-        || (isPendingCustomerSignature(run.signatureStatus) && canRequestCustomer)
-      )
+      run
+      && isPendingCustomerSignature(run.signatureStatus)
+      && canRequestCustomer
     ) {
       const proj = projects.find((p) => p.id === asset.projectId);
       setSignatureFlowTarget({ asset, run, jobNumber: proj?.jobNumber });
@@ -3573,7 +3606,7 @@ ${words.slice(midpoint).join(" ")}`;
       siteLocation: asset.location ?? undefined,
       assignedTechnician: tech?.fullName,
       documentType: docType,
-      timeZoneId: resolveReportTimeZone(proj),
+      timeZoneId: await resolveProjectTimeZoneForReport(proj),
       signatureEvents,
       productFeatures,
     };
@@ -6901,25 +6934,13 @@ ${words.slice(midpoint).join(" ")}`;
         />
       )}
 
-      {!isNativePlatform && (
-        <WorkflowSignatureFlowHost
-          target={signatureFlowTarget}
-          assignedTechnician={currentUser?.fullName ?? undefined}
-          canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
-          onClose={() => setSignatureFlowTarget(null)}
-          onComplete={() => { void refreshAssets(); }}
-        />
-      )}
-
-      {!isNativePlatform && (
-        <WorkflowSignatureFlowHost
-          target={signatureFlowTarget}
-          assignedTechnician={currentUser?.fullName ?? undefined}
-          canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
-          onClose={() => setSignatureFlowTarget(null)}
-          onComplete={() => { void refreshAssets(); }}
-        />
-      )}
+      <WorkflowSignatureFlowHost
+        target={signatureFlowTarget}
+        assignedTechnician={currentUser?.fullName ?? undefined}
+        canRequestCustomerSignature={currentUser.role === "Admin" || currentUser.role === "Project Manager"}
+        onClose={() => setSignatureFlowTarget(null)}
+        onComplete={() => { void refreshAssets(); }}
+      />
 
       {/* Paused progress popover â€" click badge to see completed steps */}
       <Popover
@@ -7054,6 +7075,7 @@ ${words.slice(midpoint).join(" ")}`;
             setRunnerWorkflowConfigId(undefined);
             setRunnerFeatureSelections(undefined);
             setRunnerExistingRunId(undefined);
+            setRunnerSignoffReviewMode(false);
             setRunnerPrefillValues(undefined);
             refreshAssets();
             if (closedAssetId) loadAssignmentsForAsset(closedAssetId);
@@ -7064,6 +7086,7 @@ ${words.slice(midpoint).join(" ")}`;
           projectAssetId={runnerAsset.id}
           workflowConfigId={runnerWorkflowConfigId}
           existingRunId={runnerExistingRunId}
+          signoffReviewMode={runnerSignoffReviewMode}
           prefillValues={runnerPrefillValues}
           currentUserName={currentUser.fullName}
           currentUserId={currentUser.id}

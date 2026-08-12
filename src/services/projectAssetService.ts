@@ -247,7 +247,26 @@ async function hydrateAssetsFromWorkspaceSnapshot(workspace: DashboardWorkspace)
     if (existing?.dirty) return;
 
     const base = existing?.data as ProjectAsset | undefined;
-    if (!base?.productId && !existing?.productId) return;
+    if (!base?.productId && !existing?.productId) {
+      try {
+        const full = await projectAssetService.getById(item.id);
+        if (full) {
+          await entityPutAsset({
+            id: full.id,
+            productId: full.productId,
+            projectId: full.projectId,
+            data: full,
+            dirty: false,
+          });
+          void import("./assetPrefetchService").then(({ prefetchAssetWorkflowData }) => {
+            void prefetchAssetWorkflowData(full.id);
+          });
+        }
+      } catch {
+        // Non-fatal — workspace row still visible online.
+      }
+      return;
+    }
 
     const productId = base?.productId ?? existing!.productId;
     const projectId = item.projectId || base?.projectId || existing!.projectId;
@@ -289,6 +308,12 @@ async function hydrateAssetsFromWorkspaceSnapshot(workspace: DashboardWorkspace)
       data: merged,
       dirty: false,
     });
+
+    if (productId || item.totalSteps > 0) {
+      void import("./assetPrefetchService").then(({ prefetchAssetWorkflowData }) => {
+        void prefetchAssetWorkflowData(item.id);
+      });
+    }
   }));
 }
 
@@ -382,6 +407,32 @@ export const projectAssetService = {
     catch { return []; }
   },
 
+  /** Network-first project list for native prefetch (avoids stale local-first gap after SSE). */
+  async listByProjectFresh(projectId: string, includeDeleted = false): Promise<ProjectAsset[]> {
+    if (!isMobileNativePlatform()) {
+      return this.listByProject(projectId, includeDeleted);
+    }
+    try {
+      const { shouldSkipBlockingFetch } = await import("./connectivityMonitor");
+      if (shouldSkipBlockingFetch()) {
+        return await this.listByProject(projectId, includeDeleted);
+      }
+      const res = await api.get<ProjectAsset[]>(`/project-assets/by-project/${projectId}`, {
+        params: { includeDeleted: includeDeleted || undefined },
+      });
+      const { entityReplaceAssetsByProject, syncMetaSet } = await import("./localDB");
+      await entityReplaceAssetsByProject(
+        projectId,
+        res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: fromDto(a) })),
+      );
+      await syncMetaSet("assets");
+      window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
+      return res.data.map(fromDto);
+    } catch {
+      return await this.listByProject(projectId, includeDeleted);
+    }
+  },
+
   async listByProjectPage(
     projectId: string,
     query: ProjectAssetPageQuery = {},
@@ -412,6 +463,9 @@ export const projectAssetService = {
     const asset = fromDto(res.data);
     if (isMobileNativePlatform()) {
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
+      void import("./assetPrefetchService").then(({ prefetchAssetWorkflowData }) => {
+        void prefetchAssetWorkflowData(asset.id);
+      });
     } else {
       invalidateWebCacheByPrefix("/project-assets/by-product/");
       invalidateWebCacheByPrefix("/project-assets/by-project/");
@@ -427,6 +481,9 @@ export const projectAssetService = {
     const created = res.data.map(fromDto);
     if (isMobileNativePlatform()) {
       await Promise.all(created.map((a) => entityPutAsset({ id: a.id, productId: a.productId, projectId: a.projectId, data: a })));
+      void import("./assetPrefetchService").then(({ prefetchAssetIds }) => {
+        void prefetchAssetIds(created.map((a) => a.id));
+      });
     } else {
       invalidateWebCacheByPrefix("/project-assets/by-product/");
       invalidateWebCacheByPrefix("/project-assets/by-project/");
@@ -901,6 +958,9 @@ export const projectAssetService = {
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
         await hydrateAssetsFromWorkspaceSnapshot(res.data);
+        void import("./assetPrefetchService").then(({ prefetchAssignedAssetsFromWorkspace }) => {
+          void prefetchAssignedAssetsFromWorkspace(res.data, userId);
+        });
       }
       if (isMobileNativePlatform()) {
         return await reconcileWorkspaceWithLocalStatus(res.data);
