@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,12 +14,12 @@ namespace Commtrac.Api.Controllers;
 public class MobileUploadController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
 
-    public MobileUploadController(AppDbContext db, IWebHostEnvironment env)
+    public MobileUploadController(AppDbContext db, IFileStorageService files)
     {
         _db = db;
-        _env = env;
+        _files = files;
     }
 
     private static readonly JsonSerializerOptions _json = new()
@@ -163,20 +164,14 @@ public class MobileUploadController : ControllerBase
         if (uploadFiles.Count == 0)
             return BadRequest(new { error = "No file provided." });
 
-        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
-        Directory.CreateDirectory(storageRoot);
-
         var documentIds = new List<string>();
         foreach (var upload in uploadFiles)
         {
             var extension = Path.GetExtension(upload.FileName);
             var storedName = $"{Guid.NewGuid()}{extension}";
-            var storedPath = Path.Combine(storageRoot, storedName);
+            var relativePath = _files.BuildRelativePath("Storage", "Documents", storedName);
 
-            await using (var stream = System.IO.File.Create(storedPath))
-            {
-                await upload.CopyToAsync(stream);
-            }
+            await _files.SaveAsync(relativePath, upload.OpenReadStream());
 
             var doc = new DocumentEntity
             {
@@ -184,7 +179,7 @@ public class MobileUploadController : ControllerBase
                 Type = entry.Type,
                 LinkedTo = entry.LinkedTo,
                 UploadedAt = DateTime.UtcNow.ToString("s"),
-                FilePath = Path.Combine("Storage", "Documents", storedName),
+                FilePath = relativePath,
                 ContentType = upload.ContentType,
                 FileSize = upload.Length,
                 CreatedBy = "mobile-upload",

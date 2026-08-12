@@ -1,8 +1,9 @@
+using Commtrac.Api.Data;
+using Commtrac.Api.Models;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Commtrac.Api.Data;
-using Commtrac.Api.Models;
 using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
@@ -13,14 +14,17 @@ namespace Commtrac.Api.Controllers;
 public class WorkflowConfigsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    public WorkflowConfigsController(AppDbContext db, IWebHostEnvironment env)
+    public WorkflowConfigsController(AppDbContext db, IFileStorageService files)
     {
         _db = db;
-        _env = env;
+        _files = files;
     }
+
+    private string WorkflowMediaDirectory(string workflowId)
+        => _files.GetAbsolutePath(_files.BuildRelativePath("Storage", "WorkflowMedia", workflowId));
 
     private static WorkflowConfigDto ToDto(WorkflowConfigEntity e) => new(
         e.Id, e.ProductId, e.Name, e.DisplayName, e.ConfigType, e.WorkflowTypeId, e.Status, e.Version,
@@ -317,15 +321,12 @@ public class WorkflowConfigsController : ControllerBase
         var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
         if (entity is null) return NotFound();
 
-        var mediaDir = Path.Combine(_env.ContentRootPath, "Storage", "WorkflowMedia", id);
-        Directory.CreateDirectory(mediaDir);
         var ext      = Path.GetExtension(file.FileName);
         var mediaId  = Guid.NewGuid().ToString();
         var fileName = $"{mediaId}{ext}";
-        var filePath = Path.Combine(mediaDir, fileName);
+        var relativePath = _files.BuildRelativePath("Storage", "WorkflowMedia", id, fileName);
 
-        await using (var stream = System.IO.File.Create(filePath))
-            await file.CopyToAsync(stream);
+        await _files.SaveAsync(relativePath, file.OpenReadStream());
 
         var mediaUrl = $"/api/workflow-configs/{id}/media/{mediaId}/file";
         var isImage  = file.ContentType.StartsWith("image/");
@@ -352,7 +353,7 @@ public class WorkflowConfigsController : ControllerBase
     [AllowAnonymous]
     public IActionResult ServeMedia(string id, string mediaId)
     {
-        var mediaDir = Path.Combine(_env.ContentRootPath, "Storage", "WorkflowMedia", id);
+        var mediaDir = WorkflowMediaDirectory(id);
         var files    = Directory.Exists(mediaDir) ? Directory.GetFiles(mediaDir, $"{mediaId}.*") : Array.Empty<string>();
         if (files.Length == 0) return NotFound();
         var ext      = Path.GetExtension(files[0]).TrimStart('.');
@@ -368,7 +369,7 @@ public class WorkflowConfigsController : ControllerBase
         var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
         if (entity is null) return NotFound();
 
-        var mediaDir = Path.Combine(_env.ContentRootPath, "Storage", "WorkflowMedia", id);
+        var mediaDir = WorkflowMediaDirectory(id);
         var files    = Directory.Exists(mediaDir) ? Directory.GetFiles(mediaDir, $"{mediaId}.*") : Array.Empty<string>();
         foreach (var f in files) System.IO.File.Delete(f);
 

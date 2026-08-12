@@ -6,6 +6,7 @@ using System.Security.Claims;
 using System.Text.Json;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -20,22 +21,28 @@ public class AssetReportSharesController : ControllerBase
     private const int MaxTotalBytes = 48 * 1024 * 1024;
     private const int MaxDirectEmailAttachmentBytes = 4 * 1024 * 1024;
 
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
     private readonly IEmailSender _email;
     private readonly NotificationSettingsService _notificationSettings;
     private readonly ILogger<AssetReportSharesController> _logger;
 
     public AssetReportSharesController(
-        IWebHostEnvironment env,
+        IFileStorageService files,
         IEmailSender email,
         NotificationSettingsService notificationSettings,
         ILogger<AssetReportSharesController> logger)
     {
-        _env = env;
+        _files = files;
         _email = email;
         _notificationSettings = notificationSettings;
         _logger = logger;
     }
+
+    private static string ShareDirectoryRelative(string shareId)
+        => $"Storage/AssetReportShares/{shareId}";
+
+    private static string ShareFileRelative(string shareId, string fileName)
+        => $"Storage/AssetReportShares/{shareId}/{fileName}";
 
     [HttpPost]
     [Authorize(Roles = "Admin,Project Manager")]
@@ -89,8 +96,8 @@ public class AssetReportSharesController : ControllerBase
         var shareId = Guid.NewGuid().ToString("N");
         var expiresHours = Math.Clamp(request.ExpiresInHours <= 0 ? 168 : request.ExpiresInHours, 1, 720);
         var expiresAtUtc = DateTime.UtcNow.AddHours(expiresHours);
-        var shareDir = GetShareDirectory(shareId);
-        Directory.CreateDirectory(shareDir);
+        var shareDir = ShareDirectoryRelative(shareId);
+        _files.EnsureDirectory(shareDir);
 
         var manifest = new AssetReportShareManifest
         {
@@ -105,12 +112,11 @@ public class AssetReportSharesController : ControllerBase
 
         foreach (var file in decodedFiles)
         {
-            var fullPath = Path.Combine(shareDir, file.FileName);
-            await System.IO.File.WriteAllBytesAsync(fullPath, file.Content);
+            await _files.WriteBytesAsync(ShareFileRelative(shareId, file.FileName), file.Content);
         }
 
-        await System.IO.File.WriteAllTextAsync(
-            Path.Combine(shareDir, "manifest.json"),
+        await _files.WriteTextAsync(
+            ShareFileRelative(shareId, "manifest.json"),
             JsonSerializer.Serialize(manifest, JsonOptions));
 
         var viewerUrl = await BuildViewerUrlAsync(shareId);
@@ -204,10 +210,10 @@ public class AssetReportSharesController : ControllerBase
         if (!manifest.FileNames.Any(f => string.Equals(f, safeName, StringComparison.OrdinalIgnoreCase)))
             return NotFound(new { message = "Report file not found in this share." });
 
-        var fullPath = Path.Combine(GetShareDirectory(shareId), safeName);
-        if (!System.IO.File.Exists(fullPath)) return NotFound(new { message = "Report file not found." });
+        var relativePath = ShareFileRelative(shareId, safeName);
+        if (!_files.Exists(relativePath)) return NotFound(new { message = "Report file not found." });
 
-        var bytes = await System.IO.File.ReadAllBytesAsync(fullPath);
+        var bytes = await _files.ReadBytesAsync(relativePath);
         Response.Headers.ContentDisposition = $"inline; filename=\"{safeName}\"";
         return File(bytes, "application/pdf");
     }
@@ -224,18 +230,18 @@ public class AssetReportSharesController : ControllerBase
             return NotFound(new { message = "Share link has expired." });
         }
 
-        var shareDir = GetShareDirectory(shareId);
+        var shareDir = ShareDirectoryRelative(shareId);
         var zipFileName = BuildZipFileName(manifest.JobLabel, manifest.ShareId);
         await using var zipStream = new MemoryStream();
         using (var archive = new ZipArchive(zipStream, ZipArchiveMode.Create, leaveOpen: true))
         {
             foreach (var fileName in manifest.FileNames)
             {
-                var fullPath = Path.Combine(shareDir, fileName);
-                if (!System.IO.File.Exists(fullPath)) continue;
+                var relativePath = ShareFileRelative(shareId, fileName);
+                if (!_files.Exists(relativePath)) continue;
                 var entry = archive.CreateEntry(fileName, CompressionLevel.Fastest);
                 await using var entryStream = entry.Open();
-                await using var fileStream = System.IO.File.OpenRead(fullPath);
+                await using var fileStream = _files.OpenRead(relativePath);
                 await fileStream.CopyToAsync(entryStream);
             }
         }
@@ -285,12 +291,12 @@ public class AssetReportSharesController : ControllerBase
         if (string.IsNullOrWhiteSpace(shareId) || shareId.Any(c => !char.IsLetterOrDigit(c)))
             return null;
 
-        var manifestPath = Path.Combine(GetShareDirectory(shareId), "manifest.json");
-        if (!System.IO.File.Exists(manifestPath)) return null;
+        var manifestPath = ShareFileRelative(shareId, "manifest.json");
+        if (!_files.Exists(manifestPath)) return null;
 
         try
         {
-            var json = await System.IO.File.ReadAllTextAsync(manifestPath);
+            var json = await _files.ReadTextAsync(manifestPath);
             return JsonSerializer.Deserialize<AssetReportShareManifest>(json, JsonOptions);
         }
         catch (Exception ex)
@@ -300,15 +306,11 @@ public class AssetReportSharesController : ControllerBase
         }
     }
 
-    private string GetShareDirectory(string shareId)
-        => Path.Combine(_env.ContentRootPath, "Storage", "AssetReportShares", shareId);
-
     private void TryDeleteShareDirectory(string shareId)
     {
         try
         {
-            var dir = GetShareDirectory(shareId);
-            if (Directory.Exists(dir)) Directory.Delete(dir, recursive: true);
+            _files.DeleteDirectory(ShareDirectoryRelative(shareId));
         }
         catch (Exception ex)
         {

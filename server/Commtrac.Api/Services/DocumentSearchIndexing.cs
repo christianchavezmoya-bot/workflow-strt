@@ -1,6 +1,7 @@
 using System.Threading.Channels;
 using System.Diagnostics.CodeAnalysis;
 using Commtrac.Api.Data;
+using Commtrac.Api.Services.Storage;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
@@ -270,20 +271,20 @@ public class DocumentSearchIndexWorker : BackgroundService
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         var extractor = scope.ServiceProvider.GetRequiredService<IDocumentContentSearchService>();
-        var env = scope.ServiceProvider.GetRequiredService<IWebHostEnvironment>();
+        var files = scope.ServiceProvider.GetRequiredService<IFileStorageService>();
 
         switch (workItem.Type)
         {
             case DocumentIndexWorkType.FullRebuild:
-                await RebuildAllAsync(db, extractor, env, ct);
+                await RebuildAllAsync(db, extractor, files, ct);
                 break;
             case DocumentIndexWorkType.IndexLibraryDocument:
                 if (!string.IsNullOrWhiteSpace(workItem.Id))
-                    await IndexLibraryDocumentAsync(db, extractor, env, workItem.Id, ct);
+                    await IndexLibraryDocumentAsync(db, extractor, files, workItem.Id, ct);
                 break;
             case DocumentIndexWorkType.IndexAssetDocument:
                 if (!string.IsNullOrWhiteSpace(workItem.Id))
-                    await IndexAssetDocumentAsync(db, extractor, env, workItem.Id, ct);
+                    await IndexAssetDocumentAsync(db, extractor, files, workItem.Id, ct);
                 break;
             case DocumentIndexWorkType.RemoveLibraryDocument:
                 if (!string.IsNullOrWhiteSpace(workItem.Id))
@@ -299,7 +300,7 @@ public class DocumentSearchIndexWorker : BackgroundService
     private async Task RebuildAllAsync(
         AppDbContext db,
         IDocumentContentSearchService extractor,
-        IWebHostEnvironment env,
+        IFileStorageService files,
         CancellationToken ct)
     {
         await db.Database.ExecuteSqlRawAsync("DELETE FROM SearchDocumentChunks;", ct);
@@ -330,7 +331,7 @@ public class DocumentSearchIndexWorker : BackgroundService
 
         foreach (var doc in docs)
         {
-            var fullPath = Path.Combine(env.ContentRootPath, doc.FilePath!);
+            var fullPath = files.GetAbsolutePath(doc.FilePath!);
             await IndexSourceAsync(db, extractor, SourceLibrary, doc.Id, fullPath, ct);
             processed++;
             _status.OnRebuildProgress(processed, total);
@@ -339,7 +340,7 @@ public class DocumentSearchIndexWorker : BackgroundService
         foreach (var ad in assetDocs)
         {
             if (!latestByDoc.TryGetValue(ad.Id, out var rev)) continue;
-            var fullPath = Path.Combine(env.ContentRootPath, "Storage", "Documents", ad.AssetId, rev.StoredName);
+            var fullPath = files.GetAbsolutePath(files.BuildRelativePath("Storage", "Documents", ad.AssetId, rev.StoredName));
             await IndexSourceAsync(db, extractor, SourceAsset, ad.Id, fullPath, ct);
             processed++;
             _status.OnRebuildProgress(processed, total);
@@ -349,7 +350,7 @@ public class DocumentSearchIndexWorker : BackgroundService
     private async Task IndexLibraryDocumentAsync(
         AppDbContext db,
         IDocumentContentSearchService extractor,
-        IWebHostEnvironment env,
+        IFileStorageService files,
         string docId,
         CancellationToken ct)
     {
@@ -357,14 +358,14 @@ public class DocumentSearchIndexWorker : BackgroundService
         var doc = await db.Documents.AsNoTracking().FirstOrDefaultAsync(d => d.Id == docId, ct);
         if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath)) return;
 
-        var fullPath = Path.Combine(env.ContentRootPath, doc.FilePath);
+        var fullPath = files.GetAbsolutePath(doc.FilePath);
         await IndexSourceAsync(db, extractor, SourceLibrary, docId, fullPath, ct);
     }
 
     private async Task IndexAssetDocumentAsync(
         AppDbContext db,
         IDocumentContentSearchService extractor,
-        IWebHostEnvironment env,
+        IFileStorageService files,
         string assetDocId,
         CancellationToken ct)
     {
@@ -383,7 +384,7 @@ public class DocumentSearchIndexWorker : BackgroundService
 
             if (latest is null) return;
 
-            var fullPath = Path.Combine(env.ContentRootPath, "Storage", "Documents", assetDoc.AssetId, latest.StoredName);
+            var fullPath = files.GetAbsolutePath(files.BuildRelativePath("Storage", "Documents", assetDoc.AssetId, latest.StoredName));
             await IndexSourceAsync(db, extractor, SourceAsset, assetDocId, fullPath, ct);
         }
         catch

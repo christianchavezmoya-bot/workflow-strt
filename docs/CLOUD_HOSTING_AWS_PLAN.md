@@ -4,8 +4,9 @@ One document: (1) honest readiness assessment, (2) opinion, (3) a concrete AWS m
 plan built around a **two-profile model (local + cloud)** so you can keep developing and
 testing locally at every step and only deploy when ready.
 
-**Status:** Phase 0 + Phase 1 *prep* landed in code (secrets hygiene, Postgres provider
-switch defaulting to **Sqlite**). The app continues to run locally unchanged.
+**Status:** Phase 0 + Phase 1 *prep* + Phase 2 *abstraction* + Phase 3 *partial* + Phase 5
+*Dockerfile* landed in code. **Sqlite** and **local disk** remain defaults — local dev
+unchanged.
 
 ---
 
@@ -33,7 +34,8 @@ Concrete anchors (validated against repo):
 
 - DB provider switch: `Program.cs` — `Database:Provider` = `Sqlite` (default) or `Postgres`.
 - **Npgsql** package added; **Postgres is opt-in** — local dev unchanged.
-- **No Dockerfile yet** — needed for container hosting.
+- **Dockerfile** at repo root (API only; port 8080) — ready for container hosting.
+- **Storage abstraction** (`IFileStorageService`) — local disk default; S3 provider TBD.
 - Frontend builds via `tsc -b && vite build` → static `dist/` (ready for S3/CDN).
 
 ### Disk writers (Phase 2 scope — broader than report shares alone)
@@ -125,21 +127,33 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** app runs end-to-end locally on Postgres; migrations apply cleanly.
 
-### PHASE 2 — Media/files: local disk → S3
+### PHASE 2 — Media/files: local disk → S3 (abstraction ✅)
 
-1. Storage abstraction (local folder / MinIO vs S3).
-2. Replace all `Storage/` writers listed above.
-3. Local: folder or MinIO; cloud: S3 (+ optional CloudFront).
+**What shipped (safe prep only):**
 
-**Gate:** read/write through abstraction locally.
+- `IFileStorageService` + `LocalFileStorageService` (`Storage:Provider=Local` default).
+- All disk writers listed above refactored to use the abstraction (same on-disk paths).
+- `StorageOptions` config section in `appsettings.Example.json`.
 
-### PHASE 3 — CORS, HTTPS, forwarded headers, API base URL
+**Still required before cloud:**
 
-1. **CORS:** set `Cors:AllowedOrigins` in production config (hook exists).
-2. **Forwarded headers:** `UseForwardedHeaders` behind App Runner/CloudFront.
-3. **Frontend:** per-environment `VITE_API_BASE` builds (web + Capacitor release).
+1. `S3FileStorageService` behind `Storage:Provider=S3` (+ IAM/bucket config).
+2. Local MinIO parity testing (optional).
+3. CloudFront signed URLs (optional).
 
-**Gate:** prod build + prod CORS verified.
+**Gate:** read/write through abstraction locally ✅; S3 provider tested in staging.
+
+### PHASE 3 — CORS, HTTPS, forwarded headers, API base URL (partial)
+
+**What shipped:**
+- `UseForwardedHeaders` in non-Development (respects `X-Forwarded-Proto` behind App Runner/CloudFront)
+- `appsettings.Production.json` template
+- `/api/health` now checks database connectivity (for load balancers)
+- Optional `Cors:AllowedOrigins` (LAN fallback unchanged when empty)
+
+**Still required:** prod `VITE_API_BASE` builds, Capacitor release pipeline.
+
+**Gate:** prod-config build + CORS verified in staging.
 
 ### PHASE 4 — Statelessness audit
 
@@ -149,10 +163,13 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** safe restart; no single-instance assumptions for correctness.
 
-### PHASE 5 — Containerize + deploy to AWS
+### PHASE 5 — Containerize + deploy to AWS (Dockerfile ✅)
 
-1. Dockerfile for API.
-2. RDS Postgres + Secrets Manager.
+**What shipped:** multi-stage `Dockerfile` + `.dockerignore` (API on port 8080).
+
+**Still required:**
+
+1. RDS Postgres + Secrets Manager.
 3. S3 for media.
 4. App Runner **or** Beanstalk (SSE spike first).
 5. S3 + CloudFront for web `dist/`.
@@ -165,9 +182,10 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 1. ✅ **Phase 0** — done
 2. **Phase 1** — Postgres migrations + local Docker parity (Sqlite stays default until gate passes)
-3. **Phase 2 + 3** — S3 abstraction + prod CORS/TLS/API URL
-4. **Phase 4** — before scaling past one instance
-5. **Phase 5** — AWS deploy
+3. ✅ **Phase 2 abstraction + Phase 3 partial** — local disk via `IFileStorageService`; forwarded headers + health DB check
+4. **Phase 2 S3 + Phase 3 frontend builds** — S3 provider + prod `VITE_API_BASE`
+5. **Phase 4** — before scaling past one instance
+6. **Phase 5 deploy** — Dockerfile ready; wire RDS/S3/secrets + SSE spike
 
 ## Open decisions
 

@@ -1,6 +1,7 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -20,18 +21,18 @@ public class AssetDocumentLinksController : ControllerBase
     private const int MaxLinksPerAsset = 3;
 
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
     private readonly SseHub _sse;
 
     public AssetDocumentLinksController(
         AppDbContext db,
-        IWebHostEnvironment env,
+        IFileStorageService files,
         IDocumentSearchIndexQueue searchIndexQueue,
         SseHub sse)
     {
         _db = db;
-        _env = env;
+        _files = files;
         _searchIndexQueue = searchIndexQueue;
         _sse = sse;
     }
@@ -151,18 +152,11 @@ public class AssetDocumentLinksController : ControllerBase
         if (count >= MaxLinksPerAsset)
             return BadRequest($"Maximum {MaxLinksPerAsset} documents per asset.");
 
-        // Store the file in the global library storage
-        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "Documents");
-        Directory.CreateDirectory(storageRoot);
-
         var extension  = Path.GetExtension(request.File.FileName);
         var storedName = $"{Guid.NewGuid()}{extension}";
-        var storedPath = Path.Combine(storageRoot, storedName);
+        var relativePath = _files.BuildRelativePath("Storage", "Documents", storedName);
 
-        await using (var stream = System.IO.File.Create(storedPath))
-        {
-            await request.File.CopyToAsync(stream);
-        }
+        await _files.SaveAsync(relativePath, request.File.OpenReadStream());
 
         // Create the library document record
         var doc = new DocumentEntity
@@ -171,7 +165,7 @@ public class AssetDocumentLinksController : ControllerBase
             Type          = request.Type ?? string.Empty,
             LinkedTo      = request.LinkedTo ?? string.Empty,
             UploadedAt    = DateTime.UtcNow.ToString("s"),
-            FilePath      = Path.Combine("Storage", "Documents", storedName),
+            FilePath      = relativePath,
             ContentType   = request.File.ContentType,
             FileSize      = request.File.Length,
             CreatedBy        = User.Identity?.Name ?? request.AttachedBy,

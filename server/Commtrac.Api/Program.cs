@@ -10,7 +10,9 @@ using Microsoft.OpenApi.Models;
 using Commtrac.Api.Hosting;
 using Commtrac.Api.Middleware;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 using Commtrac.Api.Swagger;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -66,6 +68,8 @@ else
         options.UseSqlite(resolvedConnectionString));
 }
 
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdapterService>();
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
@@ -258,6 +262,10 @@ if (app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    });
     app.UseHttpsRedirection();
 }
 
