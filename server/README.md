@@ -34,6 +34,16 @@ dotnet run --launch-profile PostgresLocal
 ```
 Uses `appsettings.PostgresLocal.json` (same admin login as Development).
 
+### Local S3 parity via MinIO (optional)
+```bash
+docker compose up -d minio
+# Create bucket "commtrac" in MinIO console: http://localhost:9001
+
+cd server/Commtrac.Api
+dotnet run --launch-profile S3Local
+```
+Uses `appsettings.S3Local.json` (MinIO at localhost:9000). **Default dev still uses local disk.**
+
 Optional integration test (requires Postgres running):
 ```bash
 COMMTRAC_POSTGRES_TEST=1 dotnet test server/Commtrac.Api.Tests

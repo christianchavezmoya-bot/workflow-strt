@@ -7,6 +7,7 @@ namespace Commtrac.Api.Services.Storage;
 /// </summary>
 public interface IFileStorageService
 {
+    /// <summary>Local disk only — do not use for cloud storage reads/writes.</summary>
     string GetAbsolutePath(string relativePath);
     bool Exists(string relativePath);
     Stream OpenRead(string relativePath);
@@ -19,4 +20,9 @@ public interface IFileStorageService
     void DeleteDirectory(string relativeDirectory);
     void EnsureDirectory(string relativeDirectory);
     string BuildRelativePath(params string[] segments);
+    /// <summary>
+    /// Lists file names (not full relative paths) under a directory.
+    /// When <paramref name="namePrefix"/> is set, returns files whose name starts with that prefix.
+    /// </summary>
+    IReadOnlyList<string> ListFileNames(string relativeDirectory, string? namePrefix = null);
 }

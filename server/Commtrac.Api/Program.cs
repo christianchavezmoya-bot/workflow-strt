@@ -69,7 +69,25 @@ else
 }
 
 builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
-builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+var storageProvider = builder.Configuration["Storage:Provider"] ?? "Local";
+if (string.Equals(storageProvider, "S3", StringComparison.OrdinalIgnoreCase))
+{
+    var storageOptions = builder.Configuration.GetSection(StorageOptions.SectionName).Get<StorageOptions>()
+        ?? new StorageOptions();
+    if (string.IsNullOrWhiteSpace(storageOptions.Bucket))
+    {
+        throw new InvalidOperationException("Storage:Bucket is required when Storage:Provider=S3.");
+    }
+
+    builder.Services.AddSingleton<Amazon.S3.IAmazonS3>(_ => S3ClientFactory.Create(storageOptions));
+    builder.Services.AddSingleton<IFileStorageService, S3FileStorageService>();
+    Console.WriteLine($"[Storage] Provider: S3 (bucket={storageOptions.Bucket})");
+}
+else
+{
+    builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
+    Console.WriteLine("[Storage] Provider: Local");
+}
 builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdapterService>();
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();

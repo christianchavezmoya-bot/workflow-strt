@@ -24,7 +24,7 @@ public class WorkflowConfigsController : ControllerBase
     }
 
     private string WorkflowMediaDirectory(string workflowId)
-        => _files.GetAbsolutePath(_files.BuildRelativePath("Storage", "WorkflowMedia", workflowId));
+        => _files.BuildRelativePath("Storage", "WorkflowMedia", workflowId);
 
     private static WorkflowConfigDto ToDto(WorkflowConfigEntity e) => new(
         e.Id, e.ProductId, e.Name, e.DisplayName, e.ConfigType, e.WorkflowTypeId, e.Status, e.Version,
@@ -354,11 +354,13 @@ public class WorkflowConfigsController : ControllerBase
     public IActionResult ServeMedia(string id, string mediaId)
     {
         var mediaDir = WorkflowMediaDirectory(id);
-        var files    = Directory.Exists(mediaDir) ? Directory.GetFiles(mediaDir, $"{mediaId}.*") : Array.Empty<string>();
-        if (files.Length == 0) return NotFound();
-        var ext      = Path.GetExtension(files[0]).TrimStart('.');
+        var files    = _files.ListFileNames(mediaDir, mediaId);
+        if (files.Count == 0) return NotFound();
+        var storedName = files[0];
+        var relativePath = _files.BuildRelativePath(mediaDir, storedName);
+        var ext      = Path.GetExtension(storedName).TrimStart('.');
         var mime     = ext is "jpg" or "jpeg" ? "image/jpeg" : ext == "png" ? "image/png" : ext == "gif" ? "image/gif" : "video/mp4";
-        return PhysicalFile(files[0], mime);
+        return File(_files.OpenRead(relativePath), mime);
     }
 
     // DELETE api/workflow-configs/{id}/media/{mediaId}
@@ -370,8 +372,10 @@ public class WorkflowConfigsController : ControllerBase
         if (entity is null) return NotFound();
 
         var mediaDir = WorkflowMediaDirectory(id);
-        var files    = Directory.Exists(mediaDir) ? Directory.GetFiles(mediaDir, $"{mediaId}.*") : Array.Empty<string>();
-        foreach (var f in files) System.IO.File.Delete(f);
+        foreach (var storedName in _files.ListFileNames(mediaDir, mediaId))
+        {
+            _files.Delete(_files.BuildRelativePath(mediaDir, storedName));
+        }
 
         var mediaList = System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(
             entity.MediaJson, new System.Text.Json.JsonSerializerOptions()) ?? new();
