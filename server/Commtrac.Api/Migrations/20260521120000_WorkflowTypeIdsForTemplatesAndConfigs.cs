@@ -38,8 +38,9 @@ public partial class WorkflowTypeIdsForTemplatesAndConfigs : Migration
             column: "WorkflowTypeId");
 
         migrationBuilder.Sql("""
-            INSERT OR IGNORE INTO WorkflowTypes (Id, Name, Icon, SortOrder, IsActive)
-            VALUES ('wftype-other', 'Other', NULL, 5, 1);
+            INSERT INTO WorkflowTypes (Id, Name, Icon, SortOrder, IsActive)
+            VALUES ('wftype-other', 'Other', NULL, 5, 1)
+            ON CONFLICT (Id) DO NOTHING;
             """);
 
         migrationBuilder.Sql("""

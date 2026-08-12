@@ -54,6 +54,12 @@ public static class DbInitializer
             EnsureNotificationSettingsResendFrom(db);
             EnsurePushDeviceTokensTable(db);
         }
+        else if (db.Database.IsNpgsql())
+        {
+            PostgresSchemaEnsurer.EnsureSchema(db);
+            EnsureLinkableKeyFieldDefinitions(db);
+            EnsureNotificationSettingsResendFrom(db);
+        }
 
         if (!db.Users.Any())
         {

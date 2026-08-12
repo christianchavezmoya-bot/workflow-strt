@@ -21,20 +21,32 @@ public class SettingsController : ControllerBase
     private readonly SqliteBackupService _backupService;
     private readonly RecoveryService _recovery;
     private readonly ResendEmailService _emailService;
+    private readonly bool _sqliteBackupsEnabled;
 
     public SettingsController(
         AppDbContext db,
         NotificationSettingsService notificationSettings,
         SqliteBackupService backupService,
         RecoveryService recovery,
-        ResendEmailService emailService)
+        ResendEmailService emailService,
+        IConfiguration configuration)
     {
         _db = db;
         _notificationSettings = notificationSettings;
         _backupService = backupService;
         _recovery = recovery;
         _emailService = emailService;
+        _sqliteBackupsEnabled = !string.Equals(
+            configuration["Database:Provider"], "Postgres", StringComparison.OrdinalIgnoreCase);
     }
+
+    private ActionResult? SqliteBackupsUnavailable()
+        => _sqliteBackupsEnabled
+            ? null
+            : StatusCode(StatusCodes.Status501NotImplemented, new
+            {
+                message = "SQLite file backups are not available when Database:Provider=Postgres. Use RDS snapshots instead."
+            });
 
     [HttpGet("quickbase")]
     public async Task<ActionResult<QuickbaseSettingsDto>> GetQuickbase()
@@ -193,6 +205,8 @@ public class SettingsController : ControllerBase
     [HttpGet("backups")]
     public async Task<ActionResult<IEnumerable<object>>> ListBackups()
     {
+        if (SqliteBackupsUnavailable() is { } unavailable) return unavailable;
+
         var backups = await _backupService.ListBackupsAsync();
         return Ok(backups.Select(b => new
         {
@@ -206,6 +220,8 @@ public class SettingsController : ControllerBase
     [HttpPost("backups/create")]
     public async Task<ActionResult<object>> CreateBackup()
     {
+        if (SqliteBackupsUnavailable() is { } unavailable) return unavailable;
+
         var backup = await _backupService.CreateBackupAsync("manual");
         return Ok(new
         {
@@ -219,6 +235,8 @@ public class SettingsController : ControllerBase
     [HttpPost("backups/restore")]
     public async Task<ActionResult<RestoreBackupResponse>> RestoreBackup([FromBody] RestoreBackupRequest request, CancellationToken cancellationToken)
     {
+        if (SqliteBackupsUnavailable() is { } unavailable) return unavailable;
+
         var result = await _backupService.RestoreBackupAsync(request.FileName, cancellationToken);
         return Ok(new RestoreBackupResponse(
             request.FileName,
@@ -234,12 +252,16 @@ public class SettingsController : ControllerBase
         [FromQuery] string? search,
         CancellationToken cancellationToken)
     {
+        if (SqliteBackupsUnavailable() is { } unavailable) return unavailable;
+
         return Ok(await _recovery.ListBackupCatalogAsync(fileName, entityType, search, cancellationToken));
     }
 
     [HttpPost("backups/restore-item")]
     public async Task<ActionResult<SelectiveRestoreResultDto>> RestoreItemFromBackup([FromBody] RestoreBackupItemRequest request, CancellationToken cancellationToken)
     {
+        if (SqliteBackupsUnavailable() is { } unavailable) return unavailable;
+
         return Ok(await _recovery.RestoreItemFromBackupAsync(request.FileName, request.EntityType, request.EntityId, cancellationToken));
     }
 
