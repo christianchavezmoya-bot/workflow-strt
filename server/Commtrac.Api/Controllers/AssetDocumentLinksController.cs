@@ -22,12 +22,18 @@ public class AssetDocumentLinksController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IWebHostEnvironment _env;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
+    private readonly SseHub _sse;
 
-    public AssetDocumentLinksController(AppDbContext db, IWebHostEnvironment env, IDocumentSearchIndexQueue searchIndexQueue)
+    public AssetDocumentLinksController(
+        AppDbContext db,
+        IWebHostEnvironment env,
+        IDocumentSearchIndexQueue searchIndexQueue,
+        SseHub sse)
     {
         _db = db;
         _env = env;
         _searchIndexQueue = searchIndexQueue;
+        _sse = sse;
     }
 
     // ── GET /by-asset/{assetId} ───────────────────────────────────────────────
@@ -125,6 +131,7 @@ public class AssetDocumentLinksController : ControllerBase
         _db.AssetDocumentLinks.Add(link);
         await _db.SaveChangesAsync();
         _searchIndexQueue.EnqueueLibraryDocument(doc.Id);
+        await BroadcastAssetDocumentsUpdatedAsync(link.AssetId);
 
         return CreatedAtAction(nameof(GetByAsset), new { assetId = link.AssetId }, ToDto(link, doc));
     }
@@ -185,6 +192,7 @@ public class AssetDocumentLinksController : ControllerBase
         _db.AssetDocumentLinks.Add(link);
         await _db.SaveChangesAsync();
         _searchIndexQueue.EnqueueLibraryDocument(doc.Id);
+        await BroadcastAssetDocumentsUpdatedAsync(link.AssetId);
 
         return CreatedAtAction(nameof(GetByAsset), new { assetId = link.AssetId }, ToDto(link, doc));
     }
@@ -202,6 +210,15 @@ public class AssetDocumentLinksController : ControllerBase
     }
 
     // ─── Mapping ──────────────────────────────────────────────────────────────
+
+    private async Task BroadcastAssetDocumentsUpdatedAsync(string assetId)
+    {
+        var asset = await _db.ProjectAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Id == assetId);
+        if (asset is null) return;
+        var userId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await _sse.BroadcastExceptAsync(userId, "assets:updated",
+            new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
+    }
 
     private AssetDocumentLinkDto ToDto(AssetDocumentLinkEntity link, DocumentEntity doc)
         => new(

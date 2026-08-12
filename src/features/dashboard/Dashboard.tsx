@@ -56,8 +56,8 @@ import {
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
-import { formatInstant } from "../../utils/datetime";
-import { randomId } from "../../utils/randomId";
+import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
+import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -76,7 +76,7 @@ import type { AssetIssue, ProjectAsset } from "../../types/projectAsset";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { featureService } from "../../services/featureService";
 import type { Feature as LibFeature } from "../../types/feature";
-import { resolveReportTimeZone } from "../../utils/datetime";
+import { randomId } from "../../utils/randomId";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
 import {
@@ -1807,7 +1807,7 @@ const Dashboard = () => {
         siteName: projects.find((project) => project.id === asset.projectId)?.siteName,
         siteLocation: asset.location ?? undefined,
         assignedTechnician: user.fullName ?? undefined,
-        timeZoneId: resolveReportTimeZone(projects.find((project) => project.id === asset.projectId)),
+        timeZoneId: await resolveProjectTimeZoneForReport(projects.find((project) => project.id === asset.projectId)),
         signatureEvents,
         productFeatures,
         outputMode: "open",
@@ -1954,15 +1954,10 @@ const Dashboard = () => {
   }, [issueDetailTarget, openIssues, refreshDashboardAfterIssueUpdate]);
 
   const openSignatureRepair = useCallback(async (sig: PendingSignatureRecord) => {
-    if (isNativePlatform) {
-      navigate(buildAssetRepairPath({
-        projectId: sig.projectId,
-        assetId: sig.assetId,
-        action: "signature",
-        runId: sig.runId,
-      }));
-      return;
-    }
+    setQuickActionOpen(false);
+    setQuickActionAsset(null);
+    setQuickActionAssignments([]);
+    setQuickActionRuns([]);
     try {
       const [asset, run] = await Promise.all([
         projectAssetService.getById(sig.assetId),
@@ -1972,15 +1967,70 @@ const Dashboard = () => {
         setDashboardError("Could not open sign-off for this asset.");
         return;
       }
-      setSignatureFlowTarget({
-        asset,
-        run,
-        jobNumber: sig.jobNumber || projectById.get(sig.projectId)?.jobNumber,
-      });
+
+      if (isPendingInstallerSignature(run.signatureStatus)) {
+        markWorkflowOpenTap("dashboard-signoff-review", run.workflowConfigId);
+        setRunnerLoading(sig.assetId);
+        try {
+          const payload = await loadWorkflowOpenPayload(run.workflowConfigId, { id: asset.id }, {
+            workflowConfigIdForRun: run.workflowConfigId,
+            mergeMedia: true,
+          });
+          if (!payload) {
+            setDashboardError("Workflow config not found for sign-off review.");
+            return;
+          }
+          const proj = projectById.get(asset.projectId);
+          const dashAsset = {
+            id: asset.id,
+            projectId: asset.projectId,
+            jobNumber: sig.jobNumber || proj?.jobNumber || "",
+            assetTag: asset.assetTag,
+            assetName: asset.assetName,
+            assetModel: asset.assetModel,
+            location: asset.location,
+            status: asset.status,
+            historyStatus: "Active",
+            completedSteps: 0,
+            totalSteps: 0,
+            missingItems: 0,
+            workflowMode: proj?.workflowMode ?? "INSTALL",
+            isDeleted: false,
+            hasOpenIssues: false,
+            assignedUserId: asset.assignedUserId,
+          };
+          setRunnerExistingRunId(run.id);
+          setRunnerSignoffReviewMode(true);
+          setRunnerAsset(dashAsset);
+          setRunnerWorkflow(payload.workflow);
+          setRunnerWorkflowConfigId(run.workflowConfigId);
+          setRunnerOpen(true);
+          refreshWorkflowOpenDataInBackground(asset.id, run.workflowConfigId);
+        } finally {
+          setRunnerLoading((current) => (current === sig.assetId ? null : current));
+        }
+        return;
+      }
+
+      if (isPendingCustomerSignature(run.signatureStatus) && isManager) {
+        setSignatureFlowTarget({
+          asset,
+          run,
+          jobNumber: sig.jobNumber || projectById.get(sig.projectId)?.jobNumber,
+        });
+        return;
+      }
+
+      navigate(buildAssetRepairPath({
+        projectId: sig.projectId,
+        assetId: sig.assetId,
+        action: "signature",
+        runId: sig.runId,
+      }));
     } catch {
       setDashboardError("Could not open sign-off. Check your connection and try again.");
     }
-  }, [buildAssetRepairPath, isNativePlatform, navigate, projectById]);
+  }, [buildAssetRepairPath, isManager, navigate, projectById]);
 
   const openMissingMediaRepair = useCallback((flag: MissingMediaFlag) => {
     const projectId = openAssets.find((asset) => asset.id === flag.assetId)?.projectId;
@@ -2240,6 +2290,7 @@ const Dashboard = () => {
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>();
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>();
+  const [runnerSignoffReviewMode, setRunnerSignoffReviewMode] = useState(false);
   const runnerProjectTimeZone = useProjectTimeZone(runnerAsset?.projectId);
   const runnerTeamMembers = useMemo(() => {
     const project = runnerAsset?.projectId ? projectById.get(runnerAsset.projectId) : undefined;
@@ -3471,9 +3522,9 @@ const Dashboard = () => {
   async function handleGenerateTechReport(w: TechnicianWorkloadSummaryItem) {
     setReportingTechId(w.userId);
     try {
-      const reportTz = resolveReportTimeZone(projects.find((project) => project.id === techAssets[0]?.projectId));
-      const exportDate = formatInstant(new Date().toISOString(), reportTz, { time: false, withZone: false });
       const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
+      const reportTz = await resolveProjectTimeZoneForReport(projects.find((project) => project.id === techAssets[0]?.projectId));
+      const exportDate = formatInstant(new Date().toISOString(), reportTz, { time: false, withZone: false });
       const assetIds = new Set(techAssets.map((a) => a.id));
 
       // Runs carry the time tracking and issue data the report is built from. Web batches
@@ -6342,15 +6393,13 @@ const Dashboard = () => {
         />
       )}
 
-      {!isNativePlatform && (
-        <WorkflowSignatureFlowHost
-          target={signatureFlowTarget}
-          assignedTechnician={user.fullName ?? undefined}
-          canRequestCustomerSignature={isManager}
-          onClose={() => setSignatureFlowTarget(null)}
-          onComplete={() => { void loadAttention(); }}
-        />
-      )}
+      <WorkflowSignatureFlowHost
+        target={signatureFlowTarget}
+        assignedTechnician={user.fullName ?? undefined}
+        canRequestCustomerSignature={isManager}
+        onClose={() => setSignatureFlowTarget(null)}
+        onComplete={() => { void loadAttention(); }}
+      />
 
       {/* Quick Action Dialog for "My Jobs Today" */}
       <Dialog open={quickActionOpen} onClose={closeQuickActionDialog} maxWidth="sm" fullWidth>
@@ -6778,6 +6827,7 @@ const Dashboard = () => {
             setRunnerAsset(null);
             setRunnerWorkflowConfigId(undefined);
             setRunnerExistingRunId(undefined);
+            setRunnerSignoffReviewMode(false);
           }}
           workflow={runnerWorkflow}
           productId={""}
@@ -6792,6 +6842,7 @@ const Dashboard = () => {
           projectId={runnerAsset.projectId}
           timeZoneId={runnerProjectTimeZone}
           teamMembers={runnerTeamMembers}
+          signoffReviewMode={runnerSignoffReviewMode}
           onComplete={refreshLiveDashboardDataNow}
           onPause={refreshLiveDashboardDataNow}
         />

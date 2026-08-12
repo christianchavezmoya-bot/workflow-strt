@@ -14,11 +14,13 @@ public class AssetWorkflowAssignmentsController : ControllerBase
 {
     private readonly AppDbContext _db;
     private readonly NotificationFeedService _feed;
+    private readonly SseHub _sse;
     private readonly ILogger<AssetWorkflowAssignmentsController> _logger;
-    public AssetWorkflowAssignmentsController(AppDbContext db, NotificationFeedService feed, ILogger<AssetWorkflowAssignmentsController> logger)
+    public AssetWorkflowAssignmentsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ILogger<AssetWorkflowAssignmentsController> logger)
     {
         _db = db;
         _feed = feed;
+        _sse = sse;
         _logger = logger;
     }
 
@@ -165,6 +167,12 @@ public class AssetWorkflowAssignmentsController : ControllerBase
                     currentUserId
                 );
             }
+        }
+
+        if (asset is not null)
+        {
+            await _sse.BroadcastExceptAsync(currentUserId ?? "", "assets:updated",
+                new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
         }
 
         return Ok(new AssetWorkflowAssignmentDto(
