@@ -318,6 +318,7 @@ export default function ProjectAssetInspectionPage() {
         workflowConfigName="Inspection Runs"
         currentUserName={user.fullName}
         onRerun={() => {}}
+        allowRerun={false}
       />
     </Stack>
   );

@@ -55,27 +55,4 @@ export const inspectionImportService = {
       assetId: existing.assetId ?? undefined,
     });
   },
-
-  async uploadFile(file: File, projectId?: string, uploadedBy?: string) {
-    return new Promise<InspectionImport>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = async () => {
-        try {
-          const rawJson = reader.result as string;
-          const result = await inspectionImportService.create({
-            source: "LOCAL",
-            fileName: file.name,
-            rawJson,
-            projectId,
-            uploadedBy,
-          });
-          resolve(result);
-        } catch (err) {
-          reject(err);
-        }
-      };
-      reader.onerror = () => reject(new Error("Failed to read file"));
-      reader.readAsText(file);
-    });
-  },
 };

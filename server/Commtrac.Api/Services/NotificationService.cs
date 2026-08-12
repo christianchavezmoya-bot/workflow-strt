@@ -85,26 +85,6 @@ public sealed class NotificationService
         }
     }
 
-    public async Task NotifyInspectionAssignedAsync(InspectionEntity inspection)
-    {
-        var recipient = await ResolveRecipientAsync(inspection.Inspector);
-        if (recipient is null)
-        {
-            _logger.LogInformation("No email found for inspector {Inspector}", inspection.Inspector);
-            return;
-        }
-
-        var subject = $"New inspection assigned: {inspection.Name}";
-        var body = $"You have been assigned inspection {inspection.Name}.";
-        var resolved = recipient.Value;
-        if (resolved.Kind == "sms")
-        {
-            await _smsSender.SendAsync(resolved.Value, body);
-            return;
-        }
-        await _emailSender.SendNotificationAsync(resolved.Value, subject, body);
-    }
-
     public async Task NotifyIssueAssignedAsync(IssueEntity issue)
     {
         var recipient = await ResolveRecipientAsync(issue.Owner);

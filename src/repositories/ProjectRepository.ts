@@ -19,16 +19,23 @@ export function buildProjectRequestKey(filters?: ProjectFilters): string {
     country: filters?.country ?? null,
     status: filters?.status ?? null,
     type: filters?.type ?? null,
-    search: filters?.search ?? null,
+    search: filters?.search ?? filters?.projectNumber ?? null,
     sortBy: filters?.sortBy ?? null,
     sortDir: filters?.sortDir ?? null,
-    page: filters?.page ?? null,
-    pageSize: filters?.pageSize ?? null,
     includeDeleted: filters?.includeDeleted ?? false,
     scope: filters?.scope ?? null,
     ownershipScope: filters?.ownershipScope ?? null,
-    projectNumber: filters?.projectNumber ?? null,
   });
+}
+
+function toApiQueryParams(filters?: ProjectFilters): Record<string, unknown> | undefined {
+  if (!filters || Object.keys(filters).length === 0) return undefined;
+  const { projectNumber, page: _page, pageSize: _pageSize, ...rest } = filters;
+  const params: Record<string, unknown> = { ...rest };
+  const search = filters.search?.trim() || projectNumber?.trim();
+  if (search) params.search = search;
+  delete params.projectNumber;
+  return params;
 }
 
 function canReconcileProjects(filters?: ProjectFilters): boolean {
@@ -39,8 +46,6 @@ function canReconcileProjects(filters?: ProjectFilters): boolean {
     && (!filters.type || filters.type === "All")
     && !filters.search
     && !filters.projectNumber
-    && !filters.page
-    && !filters.pageSize
     && !filters.scope
     && !filters.ownershipScope
     && !filters.includeDeleted;
@@ -54,7 +59,7 @@ export const ProjectRepository = {
   },
 
   async getAll(filters?: ProjectFilters): Promise<ProjectListResponse> {
-    const params = filters && Object.keys(filters).length ? filters : undefined;
+    const params = toApiQueryParams(filters);
     if (!isMobileNativePlatform()) {
       // Browser path: always confirms with the server, but a short-lived
       // in-memory cache (cleared on page reload, never persisted) avoids
@@ -110,8 +115,8 @@ export const ProjectRepository = {
             p.customerName?.toLowerCase().includes(q)
         );
       }
-      if (filters?.projectNumber) {
-        const q = filters.projectNumber.toLowerCase();
+      if (filters?.search || filters?.projectNumber) {
+        const q = (filters.search || filters.projectNumber || "").toLowerCase();
         items = items.filter((p) => p.jobNumber?.toLowerCase().includes(q));
       }
       if (filters?.status && filters.status !== "All") {

@@ -18,13 +18,10 @@ import {
   MenuItem,
   Radio,
   RadioGroup,
-  Rating,
   Select,
   Stack,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
-  Typography
+  Typography,
 } from "@mui/material";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
@@ -849,8 +846,6 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   }, [selectedCustomerId, siteId, id, items]);
 
   // Open the suggestion dialog once when candidates first appear (new project).
-  // useRef gives a stable mutable box — avoids spurious re-opens on re-render.
-  const cloneSuggestShownRef = { shown: false };
   useEffect(() => {
     if (id) return;
     if (cloneCandidates.length === 0) return;
@@ -924,10 +919,6 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const selectedProduct = useMemo(
     () => products.find((product) => product.id === selectedProductId),
     [products, selectedProductId]
-  );
-  const selectedProductFeatures = useMemo<ProductFeatureDefinition[]>(
-    () => selectedProduct?.features || [],
-    [selectedProduct]
   );
 
   const customerNameById = useMemo(() => {
