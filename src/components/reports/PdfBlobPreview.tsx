@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import * as pdfjsLib from "pdfjs-dist";
-import { isMobileNativePlatform } from "../../utils/platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -25,14 +24,10 @@ type Props = {
 };
 
 /**
- * Scrollable PDF preview.
- *
- * Web uses the browser's native PDF viewer for stability on large reports and
- * public LAN/dev links. Native mobile keeps the pdf.js canvas renderer because
- * embedded iframe/blob viewers are less reliable inside the Capacitor shell.
+ * Scrollable PDF preview using pdf.js canvas rendering on all platforms.
+ * Avoids browser iframe PDF chrome showing blob UUIDs as the document title.
  */
 export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
-  const isNativeMobile = isMobileNativePlatform();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -40,33 +35,20 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
 
   useEffect(() => {
-    const nextUrl = URL.createObjectURL(blob);
-    setBlobUrl(nextUrl);
-    return () => URL.revokeObjectURL(nextUrl);
-  }, [blob]);
-
-  useEffect(() => {
-    if (!isNativeMobile) {
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
     let cancelled = false;
+    setLoading(true);
+    setError(null);
     void blob.arrayBuffer().then((data) => {
       if (!cancelled) setPdfData(data);
     }).catch(() => {
       if (!cancelled) setError("Could not read PDF data.");
     });
     return () => { cancelled = true; };
-  }, [blob, isNativeMobile]);
+  }, [blob]);
 
   useEffect(() => {
-    if (!isNativeMobile) return;
-
     const node = viewportRef.current;
     if (!node) return;
     let frame = 0;
@@ -82,11 +64,9 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [isNativeMobile]);
+  }, []);
 
   useEffect(() => {
-    if (!isNativeMobile) return;
-
     let cancelled = false;
 
     async function renderPdf() {
@@ -158,41 +138,7 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
 
     void renderPdf();
     return () => { cancelled = true; };
-  }, [pdfData, containerWidth, isNativeMobile, zoom]);
-
-  if (!isNativeMobile && blobUrl) {
-    return (
-      <Box
-        sx={{
-          height: "100%",
-          overflow: "auto",
-          WebkitOverflowScrolling: "touch",
-          bgcolor: "#525659",
-          px: 1,
-          py: 1.5,
-        }}
-      >
-        {scrollHint && (
-          <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
-            {scrollHint}
-          </Typography>
-        )}
-        <Box
-          component="iframe"
-          src={`${blobUrl}#view=FitH`}
-          title="PDF preview"
-          sx={{
-            width: "100%",
-            height: "100%",
-            minHeight: 640,
-            border: "none",
-            borderRadius: 2,
-            bgcolor: "#fff",
-          }}
-        />
-      </Box>
-    );
-  }
+  }, [pdfData, containerWidth, zoom]);
 
   return (
     <Box
@@ -221,20 +167,6 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
         <Typography variant="body2" sx={{ color: "#ffb4a2", textAlign: "center", py: 2 }}>
           {error}
         </Typography>
-      )}
-      {!loading && error && blobUrl && (
-        <Box
-          component="iframe"
-          src={`${blobUrl}#view=FitH`}
-          title="PDF preview fallback"
-          sx={{
-            width: "100%",
-            minHeight: 640,
-            border: "none",
-            borderRadius: 2,
-            bgcolor: "#fff",
-          }}
-        />
       )}
       <Box ref={pagesRef} />
     </Box>
