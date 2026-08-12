@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import type { InspectionImport } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
+import { INSPECTION_INBOX_SOURCE_OPTIONS } from "./inspectionInboxShared";
 
 type Props = {
   projectId: string;
@@ -145,11 +146,9 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId,
                 label="Source"
                 onChange={(e) => setSource(e.target.value)}
               >
-                <MenuItem value="manual">Manual</MenuItem>
-                <MenuItem value="disk">Disk</MenuItem>
-                <MenuItem value="onedrive">OneDrive</MenuItem>
-                <MenuItem value="email">Email</MenuItem>
-                <MenuItem value="generic-kv">Generic Key-Value</MenuItem>
+                {INSPECTION_INBOX_SOURCE_OPTIONS.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                ))}
               </Select>
             </FormControl>
             <Button variant="contained" onClick={handleUpload} disabled={!rawJson.trim() || loading}>
@@ -201,11 +200,9 @@ export default function ProjectInspectionInboxPage({ projectId, assets, assetId,
                             label="Source"
                             onChange={(e) => setEditingSource(e.target.value)}
                           >
-                            <MenuItem value="manual">Manual</MenuItem>
-                            <MenuItem value="disk">Disk</MenuItem>
-                            <MenuItem value="onedrive">OneDrive</MenuItem>
-                            <MenuItem value="email">Email</MenuItem>
-                            <MenuItem value="generic-kv">Generic Key-Value</MenuItem>
+                            {INSPECTION_INBOX_SOURCE_OPTIONS.map((option) => (
+                              <MenuItem key={option.value} value={option.value}>{option.label}</MenuItem>
+                            ))}
                           </Select>
                         </FormControl>
                         <TextField

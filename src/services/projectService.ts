@@ -21,6 +21,7 @@ export interface ProjectFilters {
   includeDeleted?: boolean;
   scope?: "browse" | "assigned";
   ownershipScope?: "all" | "mine";
+  /** @deprecated Prefer `search` — kept for native IndexedDB cache keys */
   projectNumber?: string;
 }
 
