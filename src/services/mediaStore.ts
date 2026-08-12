@@ -129,7 +129,8 @@ async function resolveUploadValue(
   missingMedia?: Array<{ path: string; fieldKey?: string; error: string }>,
 ): Promise<unknown> {
   if (typeof value === "string") {
-    if (JSON_MEDIA_FIELDS.has(key ?? "")) {
+    const looksLikeJsonContainer = value.startsWith("[") || value.startsWith("{");
+    if (JSON_MEDIA_FIELDS.has(key ?? "") || looksLikeJsonContainer) {
       try {
         const parsed = JSON.parse(value);
         const resolved = await resolveUploadValue(parsed, key, missingMedia);

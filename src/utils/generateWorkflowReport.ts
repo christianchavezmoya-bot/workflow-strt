@@ -956,9 +956,15 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
           for (const src of media.photos.slice(0, 8)) {
             const resolved = await resolvePhotoForPdf(src);
-            if (!resolved) continue;
+            if (!resolved) {
+              console.warn(`[generateWorkflowReport] Could not resolve photo for "${media.label}" — skipping image, caption only.`);
+              continue;
+            }
             const fmt = detectImageFormat(resolved);
-            if (!fmt) continue;
+            if (!fmt) {
+              console.warn(`[generateWorkflowReport] Unrecognized image format for "${media.label}" — skipping image, caption only.`);
+              continue;
+            }
             const size = await getImageNaturalSize(resolved);
             const aspect = size ? size.w / size.h : 4 / 3;
             const drawW  = media.isSig ? Math.min(78, IMG_H * aspect) : imgW;
@@ -981,7 +987,10 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
                 }
               }
             }
-            if (!embedded) continue;
+            if (!embedded) {
+              console.warn(`[generateWorkflowReport] jsPDF addImage failed for "${media.label}" — skipping image, caption only.`);
+              continue;
+            }
             // Thin border around image
             doc.setDrawColor(...BORDER);
             doc.setLineWidth(0.2);
