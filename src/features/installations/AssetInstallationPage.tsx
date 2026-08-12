@@ -70,7 +70,6 @@ import {
   Skeleton,
   Stack,
   Switch,
-  Tab,
   Table,
   TableBody,
   TableCell,
@@ -127,7 +126,6 @@ import { featureService } from "../../services/featureService";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import { siteService } from "../../services/siteService";
 import type { Site } from "../../types/site";
-import AssetWorkflowRunHistoryDialog from "./AssetWorkflowRunHistoryDialog";
 import WorkflowRunHistoryDialog from "./WorkflowRunHistoryDialog";
 import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../../components/ui/WorkflowSignatureFlowHost";
 import AssetInspectionDialog from "./AssetInspectionDialog";
@@ -149,8 +147,6 @@ import type { FeatureDependency } from "../../types/featureDependency";
 import { buildFullCaptureJobColumns } from "../../utils/captureAssetJobColumns";
 import { formatAssetTableDate, resolveAssetClosedAt } from "../../utils/assetTableDates";
 import {
-  buildCaptureColumns,
-  buildCaptureRow,
   computeMaxUnitsByFeature,
   pickCaptureRun,
 } from "../../utils/captureSpreadsheet";
@@ -163,6 +159,7 @@ import { peekWebSessionCache, webCacheKey } from "../../services/webFreshCache";
 import type { PaginatedResult } from "../../types/paginatedList";
 import OperationsVirtualizedTableBody from "./OperationsVirtualizedTableBody";
 import { OPERATIONS_VIRTUALIZE_MIN_ROWS } from "./operationsTableLayout";
+import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
@@ -233,7 +230,6 @@ function operationsStickyPrefixSx(left: number, zIndex: number) {
     };
 }
 const LS_COL_KEY = "asset_installation_columns_v2";
-const CAPTURE_HIDDEN_GROUPS_KEY = "capture_spreadsheet_hidden_groups_v1";
 const FORCE_VISIBLE_COL_IDS = ["dateCreated", "dateClosed"] as const;
 const ARCHIVE_COL_IDS = ["serialNumber", "assetModel", "manufacturer", "project", "siteName", "configType", "status"];
 
@@ -257,30 +253,8 @@ function loadColumnConfig(): { order: string[]; hidden: string[] } {
 }
 
 // ------------------------------------------------------------------
-// Status helpers
+// Status helpers — shared maps live in assetStatusDisplay.ts
 // ------------------------------------------------------------------
-
-const STATUS_COLORS: Record<ProjectAssetStatus, "default" | "primary" | "success" | "error" | "warning" | "info"> = {
-  NotStarted: "default",
-  InProgress: "primary",
-  Paused: "warning",
-  Pending: "warning",
-  Complete: "success",
-  Closed: "info",
-  Issue: "error",
-  Cancelled: "error",
-};
-
-const STATUS_LABELS: Record<ProjectAssetStatus, string> = {
-  NotStarted: "Not Started",
-  InProgress: "In Progress",
-  Paused: "Paused",
-  Pending: "Pending",
-  Complete: "Complete",
-  Closed: "Closed",
-  Issue: "Issue",
-  Cancelled: "Cancelled",
-};
 
 /** Time-ago helper for mobile sync timestamp display */
 function timeAgo(date: Date): string {
@@ -521,7 +495,16 @@ const AssetInstallationPage = () => {
   const PROJECT_ASSET_PAGE_SIZE = 50;
   const [projectAssetPage, setProjectAssetPage] = useState(1);
   const [projectAssetTotal, setProjectAssetTotal] = useState(0);
-  const paginatedWebProject = !isNativePlatform && !!selectedProjectId;
+  const paginatedWebProject = useMemo(() => {
+    if (isNativePlatform || !selectedProjectId) return false;
+    const workflowTypeFilter = searchParams.get("workflowType")?.trim();
+    const hasClientOnlyFilters =
+      statusFilter !== "All"
+      || showNoWorkflow
+      || !!workflowTypeFilter
+      || Object.values(autoFilters).some((sel) => sel && sel.size > 0);
+    return !hasClientOnlyFilters;
+  }, [autoFilters, isNativePlatform, searchParams, selectedProjectId, showNoWorkflow, statusFilter]);
   const [healthMap, setHealthMap] = useState<Record<string, AssetHealth>>({});
 
   const [expandedAssetId, setExpandedAssetId] = useState<string | null>(null);
@@ -618,7 +601,6 @@ const AssetInstallationPage = () => {
   const [assignSaving, setAssignSaving] = useState(false);
   const [inspectionDialogAsset, setInspectionDialogAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAsset, setRunHistoryAsset] = useState<ProjectAsset | null>(null);
-  const [runHistoryAssignment, setRunHistoryAssignment] = useState<WorkflowAssignment | null>(null);
   // New run history dialog (with re-run support)
   const [runHistoryOpen, setRunHistoryOpen] = useState(false);
   const [runHistoryConfigId, setRunHistoryConfigId] = useState("");
@@ -893,6 +875,25 @@ const AssetInstallationPage = () => {
   useEffect(() => {
     const assetIdFromUrl = searchParams.get("asset");
     const actionFromUrl = searchParams.get("action");
+
+    if (assetIdFromUrl && !actionFromUrl) {
+      const asset = assets.find((item) => item.id === assetIdFromUrl);
+      if (asset) {
+        setExpandedAssetId(asset.id);
+        return;
+      }
+      void projectAssetService.getById(assetIdFromUrl).then((fetched) => {
+        if (!fetched) return;
+        setAssets((prev) => (prev.some((item) => item.id === fetched.id) ? prev : [...prev, fetched]));
+        setExpandedAssetId(fetched.id);
+        const projectIdFromUrl = searchParams.get("project");
+        if (projectIdFromUrl && selectedProjectId !== projectIdFromUrl) {
+          handleProjectChange(projectIdFromUrl);
+        }
+      });
+      return;
+    }
+
     if (!assetIdFromUrl || !actionFromUrl) {
       deepLinkHandledRef.current = null;
       return;
@@ -1848,8 +1849,6 @@ const AssetInstallationPage = () => {
     void check();
   }, [isNativePlatform, products, selectedProjectId, serverReachable]);
 
-  const isAdminUser = currentUser.role === "Admin";
-
   // Phone-only: "mine" filters cards to assets assigned to this user; "all" shows everything.
   const [mobileScope, setMobileScope] = useState<"mine" | "all">("all");
 
@@ -1911,6 +1910,20 @@ const AssetInstallationPage = () => {
         if (selectedProjectId && a.projectId !== selectedProjectId) return false;
         if (statusFilter !== "All" && a.status !== statusFilter) return false;
         if (showNoWorkflow && assetHasConfiguredWorkflow(a)) return false;
+        if (requestedWorkflowType?.trim().toLowerCase() === "inspection") {
+          const projectWorkflowMode = projects.find((p) => p.id === a.projectId)?.workflowMode;
+          if (!projectHasInspection(projectWorkflowMode)) return false;
+          const assignments = assignmentsMap[a.id];
+          if (assignments && assignments.length > 0) {
+            const hasInspectionWorkflow = assignments.some((asgn) =>
+              isInspectionWorkflowType(asgn.workflowTypeName)
+              || isInspectionConfigType(
+                publishedWfConfigs.find((cfg) => cfg.id === asgn.workflowConfigId)?.configType
+              )
+            );
+            if (!hasInspectionWorkflow) return false;
+          }
+        }
       }
       if (q) {
         const identityHit = anyMatchesWordStart(
@@ -1923,7 +1936,7 @@ const AssetInstallationPage = () => {
       }
       return true;
     });
-  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode, captureIndexByAsset]);
+  }, [assets, selectedProjectId, statusFilter, showNoWorkflow, search, archiveMode, captureIndexByAsset, requestedWorkflowType, assignmentsMap, projects, publishedWfConfigs]);
 
   const bulkReportSelectedAssets = useMemo(
     () => visibleAssets.filter((asset) => selectedAssetIds.has(asset.id)),
@@ -6903,17 +6916,6 @@ ${words.slice(midpoint).join(" ")}`;
         />
       )}
 
-      {/* Legacy run history dialog (assignment panel history icon) */}
-      {runHistoryAsset && runHistoryAssignment && (
-        <AssetWorkflowRunHistoryDialog
-          open={Boolean(runHistoryAsset && runHistoryAssignment)}
-          onClose={() => { setRunHistoryAsset(null); setRunHistoryAssignment(null); }}
-          asset={runHistoryAsset}
-          assignment={runHistoryAssignment}
-        />
-      )}
-
-      {/* New run history dialog â€" View/Edit button â†' history, re-run, PDF report */}
       {docsOpen && docsAsset && (
         <Suspense fallback={null}>
         <AssetDocumentsDialog
@@ -7016,8 +7018,11 @@ ${words.slice(midpoint).join(" ")}`;
           onClick={() => {
             setContextMenuAnchor(null);
             if (contextMenuAsset && contextMenuAssignment) {
-              setRunHistoryAsset(contextMenuAsset);
-              setRunHistoryAssignment(contextMenuAssignment);
+              void openRunHistory(
+                contextMenuAsset,
+                contextMenuAssignment.workflowConfigId,
+                contextMenuAssignment.workflowConfigName,
+              );
             }
           }}
         >

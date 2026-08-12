@@ -30,14 +30,6 @@ public sealed class NotificationService
         _logger = logger;
     }
 
-    public async Task NotifyInstallationCompletedAsync(InstallationEntity installation)
-    {
-        var adminEmail = _config["SeedAdmin:Email"] ?? "admin@commtrac.local";
-        var subject = $"Installation completed: {installation.InstallationNumber}";
-        var body = $"Installation {installation.InstallationNumber} is now 100% complete.";
-        await _emailSender.SendNotificationAsync(adminEmail, subject, body);
-    }
-
     public async Task NotifyWorkflowCompletedAsync(
         AssetWorkflowRunEntity run,
         ProjectAssetEntity asset,
