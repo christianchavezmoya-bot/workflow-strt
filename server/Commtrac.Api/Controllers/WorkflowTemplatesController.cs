@@ -24,7 +24,7 @@ public class WorkflowTemplatesController : ControllerBase
     }
 
     private string WorkflowMediaDirectory(string workflowId)
-        => _files.GetAbsolutePath(_files.BuildRelativePath("Storage", "WorkflowMedia", workflowId));
+        => _files.BuildRelativePath("Storage", "WorkflowMedia", workflowId);
 
     // GET api/workflow-templates/by-product/{productId}
     // Returns all workflow templates for a product.
@@ -142,14 +142,13 @@ public class WorkflowTemplatesController : ControllerBase
     [HttpGet("{id}/media/{mediaId}/file")]
     public IActionResult GetMediaFile(string id, string mediaId)
     {
-        var storageRoot = WorkflowMediaDirectory(id);
-        var files = Directory.Exists(storageRoot)
-            ? Directory.GetFiles(storageRoot, $"{mediaId}.*")
-            : Array.Empty<string>();
+        var storageDir = WorkflowMediaDirectory(id);
+        var files = _files.ListFileNames(storageDir, mediaId);
 
-        if (files.Length == 0) return NotFound();
-        var filePath = files[0];
-        var ext = Path.GetExtension(filePath).TrimStart('.').ToLowerInvariant();
+        if (files.Count == 0) return NotFound();
+        var storedName = files[0];
+        var relativePath = _files.BuildRelativePath(storageDir, storedName);
+        var ext = Path.GetExtension(storedName).TrimStart('.').ToLowerInvariant();
         var contentType = ext switch
         {
             "jpg" or "jpeg" => "image/jpeg",
@@ -161,7 +160,7 @@ public class WorkflowTemplatesController : ControllerBase
             "webm" => "video/webm",
             _ => "application/octet-stream"
         };
-        return PhysicalFile(filePath, contentType);
+        return File(_files.OpenRead(relativePath), contentType);
     }
 
     // DELETE api/workflow-templates/{id}/media/{mediaId}  — remove a media item
@@ -182,11 +181,10 @@ public class WorkflowTemplatesController : ControllerBase
         catch { }
 
         // Delete the physical file
-        var storageRoot = WorkflowMediaDirectory(id);
-        if (Directory.Exists(storageRoot))
+        var storageDir = WorkflowMediaDirectory(id);
+        foreach (var storedName in _files.ListFileNames(storageDir, mediaId))
         {
-            foreach (var f in Directory.GetFiles(storageRoot, $"{mediaId}.*"))
-                System.IO.File.Delete(f);
+            _files.Delete(_files.BuildRelativePath(storageDir, storedName));
         }
 
         template.UpdatedAt = DateTime.UtcNow;

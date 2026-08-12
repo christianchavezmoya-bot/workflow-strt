@@ -35,7 +35,7 @@ Concrete anchors (validated against repo):
 - DB provider switch: `Program.cs` — `Database:Provider` = `Sqlite` (default) or `Postgres`.
 - **Npgsql** package added; **Postgres is opt-in** — local dev unchanged.
 - **Dockerfile** at repo root (API only; port 8080) — ready for container hosting.
-- **Storage abstraction** (`IFileStorageService`) — local disk default; S3 provider TBD.
+- **Storage abstraction** (`IFileStorageService`) — **Local** default; **S3** via `Storage:Provider=S3`.
 - Frontend builds via `tsc -b && vite build` → static `dist/` (ready for S3/CDN).
 
 ### Disk writers (Phase 2 scope — broader than report shares alone)
@@ -133,21 +133,23 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** app runs end-to-end locally on Postgres; migrations apply cleanly.
 
-### PHASE 2 — Media/files: local disk → S3 (abstraction ✅)
+### PHASE 2 — Media/files: local disk → S3 ✅ (provider shipped)
 
-**What shipped (safe prep only):**
+**What shipped:**
 
 - `IFileStorageService` + `LocalFileStorageService` (`Storage:Provider=Local` default).
-- All disk writers listed above refactored to use the abstraction (same on-disk paths).
-- `StorageOptions` config section in `appsettings.Example.json`.
+- **`S3FileStorageService`** behind `Storage:Provider=S3` (AWS SDK; IAM/env credentials).
+- All disk writers use the abstraction; downloads/indexing use streams (no `PhysicalFile` dependency).
+- `ListFileNames` for workflow media lookup on S3.
+- **MinIO** in `docker-compose.yml` + `S3Local` launch profile for local S3 parity.
+- `appsettings.Production.json` template uses `Storage:Provider=S3`.
 
-**Still required before cloud:**
+**Still optional before cloud:**
 
-1. `S3FileStorageService` behind `Storage:Provider=S3` (+ IAM/bucket config).
-2. Local MinIO parity testing (optional).
-3. CloudFront signed URLs (optional).
+1. CloudFront signed URLs for large media.
+2. Staging soak with real S3 bucket + IAM role.
 
-**Gate:** read/write through abstraction locally ✅; S3 provider tested in staging.
+**Gate:** read/write through abstraction locally ✅; S3 provider available for staging.
 
 ### PHASE 3 — CORS, HTTPS, forwarded headers, API base URL (partial)
 
@@ -189,9 +191,10 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 1. ✅ **Phase 0** — done
 2. ✅ **Phase 1 parity prep** — PostgresSchemaEnsurer, docker-compose, SearchDocumentChunks port
 3. **Phase 1 gate** — full Postgres soak + optional data migration (Sqlite stays default until passes)
-4. **Phase 2 S3 + Phase 3 frontend builds** — S3 provider + prod `VITE_API_BASE`
-5. **Phase 4** — before scaling past one instance
-6. **Phase 5 deploy** — Dockerfile ready; wire RDS/S3/secrets + SSE spike
+4. ✅ **Phase 2 S3 provider** — S3FileStorageService + MinIO local parity
+5. **Phase 3 frontend builds** — prod `VITE_API_BASE` + Capacitor release pipeline
+6. **Phase 4** — before scaling past one instance
+7. **Phase 5 deploy** — Dockerfile ready; wire RDS/S3/secrets + SSE spike
 
 ## Open decisions
 

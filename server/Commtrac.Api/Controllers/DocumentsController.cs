@@ -118,17 +118,15 @@ public class DocumentsController : ControllerBase
             return NotFound();
         }
 
-        var fullPath = _files.GetAbsolutePath(doc.FilePath);
         if (!_files.Exists(doc.FilePath))
         {
             return NotFound();
         }
 
         var contentType = string.IsNullOrWhiteSpace(doc.ContentType) ? "application/octet-stream" : doc.ContentType;
-        // inline disposition: browser opens PDF/images in-tab; filename still available for "Save As"
         var safeName = Uri.EscapeDataString(doc.Name ?? "document");
         Response.Headers["Content-Disposition"] = $"inline; filename*=UTF-8''{safeName}";
-        return PhysicalFile(fullPath, contentType, enableRangeProcessing: true);
+        return File(_files.OpenRead(doc.FilePath), contentType, enableRangeProcessing: true);
     }
 
     [HttpDelete("{id}")]

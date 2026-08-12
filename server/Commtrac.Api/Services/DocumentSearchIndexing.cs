@@ -329,8 +329,7 @@ public class DocumentSearchIndexWorker : BackgroundService
 
         foreach (var doc in docs)
         {
-            var fullPath = files.GetAbsolutePath(doc.FilePath!);
-            await IndexSourceAsync(db, extractor, SourceLibrary, doc.Id, fullPath, ct);
+            await IndexSourceAsync(db, extractor, files, SourceLibrary, doc.Id, doc.FilePath!, ct);
             processed++;
             _status.OnRebuildProgress(processed, total);
         }
@@ -338,8 +337,8 @@ public class DocumentSearchIndexWorker : BackgroundService
         foreach (var ad in assetDocs)
         {
             if (!latestByDoc.TryGetValue(ad.Id, out var rev)) continue;
-            var fullPath = files.GetAbsolutePath(files.BuildRelativePath("Storage", "Documents", ad.AssetId, rev.StoredName));
-            await IndexSourceAsync(db, extractor, SourceAsset, ad.Id, fullPath, ct);
+            var relativePath = files.BuildRelativePath("Storage", "Documents", ad.AssetId, rev.StoredName);
+            await IndexSourceAsync(db, extractor, files, SourceAsset, ad.Id, relativePath, ct);
             processed++;
             _status.OnRebuildProgress(processed, total);
         }
@@ -356,8 +355,7 @@ public class DocumentSearchIndexWorker : BackgroundService
         var doc = await db.Documents.AsNoTracking().FirstOrDefaultAsync(d => d.Id == docId, ct);
         if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath)) return;
 
-        var fullPath = files.GetAbsolutePath(doc.FilePath);
-        await IndexSourceAsync(db, extractor, SourceLibrary, docId, fullPath, ct);
+        await IndexSourceAsync(db, extractor, files, SourceLibrary, docId, doc.FilePath, ct);
     }
 
     private async Task IndexAssetDocumentAsync(
@@ -382,8 +380,8 @@ public class DocumentSearchIndexWorker : BackgroundService
 
             if (latest is null) return;
 
-            var fullPath = files.GetAbsolutePath(files.BuildRelativePath("Storage", "Documents", assetDoc.AssetId, latest.StoredName));
-            await IndexSourceAsync(db, extractor, SourceAsset, assetDocId, fullPath, ct);
+            var relativePath = files.BuildRelativePath("Storage", "Documents", assetDoc.AssetId, latest.StoredName);
+            await IndexSourceAsync(db, extractor, files, SourceAsset, assetDocId, relativePath, ct);
         }
         catch
         {
@@ -391,17 +389,20 @@ public class DocumentSearchIndexWorker : BackgroundService
         }
     }
 
-    private async Task IndexSourceAsync(
+    private static async Task IndexSourceAsync(
         AppDbContext db,
         IDocumentContentSearchService extractor,
+        IFileStorageService files,
         string sourceType,
         string sourceId,
-        string fullPath,
+        string relativePath,
         CancellationToken ct)
     {
-        if (!File.Exists(fullPath)) return;
+        if (!files.Exists(relativePath)) return;
 
-        var segments = await extractor.ExtractSegmentsAsync(fullPath, ct);
+        await using var stream = files.OpenRead(relativePath);
+        var fileName = Path.GetFileName(relativePath);
+        var segments = await extractor.ExtractSegmentsAsync(stream, fileName, ct);
         if (segments.Count == 0) return;
 
         var chunks = BuildChunks(segments);

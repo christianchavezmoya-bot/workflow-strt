@@ -79,6 +79,22 @@ public sealed class LocalFileStorageService : IFileStorageService
         Directory.CreateDirectory(GetAbsolutePath(relativeDirectory));
     }
 
+    public IReadOnlyList<string> ListFileNames(string relativeDirectory, string? namePrefix = null)
+    {
+        var absoluteDirectory = GetAbsolutePath(relativeDirectory);
+        if (!Directory.Exists(absoluteDirectory))
+        {
+            return Array.Empty<string>();
+        }
+
+        var pattern = string.IsNullOrWhiteSpace(namePrefix) ? "*" : $"{namePrefix}*";
+        return Directory.GetFiles(absoluteDirectory, pattern)
+            .Select(Path.GetFileName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .ToList();
+    }
+
     private static string NormalizeRelativePath(string relativePath)
         => relativePath.Replace('\\', '/').TrimStart('/');
 }

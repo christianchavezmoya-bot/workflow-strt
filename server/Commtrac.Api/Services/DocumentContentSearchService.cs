@@ -9,11 +9,13 @@ namespace Commtrac.Api.Services;
 public interface IDocumentContentSearchService
 {
     Task<IReadOnlyList<DocumentTextSegment>> ExtractSegmentsAsync(
-        string fullPath,
+        Stream content,
+        string fileName,
         CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<DocumentContentHit>> FindMatchesAsync(
-        string fullPath,
+        Stream content,
+        string fileName,
         IReadOnlyList<string> terms,
         int maxHits = 8,
         CancellationToken cancellationToken = default);
@@ -37,17 +39,18 @@ internal record TextSegment(
 public class DocumentContentSearchService : IDocumentContentSearchService
 {
     public async Task<IReadOnlyList<DocumentTextSegment>> ExtractSegmentsAsync(
-        string fullPath,
+        Stream content,
+        string fileName,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath))
+        if (content is null || string.IsNullOrWhiteSpace(fileName))
         {
             return Array.Empty<DocumentTextSegment>();
         }
 
         try
         {
-            var segments = await ExtractRawSegmentsAsync(fullPath, cancellationToken);
+            var segments = await ExtractRawSegmentsAsync(content, fileName, cancellationToken);
             return segments
                 .Where(s => !string.IsNullOrWhiteSpace(s.Text))
                 .Select(s => new DocumentTextSegment(s.Context, Normalize(s.Text)))
@@ -61,17 +64,18 @@ public class DocumentContentSearchService : IDocumentContentSearchService
     }
 
     public async Task<IReadOnlyList<DocumentContentHit>> FindMatchesAsync(
-        string fullPath,
+        Stream content,
+        string fileName,
         IReadOnlyList<string> terms,
         int maxHits = 8,
         CancellationToken cancellationToken = default)
     {
-        if (string.IsNullOrWhiteSpace(fullPath) || !File.Exists(fullPath) || terms.Count == 0)
+        if (content is null || string.IsNullOrWhiteSpace(fileName) || terms.Count == 0)
         {
             return Array.Empty<DocumentContentHit>();
         }
 
-        var extracted = await ExtractSegmentsAsync(fullPath, cancellationToken);
+        var extracted = await ExtractSegmentsAsync(content, fileName, cancellationToken);
         var segments = extracted.Select(s => new TextSegment(s.Context, s.Text)).ToList();
 
         if (segments.Count == 0) return Array.Empty<DocumentContentHit>();
@@ -87,24 +91,24 @@ public class DocumentContentSearchService : IDocumentContentSearchService
         return hits;
     }
 
-    private static async Task<List<TextSegment>> ExtractRawSegmentsAsync(string fullPath, CancellationToken ct)
+    private static async Task<List<TextSegment>> ExtractRawSegmentsAsync(Stream content, string fileName, CancellationToken ct)
     {
-        var ext = Path.GetExtension(fullPath).ToLowerInvariant();
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
         return ext switch
         {
             ".txt" or ".csv" or ".md" or ".xml" or ".log" =>
-                new List<TextSegment> { new("Text", await File.ReadAllTextAsync(fullPath, ct)) },
-            ".json" => await ExtractJsonSegmentsAsync(fullPath, ct),
-            ".docx" => ExtractDocxSegments(fullPath),
-            ".xlsx" => ExtractXlsxSegments(fullPath),
-            ".pdf" => ExtractPdfSegments(fullPath),
+                new List<TextSegment> { new("Text", await new StreamReader(content).ReadToEndAsync(ct)) },
+            ".json" => await ExtractJsonSegmentsAsync(content, ct),
+            ".docx" => ExtractDocxSegments(content),
+            ".xlsx" => ExtractXlsxSegments(content),
+            ".pdf" => ExtractPdfSegments(content),
             _ => new List<TextSegment>()
         };
     }
 
-    private static async Task<List<TextSegment>> ExtractJsonSegmentsAsync(string fullPath, CancellationToken ct)
+    private static async Task<List<TextSegment>> ExtractJsonSegmentsAsync(Stream content, CancellationToken ct)
     {
-        var raw = await File.ReadAllTextAsync(fullPath, ct);
+        var raw = await new StreamReader(content).ReadToEndAsync(ct);
         using var doc = JsonDocument.Parse(raw);
 
         var segments = new List<TextSegment>();
@@ -149,10 +153,9 @@ public class DocumentContentSearchService : IDocumentContentSearchService
         }
     }
 
-    private static List<TextSegment> ExtractDocxSegments(string fullPath)
+    private static List<TextSegment> ExtractDocxSegments(Stream content)
     {
-        using var file = File.OpenRead(fullPath);
-        using var zip = new ZipArchive(file, ZipArchiveMode.Read);
+        using var zip = new ZipArchive(content, ZipArchiveMode.Read, leaveOpen: true);
         var entry = zip.GetEntry("word/document.xml");
         if (entry is null) return new List<TextSegment>();
 
@@ -172,10 +175,9 @@ public class DocumentContentSearchService : IDocumentContentSearchService
         return paragraphs;
     }
 
-    private static List<TextSegment> ExtractXlsxSegments(string fullPath)
+    private static List<TextSegment> ExtractXlsxSegments(Stream content)
     {
-        using var file = File.OpenRead(fullPath);
-        using var zip = new ZipArchive(file, ZipArchiveMode.Read);
+        using var zip = new ZipArchive(content, ZipArchiveMode.Read, leaveOpen: true);
 
         var sharedStrings = ReadSharedStrings(zip);
         var segments = new List<TextSegment>();
@@ -252,10 +254,10 @@ public class DocumentContentSearchService : IDocumentContentSearchService
             .ToList();
     }
 
-    private static List<TextSegment> ExtractPdfSegments(string fullPath)
+    private static List<TextSegment> ExtractPdfSegments(Stream content)
     {
         var segments = new List<TextSegment>();
-        using var doc = PdfDocument.Open(fullPath);
+        using var doc = PdfDocument.Open(content);
 
         foreach (var page in doc.GetPages())
         {
