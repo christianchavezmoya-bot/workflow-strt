@@ -89,8 +89,15 @@ export interface FinanceRollup {
   labourCost: number;
   marginPct: number;
   billablePct: number;
+  params: FinanceParams;
   byInstaller: { id: string; name: string; cost: number }[];
   byProject: { id: string; name: string; quoted: number; actual: number }[];
+}
+
+export interface FinanceParams {
+  hourlyRate: number;
+  revenueMultiplier: number;
+  quotedRatio: number;
 }
 
 export interface ForecastRow {
@@ -182,6 +189,7 @@ export interface TimeAnalyticsSnapshot {
   qualitySpeed: QualitySpeedPoint[];
   productTrend: { month: string; series: Record<string, number> }[];
   burndown: { week: string; ideal: number; actual: number }[];
+  throughputDaily: { date: string; completions: number }[];
 }
 
 export interface KpiSnapshot {

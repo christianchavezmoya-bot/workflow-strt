@@ -11,8 +11,21 @@ import { useTimeAnalyticsData } from "../hooks/useTimeAnalyticsData";
 import { applyGlobalChartTheme } from "../components/ChartTheme";
 import { ErrorState, LoadingState } from "../components/primitives";
 import type { TimeAnalyticsSnapshot } from "../types";
+import {
+  DATE_PRESETS,
+  detectPreset,
+  formatRangeLabel,
+  rangeForPreset,
+  type DatePresetId,
+} from "../utils/datePresets";
+import { exportSnapshotCsv } from "../utils/exportCsv";
+import type { FinanceSettings } from "../utils/financeSettings";
 
-type ViewComponent = ComponentType<{ data: TimeAnalyticsSnapshot }>;
+type ViewComponent = ComponentType<{
+  data: TimeAnalyticsSnapshot;
+  financeSettings?: FinanceSettings;
+  onFinanceSettingsChange?: (next: FinanceSettings) => void;
+}>;
 
 const lazyView = (loader: () => Promise<{ [key: string]: ViewComponent }>, exportName: string) =>
   lazy(async () => {
@@ -71,17 +84,38 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
     return found ? found.id : "overview";
   }, [location.pathname]);
 
-  const { data, loading, error, filters, setFilters, refresh } =
-    useTimeAnalyticsData({
-      api: props.api ?? api,
-      refreshIntervalMs: props.refreshIntervalMs,
-    });
+  const {
+    data,
+    loading,
+    error,
+    filters,
+    setFilters,
+    financeSettings,
+    setFinanceSettings,
+    refresh,
+  } = useTimeAnalyticsData({
+    api: props.api ?? api,
+    refreshIntervalMs: props.refreshIntervalMs,
+  });
+
+  const activePreset = detectPreset(filters.from, filters.to);
+  const rangeLabel = data
+    ? formatRangeLabel(data.range.from, data.range.to)
+    : formatRangeLabel(filters.from ?? "", filters.to ?? "");
 
   const showSparseDataHint =
     !!data && data.projects.length === 0 && data.customers.length === 0;
 
   const switchView = (id: TimeAnalyticsViewId) => {
     navigate(id === "overview" ? "/time-analytics" : `/time-analytics/${id}`);
+  };
+
+  const applyPreset = (id: DatePresetId) => {
+    if (id === "custom") return;
+    const preset = DATE_PRESETS.find(p => p.id === id);
+    if (!preset) return;
+    const range = rangeForPreset(preset);
+    setFilters({ ...filters, from: range.from, to: range.to });
   };
 
   const ActiveView = VIEW_LOADERS[activeView];
@@ -106,7 +140,18 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
       </nav>
 
       <div className="ta-filters">
-        <span className="label">Filters</span>
+        <span className="label">Period</span>
+        {DATE_PRESETS.map(p => (
+          <button
+            key={p.id}
+            type="button"
+            className={`ta-tag ${activePreset === p.id ? "active" : ""}`}
+            style={{ cursor: "pointer" }}
+            onClick={() => applyPreset(p.id)}
+          >
+            {p.label}
+          </button>
+        ))}
 
         <DateChip
           label="From"
@@ -135,6 +180,22 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
           </FormControl>
         )}
 
+        {data && data.products.length > 0 && (
+          <FormControl size="small" sx={{ minWidth: 160 }}>
+            <Select
+              displayEmpty
+              value={filters.productId ?? ""}
+              onChange={e => setFilters({ ...filters, productId: e.target.value as string })}
+              sx={filterSelectSx}
+            >
+              <MenuItem value="">All products</MenuItem>
+              {data.products.map(p => (
+                <MenuItem key={p.id} value={p.id}>{p.name}</MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+        )}
+
         {data && data.projects.length > 0 && (
           <FormControl size="small" sx={{ minWidth: 180 }}>
             <Select
@@ -154,6 +215,18 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
           </FormControl>
         )}
 
+        {data && (
+          <button
+            type="button"
+            className="ta-tag"
+            style={{ cursor: "pointer" }}
+            onClick={() => exportSnapshotCsv(data, activeView)}
+            title="Export current view as CSV"
+          >
+            ↓ CSV
+          </button>
+        )}
+
         <button
           type="button"
           className="ta-tag"
@@ -163,6 +236,8 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
         >
           ↻ Refresh
         </button>
+
+        <span className="ta-range-hint">{rangeLabel}</span>
       </div>
 
       {error && (
@@ -171,9 +246,8 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
 
       {showSparseDataHint && (
         <div className="ta-sparse-hint" role="status">
-          Snapshot returned no projects or customers. You may be on a fresh seed database —
-          check the API startup log for <code>[DB] File size</code> and see{" "}
-          <code>docs/TIME_ANALYTICS_DEV.md</code>.
+          Snapshot returned no projects or customers for the selected filters.
+          Widen the date range or complete workflow runs to populate analytics.
         </div>
       )}
 
@@ -182,7 +256,11 @@ export default function TimeAnalyticsPage(props: TimeAnalyticsPageProps) {
       ) : data ? (
         <div key={activeView} className="ta-view-anim">
           <Suspense fallback={<LoadingState label="Loading view…" />}>
-            <ActiveView data={data} />
+            <ActiveView
+              data={data}
+              financeSettings={financeSettings}
+              onFinanceSettingsChange={setFinanceSettings}
+            />
           </Suspense>
         </div>
       ) : null}

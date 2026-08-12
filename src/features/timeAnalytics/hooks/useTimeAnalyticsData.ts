@@ -1,16 +1,21 @@
 /**
  * useTimeAnalyticsData — single hook the views consume.
  *
- * Owns filter state and fetch lifecycle against the live API.
+ * Owns filter state, finance assumptions, and fetch lifecycle against the live API.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AxiosInstance } from "axios";
 import { ApiTimeAnalyticsService } from "../services/timeAnalyticsService";
-import type {
-  TimeAnalyticsSnapshot,
-  TimeAnalyticsFilters,
-} from "../types";
+import type { TimeAnalyticsSnapshot, TimeAnalyticsFilters } from "../types";
+import {
+  type FinanceSettings,
+  loadFinanceSettings,
+  saveFinanceSettings,
+  financeSettingsKey,
+  DEFAULT_FINANCE_SETTINGS,
+} from "../utils/financeSettings";
+import { isoDaysAgo, isoToday } from "../utils/datePresets";
 
 export interface UseTimeAnalyticsDataOptions {
   /** axios instance from the host app */
@@ -29,29 +34,21 @@ export interface UseTimeAnalyticsDataResult {
   error: string | null;
   filters: TimeAnalyticsFilters;
   setFilters: (next: TimeAnalyticsFilters) => void;
+  financeSettings: FinanceSettings;
+  setFinanceSettings: (next: FinanceSettings) => void;
   refresh: () => void;
 }
 
 const DEFAULT_FILTERS: TimeAnalyticsFilters = {
-  from: isoDaysAgo(30),
+  from: isoDaysAgo(29),
   to: isoToday(),
   customerId: "",
   productId: "",
   projectId: "",
 };
 
-function isoToday(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function isoDaysAgo(n: number): string {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().slice(0, 10);
-}
-
-function filtersKey(filters: TimeAnalyticsFilters): string {
-  return JSON.stringify(filters);
+function filtersKey(filters: TimeAnalyticsFilters, finance: FinanceSettings): string {
+  return JSON.stringify(filters) + "|" + financeSettingsKey(finance);
 }
 
 export function useTimeAnalyticsData(
@@ -65,11 +62,24 @@ export function useTimeAnalyticsData(
   } = opts;
 
   const [filters, setFilters] = useState<TimeAnalyticsFilters>(DEFAULT_FILTERS);
+  const [financeSettings, setFinanceSettingsState] = useState<FinanceSettings>(() => loadFinanceSettings());
   const [data, setData] = useState<TimeAnalyticsSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const tokenRef = useRef(0);
   const debounceRef = useRef<number | null>(null);
+
+  const setFinanceSettings = useCallback((next: FinanceSettings) => {
+    const normalized: FinanceSettings = {
+      hourlyRate: next.hourlyRate > 0 ? next.hourlyRate : DEFAULT_FINANCE_SETTINGS.hourlyRate,
+      revenueMultiplier: next.revenueMultiplier > 0 ? next.revenueMultiplier : DEFAULT_FINANCE_SETTINGS.revenueMultiplier,
+      quotedRatio: next.quotedRatio > 0 && next.quotedRatio <= 1
+        ? next.quotedRatio
+        : DEFAULT_FINANCE_SETTINGS.quotedRatio,
+    };
+    saveFinanceSettings(normalized);
+    setFinanceSettingsState(normalized);
+  }, []);
 
   const fetchOnce = useCallback(async () => {
     const myToken = ++tokenRef.current;
@@ -77,7 +87,7 @@ export function useTimeAnalyticsData(
     setError(null);
     try {
       const svc = new ApiTimeAnalyticsService(api, { endpoint });
-      const snap = await svc.fetch(filters);
+      const snap = await svc.fetch(filters, financeSettings);
       if (myToken !== tokenRef.current) return;
       setData(snap);
     } catch (e) {
@@ -88,7 +98,7 @@ export function useTimeAnalyticsData(
     } finally {
       if (myToken === tokenRef.current) setLoading(false);
     }
-  }, [api, filters, endpoint]);
+  }, [api, filters, financeSettings, endpoint]);
 
   useEffect(() => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
@@ -98,7 +108,7 @@ export function useTimeAnalyticsData(
     return () => {
       if (debounceRef.current) window.clearTimeout(debounceRef.current);
     };
-  }, [fetchOnce, filterDebounceMs, filtersKey(filters)]);
+  }, [fetchOnce, filterDebounceMs, filtersKey(filters, financeSettings)]);
 
   useEffect(() => {
     if (!refreshIntervalMs || refreshIntervalMs < 1000) return;
@@ -112,6 +122,8 @@ export function useTimeAnalyticsData(
     error,
     filters,
     setFilters,
+    financeSettings,
+    setFinanceSettings,
     refresh: fetchOnce,
   };
 }

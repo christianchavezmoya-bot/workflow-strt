@@ -1,101 +1,94 @@
 import { Fragment, useMemo, useRef } from "react";
 import { Typography } from "@mui/material";
-import { Card, Kpi, Tag, ActivityFeed, Avatar, ChartBox, SectionHeader, MiniBar } from "./primitives";
+import { Card, Kpi, Tag, ActivityFeed, Avatar, ChartBox } from "./primitives";
 import { useChart } from "./useChart";
 import { lineTrend, gauge } from "./ChartTheme";
 import type { TimeAnalyticsSnapshot } from "../types";
+import { formatRangeLabel } from "../utils/datePresets";
 
 export function OverviewView({ data }: { data: TimeAnalyticsSnapshot }) {
   const k = data.kpis;
+  const rangeLabel = formatRangeLabel(data.range.from, data.range.to);
+  const timelineDay = data.range.to;
 
   return (
     <>
-      {/* Hero / live strip */}
       <div className="ta-grid cols-12">
         <div className="span-8">
           <Card glow>
             <div style={{ padding: "4px 4px" }}>
-              <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Live Operations Command Center</h2>
+              <h2 style={{ margin: "0 0 6px", fontSize: 18, fontWeight: 700 }}>Operations Summary</h2>
               <p style={{ margin: 0, color: "var(--ta-text-dim)", fontSize: 12.5, lineHeight: 1.55 }}>
                 Tracking <b style={{ color: "var(--ta-text)" }}>{k.activeInstallers} active installers</b> across{" "}
-                <b style={{ color: "var(--ta-text)" }}>{k.projectsActive} projects</b>. Today's productivity is{" "}
-                <b style={{ color: "var(--ta-good)" }}>{k.productivityPct}%</b> — system is healthy and on plan.
+                <b style={{ color: "var(--ta-text)" }}>{k.projectsActive} projects</b> for{" "}
+                <b style={{ color: "var(--ta-text)" }}>{rangeLabel}</b>. Productivity is{" "}
+                <b style={{ color: k.productivityPct >= 80 ? "var(--ta-good)" : "var(--ta-warn)" }}>{k.productivityPct}%</b>.
               </p>
               <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Tag tone="good">● All crews connected</Tag>
-                <Tag tone="cool">◐ Benchmark sync 2m ago</Tag>
-                <Tag tone="violet">⌖ Forecast stable</Tag>
+                <Tag tone="cool">{data.projects.length} projects in scope</Tag>
+                <Tag tone="violet">{k.assetsRemaining} assets remaining</Tag>
+                {k.fastestInstallerName !== "—" && (
+                  <Tag tone="good">Fastest: {k.fastestInstallerName}</Tag>
+                )}
               </div>
             </div>
           </Card>
         </div>
         <div className="span-4">
-          <Card title="Productivity" sub="Real-time across all crews">
+          <Card title="Productivity" sub="Selected period">
             <Gauge pct={k.productivityPct} />
           </Card>
         </div>
       </div>
 
-      {/* KPI strip */}
       <div className="ta-grid cols-6">
-        <Kpi label="Active Installers" value={k.activeInstallers} icon="⚒" tone="default"
-             delta={{ dir: "up", text: "2 vs yesterday" }} hint="across 5 teams" />
-        <Kpi label="Completed Today" value={k.completedToday} icon="✓" tone="good"
-             delta={{ dir: "up", text: "18% wk avg" }} />
-        <Kpi label="Productive Hours" value={k.productiveHours.toFixed(1)} unit="h" icon="⏱"
-             delta={{ dir: "up", text: "4.2% vs last wk" }} />
-        <Kpi label="Downtime Hours" value={k.downtimeHours.toFixed(1)} unit="h" icon="◐" tone="warn"
-             delta={{ dir: "down", text: "12% permit delays" }} />
-        <Kpi label="Productivity" value={k.productivityPct} unit="%" icon="◈" tone="good"
-             delta={{ dir: "up", text: "1.4 pp vs 85% target" }} />
-        <Kpi label="Avg Install" value={k.avgInstallMinutes} unit="min" icon="⏲" tone="violet"
-             delta={{ dir: "down", text: "8 min improving" }} />
+        <Kpi label="Active Installers" value={k.activeInstallers} icon="⚒" tone="default" hint="with logged runs" />
+        <Kpi label="Completed Today" value={k.completedToday} icon="✓" tone="good" hint="UTC completion date" />
+        <Kpi label="Productive Hours" value={k.productiveHours.toFixed(1)} unit="h" icon="⏱" hint={rangeLabel} />
+        <Kpi label="Downtime Hours" value={k.downtimeHours.toFixed(1)} unit="h" icon="◐" tone="warn" hint={rangeLabel} />
+        <Kpi label="Productivity" value={k.productivityPct} unit="%" icon="◈" tone="good" hint="productive / total" />
+        <Kpi label="Avg Install" value={k.avgInstallMinutes} unit="min" icon="⏲" tone="violet" hint="completed runs" />
       </div>
 
-      {/* Trend + Activity */}
       <div className="ta-grid cols-12">
         <div className="span-8">
-          <Card title="Productive vs Downtime — last 30 days" sub="Daily aggregates across all active crews" action={<span style={{ fontSize: 11 }}>Export</span>}>
+          <Card title={`Productive vs Downtime — ${rangeLabel}`} sub="Monthly aggregates from workflow time tracking">
             <ChartBox height="lg">
               <TrendChart data={data} />
             </ChartBox>
           </Card>
         </div>
         <div className="span-4">
-          <Card title="Live Activity" sub="Streaming events from field devices" action={<span style={{ fontSize: 11 }}>● Live</span>}>
+          <Card title="Recent Activity" sub="Latest completions and issues">
             <ActivityFeed items={data.activity} max={8} />
           </Card>
         </div>
       </div>
 
-      {/* Timeline + project health */}
       <div className="ta-grid cols-12">
         <div className="span-8">
-          <Card title="Live Installer Timeline — today" sub="Productive · Downtime · Travel · Breaks" action={<span style={{ fontSize: 11 }}>Now</span>}>
+          <Card title={`Installer Timeline — ${timelineDay}`} sub="Productive and downtime segments for filter end date">
             <InstallerTimeline data={data} />
           </Card>
         </div>
         <div className="span-4">
-          <Card title="Project Health" sub="Status distribution across all projects">
+          <Card title="Project Health" sub="Status distribution">
             <ProjectHealth data={data} />
           </Card>
         </div>
       </div>
 
-      {/* Top performers + milestones */}
       <div className="ta-grid cols-2">
-        <Card title="Today's Top Performers" sub="Ranked by productivity, install count and quality">
+        <Card title="Top Performers" sub="Ranked by productivity in selected period">
           <Leaderboard data={data} />
         </Card>
-        <Card title="Milestones & Alerts" sub="Derived from project health, recent completions and issue signals">
+        <Card title="Milestones & Alerts" sub="From project health and recent activity">
           <Milestones data={data} />
         </Card>
       </div>
     </>
   );
 }
-
-// ----- Sub-components for Overview -----
 
 function Gauge({ pct }: { pct: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
@@ -113,20 +106,24 @@ function Gauge({ pct }: { pct: number }) {
 
 function TrendChart({ data }: { data: TimeAnalyticsSnapshot }) {
   const ref = useRef<HTMLCanvasElement>(null);
-  const series = useMemo(() => {
-    // Derive 30-day series from the heatmap-like monthly aggregate plus daily noise
-    const prod = data.downtime.trendMonthly.map(t => t.productive / 22);
-    const down = data.downtime.trendMonthly.map(t => t.downtime / 22);
-    return {
-      labels: data.downtime.trendMonthly.map(t => t.month),
-      prod, down,
-    };
-  }, [data]);
+  const series = useMemo(() => ({
+    labels: data.downtime.trendMonthly.map(t => t.month),
+    prod: data.downtime.trendMonthly.map(t => t.productive),
+    down: data.downtime.trendMonthly.map(t => t.downtime),
+  }), [data.downtime.trendMonthly]);
   useChart(ref, () => lineTrend(series.labels, series.prod, series.down), [series.labels.join(",")]);
   return <canvas ref={ref} />;
 }
 
 function InstallerTimeline({ data }: { data: TimeAnalyticsSnapshot }) {
+  if (data.installerTimeline.length === 0) {
+    return (
+      <Typography variant="body2" color="text.secondary" sx={{ fontSize: 12.5, py: 1 }}>
+        No installer segments on {data.range.to}. Try a date with completed workflow runs.
+      </Typography>
+    );
+  }
+
   return (
     <div>
       <div className="ta-tl">
@@ -161,8 +158,6 @@ function InstallerTimeline({ data }: { data: TimeAnalyticsSnapshot }) {
       <div className="ta-tl-legend">
         <div className="leg"><span className="sw" style={{ background: "linear-gradient(90deg, #2dd4bf, #5eead4)" }} /> Productive</div>
         <div className="leg"><span className="sw" style={{ background: "repeating-linear-gradient(45deg, #f87171 0 4px, #b14545 4px 8px)" }} /> Downtime</div>
-        <div className="leg"><span className="sw" style={{ background: "linear-gradient(90deg, #fbbf24, #f59e0b)" }} /> Travel</div>
-        <div className="leg"><span className="sw" style={{ background: "rgba(255,255,255,0.10)", border: "1px dashed var(--ta-border-hi)" }} /> Break</div>
       </div>
     </div>
   );
@@ -257,19 +252,11 @@ function Milestones({ data }: { data: TimeAnalyticsSnapshot }) {
     }
 
     for (const ev of data.activity.filter(a => a.type !== "good").slice(0, 4)) {
-      out.push({
-        type: ev.type,
-        text: ev.text,
-        time: formatFeedTime(ev.timestamp),
-      });
+      out.push({ type: ev.type, text: ev.text, time: formatFeedTime(ev.timestamp) });
     }
 
     for (const ev of data.activity.filter(a => a.type === "good").slice(0, 3)) {
-      out.push({
-        type: "good",
-        text: ev.text,
-        time: formatFeedTime(ev.timestamp),
-      });
+      out.push({ type: "good", text: ev.text, time: formatFeedTime(ev.timestamp) });
     }
 
     return out.slice(0, 8);

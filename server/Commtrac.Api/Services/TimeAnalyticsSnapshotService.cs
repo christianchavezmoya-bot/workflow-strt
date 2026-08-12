@@ -30,6 +30,8 @@ public class TimeAnalyticsSnapshotService
     };
 
     private const double DefaultHourlyRate = 85.0;
+    private const double DefaultRevenueMultiplier = 1.35;
+    private const double DefaultQuotedRatio = 0.92;
 
     private readonly AppDbContext _db;
 
@@ -41,8 +43,11 @@ public class TimeAnalyticsSnapshotService
         string? customerId,
         string? productId,
         string? projectId,
+        TimeAnalyticsFinanceParamsDto? financeParams = null,
         CancellationToken ct = default)
     {
+        financeParams ??= new TimeAnalyticsFinanceParamsDto(
+            DefaultHourlyRate, DefaultRevenueMultiplier, DefaultQuotedRatio);
         var toDate = ParseDate(to) ?? DateTime.UtcNow.Date;
         var fromDate = ParseDate(from) ?? toDate.AddDays(-30);
         if (fromDate > toDate) (fromDate, toDate) = (toDate, fromDate);
@@ -79,7 +84,7 @@ public class TimeAnalyticsSnapshotService
 
         var projectIds = projects.Select(p => p.Id).ToHashSet();
         if (projectIds.Count == 0)
-            return EmptySnapshot(filters, fromDate, toDate);
+            return EmptySnapshot(filters, fromDate, toDate, financeParams);
 
         var assetQuery = _db.ProjectAssets.AsNoTracking()
             .Where(a => !a.IsDeleted && projectIds.Contains(a.ProjectId));
@@ -99,7 +104,7 @@ public class TimeAnalyticsSnapshotService
             .ToListAsync(ct);
 
         if (assets.Count == 0)
-            return EmptySnapshot(filters, fromDate, toDate);
+            return EmptySnapshot(filters, fromDate, toDate, financeParams);
 
         var assetIds = assets.Select(a => a.Id).ToHashSet();
         var assetById = assets.ToDictionary(a => a.Id);
@@ -192,15 +197,17 @@ public class TimeAnalyticsSnapshotService
         var customerRows = BuildCustomers(projects, assets, runs, customerByBizId);
 
         var downtime = BuildDowntime(runs, fromUtc, toUtc);
-        var finance = BuildFinance(installerRows, projectRows, runs);
-        var forecast = BuildForecast(projectRows, runs, toDate);
+        var finance = BuildFinance(installerRows, projectRows, runs, financeParams);
+        var rangeDays = Math.Max(1, (toDate - fromDate).Days + 1);
+        var forecast = BuildForecast(projectRows, runs, toDate, rangeDays);
         var benchmarks = BuildBenchmarks(assetRows);
         var activity = BuildActivity(runs, users, assetById, projects);
-        var timeline = BuildTimeline(runs, users);
+        var timeline = BuildTimeline(runs, users, toDate);
         var heatmap = BuildHeatmap(runs);
         var qualitySpeed = BuildQualitySpeed(installerRows);
         var productTrend = BuildProductTrend(runs, assets, productById, fromUtc, toUtc);
         var burndown = BuildBurndown(projectRows, assets, runs, toDate);
+        var throughputDaily = BuildThroughputDaily(runs, fromDate, toDate);
 
         var assetsRemaining = assets.Count(a => !IsDoneAsset(a.Status));
         var projectsActive = projectRows.Count(p =>
@@ -239,7 +246,8 @@ public class TimeAnalyticsSnapshotService
             Heatmap: heatmap,
             QualitySpeed: qualitySpeed,
             ProductTrend: productTrend,
-            Burndown: burndown);
+            Burndown: burndown,
+            ThroughputDaily: throughputDaily);
     }
 
     // ── Builders ────────────────────────────────────────────────────────────
@@ -533,9 +541,19 @@ public class TimeAnalyticsSnapshotService
     private static TimeAnalyticsFinanceDto BuildFinance(
         List<TimeAnalyticsInstallerDto> installers,
         List<TimeAnalyticsProjectDto> projects,
-        List<RunSlice> runs)
+        List<RunSlice> runs,
+        TimeAnalyticsFinanceParamsDto financeParams)
     {
-        var labour = Math.Round(installers.Sum(i => i.ProductiveHours + i.DowntimeHours) * DefaultHourlyRate, 0);
+        var hourlyRate = financeParams.HourlyRate;
+        var revenueMultiplier = financeParams.RevenueMultiplier;
+        var quotedRatio = financeParams.QuotedRatio;
+
+        var labour = Math.Round(installers.Sum(i => i.ProductiveHours + i.DowntimeHours) * hourlyRate, 0);
+        var revenue = Math.Round(labour * revenueMultiplier, 0);
+        var marginPct = revenue > 0
+            ? Math.Round((revenue - labour) * 100.0 / revenue, 1)
+            : 0;
+
         var billableHours = runs.Sum(r => r.ProductiveSeconds) / 3600.0;
         var totalHours = runs.Sum(r => r.ProductiveSeconds + r.DowntimeSeconds) / 3600.0;
         var billablePct = totalHours > 0 ? Math.Round(billableHours * 100.0 / totalHours, 1) : 0;
@@ -545,7 +563,7 @@ public class TimeAnalyticsSnapshotService
             .Take(12)
             .Select(i => new TimeAnalyticsFinanceInstallerDto(
                 i.Id, i.Name,
-                Math.Round((i.ProductiveHours + i.DowntimeHours) * DefaultHourlyRate, 0)))
+                Math.Round((i.ProductiveHours + i.DowntimeHours) * hourlyRate, 0)))
             .ToList();
 
         var byProject = projects
@@ -554,16 +572,17 @@ public class TimeAnalyticsSnapshotService
             .Select(p =>
             {
                 var actual = p.ProductiveHours + p.DowntimeHours;
-                var quoted = actual > 0 ? actual * 0.92 : 0; // no quoted hours in DB — estimate from actual
+                var quoted = actual > 0 ? Math.Round(actual * quotedRatio, 1) : 0;
                 return new TimeAnalyticsFinanceProjectDto(p.Id, p.Name, quoted, actual);
             })
             .ToList();
 
         return new TimeAnalyticsFinanceDto(
-            Revenue: Math.Round(labour * 1.35, 0),
+            Revenue: revenue,
             LabourCost: labour,
-            MarginPct: 26,
+            MarginPct: marginPct,
             BillablePct: billablePct,
+            Params: financeParams,
             ByInstaller: byInstaller,
             ByProject: byProject);
     }
@@ -571,7 +590,8 @@ public class TimeAnalyticsSnapshotService
     private static TimeAnalyticsForecastDto BuildForecast(
         List<TimeAnalyticsProjectDto> projects,
         List<RunSlice> runs,
-        DateTime toDate)
+        DateTime toDate,
+        int rangeDays)
     {
         var remainingAssets = projects.Sum(p => p.TotalAssets - p.DoneAssets);
         var avgHoursPerAsset = runs.Count > 0
@@ -579,7 +599,10 @@ public class TimeAnalyticsSnapshotService
             : 2.5;
         var remainingHours = Math.Round(remainingAssets * avgHoursPerAsset, 0);
 
-        var dailyThroughput = runs.Count(r => r.Status.Equals("Complete", StringComparison.OrdinalIgnoreCase)) / 30.0;
+        var dailyThroughput = runs.Count(r =>
+                r.Status.Equals("Complete", StringComparison.OrdinalIgnoreCase)
+                && r.CompletedAt.HasValue)
+            / (double)rangeDays;
         if (dailyThroughput < 0.5) dailyThroughput = 0.5;
         var weeksToFinish = remainingAssets / (dailyThroughput * 7);
         if (double.IsNaN(weeksToFinish) || double.IsInfinity(weeksToFinish)) weeksToFinish = 12;
@@ -611,7 +634,7 @@ public class TimeAnalyticsSnapshotService
                     r.CompletedAt.HasValue
                     && r.CompletedAt.Value.Month == q.Month
                     && r.CompletedAt.Value.Year == q.Year);
-                return new TimeAnalyticsForecastHistoryDto(label, actual * 1.05, actual);
+                return new TimeAnalyticsForecastHistoryDto(label, actual, actual);
             })
             .ToList();
 
@@ -687,11 +710,13 @@ public class TimeAnalyticsSnapshotService
 
     private static List<TimeAnalyticsTimelineDto> BuildTimeline(
         List<RunSlice> runs,
-        Dictionary<string, UserSlice> users)
+        Dictionary<string, UserSlice> users,
+        DateTime focusDate)
     {
-        var today = DateTime.UtcNow.Date;
-        var todayRuns = runs.Where(r => r.StartedAt.Date == today || (r.CompletedAt?.Date == today)).ToList();
-        var groups = todayRuns.GroupBy(r => r.TechnicianUserId ?? r.CompletedByName ?? "unknown").Take(8);
+        var day = focusDate.Date;
+        var dayRuns = runs.Where(r =>
+            r.StartedAt.Date == day || (r.CompletedAt?.Date == day)).ToList();
+        var groups = dayRuns.GroupBy(r => r.TechnicianUserId ?? r.CompletedByName ?? "unknown").Take(8);
 
         return groups.Select(g =>
         {
@@ -705,7 +730,7 @@ public class TimeAnalyticsSnapshotService
             {
                 foreach (var entry in ParseTimeEntries(run.TimeTrackingJson))
                 {
-                    if (entry.StartedAtUtc.Date != today) continue;
+                    if (entry.StartedAtUtc.Date != day) continue;
                     var start = entry.StartedAtUtc.TimeOfDay.TotalHours;
                     var end = (entry.EndedAtUtc ?? run.CompletedAt ?? DateTime.UtcNow).TimeOfDay.TotalHours;
                     if (end <= start) end = start + 0.25;
@@ -716,7 +741,7 @@ public class TimeAnalyticsSnapshotService
                 }
 
                 // Fallback single productive block from run bounds.
-                if (segments.Count == 0 && run.StartedAt.Date == today)
+                if (segments.Count == 0 && run.StartedAt.Date == day)
                 {
                     var end = (run.CompletedAt ?? DateTime.UtcNow).TimeOfDay.TotalHours;
                     segments.Add(new TimeAnalyticsTimelineSegmentDto(
@@ -851,12 +876,36 @@ public class TimeAnalyticsSnapshotService
         return list;
     }
 
+    private static List<TimeAnalyticsThroughputDayDto> BuildThroughputDaily(
+        List<RunSlice> runs,
+        DateTime fromDate,
+        DateTime toDate)
+    {
+        var completionsByDay = runs
+            .Where(r =>
+                r.Status.Equals("Complete", StringComparison.OrdinalIgnoreCase)
+                && r.CompletedAt.HasValue)
+            .GroupBy(r => r.CompletedAt!.Value.Date)
+            .ToDictionary(g => g.Key, g => g.Count());
+
+        var list = new List<TimeAnalyticsThroughputDayDto>();
+        for (var d = fromDate.Date; d <= toDate.Date; d = d.AddDays(1))
+        {
+            list.Add(new TimeAnalyticsThroughputDayDto(
+                d.ToString("yyyy-MM-dd"),
+                completionsByDay.GetValueOrDefault(d)));
+        }
+
+        return list;
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private static TimeAnalyticsSnapshotDto EmptySnapshot(
         TimeAnalyticsFiltersDto filters,
         DateTime fromDate,
-        DateTime toDate) =>
+        DateTime toDate,
+        TimeAnalyticsFinanceParamsDto financeParams) =>
         new(
             DateTime.UtcNow.ToString("o"),
             new TimeAnalyticsRangeDto(fromDate.ToString("yyyy-MM-dd"), toDate.ToString("yyyy-MM-dd")),
@@ -864,9 +913,9 @@ public class TimeAnalyticsSnapshotService
             new TimeAnalyticsKpiDto(0, 0, 0, 0, 0, 0, "—", 0, 0, 0, 0),
             [], [], [], [], [],
             new TimeAnalyticsDowntimeDto([], []),
-            new TimeAnalyticsFinanceDto(0, 0, 0, 0, [], []),
+            new TimeAnalyticsFinanceDto(0, 0, 0, 0, financeParams, [], []),
             new TimeAnalyticsForecastDto(0, toDate.ToString("yyyy-MM-dd"), "low", 0, 0, [], []),
-            [], [], [], [], [], [], []);
+            [], [], [], [], [], [], [], []);
 
     private static bool IsDoneAsset(string status) =>
         DoneAssetStatuses.Contains(status);
