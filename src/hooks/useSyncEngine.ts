@@ -16,6 +16,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Network } from "@capacitor/network";
 import api from "../services/api";
 import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
+import { shouldScheduleBootstrap } from "../utils/bootstrapFreshness";
 import { isMobileNativePlatform } from "../utils/platform";
 import {
   entityGetAllIssues,
@@ -131,7 +132,7 @@ export interface SyncState {
   /** True when upload/bootstrap is allowed (native: radio up and server ping confirmed). */
   canSync: boolean;
   /** Manually trigger a sync flush */
-  triggerSync: () => Promise<void>;
+  triggerSync: (options?: TriggerSyncOptions) => Promise<TriggerSyncResult>;
   /** Live bootstrap download progress (native Sync Now / reconnect prefetch). */
   bootstrapProgress: BootstrapProgress | null;
   /** Force-proceed a conflicted action (overwrite server version). */
@@ -150,6 +151,17 @@ export interface SyncState {
    */
   queueOrSend: <T>(opts: QueueOrSendOpts) => Promise<T | null>;
 }
+
+export type TriggerSyncOptions = {
+  /** When true (default), force a full field download after upload. Pull-to-sync passes false. */
+  forceDownload?: boolean;
+};
+
+export type TriggerSyncResult = {
+  uploaded: boolean;
+  downloadScheduled: boolean;
+  upToDate: boolean;
+};
 
 export interface QueueOrSendOpts {
   url: string;
@@ -1501,14 +1513,45 @@ export function useSyncEngine(): SyncState {
     await refreshPending();
   }, [refreshPending]);
 
-  /** Upload pending ops, wait for drain, then download field data. User Sync Now forces bootstrap. */
-  const triggerSync = useCallback(async () => {
-    if (!canAttemptSyncFlush()) return;
+  /** Upload pending ops, then download field data when freshness gate allows. */
+  const triggerSync = useCallback(async (options?: TriggerSyncOptions): Promise<TriggerSyncResult> => {
+    const result: TriggerSyncResult = { uploaded: false, downloadScheduled: false, upToDate: false };
+    if (!canAttemptSyncFlush()) return result;
+
+    const pendingBefore = pending;
     await reconnectAndFlushNow();
+    if (pendingBefore > 0) result.uploaded = true;
+
     if (isMobileNativePlatform() && canAttemptSyncFlush()) {
-      scheduleBootstrapAfterUploadDrain("all", 0, true);
+      const forceDownload = options?.forceDownload ?? true;
+      if (forceDownload) {
+        scheduleBootstrapAfterUploadDrain("all", 0, true, "sync-now");
+        result.downloadScheduled = true;
+      } else {
+        const shouldDownload = await shouldScheduleBootstrap({
+          reason: "pull-sync",
+          scope: "assigned",
+          force: false,
+        });
+        if (shouldDownload) {
+          scheduleBootstrapAfterUploadDrain("assigned", 0, false, "pull-sync");
+          result.downloadScheduled = true;
+        } else {
+          result.upToDate = true;
+          window.dispatchEvent(new CustomEvent("sync:up-to-date", {
+            detail: { uploaded: result.uploaded },
+          }));
+        }
+      }
+    } else if (!result.uploaded) {
+      result.upToDate = true;
+      window.dispatchEvent(new CustomEvent("sync:up-to-date", {
+        detail: { uploaded: false },
+      }));
     }
-  }, []);
+
+    return result;
+  }, [pending]);
 
   useEffect(() => {
     if (!isMobileNativePlatform()) return;

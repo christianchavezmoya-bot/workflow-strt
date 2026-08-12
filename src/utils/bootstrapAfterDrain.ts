@@ -6,6 +6,7 @@
 import offlineBootstrapService, { type BootstrapScope } from "../services/offlineBootstrapService";
 import { getNativeNetworkConnected, getServerReachable, shouldSkipRunMutation, subscribeServerReachable } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "./platform";
+import { shouldScheduleBootstrap, type BootstrapReason } from "./bootstrapFreshness";
 
 let chainTimer: ReturnType<typeof setTimeout> | null = null;
 let lastScheduledAtMs = 0;
@@ -13,8 +14,6 @@ let deferredBootstrapUnsub: (() => void) | null = null;
 
 /** Minimum gap between automatic bootstrap schedules (assigned-scope prefetch). */
 const AUTO_DEBOUNCE_MS = 3_000;
-/** Skip full bootstrap if one completed within this window (unless user Sync Now). */
-const FULL_BOOTSTRAP_COOLDOWN_MS = 10 * 60_000;
 
 function hasNetworkSignal(): boolean {
   if (isMobileNativePlatform()) {
@@ -36,6 +35,7 @@ export function scheduleBootstrapAfterUploadDrain(
   scope: BootstrapScope = "all",
   debounceMs = AUTO_DEBOUNCE_MS,
   force = false,
+  reason: BootstrapReason = "flush-complete",
 ): void {
   if (!isMobileNativePlatform()) return;
   if (!canScheduleBootstrap()) {
@@ -45,19 +45,21 @@ export function scheduleBootstrapAfterUploadDrain(
       if (!reachable) return;
       deferredBootstrapUnsub?.();
       deferredBootstrapUnsub = null;
-      scheduleBootstrapAfterUploadDrain(scope, debounceMs, force);
+      scheduleBootstrapAfterUploadDrain(scope, debounceMs, force, reason);
     });
     return;
   }
 
   const run = () => {
-    chainTimer = null;
-    if (offlineBootstrapService.isRunning()) return;
-    if (!force && scope === "all") {
-      const lastMs = offlineBootstrapService.getLastCompletedAtMs();
-      if (lastMs !== null && Date.now() - lastMs < FULL_BOOTSTRAP_COOLDOWN_MS) return;
-    }
-    void offlineBootstrapService.runAfterUploadDrain({ scope, force });
+    void (async () => {
+      chainTimer = null;
+      if (offlineBootstrapService.isRunning()) return;
+
+      const shouldRun = force || await shouldScheduleBootstrap({ reason, scope, force });
+      if (!shouldRun) return;
+
+      void offlineBootstrapService.runAfterUploadDrain({ scope, force });
+    })();
   };
 
   const now = Date.now();
@@ -84,5 +86,5 @@ export function scheduleBootstrapIfQueueEmpty(
   scope: BootstrapScope = "all",
 ): void {
   if (pendingRemaining > 0) return;
-  scheduleBootstrapAfterUploadDrain(scope, AUTO_DEBOUNCE_MS);
+  scheduleBootstrapAfterUploadDrain(scope, AUTO_DEBOUNCE_MS, false, "flush-complete");
 }

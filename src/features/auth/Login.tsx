@@ -143,7 +143,7 @@ const Login = () => {
     window.dispatchEvent(new Event("auth-user-updated"));
 
     // Prefetch field data after login — gated on /health ping (not radio alone).
-    scheduleBootstrapAfterUploadDrain("all");
+    scheduleBootstrapAfterUploadDrain("all", 3_000, false, "first-login");
 
     const landingRoute = resolvePostLoginRoute(
       result.user as { role?: string } | undefined,

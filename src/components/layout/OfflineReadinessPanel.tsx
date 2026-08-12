@@ -15,6 +15,7 @@ import {
 } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
 import { useOfflineMode } from "../../contexts/OfflineModeContext";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
 import {
   offlineBootstrapService,
   type BootstrapStatus,
@@ -32,6 +33,7 @@ function formatWhen(date: Date | null): string {
 
 export default function OfflineReadinessPanel() {
   const { isManualOffline, isOfflineMode, goOffline, goOnline } = useOfflineMode();
+  const { triggerSync, canSync, syncing } = useSyncEngine();
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
 
@@ -58,13 +60,13 @@ export default function OfflineReadinessPanel() {
   if (!isMobileNativePlatform() || !status) return null;
 
   const summary = status.summary;
-  const running = status.isRunning || retrying;
+  const running = status.isRunning || retrying || syncing;
 
   async function handleRetry() {
-    if (typeof navigator !== "undefined" && !navigator.onLine) return;
+    if (!canSync) return;
     setRetrying(true);
     try {
-      await offlineBootstrapService.retry({ scope: "assigned" });
+      await triggerSync({ forceDownload: true });
     } finally {
       setRetrying(false);
       await reload();
@@ -153,11 +155,11 @@ export default function OfflineReadinessPanel() {
           variant="outlined"
           size="small"
           startIcon={running ? <CircularProgress size={14} /> : status.isStale ? <DownloadOutlinedIcon /> : <RefreshOutlinedIcon />}
-          disabled={running || (typeof navigator !== "undefined" && !navigator.onLine)}
+          disabled={running || !canSync}
           onClick={() => void handleRetry()}
           sx={{ alignSelf: "flex-start" }}
         >
-          {status.isStale ? "Download now" : "Refresh field data"}
+          {status.isStale ? "Sync & download" : "Refresh field data"}
         </Button>
       </Stack>
     </Box>
