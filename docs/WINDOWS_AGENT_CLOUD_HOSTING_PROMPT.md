@@ -211,4 +211,12 @@ Next phase implemented: none / Phase <n> — <summary>
 
 **Rules:** Do not commit LAN IPs or secrets. Report before merging cloud-hosting PRs. Tell Mac agent your hash when default dev passes.
 
+### Before AWS deploy (mandatory gate)
+
+When cloud **prep** is done and staging is wired (Postgres + S3 + HTTPS + prod `VITE_API_BASE`):
+
+1. Run **[`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)** — full **web (W1–W11)** + **phone (P1–P8)** on staging.
+2. Mac agent owns phone section; Windows owns web + automated gates.
+3. **Do not deploy to AWS production** until sign-off section is YES.
+
 ## PROMPT END

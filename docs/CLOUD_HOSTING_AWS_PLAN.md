@@ -163,13 +163,20 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** prod-config build + CORS verified in staging.
 
-### PHASE 4 — Statelessness audit
+### PHASE 4 — Statelessness audit (partial)
 
-1. SSE hub, document search queue, SQLite backup service.
-2. Retire `SqliteBackupService` on Postgres/RDS.
-3. Controlled migrations (not N instances racing `Migrate()` on boot).
+**What shipped:**
 
-**Gate:** safe restart; no single-instance assumptions for correctness.
+- `Database:RunMigrationsOnStartup` — default `true` (dev); **`false` in Production** template so CI applies migrations before instances boot (`scripts/cloud-migrate.ps1` / `.sh`).
+- **`docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`** — full **web + phone** verification gate before AWS deploy.
+
+**Still required:**
+
+1. SSE hub multi-instance strategy (stick to **single instance** for v1).
+2. Document search queue behavior on restart (rebuild acceptable for v1).
+3. Production SSE soak on chosen host (App Runner vs Beanstalk).
+
+**Gate:** pre-deploy checklist PASS on staging; single-instance deploy only until SSE resolved.
 
 ### PHASE 5 — Containerize + deploy to AWS (Dockerfile ✅)
 
@@ -193,8 +200,9 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 3. **Phase 1 gate** — full Postgres soak + optional data migration (Sqlite stays default until passes)
 4. ✅ **Phase 2 S3 provider** — S3FileStorageService + MinIO local parity
 5. **Phase 3 frontend builds** — prod `VITE_API_BASE` + Capacitor release pipeline
-6. **Phase 4** — before scaling past one instance
-7. **Phase 5 deploy** — Dockerfile ready; wire RDS/S3/secrets + SSE spike
+6. **Pre-deploy gate** — [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) PASS on staging (web + phone)
+7. **Phase 4 complete** — SSE soak; multi-instance only after hub strategy
+8. **Phase 5 deploy** — AWS cutover after sign-off
 
 ## Open decisions
 
@@ -212,4 +220,4 @@ dotnet user-secrets set "SeedAdmin:Password" "YourStrongPassword!"
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Data Source=C:\path\to\commtrac.db"
 ```
 
-See also: `docs/RESEND_EMAIL_SETUP.md`, `server/README.md`, `docs/WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`.
+See also: `docs/RESEND_EMAIL_SETUP.md`, `server/README.md`, `docs/WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`.
