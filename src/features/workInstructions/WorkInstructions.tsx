@@ -1090,7 +1090,7 @@ const WorkInstructions = () => {
         <Paper className="glass-card" sx={{ p: 2.5 }}>
           {!activeProduct ? (
             <Typography color="text.secondary">
-              No products found. Create a product in Admin to generate tabs here.
+              No products found. Create a product in Settings to generate tabs here.
             </Typography>
           ) : (
             <Stack spacing={2}>
