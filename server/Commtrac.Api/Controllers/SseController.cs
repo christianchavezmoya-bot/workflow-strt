@@ -3,9 +3,11 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using System.Threading.Channels;
+using Commtrac.Api.Hosting;
 using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 
 namespace Commtrac.Api.Controllers;
@@ -26,6 +28,7 @@ public class SseController : ControllerBase
 {
     private readonly SseHub       _hub;
     private readonly IConfiguration _config;
+    private readonly IHostEnvironment _environment;
 
     // Hard ceiling on a single SSE stream's lifetime. A client that vanishes ungracefully
     // (mobile Wi-Fi drop, device sleep) may never trigger RequestAborted; without a ceiling
@@ -37,10 +40,11 @@ public class SseController : ControllerBase
     // reaped promptly instead of lingering.
     private static readonly TimeSpan WriteTimeout = TimeSpan.FromSeconds(15);
 
-    public SseController(SseHub hub, IConfiguration config)
+    public SseController(SseHub hub, IConfiguration config, IHostEnvironment environment)
     {
         _hub    = hub;
         _config = config;
+        _environment = environment;
     }
 
     // GET api/sse/events?token=<jwt>
@@ -140,7 +144,7 @@ public class SseController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(token)) return null;
 
-        var jwtKey      = _config["Jwt:Key"]      ?? "dev-only-change-me";
+        var jwtKey      = JwtKeyResolver.Resolve(_config, _environment);
         var jwtIssuer   = _config["Jwt:Issuer"]   ?? "commtrac";
         var jwtAudience = _config["Jwt:Audience"] ?? "commtrac-ui";
 

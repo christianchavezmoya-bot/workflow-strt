@@ -7,47 +7,69 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Commtrac.Api.Hosting;
 using Commtrac.Api.Middleware;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 using Commtrac.Api.Swagger;
+using Microsoft.AspNetCore.HttpOverrides;
 
 var builder = WebApplication.CreateBuilder(args);
+
+HostingSecretGuard.ValidateProductionSecrets(builder.Configuration, builder.Environment);
 
 builder.Services.AddControllers();
 builder.Services.AddHttpClient();
 
-// Resolve DB path relative to ContentRootPath (project dir) so it can never resolve
-// to the bin/Debug output folder regardless of how the process is started.
+// Database provider: Sqlite (default, unchanged local dev) or Postgres (cloud parity).
+var dbProvider = builder.Configuration["Database:Provider"] ?? "Sqlite";
 var rawConnectionString = builder.Configuration.GetConnectionString("DefaultConnection") ?? "Data Source=commtrac.db";
-var dbDataSource = rawConnectionString.Replace("Data Source=", "", StringComparison.OrdinalIgnoreCase).Trim();
-if (!Path.IsPathRooted(dbDataSource))
-    dbDataSource = Path.Combine(builder.Environment.ContentRootPath, dbDataSource);
-var resolvedConnectionString = $"Data Source={dbDataSource}";
-Console.WriteLine($"[DB] Resolved path: {dbDataSource}");
+string resolvedConnectionString;
 
-const long freshDbWarningBytes = 5L * 1024 * 1024;
-if (File.Exists(dbDataSource))
+if (string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase))
 {
-    var dbSizeBytes = new FileInfo(dbDataSource).Length;
-    Console.WriteLine($"[DB] File size: {dbSizeBytes / (1024.0 * 1024.0):F2} MB");
-    if (dbSizeBytes < freshDbWarningBytes)
-    {
-        Console.ForegroundColor = ConsoleColor.Yellow;
-        Console.WriteLine("[DB] WARNING: Database file is very small (< 5 MB).");
-        Console.WriteLine("[DB] You may be on a fresh seed DB, not your populated workflow database.");
-        Console.WriteLine("[DB] Set ConnectionStrings:DefaultConnection to your real commtrac.db (user-secrets or env var).");
-        Console.WriteLine("[DB] See docs/TIME_ANALYTICS_DEV.md");
-        Console.ResetColor();
-    }
+    resolvedConnectionString = rawConnectionString;
+    Console.WriteLine("[DB] Provider: Postgres");
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(resolvedConnectionString));
 }
 else
 {
-    Console.WriteLine("[DB] File does not exist yet — will be created on first migration.");
+    // Resolve DB path relative to ContentRootPath (project dir) so it can never resolve
+    // to the bin/Debug output folder regardless of how the process is started.
+    var dbDataSource = rawConnectionString.Replace("Data Source=", "", StringComparison.OrdinalIgnoreCase).Trim();
+    if (!Path.IsPathRooted(dbDataSource))
+        dbDataSource = Path.Combine(builder.Environment.ContentRootPath, dbDataSource);
+    resolvedConnectionString = $"Data Source={dbDataSource}";
+    Console.WriteLine($"[DB] Provider: Sqlite");
+    Console.WriteLine($"[DB] Resolved path: {dbDataSource}");
+
+    const long freshDbWarningBytes = 5L * 1024 * 1024;
+    if (File.Exists(dbDataSource))
+    {
+        var dbSizeBytes = new FileInfo(dbDataSource).Length;
+        Console.WriteLine($"[DB] File size: {dbSizeBytes / (1024.0 * 1024.0):F2} MB");
+        if (dbSizeBytes < freshDbWarningBytes)
+        {
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine("[DB] WARNING: Database file is very small (< 5 MB).");
+            Console.WriteLine("[DB] You may be on a fresh seed DB, not your populated workflow database.");
+            Console.WriteLine("[DB] Set ConnectionStrings:DefaultConnection to your real commtrac.db (user-secrets or env var).");
+            Console.WriteLine("[DB] See docs/TIME_ANALYTICS_DEV.md");
+            Console.ResetColor();
+        }
+    }
+    else
+    {
+        Console.WriteLine("[DB] File does not exist yet — will be created on first migration.");
+    }
+
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseSqlite(resolvedConnectionString));
 }
 
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseSqlite(resolvedConnectionString));
-
+builder.Services.Configure<StorageOptions>(builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.AddSingleton<IFileStorageService, LocalFileStorageService>();
 builder.Services.AddScoped<IInspectionImportAdapterService, InspectionImportAdapterService>();
 builder.Services.AddScoped<IInspectionImportValidatorService, InspectionImportValidatorService>();
 builder.Services.AddScoped<NotificationSettingsService>();
@@ -79,10 +101,24 @@ builder.Services.AddSingleton<IDocumentSearchIndexChannel>(sp => sp.GetRequiredS
 builder.Services.AddSingleton<IDocumentSearchIndexQueueMetrics>(sp => sp.GetRequiredService<DocumentSearchIndexQueue>());
 builder.Services.AddHostedService<DocumentSearchIndexWorker>();
 
+var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?.Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .ToArray();
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
+        if (configuredCorsOrigins is { Length: > 0 })
+        {
+            policy
+                .WithOrigins(configuredCorsOrigins)
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+            return;
+        }
+
         policy
             .SetIsOriginAllowed(origin =>
             {
@@ -100,7 +136,7 @@ builder.Services.AddCors(options =>
     });
 });
 
-var jwtKey = builder.Configuration["Jwt:Key"] ?? "dev-only-change-me";
+var jwtKey = JwtKeyResolver.Resolve(builder.Configuration, builder.Environment);
 var jwtIssuer = builder.Configuration["Jwt:Issuer"] ?? "commtrac";
 var jwtAudience = builder.Configuration["Jwt:Audience"] ?? "commtrac-ui";
 var keyBytes = Encoding.UTF8.GetBytes(jwtKey);
@@ -226,6 +262,10 @@ if (app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
+    app.UseForwardedHeaders(new ForwardedHeadersOptions
+    {
+        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
+    });
     app.UseHttpsRedirection();
 }
 

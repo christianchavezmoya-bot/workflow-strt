@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
+using Commtrac.Api.Services.Storage;
 
 namespace Commtrac.Api.Controllers;
 
@@ -14,21 +15,18 @@ public class AssetDocumentsController : ControllerBase
 {
     private const int MaxDocsPerAsset = 3;
     private readonly AppDbContext _db;
+    private readonly IFileStorageService _files;
     private readonly IDocumentSearchIndexQueue _searchIndexQueue;
 
-    public AssetDocumentsController(AppDbContext db, IDocumentSearchIndexQueue searchIndexQueue)
+    public AssetDocumentsController(AppDbContext db, IFileStorageService files, IDocumentSearchIndexQueue searchIndexQueue)
     {
         _db = db;
+        _files = files;
         _searchIndexQueue = searchIndexQueue;
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-
-    private string StorageRoot =>
-        Path.Combine(Directory.GetCurrentDirectory(), "Storage", "Documents");
-
-    private string AssetDir(string assetId) =>
-        Path.Combine(StorageRoot, assetId);
+    private string AssetRevisionRelativePath(string assetId, string storedName)
+        => _files.BuildRelativePath("Storage", "Documents", assetId, storedName);
 
     private static AssetDocumentRevisionDto ToRevDto(AssetDocumentRevisionEntity r) => new(
         r.Id, r.RevisionNumber, r.OriginalName,
@@ -172,9 +170,7 @@ public class AssetDocumentsController : ControllerBase
         // Delete files from disk
         foreach (var rev in revisions)
         {
-            var path = Path.Combine(AssetDir(doc.AssetId), rev.StoredName);
-            if (System.IO.File.Exists(path))
-                System.IO.File.Delete(path);
+            _files.Delete(AssetRevisionRelativePath(doc.AssetId, rev.StoredName));
         }
 
         _db.AssetDocumentRevisions.RemoveRange(revisions);
@@ -197,12 +193,8 @@ public class AssetDocumentsController : ControllerBase
             .Replace("\\", "_");
         var storedName = $"{revId}_{safeOriginal}";
 
-        var dir = AssetDir(assetId);
-        Directory.CreateDirectory(dir);
-
-        var filePath = Path.Combine(dir, storedName);
-        await using var stream = new FileStream(filePath, FileMode.Create);
-        await file.CopyToAsync(stream);
+        var relativePath = AssetRevisionRelativePath(assetId, storedName);
+        await _files.SaveAsync(relativePath, file.OpenReadStream());
 
         return new AssetDocumentRevisionEntity
         {
@@ -222,10 +214,10 @@ public class AssetDocumentsController : ControllerBase
         var doc = _db.AssetDocuments.Find(rev.DocumentId);
         if (doc is null) return NotFound();
 
-        var path = Path.Combine(AssetDir(doc.AssetId), rev.StoredName);
-        if (!System.IO.File.Exists(path)) return NotFound("File not found on disk.");
+        var relativePath = AssetRevisionRelativePath(doc.AssetId, rev.StoredName);
+        if (!_files.Exists(relativePath)) return NotFound("File not found on disk.");
 
-        var stream = new FileStream(path, FileMode.Open, FileAccess.Read);
+        var stream = _files.OpenRead(relativePath);
         return File(stream, rev.MimeType, rev.OriginalName);
     }
 }

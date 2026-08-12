@@ -2,7 +2,7 @@ using System.Text.Json;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Hosting;
+using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
@@ -14,14 +14,17 @@ namespace Commtrac.Api.Controllers;
 public class WorkflowTemplatesController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly IWebHostEnvironment _env;
+    private readonly IFileStorageService _files;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
-    public WorkflowTemplatesController(AppDbContext db, IWebHostEnvironment env)
+    public WorkflowTemplatesController(AppDbContext db, IFileStorageService files)
     {
         _db = db;
-        _env = env;
+        _files = files;
     }
+
+    private string WorkflowMediaDirectory(string workflowId)
+        => _files.GetAbsolutePath(_files.BuildRelativePath("Storage", "WorkflowMedia", workflowId));
 
     // GET api/workflow-templates/by-product/{productId}
     // Returns all workflow templates for a product.
@@ -103,18 +106,12 @@ public class WorkflowTemplatesController : ControllerBase
         if (template is null) return NotFound();
         if (request.File is null || request.File.Length == 0) return BadRequest("No file provided.");
 
-        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "WorkflowMedia", id);
-        Directory.CreateDirectory(storageRoot);
-
         var mediaId = Guid.NewGuid().ToString();
         var extension = Path.GetExtension(request.File.FileName);
         var storedName = $"{mediaId}{extension}";
-        var storedPath = Path.Combine(storageRoot, storedName);
+        var relativePath = _files.BuildRelativePath("Storage", "WorkflowMedia", id, storedName);
 
-        await using (var stream = System.IO.File.Create(storedPath))
-        {
-            await request.File.CopyToAsync(stream);
-        }
+        await _files.SaveAsync(relativePath, request.File.OpenReadStream());
 
         var mime = request.File.ContentType ?? "application/octet-stream";
         var mediaType = mime.StartsWith("video/") ? "video" : "image";
@@ -145,7 +142,7 @@ public class WorkflowTemplatesController : ControllerBase
     [HttpGet("{id}/media/{mediaId}/file")]
     public IActionResult GetMediaFile(string id, string mediaId)
     {
-        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "WorkflowMedia", id);
+        var storageRoot = WorkflowMediaDirectory(id);
         var files = Directory.Exists(storageRoot)
             ? Directory.GetFiles(storageRoot, $"{mediaId}.*")
             : Array.Empty<string>();
@@ -185,7 +182,7 @@ public class WorkflowTemplatesController : ControllerBase
         catch { }
 
         // Delete the physical file
-        var storageRoot = Path.Combine(_env.ContentRootPath, "Storage", "WorkflowMedia", id);
+        var storageRoot = WorkflowMediaDirectory(id);
         if (Directory.Exists(storageRoot))
         {
             foreach (var f in Directory.GetFiles(storageRoot, $"{mediaId}.*"))
