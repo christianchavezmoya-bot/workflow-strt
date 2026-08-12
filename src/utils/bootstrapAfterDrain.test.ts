@@ -42,6 +42,6 @@ describe("scheduleBootstrapAfterUploadDrain", () => {
 
     scheduleBootstrapAfterUploadDrain("all", 0);
 
-    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({ scope: "all" });
+    expect(offlineBootstrapService.runAfterUploadDrain).toHaveBeenCalledWith({ scope: "all", force: false });
   });
 });
