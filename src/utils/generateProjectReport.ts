@@ -51,6 +51,8 @@ export interface ProjectReportData {
   exportDate: string;
   projectTimeZoneId?: string | null;
   outputMode?: "download" | "blob";
+  includeAssetList?: boolean;
+  includeIssueList?: boolean;
 }
 
 type IssueRow = {
@@ -211,6 +213,8 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
     exportDate,
     projectTimeZoneId,
     outputMode = "download",
+    includeAssetList = true,
+    includeIssueList = true,
   } = data;
 
   const fmt = (iso: string | undefined | null) => fmtDate(iso, projectTimeZoneId);
@@ -313,7 +317,7 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
   });
   y += 21;
 
-  if (issueRows.length > 0) {
+  if (includeIssueList && issueRows.length > 0) {
     y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 34);
     y = sectionBar(doc, y, `Issue Register (${issueRows.length})`);
     autoTable(doc, {
@@ -405,49 +409,51 @@ export async function generateProjectReport(data: ProjectReportData): Promise<Bl
     y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
   }
 
-  y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 36);
-  y = sectionBar(doc, y, `Asset Status (${totalAssets} assets)`);
-  autoTable(doc, {
-    startY: y,
-    head: [["Asset", "Tag", "Location", "Technician", "Status", "Completed", "Signature", "Open Issues"]],
-    body: assets.map((asset) => {
-      const run = runByAsset.get(asset.id);
-      const technician = run?.completedByName || "-";
-      return [
-        asset.assetName || asset.assetTag || asset.id,
-        asset.assetTag || "-",
-        asset.location || "-",
-        technician,
-        asset.status,
-        fmt(run?.completedAt),
-        run ? signatureStatusLabel(run) : "-",
-        run ? `${issueCount(run)}` : "0",
-      ];
-    }),
-    margin: { left: MARGIN, right: MARGIN },
-    styles: { fontSize: 7.1, cellPadding: 2, textColor: BLACK },
-    headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.1 },
-    alternateRowStyles: { fillColor: GREY_BG },
-    didParseCell: (hookData) => {
-      if (hookData.section !== "body") return;
-      if (hookData.column.index === 4) {
-        const val = String(hookData.cell.raw);
-        if (val === "Closed") hookData.cell.styles.textColor = TEAL;
-        else if (val === "Complete") hookData.cell.styles.textColor = GREEN;
-        else if (val === "InProgress") hookData.cell.styles.textColor = BLUE;
-        else if (val === "Issue" || val === "Paused" || val === "Pending") hookData.cell.styles.textColor = ORANGE;
-      }
-      if (hookData.column.index === 6) {
-        const val = String(hookData.cell.raw);
-        if (val === "Fully signed") hookData.cell.styles.textColor = GREEN;
-        else if (val === "Awaiting customer" || val === "Awaiting installer") hookData.cell.styles.textColor = ORANGE;
-      }
-      if (hookData.column.index === 7 && Number(String(hookData.cell.raw)) > 0) {
-        hookData.cell.styles.textColor = RED;
-      }
-    },
-  });
-  y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  if (includeAssetList) {
+    y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 36);
+    y = sectionBar(doc, y, `Asset Status (${totalAssets} assets)`);
+    autoTable(doc, {
+      startY: y,
+      head: [["Asset", "Tag", "Location", "Technician", "Status", "Completed", "Signature", "Open Issues"]],
+      body: assets.map((asset) => {
+        const run = runByAsset.get(asset.id);
+        const technician = run?.completedByName || "-";
+        return [
+          asset.assetName || asset.assetTag || asset.id,
+          asset.assetTag || "-",
+          asset.location || "-",
+          technician,
+          asset.status,
+          fmt(run?.completedAt),
+          run ? signatureStatusLabel(run) : "-",
+          run ? `${issueCount(run)}` : "0",
+        ];
+      }),
+      margin: { left: MARGIN, right: MARGIN },
+      styles: { fontSize: 7.1, cellPadding: 2, textColor: BLACK },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.1 },
+      alternateRowStyles: { fillColor: GREY_BG },
+      didParseCell: (hookData) => {
+        if (hookData.section !== "body") return;
+        if (hookData.column.index === 4) {
+          const val = String(hookData.cell.raw);
+          if (val === "Closed") hookData.cell.styles.textColor = TEAL;
+          else if (val === "Complete") hookData.cell.styles.textColor = GREEN;
+          else if (val === "InProgress") hookData.cell.styles.textColor = BLUE;
+          else if (val === "Issue" || val === "Paused" || val === "Pending") hookData.cell.styles.textColor = ORANGE;
+        }
+        if (hookData.column.index === 6) {
+          const val = String(hookData.cell.raw);
+          if (val === "Fully signed") hookData.cell.styles.textColor = GREEN;
+          else if (val === "Awaiting customer" || val === "Awaiting installer") hookData.cell.styles.textColor = ORANGE;
+        }
+        if (hookData.column.index === 7 && Number(String(hookData.cell.raw)) > 0) {
+          hookData.cell.styles.textColor = RED;
+        }
+      },
+    });
+    y = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 6;
+  }
 
   if (bomRows.length > 0 || missingBomAssets.length > 0) {
     y = checkPageBreak(doc, y, exportDate, businessLogoBase64, customerLogoBase64, 32);

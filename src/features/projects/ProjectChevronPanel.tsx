@@ -501,6 +501,8 @@ export default function ProjectChevronPanel({
   const [reportLogoOpen, setReportLogoOpen] = useState(false);
   const [reportLogo, setReportLogo] = useState(true);
   const [reportCustomerLogo, setReportCustomerLogo] = useState(true);
+  const [reportIncludeAssetList, setReportIncludeAssetList] = useState(true);
+  const [reportIncludeIssueList, setReportIncludeIssueList] = useState(true);
   const [signedAssetsOpen, setSignedAssetsOpen] = useState(false);
   const [exportingReport, setExportingReport] = useState(false);
 
@@ -525,7 +527,12 @@ export default function ProjectChevronPanel({
     };
   };
 
-  const handleGenerateProjectReport = async (withBusinessLogo: boolean, withCustomerLogo: boolean) => {
+  const handleGenerateProjectReport = async (
+    withBusinessLogo: boolean,
+    withCustomerLogo: boolean,
+    includeAssetList: boolean,
+    includeIssueList: boolean,
+  ) => {
     setExportingReport(true);
     try {
       await ensureFullRunDetails();
@@ -569,6 +576,8 @@ export default function ProjectChevronPanel({
         customerLogoBase64,
         exportDate: formatInstant(new Date().toISOString(), projectTimeZoneId, { time: false, withZone: false }),
         projectTimeZoneId,
+        includeAssetList,
+        includeIssueList,
       };
       await generateProjectReport(data);
     } finally {
@@ -1681,8 +1690,16 @@ export default function ProjectChevronPanel({
             control={<Checkbox checked={reportCustomerLogo} onChange={e => setReportCustomerLogo(e.target.checked)} size="small" />}
             label={<Typography variant="body2">Include customer logo in header</Typography>}
           />
+          <FormControlLabel
+            control={<Checkbox checked={reportIncludeAssetList} onChange={e => setReportIncludeAssetList(e.target.checked)} size="small" />}
+            label={<Typography variant="body2">Include asset list</Typography>}
+          />
+          <FormControlLabel
+            control={<Checkbox checked={reportIncludeIssueList} onChange={e => setReportIncludeIssueList(e.target.checked)} size="small" />}
+            label={<Typography variant="body2">Include issue list</Typography>}
+          />
           <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.5 }}>
-            Includes project details, health summary, issues, time tracking, BOM, assets, and signature status.
+            Always includes project details, health summary, time tracking, BOM, and signature status. Asset and issue lists are optional.
           </Typography>
         </DialogContent>
         <DialogActions>
@@ -1692,7 +1709,7 @@ export default function ProjectChevronPanel({
             variant="contained"
             disabled={exportingReport}
             startIcon={exportingReport ? <CircularProgress size={12} /> : <AssessmentOutlined sx={{ fontSize: 14 }} />}
-            onClick={() => handleGenerateProjectReport(reportLogo, reportCustomerLogo)}
+            onClick={() => handleGenerateProjectReport(reportLogo, reportCustomerLogo, reportIncludeAssetList, reportIncludeIssueList)}
           >
             {exportingReport ? "Generating..." : "Generate PDF"}
           </Button>
