@@ -48,12 +48,13 @@ import {
   UploadFileOutlined,
   DownloadOutlined,
 } from "@mui/icons-material";
-import { Dispatch, SetStateAction, useEffect, useMemo, useRef, useState, MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useLocation, useSearchParams } from "react-router-dom";
 import DynamicFieldsForm from "../../components/DynamicFieldsForm";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
-import GlobalOfficeMap, { Office } from "../../components/GlobalOfficeMap";
+import GlobalOfficeMap, { type Office } from "../../components/GlobalOfficeMap";
+import AdminOfficesTab from "./AdminOfficesTab";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useAuth } from "../../hooks/useAuth";
@@ -67,320 +68,29 @@ import { defaultDomains, roleConfigService, RolePermissions, DomainPermissions }
 import api from "../../services/api";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { createCustomer, deleteCustomer, fetchCustomers, updateCustomer } from "../../store/customersSlice";
-import { createProduct, deleteProduct, fetchProducts, updateProduct } from "../../store/productsSlice";
 import { createUser, deactivateUser, deleteUser, fetchUsers, inviteUser, reset2fa, resetOnboarding, updateUser } from "../../store/usersSlice";
 import { Customer } from "../../types/customer";
-import { Product } from "../../types/product";
-import type { FeatureSubProperty as ProductFeatureSubProperty, ProductFeatureDefinition, ProductFeatureValueType } from "../../types/product";
 import { User, UserRole } from "../../types/user";
-import { divisionService } from "../../services/divisionService";
-import type { Division } from "../../types/division";
-import { featureService } from "../../services/featureService";
-import type { Feature } from "../../types/feature";
 import { randomId } from "../../utils/randomId";
+import {
+  applyAutoFilter,
+  applyAutoSort,
+  createDefaultCustomRow,
+  defaultCustomColumns,
+  DraggablePaper,
+  fieldLabelStyle,
+  getDefaultColumnType,
+  normalize,
+  resolveErrorMessage,
+  toggleFilterValue,
+} from "./adminShared";
+import {
+  buildNormalizedRolesConfig,
+  KNOWN_ROLE_ORDER,
+  resolveRoleName,
+} from "./adminRoleDefaults";
 
-// Style for field definition labels (yellow bold)
-const fieldLabelStyle = {
-  color: '#FFD700',
-  fontWeight: 'bold'
-};
 
-const KNOWN_ROLE_ORDER = [
-  "Admin",
-  "Project Manager",
-  "Engineer",
-  "Viewer",
-  "Installer",
-  "Supervisor",
-  "Technician",
-  "QA Inspector",
-  "Client",
-] as const;
-
-const createRolePermissions = (
-  base: Omit<RolePermissions, "domains">,
-  documentOverrides?: Partial<DomainPermissions["documents"]>
-): RolePermissions => ({
-  ...base,
-  domains: {
-    ...defaultDomains(base),
-    documents: {
-      ...defaultDomains(base).documents,
-      ...(documentOverrides ?? {}),
-    },
-  },
-});
-
-const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
-  Admin: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: true,
-    createUsers: true,
-    editFields: true,
-    modifyData: true,
-    editForms: true,
-  }, { upload: true, delete: true }),
-  "Project Manager": createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: true,
-    createUsers: false,
-    editFields: true,
-    modifyData: true,
-    editForms: true,
-  }, { upload: true, delete: true }),
-  Engineer: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: true,
-    editForms: false,
-  }, { upload: false, delete: false }),
-  Viewer: createRolePermissions({
-    viewOnly: true,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: false,
-    editForms: false,
-  }, { upload: false, delete: false }),
-  Installer: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: true,
-    modifyData: false,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  Supervisor: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: true,
-    modifyData: true,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  Technician: createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: true,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  "QA Inspector": createRolePermissions({
-    viewOnly: false,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: true,
-    editForms: true,
-  }, { upload: false, delete: false }),
-  Client: createRolePermissions({
-    viewOnly: true,
-    createDeleteTables: false,
-    createUsers: false,
-    editFields: false,
-    modifyData: false,
-    editForms: false,
-  }, { upload: false, delete: false }),
-};
-
-const getRoleTemplate = (roleName: string): RolePermissions =>
-  KNOWN_ROLE_DEFAULTS[roleName] ?? KNOWN_ROLE_DEFAULTS.Viewer;
-
-const normalizeRolePermissions = (roleName: string, permissions: RolePermissions): RolePermissions => ({
-  viewOnly: permissions.viewOnly,
-  createDeleteTables: permissions.createDeleteTables,
-  createUsers: permissions.createUsers,
-  editFields: permissions.editFields,
-  modifyData: permissions.modifyData,
-  editForms: permissions.editForms,
-  domains: permissions.domains ?? getRoleTemplate(roleName).domains ?? defaultDomains({
-    viewOnly: permissions.viewOnly,
-    createDeleteTables: permissions.createDeleteTables,
-    createUsers: permissions.createUsers,
-    editFields: permissions.editFields,
-    modifyData: permissions.modifyData,
-    editForms: permissions.editForms,
-  }),
-});
-
-const buildNormalizedRolesConfig = (
-  current: Record<string, RolePermissions>,
-  extraRoleNames: string[] = []
-) => {
-  const merged: Record<string, RolePermissions> = {};
-  const requestedNames = Array.from(new Set([...KNOWN_ROLE_ORDER, ...extraRoleNames]));
-
-  requestedNames.forEach((roleName) => {
-    merged[roleName] = normalizeRolePermissions(roleName, current[roleName] ?? getRoleTemplate(roleName));
-  });
-
-  Object.entries(current).forEach(([roleName, permissions]) => {
-    if (!merged[roleName]) {
-      merged[roleName] = normalizeRolePermissions(roleName, permissions);
-    }
-  });
-
-  return merged;
-};
-
-const resolveRoleName = (roleName: string, availableRoles: string[]) => {
-  const trimmed = roleName.trim();
-  if (!trimmed) return "";
-  const exact = availableRoles.find((role) => role === trimmed);
-  if (exact) return exact;
-  const caseInsensitive = availableRoles.find(
-    (role) => role.toLowerCase() === trimmed.toLowerCase()
-  );
-  return caseInsensitive ?? trimmed;
-};
-
-const defaultCustomColumns = ["ID", "Name", "Created Date"];
-const getDefaultColumnType = (name: string) => {
-  if (name === "ID") return "lookup field";
-  if (name === "Created Date") return "date";
-  return "text";
-};
-const createDefaultCustomRow = (index: number) => ({
-  ID: `ID-${String(index).padStart(3, "0")}`,
-  Name: "New item",
-  "Created Date": new Date().toISOString().slice(0, 10)
-});
-
-const normalize = (value: string | number | boolean | undefined | null) => String(value ?? "");
-
-const resolveErrorMessage = (error: unknown, fallback: string) => {
-  if (typeof error === "string") return error;
-  if (error && typeof error === "object") {
-    const anyError = error as {
-      message?: string;
-      response?: {
-        data?: string | {
-          title?: string;
-          detail?: string;
-          message?: string;
-          errors?: Record<string, string[]>;
-        }
-      }
-    };
-
-    // Handle .NET ProblemDetails response
-    if (anyError.response?.data && typeof anyError.response.data === "object") {
-      const data = anyError.response.data;
-
-      // If there are validation errors, format them nicely
-      if (data.errors && typeof data.errors === "object") {
-        const errorMessages = Object.entries(data.errors)
-          .map(([field, messages]) => `${field}: ${Array.isArray(messages) ? messages.join(", ") : messages}`)
-          .join("; ");
-        if (errorMessages) {
-          return `${data.title || "Validation error"} - ${errorMessages}`;
-        }
-      }
-
-      return data.title || data.detail || data.message || fallback;
-    }
-
-    // Handle string response data
-    if (anyError.response?.data && typeof anyError.response.data === "string") {
-      return anyError.response.data;
-    }
-
-    return anyError.message || fallback;
-  }
-  return fallback;
-};
-
-const applyAutoSort = <T,>(
-  rows: T[],
-  sort: { key: string; dir: "asc" | "desc" },
-  accessorMap: Record<string, (row: T) => string>
-) => {
-  if (!sort.key || !accessorMap[sort.key]) return rows;
-  const accessor = accessorMap[sort.key];
-  return [...rows].sort((a, b) => {
-    const aVal = accessor(a).toLowerCase();
-    const bVal = accessor(b).toLowerCase();
-    if (aVal < bVal) return sort.dir === "asc" ? -1 : 1;
-    if (aVal > bVal) return sort.dir === "asc" ? 1 : -1;
-    return 0;
-  });
-};
-
-const applyAutoFilter = <T,>(
-  rows: T[],
-  filters: Record<string, Set<string>>,
-  accessorMap: Record<string, (row: T) => string>
-) => {
-  return rows.filter((row) =>
-    Object.entries(filters).every(([key, selected]) => {
-      if (!selected || selected.size === 0) return true;
-      const value = accessorMap[key]?.(row) ?? "";
-      return selected.has(value);
-    })
-  );
-};
-
-// Draggable Paper component for Dialog
-function DraggablePaper(props: any) {
-  const [position, setPosition] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-
-  const handleMouseDown = (e: ReactMouseEvent) => {
-    // Only allow dragging from the title area
-    const target = e.target as HTMLElement;
-    if (target.closest('.MuiDialogTitle-root')) {
-      setIsDragging(true);
-      setDragStart({
-        x: e.clientX - position.x,
-        y: e.clientY - position.y,
-      });
-    }
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (isDragging) {
-        setPosition({
-          x: e.clientX - dragStart.x,
-          y: e.clientY - dragStart.y,
-        });
-      }
-    };
-
-    const handleMouseUp = () => {
-      setIsDragging(false);
-    };
-
-    if (isDragging) {
-      window.addEventListener('mousemove', handleMouseMove);
-      window.addEventListener('mouseup', handleMouseUp);
-      return () => {
-        window.removeEventListener('mousemove', handleMouseMove);
-        window.removeEventListener('mouseup', handleMouseUp);
-      };
-    }
-  }, [isDragging, dragStart.x, dragStart.y, position.x, position.y]);
-
-  return (
-    <Paper
-      {...props}
-      onMouseDown={handleMouseDown}
-      sx={{
-        ...props.sx,
-        transform: `translate(${position.x}px, ${position.y}px)`,
-        cursor: isDragging ? 'grabbing' : 'default',
-        '& .MuiDialogTitle-root': {
-          cursor: 'grab',
-          userSelect: 'none',
-        },
-      }}
-    />
-  );
-}
 
 export const UserManagement: React.FC = () => {
   const VIRTUAL_SITE_PREFIX = "virtual-site-for-customer:";
@@ -393,10 +103,6 @@ export const UserManagement: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const usersState = useAppSelector((state) => state.users);
   const customersState = useAppSelector((state) => state.customers);
-  const productsState = useAppSelector((state) => state.products);
-  const [divisions, setDivisions] = useState<Division[]>([]);
-  const [libraryFeatures, setLibraryFeatures] = useState<Feature[]>([]);
-  const [featurePickerOpen, setFeaturePickerOpen] = useState<"create" | "edit" | null>(null);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
 
   // Derive offices dropdown list from globalOffices (City, Country format)
@@ -428,7 +134,7 @@ export const UserManagement: React.FC = () => {
   const [editUserOpen, setEditUserOpen] = useState(false);
   const [editCustomerOpen, setEditCustomerOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<{
-    type: "user" | "customer" | "product" | "role" | "site" | "office";
+    type: "user" | "customer" | "role" | "site" | "office";
     id: string;
     label: string;
   } | null>(null);
@@ -498,20 +204,8 @@ export const UserManagement: React.FC = () => {
     customerId: "",
     office: activeOffice
   });
-  const [editProductForm, setEditProductForm] = useState({
-    id: "",
-    name: "",
-    description: "",
-    divisionId: ""
-  });
-  const [editProductFeatures, setEditProductFeatures] = useState<ProductFeatureDefinition[]>([]);
-  const [productOpen, setProductOpen] = useState(false);
-  const [productForm, setProductForm] = useState({ name: "", description: "", divisionId: "" });
-  const [productFeatures, setProductFeatures] = useState<ProductFeatureDefinition[]>([]);
-  const [editProductOpen, setEditProductOpen] = useState(false);
   const usersDynamic = useDynamicFields("users");
   const customersDynamic = useDynamicFields("customers");
-  const productsDynamic = useDynamicFields("products");
   const allFieldDefinitions = useFieldDefinitions();
   // Use database field definitions for users table
   const allUsersFields = useMemo(() =>
@@ -563,23 +257,8 @@ export const UserManagement: React.FC = () => {
   useEffect(() => {
     localStorage.setItem(`base_field_names:${user?.id || "anonymous"}`, JSON.stringify(baseFieldNames));
   }, [baseFieldNames, user?.id]);
-
-  const productsTableConfig = useTableConfig(
-    "products",
-    useMemo(() => [
-      { id: "base-name", name: baseFieldNames.products?.["base-name"] || "Product name", type: "text" },
-      { id: "base-description", name: baseFieldNames.products?.["base-description"] || "Description", type: "text" },
-      ...productsDynamic.definitions.map((field) => ({
-        id: field.id,
-        name: field.id === "field-products" ? "Division" : field.name,
-        type: field.fieldType,
-        linkToFieldId: field.linkToFieldId,
-        actionType: field.actionType
-      }))
-    ], [baseFieldNames, productsDynamic.definitions])
-  );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
-  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "products" | "roles">("users");
+  const [tableConfigTarget, setTableConfigTarget] = useState<"users" | "customers" | "roles">("users");
 
   const availableFieldsForAdminTable = useMemo(() => {
     if (tableConfigTarget === "roles") return [];
@@ -599,20 +278,6 @@ export const UserManagement: React.FC = () => {
 
     return [...ordered, ...remaining];
   };
-
-  // Get ordered field definitions for each table
-  const orderedProductsDefinitions = useMemo(
-    () => getOrderedDefinitions(productsDynamic.definitions, productsTableConfig.config),
-    [productsDynamic.definitions, productsTableConfig.config]
-  );
-
-  // Same list but with the division field renamed consistently for use inside forms
-  const productsDefinitionsForForm = useMemo(
-    () => orderedProductsDefinitions.map((d) =>
-      d.id === "field-products" ? { ...d, name: "Division" } : d
-    ),
-    [orderedProductsDefinitions]
-  );
 
   const orderedUsersDefinitions = useMemo(
     () => getOrderedDefinitions(usersDynamic.definitions, usersTableConfig.config),
@@ -636,8 +301,6 @@ export const UserManagement: React.FC = () => {
   const [editUserDynamicValues, setEditUserDynamicValues] = useState<Record<string, string>>({});
   const [customerDynamicValues, setCustomerDynamicValues] = useState<Record<string, string>>({});
   const [editCustomerDynamicValues, setEditCustomerDynamicValues] = useState<Record<string, string>>({});
-  const [productDynamicValues, setProductDynamicValues] = useState<Record<string, string>>({});
-  const [editProductDynamicValues, setEditProductDynamicValues] = useState<Record<string, string>>({});
   const [userSort, setUserSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
   const [userFilters, setUserFilters] = useState<Record<string, Set<string>>>({});
   const [userMenu, setUserMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
@@ -651,12 +314,6 @@ export const UserManagement: React.FC = () => {
     key: ""
   });
   const [customerSearch, setCustomerSearch] = useState("");
-  const [productSort, setProductSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
-  const [productFilters, setProductFilters] = useState<Record<string, Set<string>>>({});
-  const [productMenu, setProductMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
-    anchorEl: null,
-    key: ""
-  });
   const [roleSort, setRoleSort] = useState({ key: "", dir: "asc" as "asc" | "desc" });
   const [roleFilters, setRoleFilters] = useState<Record<string, Set<string>>>({});
   const [roleMenu, setRoleMenu] = useState<{ anchorEl: HTMLElement | null; key: string }>({
@@ -700,9 +357,6 @@ export const UserManagement: React.FC = () => {
   useEffect(() => {
     dispatch(fetchUsers());
     dispatch(fetchCustomers());
-    dispatch(fetchProducts());
-    divisionService.getAll().then(setDivisions).catch(() => {});
-    featureService.getAll().then(setLibraryFeatures).catch(() => {});
   }, [dispatch]);
 
   useEffect(() => {
@@ -1032,17 +686,6 @@ export const UserManagement: React.FC = () => {
   }, [customersDynamic.definitions]);
 
   useEffect(() => {
-    if (productsDynamic.definitions.length === 0) return;
-    setProductDynamicValues((prev) => {
-      const next = { ...prev };
-      productsDynamic.definitions.forEach((field) => {
-        if (next[field.id] === undefined) next[field.id] = "";
-      });
-      return next;
-    });
-  }, [productsDynamic.definitions]);
-
-  useEffect(() => {
     setCustomerForm((prev) => ({ ...prev, office: activeOffice === "All" ? "" : activeOffice }));
   }, [activeOffice]);
 
@@ -1058,8 +701,6 @@ export const UserManagement: React.FC = () => {
   }, [tab]);
 
   const users = usersState.items;
-  const products = productsState.items;
-
   // Map office cities/states to countries
   const getCountryForOffice = useMemo(() => {
     const map = new Map<string, string>();
@@ -1136,9 +777,7 @@ export const UserManagement: React.FC = () => {
   // Customers are visible across all offices (no activeOffice filtering).
   const filteredCustomers = useMemo(() => customersState.items, [customersState.items]);
 
-  const [adminTabsConfig, setAdminTabsConfig] = useState<AdminTab[]>([]);
-  const [adminSettingsOpen, setAdminSettingsOpen] = useState(false);
-  const [adminSettingsMenu, setAdminSettingsMenu] = useState<HTMLElement | null>(null);
+  const [adminTabsConfig, setAdminTabsConfig] = useState<AdminTab[]>([]);  const [adminSettingsMenu, setAdminSettingsMenu] = useState<HTMLElement | null>(null);
   const [adminSettingsMenuOpen, setAdminSettingsMenuOpen] = useState(false);
   const [adminTabManagerOpen, setAdminTabManagerOpen] = useState(false);
   const adminSettingsAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1167,7 +806,7 @@ export const UserManagement: React.FC = () => {
         const data = await adminTabsService.getAll();
         if (data.length > 0) {
           // Strip dispatch tab if it was previously injected (now lives in Projects page)
-          const cleaned = data.filter((t) => t.type !== "dispatch" && t.type !== "assets");
+          const cleaned = data.filter((t) => t.type !== "dispatch" && t.type !== "assets" && t.type !== "products");
           setAdminTabsConfig(cleaned);
           setAdminTabsLoaded(true);
           return;
@@ -1251,9 +890,17 @@ export const UserManagement: React.FC = () => {
   // On first load with no URL param, pushes the current tab type to the URL so
   // Favorites always captures the correct sub-page.
   useEffect(() => {
+    if (searchParams.get("tab") === "products") {
+      navigate("/settings?tab=products", { replace: true });
+      return;
+    }
     if (adminTabsConfig.length === 0) return;
     const stateWithOpenTab = location.state as { openTab?: string } | null;
     const tabType = stateWithOpenTab?.openTab ?? searchParams.get("tab");
+    if (tabType === "products") {
+      navigate("/settings?tab=products", { replace: true });
+      return;
+    }
     if (tabType) {
       const tabIndex = adminTabsConfig.findIndex((t) => t.type === tabType);
       if (tabIndex >= 0) setTab(tabIndex);
@@ -1342,11 +989,6 @@ export const UserManagement: React.FC = () => {
   }, [adminTabsConfig]);
 
   const numberedUsers = useMemo(() => users.map((user, index) => ({ ...user, seq: index + 1 })), [users]);
-  const numberedProducts = useMemo(
-    () => products.map((product, index) => ({ ...product, seq: index + 1 })),
-    [products]
-  );
-
   const userAccessors = useMemo(
     () => ({
       name: (user: User & { seq: number }) => normalize(user.fullName),
@@ -1368,37 +1010,6 @@ export const UserManagement: React.FC = () => {
     }),
     [numberedUsers, userAccessors]
   );
-
-  const productAccessors = useMemo(
-    () => ({
-      name: (product: Product & { seq: number }) => normalize(product.name),
-      description: (product: Product & { seq: number }) => normalize(product.description ?? "-")
-    }),
-    []
-  );
-  const productFilterOptions = useMemo(() => {
-    const options: Record<string, string[]> = {};
-
-    productsTableConfig.visibleFields.forEach((field) => {
-      const values = new Set<string>();
-
-      products.forEach((product) => {
-        let value = "";
-        if (field.id === "base-name") {
-          value = normalize(product.name);
-        } else if (field.id === "base-description") {
-          value = normalize(product.description ?? "");
-        } else {
-          value = normalize(productsDynamic.valuesByEntity[product.id]?.[field.id]?.value ?? "");
-        }
-        values.add(value);
-      });
-
-      options[field.id] = Array.from(values).sort();
-    });
-
-    return options;
-  }, [products, productsTableConfig.visibleFields, productsDynamic.valuesByEntity]);
 
   const roleLabels = useMemo(() => Object.keys(rolesConfig), [rolesConfig]);
 
@@ -1548,56 +1159,6 @@ export const UserManagement: React.FC = () => {
     const end = start + usersRowsPerPage;
     return filteredUsers.slice(start, end);
   }, [filteredUsers, usersPage, usersRowsPerPage]);
-
-  const filteredProductRows = useMemo(() => {
-    const filtered = applyAutoFilter(numberedProducts, productFilters, productAccessors);
-    return applyAutoSort(filtered, productSort, productAccessors);
-  }, [numberedProducts, productFilters, productSort, productAccessors]);
-
-  // Comprehensive products filtering including dynamic fields
-  const filteredProducts = useMemo(() => {
-    let result = [...products];
-
-    // Apply filters for each field
-    Object.entries(productFilters).forEach(([fieldId, valueSet]) => {
-      if (valueSet.size === 0) return;
-      result = result.filter((product) => {
-        let fieldValue = "";
-        if (fieldId === "base-name") fieldValue = normalize(product.name);
-        else if (fieldId === "base-description") fieldValue = normalize(product.description ?? "");
-        else fieldValue = normalize(productsDynamic.valuesByEntity[product.id]?.[fieldId]?.value ?? "");
-
-        return valueSet.has(fieldValue);
-      });
-    });
-
-    // Apply sorting
-    if (productSort.key) {
-      result.sort((a, b) => {
-        let aVal = "";
-        let bVal = "";
-
-        if (productSort.key === "base-name") {
-          aVal = normalize(a.name);
-          bVal = normalize(b.name);
-        } else if (productSort.key === "base-description") {
-          aVal = normalize(a.description ?? "");
-          bVal = normalize(b.description ?? "");
-        } else {
-          aVal = normalize(productsDynamic.valuesByEntity[a.id]?.[productSort.key]?.value ?? "");
-          bVal = normalize(productsDynamic.valuesByEntity[b.id]?.[productSort.key]?.value ?? "");
-        }
-
-        if (productSort.dir === "asc") {
-          return aVal.localeCompare(bVal);
-        } else {
-          return bVal.localeCompare(aVal);
-        }
-      });
-    }
-
-    return result;
-  }, [products, productFilters, productSort, productsDynamic.valuesByEntity]);
 
   const filteredRoles = useMemo(() => {
     const rows = roleLabels.map((role, index) => ({ role, seq: index + 1 }));
@@ -1782,37 +1343,6 @@ export const UserManagement: React.FC = () => {
     setCustomerDynamicValues({});
   };
 
-  const handleCreateProduct = async () => {
-    const normalizedFeatures = productFeatures
-      .map((feature) => ({
-        ...feature,
-        name: feature.name.trim(),
-        options: (feature.options || []).map((item) => item.trim()).filter(Boolean)
-      }))
-      .filter((feature) => feature.name);
-    const payload: Omit<Product, "id"> = {
-      name: productForm.name,
-      description: productForm.description || undefined,
-      features: normalizedFeatures,
-      divisionId: productForm.divisionId || undefined
-    };
-    try {
-      setActionError(null);
-      const created = await dispatch(createProduct(payload)).unwrap();
-      await productsDynamic.upsertForEntity(
-        created.id,
-        productDynamicValues,
-        productsDynamic.valuesByEntity[created.id]
-      );
-    } catch (error) {
-      setActionError(resolveErrorMessage(error, "Failed to create product."));
-    }
-    setProductOpen(false);
-    setProductForm({ name: "", description: "", divisionId: "" });
-    setProductFeatures([]);
-    setProductDynamicValues({});
-  };
-
   const handleEditUser = (user: User) => {
     setEditUserForm({
       id: user.id,
@@ -1829,23 +1359,6 @@ export const UserManagement: React.FC = () => {
     });
     setEditUserDynamicValues(next);
     setEditUserOpen(true);
-  };
-
-  const handleEditProduct = (product: Product) => {
-    setEditProductForm({
-      id: product.id,
-      name: product.name,
-      description: product.description || "",
-      divisionId: product.divisionId || ""
-    });
-    setEditProductFeatures(product.features || []);
-    const existing = productsDynamic.valuesByEntity[product.id] || {};
-    const next: Record<string, string> = {};
-    productsDynamic.definitions.forEach((field) => {
-      next[field.id] = existing[field.id]?.value || "";
-    });
-    setEditProductDynamicValues(next);
-    setEditProductOpen(true);
   };
 
   const handleSaveUser = async () => {
@@ -1900,65 +1413,6 @@ export const UserManagement: React.FC = () => {
     setEditCustomerOpen(false);
   };
 
-  const handleSaveProduct = async () => {
-    if (!editProductForm.id) return;
-    const normalizedFeatures = editProductFeatures
-      .map((feature) => ({
-        ...feature,
-        name: feature.name.trim(),
-        options: (feature.options || []).map((item) => item.trim()).filter(Boolean)
-      }))
-      .filter((feature) => feature.name);
-    try {
-      setActionError(null);
-      const updated = await dispatch(
-        updateProduct({
-          id: editProductForm.id,
-          payload: {
-            name: editProductForm.name,
-            description: editProductForm.description || undefined,
-            features: normalizedFeatures,
-            divisionId: editProductForm.divisionId || ""
-          }
-        })
-      ).unwrap();
-      await productsDynamic.upsertForEntity(
-        updated.id,
-        editProductDynamicValues,
-        productsDynamic.valuesByEntity[updated.id]
-      );
-    } catch (error) {
-      setActionError(resolveErrorMessage(error, "Failed to update product."));
-    }
-    setEditProductOpen(false);
-  };
-
-  const createFeature = (): ProductFeatureDefinition => ({
-    id: randomId("feature"),
-    name: "",
-    valueType: "text",
-    options: []
-  });
-
-  const featureTypeOptions: ProductFeatureValueType[] = [
-    "text", "number", "tri-state", "single-select", "multi-select",
-    "date", "rating", "percentage", "file", "rich-text", "link", "component"
-  ];
-  const featureTypeLabels: Record<ProductFeatureValueType, string> = {
-    "text": "Text",
-    "number": "Number",
-    "tri-state": "Yes / No / N/A",
-    "single-select": "Single-select",
-    "multi-select": "Multi-select",
-    "date": "Date",
-    "rating": "Rating (1–5)",
-    "percentage": "Percentage (%)",
-    "file": "File / Image",
-    "rich-text": "Rich text",
-    "link": "Link (URL)",
-    "component": "Component (sub-fields)"
-  };
-
   const handleAddOffice = async (office: Omit<Office, "id">) => {
     try {
       const created = await officesService.create(office);
@@ -1999,9 +1453,6 @@ export const UserManagement: React.FC = () => {
       if (deleteTarget.type === "customer") {
         await dispatch(deleteCustomer(deleteTarget.id)).unwrap();
       }
-      if (deleteTarget.type === "product") {
-        await dispatch(deleteProduct(deleteTarget.id)).unwrap();
-      }
       if (deleteTarget.type === "role") {
         setRolesConfig((prev) => {
           const { [deleteTarget.id]: _, ...rest } = prev;
@@ -2025,21 +1476,6 @@ export const UserManagement: React.FC = () => {
     }
   };
 
-  const toggleFilterValue = (
-    setter: Dispatch<SetStateAction<Record<string, Set<string>>>>,
-    key: string,
-    value: string
-  ) => {
-    setter((prev) => {
-      const current = new Set(prev[key] ?? []);
-      if (current.has(value)) {
-        current.delete(value);
-      } else {
-        current.add(value);
-      }
-      return { ...prev, [key]: current };
-    });
-  };
 
   const toggleCustomTabFilterValue = (tabId: string, key: string, value: string) => {
     setCustomTabFilters((prev) => {
@@ -3368,16 +2804,13 @@ export const UserManagement: React.FC = () => {
         </Stack>
       )}
 
-      {/* Global Offices Tab */}
       {adminTabsConfig[tab]?.type === "offices" && (
-        <Box>
-          <GlobalOfficeMap
-            offices={globalOffices}
-            onAddOffice={handleAddOffice}
-            onUpdateOffice={handleUpdateOffice}
-            onDeleteOffice={handleDeleteOffice}
-          />
-        </Box>
+        <AdminOfficesTab
+          offices={globalOffices}
+          onAddOffice={handleAddOffice}
+          onUpdateOffice={handleUpdateOffice}
+          onDeleteOffice={handleDeleteOffice}
+        />
       )}
 
       {/* Custom Tabs - Dynamically Rendered */}
@@ -4239,28 +3672,19 @@ export const UserManagement: React.FC = () => {
             ? usersTableConfig.orderedFields
             : tableConfigTarget === "roles"
               ? rolesTableConfig.orderedFields
-              : tableConfigTarget === "customers"
-                ? customersTableConfig.orderedFields
-                : tableConfigTarget === "products"
-                  ? productsTableConfig.orderedFields
-                  : customersTableConfig.orderedFields
+              : customersTableConfig.orderedFields
         }
         config={
           tableConfigTarget === "users"
             ? usersTableConfig.config
             : tableConfigTarget === "roles"
               ? rolesTableConfig.config
-              : tableConfigTarget === "customers"
-                ? customersTableConfig.config
-                : tableConfigTarget === "products"
-                  ? productsTableConfig.config
-                  : customersTableConfig.config
+              : customersTableConfig.config
         }
         onChange={(next) => {
           if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
           if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
           if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
-          if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
         }}
         onAddField={async (fieldId) => {
           if (tableConfigTarget === "roles") return;
@@ -4273,7 +3697,6 @@ export const UserManagement: React.FC = () => {
           await allFieldDefinitions.reload();
           if (tableConfigTarget === "users") await usersDynamic.reload();
           if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
         }}
         onCreateField={async (name, type, linkToFieldId, actionType) => {
           try {
@@ -4290,7 +3713,6 @@ export const UserManagement: React.FC = () => {
             await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -4315,11 +3737,7 @@ export const UserManagement: React.FC = () => {
             const defs =
               tableConfigTarget === "users"
                 ? usersDynamic.definitions
-                : tableConfigTarget === "customers"
-                  ? customersDynamic.definitions
-                  : tableConfigTarget === "products"
-                    ? productsDynamic.definitions
-                    : [];
+                : customersDynamic.definitions;
             const existing = defs.find((item) => item.id === fieldId)
               || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
             if (!existing) return;
@@ -4333,7 +3751,6 @@ export const UserManagement: React.FC = () => {
             await allFieldDefinitions.reload();
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
             if (type === "lookup field" && actionType === "create linked table") {
               openOrCreateAdminLinkedTab(name);
             }
@@ -4348,7 +3765,6 @@ export const UserManagement: React.FC = () => {
             await fieldService.deleteDefinition(fieldId);
             if (tableConfigTarget === "users") await usersDynamic.reload();
             if (tableConfigTarget === "customers") await customersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
           } catch (error) {
             console.error("Error deleting field:", error);
             setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
@@ -4673,973 +4089,6 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={productOpen} onClose={() => setProductOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add product</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <TextField
-              label="Product name"
-              value={productForm.name}
-              onChange={(event) => setProductForm((prev) => ({ ...prev, name: event.target.value }))}
-            />
-            <TextField
-              label="Description (optional)"
-              value={productForm.description}
-              onChange={(event) => setProductForm((prev) => ({ ...prev, description: event.target.value }))}
-              multiline
-              rows={2}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setAdminSettingsOpen(false)}>
-            Close
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <TableConfigDialog
-        open={tableConfigOpen}
-        onClose={() => setTableConfigOpen(false)}
-        title={`Table configuration: ${tableConfigTarget}`}
-        availableFields={availableFieldsForAdminTable.map((field) => ({
-          id: field.id,
-          name: field.name,
-          fieldType: field.fieldType,
-          linkToFieldId: field.linkToFieldId,
-          actionType: field.actionType
-        }))}
-        fields={
-          tableConfigTarget === "users"
-            ? usersTableConfig.orderedFields
-            : tableConfigTarget === "roles"
-              ? rolesTableConfig.orderedFields
-              : tableConfigTarget === "products"
-                ? productsTableConfig.orderedFields
-                : customersTableConfig.orderedFields
-        }
-        config={
-          tableConfigTarget === "users"
-            ? usersTableConfig.config
-            : tableConfigTarget === "roles"
-              ? rolesTableConfig.config
-              : tableConfigTarget === "products"
-                ? productsTableConfig.config
-                : customersTableConfig.config
-        }
-        onChange={(next) => {
-          if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
-          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
-          if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
-        }}
-        onAddField={async (fieldId) => {
-          if (tableConfigTarget === "roles") return;
-          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-          if (!existing) return;
-          const tables = existing.tables.includes(tableConfigTarget)
-            ? existing.tables
-            : [...existing.tables, tableConfigTarget];
-          await fieldService.updateDefinition(fieldId, { ...existing, tables });
-          await allFieldDefinitions.reload();
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-        }}
-        onCreateField={async (name, type, linkToFieldId, actionType) => {
-          if (tableConfigTarget === "roles") return;
-          await fieldService.createDefinition({
-            id: "",
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null,
-            tables: [tableConfigTarget],
-            sortOrder: allFieldDefinitions.definitions.length + 1,
-            isActive: true
-          });
-          await allFieldDefinitions.reload();
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
-          }
-        }}
-        onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          try {
-            // Handle base fields - update local config only, no API call
-            if (fieldId.startsWith("base-")) {
-              setBaseFieldNames((prev) => ({
-                ...prev,
-                [tableConfigTarget]: {
-                  ...(prev[tableConfigTarget] || {}),
-                  [fieldId]: name
-                }
-              }));
-              return;
-            }
-            const defs =
-              tableConfigTarget === "users"
-                ? usersDynamic.definitions
-                : tableConfigTarget === "products"
-                  ? productsDynamic.definitions
-                  : [];
-            const existing = defs.find((item) => item.id === fieldId)
-              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-            if (!existing) return;
-            await fieldService.updateDefinition(fieldId, {
-              ...existing,
-              name,
-              fieldType: type,
-              linkToFieldId: linkToFieldId || null,
-              actionType: actionType || null
-            });
-            await allFieldDefinitions.reload();
-            if (tableConfigTarget === "users") await usersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (type === "lookup field" && actionType === "create linked table") {
-              openOrCreateAdminLinkedTab(name);
-            }
-          } catch (error) {
-            console.error("Error editing field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
-          }
-        }}
-        onDeleteField={async (fieldId) => {
-          if (tableConfigTarget === "roles") return;
-          try {
-            await fieldService.deleteDefinition(fieldId);
-            if (tableConfigTarget === "users") await usersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
-          } catch (error) {
-            console.error("Error deleting field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
-          }
-        }}
-      />
-
-      <TableConfigDialog
-        open={customTableConfigOpen}
-        onClose={() => {
-          setCustomTableConfigOpen(false);
-          setCustomTableConfigTabId(null);
-        }}
-        title={
-          customTableConfigTabId
-            ? `Table configuration: ${adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.label || "Custom"}`
-            : "Table configuration"
-        }
-        availableFields={
-          customTableConfigTabId
-            ? allFieldDefinitions.definitions
-                .filter(
-                  (field) =>
-                    !(adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.fieldIds || []).includes(
-                      field.id
-                    )
-                )
-                  .map((field) => ({
-                    id: field.id,
-                    name: field.name,
-                    fieldType: field.fieldType,
-                    linkToFieldId: field.linkToFieldId,
-                    actionType: field.actionType
-                  }))
-            : []
-        }
-          fields={
-            customTableConfigTabId
-              ? [
-                  ...(
-                    adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
-                    defaultCustomColumns
-                  ).map((name) => {
-                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
-                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
-                  }),
-                  ...allFieldDefinitions.definitions
-                    .filter(
-                      (field) =>
-                      (adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.fieldIds || []).includes(
-                        field.id
-                      )
-                  )
-                  .map((field) => ({ id: field.id, name: field.name, type: field.fieldType }))
-              ]
-            : []
-        }
-        config={customTableConfigTabId ? customTabConfigs[customTableConfigTabId] || { order: [], hidden: [] } : { order: [], hidden: [] }}
-        onChange={(next) => {
-          if (!customTableConfigTabId) return;
-          setCustomTabConfigs((prev) => ({ ...prev, [customTableConfigTabId]: next }));
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId ? { ...tabItem, config: next } : tabItem
-            )
-          );
-        }}
-        onAddField={async (fieldId) => {
-          if (!customTableConfigTabId) return;
-          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-          if (!existing) return;
-          const tables = existing.tables.includes(customTableConfigTabId)
-            ? existing.tables
-            : [...existing.tables, customTableConfigTabId];
-          await fieldService.updateDefinition(fieldId, { ...existing, tables });
-          await allFieldDefinitions.reload();
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId
-                ? {
-                    ...tabItem,
-                    fieldIds: [...(tabItem.fieldIds || []), fieldId],
-                    config: customTabConfigs[customTableConfigTabId] || { order: [], hidden: [] }
-                  }
-                : tabItem
-            )
-          );
-          setAdminTabRows((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => ({
-              ...row,
-              [fieldId]: row[fieldId] ?? ""
-            }))
-          }));
-        }}
-        onCreateField={async (name, type, linkToFieldId, actionType) => {
-          if (!customTableConfigTabId) return;
-          const created = await fieldService.createDefinition({
-            id: "",
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null,
-            tables: [],
-            sortOrder: allFieldDefinitions.definitions.length + 1,
-            isActive: true
-          });
-          await allFieldDefinitions.reload();
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId
-                ? {
-                    ...tabItem,
-                    fieldIds: [...(tabItem.fieldIds || []), created.id],
-                    config: customTabConfigs[customTableConfigTabId] || { order: [], hidden: [] }
-                  }
-                : tabItem
-            )
-          );
-          setAdminTabRows((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => ({
-              ...row,
-              [created.id]: row[created.id] ?? ""
-            }))
-          }));
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
-          }
-        }}
-        onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          if (!customTableConfigTabId) return;
-          if (fieldId.startsWith("default:")) {
-            const oldName = fieldId.replace("default:", "");
-            const nextName = name.trim() || oldName;
-            setAdminTabsConfig((prev) =>
-              prev.map((tabItem) =>
-                tabItem.id === customTableConfigTabId
-                  ? {
-                      ...tabItem,
-                      columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
-                      config: {
-                        order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                          id === fieldId ? `default:${nextName}` : id
-                        ),
-                        hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                          id === fieldId ? `default:${nextName}` : id
-                        )
-                      }
-                    }
-                  : tabItem
-              )
-            );
-            setAdminTabRows((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                const { [oldName]: oldValue, ...rest } = row;
-                return { ...rest, [nextName]: oldValue ?? "" };
-              })
-            }));
-          }
-        }}
-        onDeleteField={async (fieldId) => {
-          // Delete field implementation would go here
-        }}
-      />
-
-      <TableConfigDialog
-        open={tableConfigOpen}
-        onClose={() => setTableConfigOpen(false)}
-        title={`Table configuration: ${tableConfigTarget}`}
-        availableFields={availableFieldsForAdminTable.map((field) => ({
-          id: field.id,
-          name: field.name,
-          fieldType: field.fieldType,
-          linkToFieldId: field.linkToFieldId,
-          actionType: field.actionType
-        }))}
-        fields={
-          tableConfigTarget === "users"
-            ? usersTableConfig.orderedFields
-            : tableConfigTarget === "roles"
-              ? rolesTableConfig.orderedFields
-              : tableConfigTarget === "customers"
-                ? customersTableConfig.orderedFields
-                : tableConfigTarget === "products"
-                  ? productsTableConfig.orderedFields
-                  : customersTableConfig.orderedFields
-        }
-        config={
-          tableConfigTarget === "users"
-            ? usersTableConfig.config
-            : tableConfigTarget === "roles"
-              ? rolesTableConfig.config
-              : tableConfigTarget === "customers"
-                ? customersTableConfig.config
-                : tableConfigTarget === "products"
-                  ? productsTableConfig.config
-                  : customersTableConfig.config
-        }
-        onChange={(next) => {
-          if (tableConfigTarget === "users") usersTableConfig.setConfig(next);
-          if (tableConfigTarget === "roles") rolesTableConfig.setConfig(next);
-          if (tableConfigTarget === "customers") customersTableConfig.setConfig(next);
-          if (tableConfigTarget === "products") productsTableConfig.setConfig(next);
-        }}
-        onAddField={async (fieldId) => {
-          if (tableConfigTarget === "roles") return;
-          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-          if (!existing) return;
-          const tables = existing.tables.includes(tableConfigTarget)
-            ? existing.tables
-            : [...existing.tables, tableConfigTarget];
-          await fieldService.updateDefinition(fieldId, { ...existing, tables });
-          await allFieldDefinitions.reload();
-          if (tableConfigTarget === "users") await usersDynamic.reload();
-          if (tableConfigTarget === "customers") await customersDynamic.reload();
-          if (tableConfigTarget === "products") await productsDynamic.reload();
-        }}
-        onCreateField={async (name, type, linkToFieldId, actionType) => {
-          try {
-            await fieldService.createDefinition({
-              id: "",
-              name,
-              fieldType: type,
-              linkToFieldId: linkToFieldId || null,
-              actionType: actionType || null,
-              tables: [tableConfigTarget],
-              sortOrder: allFieldDefinitions.definitions.length + 1,
-              isActive: true
-            });
-            await allFieldDefinitions.reload();
-            if (tableConfigTarget === "users") await usersDynamic.reload();
-            if (tableConfigTarget === "customers") await customersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (type === "lookup field" && actionType === "create linked table") {
-              openOrCreateAdminLinkedTab(name);
-            }
-          } catch (error) {
-            console.error("Error creating field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to create field. Please try again."));
-          }
-        }}
-        onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          try {
-            // Handle base fields — update local display name only
-            if (fieldId.startsWith("base-")) {
-              setBaseFieldNames((prev) => ({
-                ...prev,
-                [tableConfigTarget]: {
-                  ...(prev[tableConfigTarget] || {}),
-                  [fieldId]: name
-                }
-              }));
-              return;
-            }
-            const defs =
-              tableConfigTarget === "users"
-                ? usersDynamic.definitions
-                : tableConfigTarget === "customers"
-                  ? customersDynamic.definitions
-                  : tableConfigTarget === "products"
-                    ? productsDynamic.definitions
-                    : [];
-            const existing = defs.find((item) => item.id === fieldId)
-              || allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-            if (!existing) return;
-            await fieldService.updateDefinition(fieldId, {
-              ...existing,
-              name,
-              fieldType: type,
-              linkToFieldId: linkToFieldId || null,
-              actionType: actionType || null
-            });
-            await allFieldDefinitions.reload();
-            if (tableConfigTarget === "users") await usersDynamic.reload();
-            if (tableConfigTarget === "customers") await customersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
-            if (type === "lookup field" && actionType === "create linked table") {
-              openOrCreateAdminLinkedTab(name);
-            }
-          } catch (error) {
-            console.error("Error editing field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
-          }
-        }}
-        onDeleteField={async (fieldId) => {
-          if (tableConfigTarget === "roles") return;
-          try {
-            await fieldService.deleteDefinition(fieldId);
-            if (tableConfigTarget === "users") await usersDynamic.reload();
-            if (tableConfigTarget === "customers") await customersDynamic.reload();
-            if (tableConfigTarget === "products") await productsDynamic.reload();
-          } catch (error) {
-            console.error("Error deleting field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
-          }
-        }}
-      />
-
-      <TableConfigDialog
-        open={customTableConfigOpen}
-        onClose={() => {
-          setCustomTableConfigOpen(false);
-          setCustomTableConfigTabId(null);
-        }}
-        title={
-          customTableConfigTabId
-            ? `Table configuration: ${adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.label || "Custom"}`
-            : "Table configuration"
-        }
-        availableFields={
-          customTableConfigTabId
-            ? allFieldDefinitions.definitions
-                .filter(
-                  (field) =>
-                    !(adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.fieldIds || []).includes(
-                      field.id
-                    )
-                )
-                  .map((field) => ({
-                    id: field.id,
-                    name: field.name,
-                    fieldType: field.fieldType,
-                    linkToFieldId: field.linkToFieldId,
-                    actionType: field.actionType
-                  }))
-            : []
-        }
-          fields={
-            customTableConfigTabId
-              ? [
-                  ...(
-                    adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.columns ||
-                    defaultCustomColumns
-                  ).map((name) => {
-                    const storedType = adminTabsConfig.find((t) => t.id === customTableConfigTabId)?.columnTypes?.[name];
-                    return { id: `default:${name}`, name, type: storedType || getDefaultColumnType(name) };
-                  }),
-                  ...allFieldDefinitions.definitions
-                    .filter(
-                      (field) =>
-                      (adminTabsConfig.find((tabItem) => tabItem.id === customTableConfigTabId)?.fieldIds || []).includes(
-                        field.id
-                      )
-                  )
-                  .map((field) => ({ id: field.id, name: field.name, type: field.fieldType }))
-              ]
-            : []
-        }
-        config={customTableConfigTabId ? customTabConfigs[customTableConfigTabId] || { order: [], hidden: [] } : { order: [], hidden: [] }}
-        onChange={(next) => {
-          if (!customTableConfigTabId) return;
-          setCustomTabConfigs((prev) => ({ ...prev, [customTableConfigTabId]: next }));
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId ? { ...tabItem, config: next } : tabItem
-            )
-          );
-        }}
-        onAddField={async (fieldId) => {
-          if (!customTableConfigTabId) return;
-          const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-          if (!existing) return;
-          const tables = existing.tables.includes(customTableConfigTabId)
-            ? existing.tables
-            : [...existing.tables, customTableConfigTabId];
-          await fieldService.updateDefinition(fieldId, { ...existing, tables });
-          await allFieldDefinitions.reload();
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId
-                ? {
-                    ...tabItem,
-                    fieldIds: [...(tabItem.fieldIds || []), fieldId],
-                    config: customTabConfigs[customTableConfigTabId] || { order: [], hidden: [] }
-                  }
-                : tabItem
-            )
-          );
-          setAdminTabRows((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => ({
-              ...row,
-              [fieldId]: row[fieldId] ?? ""
-            }))
-          }));
-        }}
-        onCreateField={async (name, type, linkToFieldId, actionType) => {
-          if (!customTableConfigTabId) return;
-          const created = await fieldService.createDefinition({
-            id: "",
-            name,
-            fieldType: type,
-            linkToFieldId: linkToFieldId || null,
-            actionType: actionType || null,
-            tables: [],
-            sortOrder: allFieldDefinitions.definitions.length + 1,
-            isActive: true
-          });
-          await allFieldDefinitions.reload();
-          setAdminTabsConfig((prev) =>
-            prev.map((tabItem) =>
-              tabItem.id === customTableConfigTabId
-                ? {
-                    ...tabItem,
-                    fieldIds: [...(tabItem.fieldIds || []), created.id],
-                    config: customTabConfigs[customTableConfigTabId] || { order: [], hidden: [] }
-                  }
-                : tabItem
-            )
-          );
-          setAdminTabRows((prev) => ({
-            ...prev,
-            [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => ({
-              ...row,
-              [created.id]: row[created.id] ?? ""
-            }))
-          }));
-          if (type === "lookup field" && actionType === "create linked table") {
-            openOrCreateAdminLinkedTab(name);
-          }
-        }}
-        onEditField={async (fieldId, name, type, linkToFieldId, actionType) => {
-          try {
-            if (!customTableConfigTabId) return;
-            if (fieldId.startsWith("default:")) {
-              const oldName = fieldId.replace("default:", "");
-              const nextName = name.trim() || oldName;
-              setAdminTabsConfig((prev) =>
-                prev.map((tabItem) => {
-                  if (tabItem.id !== customTableConfigTabId) return tabItem;
-                  const nextColumnTypes = { ...(tabItem.columnTypes || {}) };
-                  delete nextColumnTypes[oldName];
-                  nextColumnTypes[nextName] = type;
-                  return {
-                    ...tabItem,
-                    columns: (tabItem.columns || []).map((col) => (col === oldName ? nextName : col)),
-                    columnTypes: nextColumnTypes,
-                    config: {
-                      order: (customTabConfigs[customTableConfigTabId]?.order || []).map((id) =>
-                        id === fieldId ? `default:${nextName}` : id
-                      ),
-                      hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).map((id) =>
-                        id === fieldId ? `default:${nextName}` : id
-                      )
-                    }
-                  };
-                })
-              );
-              setAdminTabRows((prev) => ({
-                ...prev,
-                [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                  const nextRow = { ...row };
-                  nextRow[nextName] = nextRow[oldName] ?? "";
-                  delete nextRow[oldName];
-                  return nextRow;
-                })
-              }));
-              setCustomTabConfigs((prev) => ({
-                ...prev,
-                [customTableConfigTabId]: {
-                  order: (prev[customTableConfigTabId]?.order || []).map((id) =>
-                    id === fieldId ? `default:${nextName}` : id
-                  ),
-                  hidden: (prev[customTableConfigTabId]?.hidden || []).map((id) =>
-                    id === fieldId ? `default:${nextName}` : id
-                  )
-                }
-              }));
-              return;
-            }
-            const existing = allFieldDefinitions.definitions.find((item) => item.id === fieldId);
-            if (!existing) return;
-            await fieldService.updateDefinition(fieldId, {
-              ...existing,
-              name,
-              fieldType: type,
-              linkToFieldId: linkToFieldId || null,
-              actionType: actionType || null
-            });
-            await allFieldDefinitions.reload();
-            if (type === "lookup field" && actionType === "create linked table") {
-              openOrCreateAdminLinkedTab(name);
-            }
-          } catch (error) {
-            console.error("Error editing field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to edit field. Please try again."));
-          }
-        }}
-        onDeleteField={async (fieldId) => {
-          try {
-            if (!customTableConfigTabId) return;
-            if (fieldId.startsWith("default:")) {
-              const name = fieldId.replace("default:", "");
-              setAdminTabsConfig((prev) =>
-                prev.map((tabItem) =>
-                  tabItem.id === customTableConfigTabId
-                    ? {
-                        ...tabItem,
-                        columns: (tabItem.columns || []).filter((col) => col !== name),
-                        columnTypes: (() => { const ct = { ...(tabItem.columnTypes || {}) }; delete ct[name]; return ct; })()
-                      }
-                    : tabItem
-                )
-              );
-              setAdminTabRows((prev) => ({
-                ...prev,
-                [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                  const nextRow = { ...row };
-                  delete nextRow[name];
-                  return nextRow;
-                })
-              }));
-              setCustomTabConfigs((prev) => ({
-                ...prev,
-                [customTableConfigTabId]: {
-                  order: (prev[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-                  hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-                }
-              }));
-              return;
-            }
-            setAdminTabsConfig((prev) =>
-              prev.map((tabItem) =>
-                tabItem.id === customTableConfigTabId
-                  ? {
-                      ...tabItem,
-                      fieldIds: (tabItem.fieldIds || []).filter((id) => id !== fieldId),
-                      config: {
-                        order: (customTabConfigs[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-                        hidden: (customTabConfigs[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-                      }
-                    }
-                  : tabItem
-              )
-            );
-            setCustomTabConfigs((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: {
-                order: (prev[customTableConfigTabId]?.order || []).filter((id) => id !== fieldId),
-                hidden: (prev[customTableConfigTabId]?.hidden || []).filter((id) => id !== fieldId)
-              }
-            }));
-            setAdminTabRows((prev) => ({
-              ...prev,
-              [customTableConfigTabId]: (prev[customTableConfigTabId] || []).map((row) => {
-                const nextRow = { ...row };
-                delete nextRow[fieldId];
-                return nextRow;
-              })
-            }));
-          } catch (error) {
-            console.error("Error deleting field:", error);
-            setActionError(resolveErrorMessage(error, "Failed to delete field. Please try again."));
-          }
-        }}
-      />
-
-      <Dialog open={customerOpen} onClose={() => setCustomerOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add customer</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <FormControl>
-              <Typography variant="caption" color="text.secondary">
-                Customer name
-              </Typography>
-              <TextField
-                value={customerForm.name}
-                onChange={(event) => setCustomerForm((prev) => ({ ...prev, name: event.target.value }))}
-              />
-            </FormControl>
-            <FormControl>
-              <Typography variant="caption" color="text.secondary">
-                Customer ID
-              </Typography>
-              <TextField
-                value={customerForm.customerId}
-                onChange={(event) => setCustomerForm((prev) => ({ ...prev, customerId: event.target.value }))}
-              />
-            </FormControl>
-            <FormControl>
-              <Typography variant="caption" color="text.secondary">
-                Office
-              </Typography>
-              <Select
-                value={customerForm.office}
-                onChange={(event) =>
-                  setCustomerForm((prev) => ({ ...prev, office: event.target.value as Customer["office"] }))
-                }
-                displayEmpty
-              >
-                <MenuItem value="">Select office</MenuItem>
-                {offices.map((office) => (
-                  <MenuItem key={office} value={office}>
-                    {office}
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <DynamicFieldsForm
-              definitions={orderedCustomersDefinitions}
-              values={customerDynamicValues}
-              onChange={setCustomerDynamicValues}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setCustomerOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="contained" onClick={handleCreateCustomer}>
-            Save customer
-          </Button>
-        </DialogActions>
-      </Dialog>
-
-      <Dialog open={productOpen} onClose={() => setProductOpen(false)} maxWidth="sm" fullWidth>
-        <DialogTitle>Add product</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <TextField
-              label={baseFieldNames.products?.["base-name"] || "Product name"}
-              value={productForm.name}
-              onChange={(event) => setProductForm((prev) => ({ ...prev, name: event.target.value }))}
-            />
-            <TextField
-              label={`${baseFieldNames.products?.["base-description"] || "Description"} (optional)`}
-              value={productForm.description}
-              onChange={(event) => setProductForm((prev) => ({ ...prev, description: event.target.value }))}
-              multiline
-              rows={2}
-            />
-            <FormControl fullWidth size="small">
-              <InputLabel shrink>Division (optional)</InputLabel>
-              <Select
-                value={productForm.divisionId}
-                label="Division (optional)"
-                onChange={(event) => setProductForm((prev) => ({ ...prev, divisionId: event.target.value }))}
-              >
-                <MenuItem value=""><em>None</em></MenuItem>
-                {divisions.map((d) => (
-                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Stack spacing={1}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="subtitle2">Features</Typography>
-                <Stack direction="row" spacing={1}>
-                  <Button size="small" variant="outlined" onClick={() => setFeaturePickerOpen("create")}>
-                    Link from library
-                  </Button>
-                  <Button size="small" onClick={() => setProductFeatures((prev) => [...prev, createFeature()])}>
-                    Add new
-                  </Button>
-                </Stack>
-              </Stack>
-              {productFeatures.map((feature) => (
-                <Stack key={feature.id} spacing={0.5}>
-                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
-                    <TextField
-                      label="Feature name"
-                      value={feature.name}
-                      onChange={(event) =>
-                        setProductFeatures((prev) =>
-                          prev.map((f) => (f.id === feature.id ? { ...f, name: event.target.value } : f))
-                        )
-                      }
-                      sx={{ flex: 2 }}
-                    />
-                    <FormControl sx={{ minWidth: 160, flex: 1 }}>
-                      <Select
-                        value={feature.valueType}
-                        onChange={(event) =>
-                          setProductFeatures((prev) =>
-                            prev.map((f) =>
-                              f.id === feature.id ? { ...f, valueType: event.target.value as ProductFeatureValueType } : f
-                            )
-                          )
-                        }
-                      >
-                        {featureTypeOptions.map((type) => (
-                          <MenuItem key={type} value={type}>
-                            {featureTypeLabels[type]}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    {(feature.valueType === "multi-select" || feature.valueType === "single-select") && (
-                      <TextField
-                        label="Options (comma separated)"
-                        value={(feature.options || []).join(", ")}
-                        onChange={(event) =>
-                          setProductFeatures((prev) =>
-                            prev.map((f) =>
-                              f.id === feature.id
-                                ? {
-                                    ...f,
-                                    options: event.target.value
-                                      .split(",")
-                                      .map((item) => item.trim())
-                                      .filter(Boolean)
-                                  }
-                                : f
-                            )
-                          )
-                        }
-                        sx={{ flex: 2 }}
-                      />
-                    )}
-                    <Button
-                      color="error"
-                      onClick={() => setProductFeatures((prev) => prev.filter((f) => f.id !== feature.id))}
-                    >
-                      Remove
-                    </Button>
-                  </Stack>
-                  {feature.valueType === "component" && (
-                    <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-                        <Typography variant="caption" color="text.secondary">Dependencies</Typography>
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            setProductFeatures((prev) =>
-                              prev.map((f) =>
-                                f.id === feature.id
-                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: randomId(), name: "", valueType: "text" as const, isInventory: false }] }
-                                  : f
-                              )
-                            )
-                          }
-                        >
-                          + Add dependency
-                        </Button>
-                      </Stack>
-                      {(feature.subProperties ?? []).map((sf) => (
-                        <Stack key={sf.id} spacing={0.5} mb={1}>
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <TextField
-                              size="small"
-                              label="Name"
-                              value={sf.name}
-                              sx={{ flex: 1 }}
-                              onChange={(e) =>
-                                setProductFeatures((prev) =>
-                                  prev.map((f) =>
-                                    f.id === feature.id
-                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
-                                      : f
-                                  )
-                                )
-                              }
-                            />
-                            <TextField
-                              size="small"
-                              label="Unit"
-                              value={sf.unit ?? ""}
-                              sx={{ width: 80 }}
-                              placeholder="ea, m…"
-                              InputLabelProps={{ shrink: true }}
-                              onChange={(e) =>
-                                setProductFeatures((prev) =>
-                                  prev.map((f) =>
-                                    f.id === feature.id
-                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, unit: e.target.value } : s)) }
-                                      : f
-                                  )
-                                )
-                              }
-                            />
-                            <Tooltip title={sf.isInventory ? "Inventory — tracks serial numbers per unit" : "Non-inventory — tracks quantity + unit price"}>
-                              <Stack direction="row" alignItems="center" spacing={0.25}>
-                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap", fontSize: 10 }}>
-                                  {sf.isInventory ? "Inventory" : "Non-inv."}
-                                </Typography>
-                                <Switch
-                                  size="small"
-                                  checked={!!sf.isInventory}
-                                  onChange={(e) =>
-                                    setProductFeatures((prev) =>
-                                      prev.map((f) =>
-                                        f.id === feature.id
-                                          ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, isInventory: e.target.checked } : s)) }
-                                          : f
-                                      )
-                                    )
-                                  }
-                                />
-                              </Stack>
-                            </Tooltip>
-                            <Button
-                              color="error"
-                              size="small"
-                              onClick={() =>
-                                setProductFeatures((prev) =>
-                                  prev.map((f) =>
-                                    f.id === feature.id
-                                      ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
-                                      : f
-                                  )
-                                )
-                              }
-                            >
-                              Remove
-                            </Button>
-                          </Stack>
-                        </Stack>
-                      ))}
-                    </Box>
-                  )}
-                </Stack>
-              ))}
-            </Stack>
-            <DynamicFieldsForm
-              definitions={productsDefinitionsForForm}
-              values={productDynamicValues}
-              onChange={setProductDynamicValues}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setProductOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="contained" onClick={handleCreateProduct} disabled={!productForm.name.trim()}>
-            Save product
-          </Button>
-        </DialogActions>
-      </Dialog>
 
       <Dialog open={editUserOpen} onClose={() => setEditUserOpen(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Edit user</DialogTitle>
@@ -5750,220 +4199,6 @@ export const UserManagement: React.FC = () => {
         </DialogActions>
       </Dialog>
 
-      <Dialog open={editProductOpen} onClose={() => { setEditProductOpen(false); setEditProductFeatures([]); }} maxWidth="sm" fullWidth>
-        <DialogTitle>Edit product</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ marginTop: 1 }}>
-            <TextField
-              label={baseFieldNames.products?.["base-name"] || "Product name"}
-              value={editProductForm.name}
-              onChange={(event) => setEditProductForm((prev) => ({ ...prev, name: event.target.value }))}
-            />
-            <TextField
-              label={`${baseFieldNames.products?.["base-description"] || "Description"} (optional)`}
-              value={editProductForm.description}
-              onChange={(event) => setEditProductForm((prev) => ({ ...prev, description: event.target.value }))}
-              multiline
-              rows={2}
-            />
-            <FormControl fullWidth size="small">
-              <InputLabel shrink>Division (optional)</InputLabel>
-              <Select
-                value={editProductForm.divisionId}
-                label="Division (optional)"
-                onChange={(event) => setEditProductForm((prev) => ({ ...prev, divisionId: event.target.value }))}
-              >
-                <MenuItem value=""><em>None</em></MenuItem>
-                {divisions.map((d) => (
-                  <MenuItem key={d.id} value={d.id}>{d.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <Stack spacing={1}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center">
-                <Typography variant="subtitle2">Features</Typography>
-                <Stack direction="row" spacing={1}>
-                  <Button size="small" variant="outlined" onClick={() => setFeaturePickerOpen("edit")}>
-                    Link from library
-                  </Button>
-                  <Button size="small" onClick={() => setEditProductFeatures((prev) => [...prev, createFeature()])}>
-                    Add new
-                  </Button>
-                </Stack>
-              </Stack>
-              {editProductFeatures.map((feature) => (
-                <Stack key={feature.id} spacing={0.5}>
-                  <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems="center">
-                    <TextField
-                      label="Feature name"
-                      value={feature.name}
-                      onChange={(event) =>
-                        setEditProductFeatures((prev) =>
-                          prev.map((f) => (f.id === feature.id ? { ...f, name: event.target.value } : f))
-                        )
-                      }
-                      sx={{ flex: 2 }}
-                    />
-                    <FormControl sx={{ minWidth: 160, flex: 1 }}>
-                      <Select
-                        value={feature.valueType}
-                        onChange={(event) =>
-                          setEditProductFeatures((prev) =>
-                            prev.map((f) =>
-                              f.id === feature.id ? { ...f, valueType: event.target.value as ProductFeatureValueType } : f
-                            )
-                          )
-                        }
-                      >
-                        {featureTypeOptions.map((type) => (
-                          <MenuItem key={type} value={type}>
-                            {featureTypeLabels[type]}
-                          </MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    {(feature.valueType === "multi-select" || feature.valueType === "single-select") && (
-                      <TextField
-                        label="Options (comma separated)"
-                        value={(feature.options || []).join(", ")}
-                        onChange={(event) =>
-                          setEditProductFeatures((prev) =>
-                            prev.map((f) =>
-                              f.id === feature.id
-                                ? {
-                                    ...f,
-                                    options: event.target.value
-                                      .split(",")
-                                      .map((item) => item.trim())
-                                      .filter(Boolean)
-                                  }
-                                : f
-                            )
-                          )
-                        }
-                        sx={{ flex: 2 }}
-                      />
-                    )}
-                    <Button
-                      color="error"
-                      onClick={() => setEditProductFeatures((prev) => prev.filter((f) => f.id !== feature.id))}
-                    >
-                      Remove
-                    </Button>
-                  </Stack>
-                  {feature.valueType === "component" && (
-                    <Box sx={{ pl: 2, borderLeft: "2px solid", borderColor: "divider" }}>
-                      <Stack direction="row" justifyContent="space-between" alignItems="center" mb={0.5}>
-                        <Typography variant="caption" color="text.secondary">Dependencies</Typography>
-                        <Button
-                          size="small"
-                          onClick={() =>
-                            setEditProductFeatures((prev) =>
-                              prev.map((f) =>
-                                f.id === feature.id
-                                  ? { ...f, subProperties: [...(f.subProperties ?? []), { id: randomId(), name: "", valueType: "text" as const, isInventory: false }] }
-                                  : f
-                              )
-                            )
-                          }
-                        >
-                          + Add dependency
-                        </Button>
-                      </Stack>
-                      {(feature.subProperties ?? []).map((sf) => (
-                        <Stack key={sf.id} spacing={0.5} mb={1}>
-                          <Stack direction="row" spacing={1} alignItems="center">
-                            <TextField
-                              size="small"
-                              label="Name"
-                              value={sf.name}
-                              sx={{ flex: 1 }}
-                              onChange={(e) =>
-                                setEditProductFeatures((prev) =>
-                                  prev.map((f) =>
-                                    f.id === feature.id
-                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, name: e.target.value } : s)) }
-                                      : f
-                                  )
-                                )
-                              }
-                            />
-                            <TextField
-                              size="small"
-                              label="Unit"
-                              value={sf.unit ?? ""}
-                              sx={{ width: 80 }}
-                              placeholder="ea, m…"
-                              InputLabelProps={{ shrink: true }}
-                              onChange={(e) =>
-                                setEditProductFeatures((prev) =>
-                                  prev.map((f) =>
-                                    f.id === feature.id
-                                      ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, unit: e.target.value } : s)) }
-                                      : f
-                                  )
-                                )
-                              }
-                            />
-                            <Tooltip title={sf.isInventory ? "Inventory — tracks serial numbers per unit" : "Non-inventory — tracks quantity + unit price"}>
-                              <Stack direction="row" alignItems="center" spacing={0.25}>
-                                <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap", fontSize: 10 }}>
-                                  {sf.isInventory ? "Inventory" : "Non-inv."}
-                                </Typography>
-                                <Switch
-                                  size="small"
-                                  checked={!!sf.isInventory}
-                                  onChange={(e) =>
-                                    setEditProductFeatures((prev) =>
-                                      prev.map((f) =>
-                                        f.id === feature.id
-                                          ? { ...f, subProperties: (f.subProperties ?? []).map((s) => (s.id === sf.id ? { ...s, isInventory: e.target.checked } : s)) }
-                                          : f
-                                      )
-                                    )
-                                  }
-                                />
-                              </Stack>
-                            </Tooltip>
-                            <Button
-                              color="error"
-                              size="small"
-                              onClick={() =>
-                                setEditProductFeatures((prev) =>
-                                  prev.map((f) =>
-                                    f.id === feature.id
-                                      ? { ...f, subProperties: (f.subProperties ?? []).filter((s) => s.id !== sf.id) }
-                                      : f
-                                  )
-                                )
-                              }
-                            >
-                              Remove
-                            </Button>
-                          </Stack>
-                        </Stack>
-                      ))}
-                    </Box>
-                  )}
-                </Stack>
-              ))}
-            </Stack>
-            <DynamicFieldsForm
-              definitions={productsDefinitionsForForm}
-              values={editProductDynamicValues}
-              onChange={setEditProductDynamicValues}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => { setEditProductOpen(false); setEditProductFeatures([]); }}>
-            Cancel
-          </Button>
-          <Button variant="contained" onClick={handleSaveProduct} disabled={!editProductForm.name.trim()}>
-            Save changes
-          </Button>
-        </DialogActions>
-      </Dialog>
 
         <Menu
           anchorEl={adminSettingsMenu}
@@ -6093,7 +4328,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Typography variant="body2" color="text.secondary">
-                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "dispatch" ? "Dispatch" : item.type === "customers" ? "Customers" : "Default"}
+                        {item.type === "custom" ? "Custom" : item.type === "users" ? "Users" : item.type === "roles" ? "Roles" : item.type === "customers" ? "Customers" : item.type === "offices" ? "Offices" : "Legacy"}
                       </Typography>
                     </TableCell>
                     <TableCell>
@@ -6521,82 +4756,6 @@ export const UserManagement: React.FC = () => {
           >
             Apply
           </Button>
-        </DialogActions>
-      </Dialog>
-
-      {/* Feature Library Picker */}
-      <Dialog
-        open={featurePickerOpen !== null}
-        onClose={() => setFeaturePickerOpen(null)}
-        maxWidth="sm"
-        fullWidth
-        PaperComponent={DraggablePaper}
-      >
-        <DialogTitle>Link Feature from Library</DialogTitle>
-        <DialogContent>
-          <Stack spacing={1} sx={{ mt: 1 }}>
-            {libraryFeatures.length === 0 ? (
-              <Typography color="text.secondary" variant="body2">
-                No features in library yet. Use "Add new" to create inline features, or add features via Settings → Features.
-              </Typography>
-            ) : (
-              libraryFeatures.map((lf) => {
-                const alreadyLinked =
-                  featurePickerOpen === "create"
-                    ? productFeatures.some((pf) => pf.id === lf.id)
-                    : editProductFeatures.some((pf) => pf.id === lf.id);
-                return (
-                  <Stack
-                    key={lf.id}
-                    direction="row"
-                    alignItems="center"
-                    justifyContent="space-between"
-                    sx={{
-                      px: 1.5,
-                      py: 1,
-                      border: "1px solid",
-                      borderColor: "divider",
-                      borderRadius: 1,
-                      opacity: alreadyLinked ? 0.5 : 1,
-                    }}
-                  >
-                    <Stack spacing={0.25}>
-                      <Typography variant="body2" fontWeight={500}>
-                        {lf.name}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {lf.valueType}{lf.description ? ` · ${lf.description}` : ""}
-                      </Typography>
-                    </Stack>
-                    <Button
-                      size="small"
-                      disabled={alreadyLinked}
-                      onClick={() => {
-                        const linked: ProductFeatureDefinition = {
-                          id: lf.id,
-                          name: lf.name,
-                          valueType: lf.valueType as ProductFeatureValueType,
-                          options: lf.options ?? [],
-                          subProperties: lf.subProperties as ProductFeatureSubProperty[] | undefined,
-                        };
-                        if (featurePickerOpen === "create") {
-                          setProductFeatures((prev) => [...prev, linked]);
-                        } else {
-                          setEditProductFeatures((prev) => [...prev, linked]);
-                        }
-                        setFeaturePickerOpen(null);
-                      }}
-                    >
-                      {alreadyLinked ? "Linked" : "Add"}
-                    </Button>
-                  </Stack>
-                );
-              })
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setFeaturePickerOpen(null)}>Close</Button>
         </DialogActions>
       </Dialog>
 

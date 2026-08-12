@@ -89,6 +89,12 @@ const AdminRoute = () => {
   return can.createUsers || can.settings.view ? <UserManagement /> : <Navigate to="/" replace />;
 };
 
+const CustomerSitesRoute = () => {
+  const can = usePermissions();
+  if (!can.permissionsReady) return null;
+  return can.createUsers || can.settings.view ? <CustomerSites /> : <Navigate to="/" replace />;
+};
+
 const TipsRoute = () => {
   const can = usePermissions();
   if (!can.permissionsReady) return null;
@@ -137,7 +143,7 @@ const AppRoutes = () => {
         <Route path="/documents" element={<LazyRoute><DocumentsPage /></LazyRoute>} />
         <Route path="/tips" element={<LazyRoute><TipsRoute /></LazyRoute>} />
         <Route path="/admin" element={<LazyRoute><AdminRoute /></LazyRoute>} />
-        <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSites /></LazyRoute>} />
+        <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSitesRoute /></LazyRoute>} />
         <Route path="/issues" element={<LazyRoute><IssuesBoard /></LazyRoute>} />
         <Route path="/time-analytics" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
         <Route path="/time-analytics/:view" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
@@ -159,8 +165,6 @@ const AppRoutes = () => {
             <Route path="/admin/bom-project/upload" element={<LazyRoute><BomUploadPage /></LazyRoute>} />
             <Route path="/admin/bom-project/imports/:id/mapping" element={<LazyRoute><BomMappingPage /></LazyRoute>} />
             <Route path="/admin/bom-project/imports/:id/classification" element={<LazyRoute><BomClassificationPage /></LazyRoute>} />
-            <Route path="/admin/bom-project/imports/:id/compare" element={<Navigate to="/admin/bom-project" replace />} />
-            <Route path="/admin/bom-project/imports/:id/preview" element={<Navigate to="/admin/bom-project" replace />} />
             <Route path="/admin/bom-project/imports/:id/commit" element={<LazyRoute><BomCommitPage /></LazyRoute>} />
           </Route>
         )}
