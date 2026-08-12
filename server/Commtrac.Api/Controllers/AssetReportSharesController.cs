@@ -280,7 +280,7 @@ public class AssetReportSharesController : ControllerBase
 
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            baseUrl = "http://localhost:5173";
+            baseUrl = BuildFallbackFrontendBaseUrl(Request.Scheme, Request.Host.Host);
         }
 
         return baseUrl.TrimEnd('/');
@@ -423,6 +423,13 @@ public class AssetReportSharesController : ControllerBase
         var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
         return $"{scheme}://{detectedIp}:5173";
     }
+    private static string BuildFallbackFrontendBaseUrl(string requestScheme, string? requestHost)
+    {
+        var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
+        var host = string.IsNullOrWhiteSpace(requestHost) ? "127.0.0.1" : requestHost.Trim();
+        return $"{scheme}://{host}:5173";
+    }
+
 
     private static string DetectLanIpv4Address()
     {
@@ -478,3 +485,4 @@ public class AssetReportSharesController : ControllerBase
         public List<string> FileNames { get; set; } = [];
     }
 }
+

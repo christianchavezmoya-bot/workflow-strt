@@ -64,9 +64,13 @@ import { fetchProducts } from "../../store/productsSlice";
 import type { Feature } from "../../types/feature";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Workflow } from "../../types/workflow";
+import type { CaptureField, StepInput, WorkflowStep } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
+import { isMobileNativePlatform } from "../../utils/platform";
+import WorkOrderRunner from "./WorkOrderRunner";
+import { jsPDF } from "jspdf";
 
 const WorkflowBuilder = lazy(() => import("./WorkflowBuilder"));
 
@@ -131,27 +135,300 @@ function toWorkflowFeatureDefinition(
 function printPdf(cfg: WorkflowConfig, productName: string) {
   const workflow = parseSteps(cfg);
   const steps = workflow?.steps ? [...workflow.steps].sort((a, b) => a.order - b.order) : [];
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const contentWidth = pageWidth - margin * 2;
+  const previewFrameX = margin;
+  const previewFrameY = margin + 16;
+  const previewFrameW = contentWidth;
+  const previewFrameH = pageHeight - previewFrameY - margin;
+  const sidebarW = 42;
+  const headerH = 22;
+  const bodyTop = previewFrameY + headerH;
+  const innerPad = 6;
+  const contentX = previewFrameX + sidebarW + innerPad;
+  const contentW = previewFrameW - sidebarW - innerPad * 2;
+
+  const fieldTypeLabel = (input: StepInput | CaptureField) => {
+    const baseType = input.type === "choice" ? "CHOICE" : input.type.toUpperCase();
+    if (input.type === "choice" && "options" in input && input.options && input.options.length > 0) {
+      return `${baseType} · ${input.options.join(" / ")}`;
+    }
+    if ("unit" in input && input.unit) {
+      return `${baseType} · ${input.unit}`;
+    }
+    return baseType;
+  };
+
+  const stepFieldEntries = (step: WorkflowStep) => [
+    ...(step.inputs ?? []).map((field) => ({ field, variant: "input" as const })),
+    ...(step.captureFields ?? []).map((field) => ({ field, variant: "capture" as const })),
+  ];
+
+  const drawTextBlock = (text: string, x: number, y: number, maxWidth: number, fontSize: number, color: string, fontStyle: "normal" | "bold" = "normal") => {
+    doc.setFont("helvetica", fontStyle);
+    doc.setFontSize(fontSize);
+    doc.setTextColor(color);
+    const lines = doc.splitTextToSize(text || "", maxWidth);
+    doc.text(lines, x, y);
+    return y + lines.length * (fontSize * 0.52);
+  };
+
+  const drawFieldCard = (
+    field: StepInput | CaptureField,
+    y: number,
+    variant: "input" | "capture",
+  ) => {
+    const label = `${field.label || "Untitled field"}${field.required ? " *" : ""}`;
+    const labelLines = doc.splitTextToSize(label, 58);
+    const cardHeight = Math.max(17, 10 + labelLines.length * 4.4);
+    const cardX = contentX;
+    const cardWidth = contentW;
+    doc.setDrawColor(variant === "capture" ? "#2f4657" : "#23313d");
+    doc.setFillColor("#141c24");
+    doc.roundedRect(cardX, y, cardWidth, cardHeight, 4, 4, "FD");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9.5);
+    doc.setTextColor("#f8fafc");
+    doc.text(labelLines, cardX + 4, y + 5.2);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.5);
+    doc.setTextColor("#7d8d9f");
+    doc.text(fieldTypeLabel(field), cardX + 4, y + cardHeight - 3.4);
+
+    const lineStartX = cardX + Math.min(72, cardWidth * 0.4);
+    const lineY = y + cardHeight / 2;
+    doc.setDrawColor("#415262");
+    doc.line(lineStartX, lineY, cardX + cardWidth - 4, lineY);
+
+    return y + cardHeight + 4;
+  };
+
+  const drawChip = (
+    label: string,
+    x: number,
+    y: number,
+    fill: string,
+    stroke: string,
+    textColor: string,
+    width?: number,
+  ) => {
+    const chipWidth = width ?? Math.max(18, doc.getTextWidth(label) + 8);
+    doc.setFillColor(fill);
+    doc.setDrawColor(stroke);
+    doc.roundedRect(x, y, chipWidth, 7.2, 3.6, 3.6, "FD");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7.5);
+    doc.setTextColor(textColor);
+    doc.text(label, x + chipWidth / 2, y + 4.75, { align: "center" });
+    return chipWidth;
+  };
+
+  const drawStepRail = (activeIndex: number) => {
+    doc.setFillColor("#131b22");
+    doc.rect(previewFrameX, bodyTop, sidebarW, previewFrameH - headerH, "F");
+    doc.setDrawColor("#22303d");
+    doc.line(previewFrameX + sidebarW, bodyTop, previewFrameX + sidebarW, previewFrameY + previewFrameH);
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8);
+    doc.setTextColor("#94a3b8");
+    doc.text("STEPS", previewFrameX + 3, bodyTop + 7);
+
+    let railY = bodyTop + 11;
+    steps.forEach((step, idx) => {
+      const stepInputs = stepFieldEntries(step).length;
+      const itemH = 16;
+      if (railY + itemH > previewFrameY + previewFrameH - 8) return;
+      if (idx === activeIndex) {
+        doc.setFillColor("#1c4648");
+        doc.rect(previewFrameX, railY - 4, sidebarW, itemH, "F");
+      }
+
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(7.5);
+      doc.setTextColor(idx === activeIndex ? "#d7fffb" : "#9aa9b8");
+      doc.text(String(step.order ?? idx + 1).padStart(2, "0"), previewFrameX + 3, railY);
+
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7.2);
+      doc.setTextColor(idx === activeIndex ? "#f8fafc" : "#d1d9e2");
+      const titleLines = doc.splitTextToSize(step.title || "(Untitled step)", sidebarW - 8);
+      doc.text(titleLines.slice(0, 2), previewFrameX + 3, railY + 4.6);
+
+      doc.setFontSize(6.8);
+      doc.setTextColor(idx === activeIndex ? "#b7d4d1" : "#79889a");
+      doc.text(`${stepInputs} field${stepInputs === 1 ? "" : "s"}`, previewFrameX + 3, railY + 11.2);
+
+      railY += itemH;
+    });
+  };
+
+  const drawStepPage = (step: WorkflowStep, index: number) => {
+    if (index > 0) doc.addPage();
+
+    doc.setFillColor("#081219");
+    doc.rect(0, 0, pageWidth, pageHeight, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor("#d8e1ea");
+    doc.text("Workflow Preview", previewFrameX, margin + 6);
+
+    doc.setFillColor("#091016");
+    doc.setDrawColor("#16424d");
+    doc.roundedRect(previewFrameX, previewFrameY, previewFrameW, previewFrameH, 8, 8, "FD");
+
+    doc.setFillColor("#0d2a31");
+    doc.roundedRect(previewFrameX, previewFrameY, previewFrameW, headerH, 8, 8, "F");
+    doc.rect(previewFrameX, previewFrameY + headerH - 8, previewFrameW, 8, "F");
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.setTextColor("#f8fafc");
+    doc.text(cfg.name, previewFrameX + 4, previewFrameY + 8.5);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    doc.setTextColor("#cbd5e1");
+    doc.text(`Product: ${productName || "-"}`, previewFrameX + 4, previewFrameY + 15.5);
+    doc.text(`Type: ${cfg.configType || "-"}`, previewFrameX + 42, previewFrameY + 15.5);
+    doc.text(formatDate(cfg.createdAt), previewFrameX + 74, previewFrameY + 15.5);
+
+    drawChip("Published", previewFrameX + previewFrameW - 28, previewFrameY + 5, "#22c55e", "#22c55e", "#ffffff", 14);
+    drawChip(`v${cfg.version}`, previewFrameX + previewFrameW - 12, previewFrameY + 5, "#0d2a31", "#90a4ae", "#dfe9f3", 9);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7.8);
+    doc.setTextColor("#a7b5c4");
+    doc.text(`${steps.length} step${steps.length === 1 ? "" : "s"}`, previewFrameX + previewFrameW - 4, previewFrameY + 14.8, { align: "right" });
+
+    drawStepRail(index);
+
+    doc.setFillColor("#0a1218");
+    doc.rect(previewFrameX + sidebarW + 0.2, bodyTop, previewFrameW - sidebarW - 0.2, previewFrameH - headerH, "F");
+
+    let y = bodyTop + 10;
+    doc.setFillColor("#0f766e");
+    doc.circle(contentX + 2.5, y - 1.3, 4.4, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.setTextColor("#ecfeff");
+    doc.text(String(step.order ?? index + 1), contentX + 2.5, y - 0.1, { align: "center" });
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.setTextColor("#f8fafc");
+    const titleLines = doc.splitTextToSize(step.title || "(Untitled step)", contentW - 12);
+    doc.text(titleLines, contentX + 8, y);
+    y += titleLines.length * 6.1;
+
+    if (step.description) {
+      y = drawTextBlock(step.description, contentX + 8, y + 1.5, contentW - 12, 9.5, "#cbd5e1");
+    }
+
+    y += 6;
+    doc.setDrawColor("#1e293b");
+    doc.line(contentX, y, contentX + contentW, y);
+    y += 8;
+
+    const allFields = stepFieldEntries(step);
+
+    if (allFields.length > 0) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor("#99f6e4");
+      doc.text("INPUT FIELDS", contentX, y);
+      y += 6;
+
+      allFields.forEach(({ field, variant }) => {
+        y = drawFieldCard(field, y, variant);
+      });
+    } else {
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(10);
+      doc.setTextColor("#94a3b8");
+      doc.text("No inputs or capture fields on this step.", contentX, y);
+      y += 10;
+    }
+
+    if (step.decisionsEnabled && (step.decisions?.length ?? 0) > 0) {
+      y += 2;
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9);
+      doc.setTextColor("#99f6e4");
+      doc.text("DECISION BUTTONS", contentX, y);
+      y += 6;
+
+      let chipX = contentX;
+      step.decisions.forEach((decision) => {
+        const label = decision.label || "Decision";
+        const chipWidth = Math.min(58, Math.max(24, doc.getTextWidth(label) + 10));
+        if (chipX + chipWidth > contentX + contentW) {
+          chipX = contentX;
+          y += 10;
+        }
+        drawChip(label, chipX, y - 5, "#10343b", "#2dd4bf", "#d1fae5", chipWidth);
+        chipX += chipWidth + 4;
+      });
+    }
+
+    const footerY = previewFrameY + previewFrameH - 8;
+    doc.setDrawColor("#1e293b");
+    doc.line(contentX, footerY - 8, contentX + contentW, footerY - 8);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor("#94a3b8");
+    doc.text("Workflow preview snapshot only - no asset run data, no validation enforced.", contentX, footerY);
+
+    const backLabel = index === 0 ? "<- Back" : "<- Previous";
+    const nextLabel = index === steps.length - 1 ? "Preview complete" : "Next step ->";
+    const backW = Math.max(18, doc.getTextWidth(backLabel) + 7);
+    const nextW = Math.max(21, doc.getTextWidth(nextLabel) + 8);
+    const actionY = footerY - 4;
+    const actionRightX = contentX + contentW;
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.setTextColor("#8ea0b0");
+    doc.text(`Step ${index + 1} of ${steps.length}`, actionRightX - nextW - 12, actionY + 4.4, { align: "right" });
+
+    drawChip(backLabel, contentX, actionY, "#0a1218", "#415262", index === 0 ? "#5b6875" : "#d7dee7", backW);
+    drawChip(nextLabel, actionRightX - nextW, actionY, "#0f766e", "#14b8a6", "#d8fffb", nextW);
+  };
+
+  if (steps.length === 0) {
+    doc.setFillColor("#081219");
+    doc.rect(0, 0, pageWidth, pageHeight, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(18);
+    doc.setTextColor("#f8fafc");
+    doc.text(cfg.name, margin, margin + 10);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(11);
+    doc.setTextColor("#94a3b8");
+    doc.text("No workflow steps defined.", margin, margin + 22);
+  } else {
+    steps.forEach((step, index) => drawStepPage(step, index));
+  }
+
+  const safeName = cfg.name.replace(/[^a-z0-9-_]+/gi, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+  doc.save(`work-instruction-${safeName || "export"}.pdf`);
+}
+
+function printWorkflowPreview(cfg: WorkflowConfig, productName: string) {
+  const workflow = parseSteps(cfg);
+  const steps = workflow?.steps ? [...workflow.steps].sort((a, b) => a.order - b.order) : [];
   const stepsHtml = steps
     .map(
       (step) => `
       <div style="margin-bottom:16px">
         <div style="font-size:14px;font-weight:600;margin-bottom:4px;padding-bottom:3px;border-bottom:1px solid #ddd">${escapeHtml(step.title)}</div>
         ${step.description ? `<p style="margin:0 0 6px;font-size:12px;color:#666">${escapeHtml(step.description)}</p>` : ""}
-        ${
-          step.inputs.length
-            ? `<table style="width:100%;border-collapse:collapse">
-                ${step.inputs
-                  .map(
-                    (inp) =>
-                      `<tr>
-                        <td style="padding:3px 10px 3px 0;color:#555;font-size:12px;width:40%">${escapeHtml(inp.label)}</td>
-                        <td style="padding:3px 0;font-size:12px;color:#aaa;font-style:italic">_______________</td>
-                       </tr>`,
-                  )
-                  .join("")}
-               </table>`
-            : "<p style='color:#aaa;font-size:12px'>No inputs</p>"
-        }
       </div>`,
     )
     .join("");
@@ -165,9 +442,6 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
       Configuration Type: ${escapeHtml(cfg.configType ?? "-")}&nbsp;|&nbsp;
       Status: ${escapeHtml(cfg.status)}&nbsp;|&nbsp;v${escapeHtml(cfg.version)}
     </p>
-    ${cfg.notes ? `<p style="margin:0 0 12px;font-size:12px;color:#555;font-style:italic">${escapeHtml(cfg.notes)}</p>` : ""}
-    ${cfg.createdBy ? `<p style="margin:0 0 12px;font-size:12px;color:#888">Created by: ${escapeHtml(cfg.createdBy)} on ${escapeHtml(formatDate(cfg.createdAt))}</p>` : ""}
-    <hr style="margin:14px 0">
     ${stepsHtml || "<p>No workflow steps defined.</p>"}
     </body></html>`;
 
@@ -198,6 +472,7 @@ interface PreviewProps {
 function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
+  const isNative = isMobileNativePlatform();
   const [activeStep, setActiveStep] = useState(0);
 
   const workflow = useMemo(() => parseSteps(cfg), [cfg]);
@@ -210,6 +485,19 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
   useEffect(() => {
     if (open) setActiveStep(0);
   }, [open, cfg.id]);
+
+  if (!isNative && workflow) {
+    return (
+      <WorkOrderRunner
+        open={open}
+        onClose={onClose}
+        workflow={workflow}
+        productId={cfg.productId}
+        productName={productName}
+        previewWalkthrough
+      />
+    );
+  }
 
   return (
     <Dialog

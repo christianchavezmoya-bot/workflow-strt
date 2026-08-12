@@ -587,7 +587,7 @@ public class NotificationSettingsEntity
     [MaxLength(200)]
     public string SmtpFrom { get; set; } = "no-reply@commtrac.local";
     [MaxLength(300)]
-    public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
+    public string FrontendBaseUrl { get; set; } = "";
 
     [MaxLength(80)]
     public string SmsProvider { get; set; } = "";
@@ -1466,3 +1466,4 @@ public class PushDeviceTokenEntity
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
+

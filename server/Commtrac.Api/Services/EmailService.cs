@@ -9,5 +9,6 @@ public sealed class EmailSettings
     public string Password { get; set; } = "";
     public string FromAddress { get; set; } = AppBranding.EmailFromAddress;
     public string FromName { get; set; } = AppBranding.EmailFromName;
-    public string FrontendBaseUrl { get; set; } = "http://localhost:5173";
+    public string FrontendBaseUrl { get; set; } = "";
 }
+

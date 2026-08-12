@@ -76,7 +76,7 @@ public class SignatureTokensController : ControllerBase
         }
         if (string.IsNullOrWhiteSpace(baseUrl))
         {
-            baseUrl = "http://localhost:5173";
+            baseUrl = BuildFallbackFrontendBaseUrl(Request.Scheme, Request.Host.Host);
         }
 
         var token = new SignatureTokenEntity
@@ -165,6 +165,13 @@ public class SignatureTokensController : ControllerBase
         var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
         return $"{scheme}://{detectedIp}:5173";
     }
+    private static string BuildFallbackFrontendBaseUrl(string requestScheme, string? requestHost)
+    {
+        var scheme = string.IsNullOrWhiteSpace(requestScheme) ? "http" : requestScheme;
+        var host = string.IsNullOrWhiteSpace(requestHost) ? "127.0.0.1" : requestHost.Trim();
+        return $"{scheme}://{host}:5173";
+    }
+
 
     private string GetRequestHostFrontendBaseUrl(string requestScheme)
     {
@@ -261,3 +268,4 @@ public class SignatureTokensController : ControllerBase
         return IPAddress.TryParse(host, out var address) && IsPrivateIpv4Address(address);
     }
 }
+

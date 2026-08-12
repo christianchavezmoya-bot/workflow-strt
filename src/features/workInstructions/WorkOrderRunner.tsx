@@ -109,6 +109,8 @@ interface WorkOrderRunnerProps {
   workflow: Workflow;
   productId: string;
   productName: string;
+  /** Preview-only walkthrough for web work-instruction preview. */
+  previewWalkthrough?: boolean;
   /** Links this run to a specific project asset. Required for real run tracking. */
   projectAssetId?: string;
   /** The WorkflowConfig id â€" used to call startRun() if no runId. */
@@ -248,6 +250,7 @@ export default function WorkOrderRunner({
   workflow,
   productId,
   productName,
+  previewWalkthrough = false,
   projectAssetId,
   workflowConfigId,
   existingRunId,
@@ -453,6 +456,7 @@ export default function WorkOrderRunner({
   const currentStep = stepsSorted.find((s) => s.id === currentStepId) ?? null;
   const currentIndex = stepsSorted.findIndex((s) => s.id === currentStepId);
   const isLastStep = currentStep?.nextStepId === null && !currentStep?.decisionsEnabled;
+  const isPreviewWalkthrough = previewWalkthrough && !isRealRun;
 
   function getFeatureLinkContext(step: WorkflowStep) {
     for (const inp of step.inputs ?? []) {
@@ -503,6 +507,14 @@ export default function WorkOrderRunner({
     if (open && existingRunId) setActiveRunId(existingRunId);
     if (!open) reset();
   }, [open, existingRunId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open || !isPreviewWalkthrough) return;
+    firstRenderMarkedRef.current = false;
+    setStage("running");
+    setCurrentStepId(stepsSorted[0]?.id ?? null);
+    setHistory([]);
+  }, [open, isPreviewWalkthrough, stepsSorted]);
 
   useLayoutEffect(() => {
     if (!open || stage !== "running" || firstRenderMarkedRef.current) return;
@@ -1098,6 +1110,10 @@ export default function WorkOrderRunner({
     if (!currentStep) return;
     setFlagOpen(false);
     setFlagSubmitted(false);
+    if (isPreviewWalkthrough) {
+      proceedToNextStep();
+      return;
+    }
     const missingItems = getStepMissingItems(currentStep);
     const { blocking, warning } = splitMissingItems(missingItems);
     if (blocking.length > 0) {
@@ -1115,6 +1131,10 @@ export default function WorkOrderRunner({
     if (!currentStep) return;
     setFlagOpen(false);
     setFlagSubmitted(false);
+    if (isPreviewWalkthrough) {
+      proceedWithDecision(targetId);
+      return;
+    }
     const missingItems = getStepMissingItems(currentStep);
     const { blocking, warning } = splitMissingItems(missingItems);
     if (blocking.length > 0) {
@@ -2512,68 +2532,108 @@ export default function WorkOrderRunner({
         </Dialog>
 
         <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
-          <Stack direction="row" spacing={0.75} alignItems="center">
-            <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
-              {"<- Back"}
-            </Button>
-            {!flagOpen && (() => {
-              const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
-              return (
-                <Tooltip title="Flag an issue on this step">
+          {isPreviewWalkthrough ? (
+            <>
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
+                  {"<- Back"}
+                </Button>
+              </Stack>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                <Button size="small" color="inherit" onClick={onClose}>
+                  Close preview
+                </Button>
+                {!needsConfirmation && !needsCountPicker && (hasDecisions ? (
+                  (currentStep.decisions ?? []).map((d) => (
+                    <Button
+                      key={d.id}
+                      variant="contained"
+                      size="small"
+                      onClick={() => handleDecision(d.targetStepId)}
+                    >
+                      {d.label || "Decision"}
+                    </Button>
+                  ))
+                ) : (
+                  <Button
+                    variant="contained"
+                    color={isLast ? "success" : "primary"}
+                    size="small"
+                    onClick={handleNext}
+                  >
+                    {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && repeatIdx + 1 < repeatCount
+                      ? `Next ${unitLabel} ->`
+                      : isLast ? "Preview complete" : "Next step ->"}
+                  </Button>
+                ))}
+              </Stack>
+            </>
+          ) : (
+            <>
+              <Stack direction="row" spacing={0.75} alignItems="center">
+                <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
+                  {"<- Back"}
+                </Button>
+                {!flagOpen && (() => {
+                  const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
+                  return (
+                    <Tooltip title="Flag an issue on this step">
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        startIcon={<ReportProblemOutlined fontSize="small" />}
+                        onClick={() => openFlagDialog()}
+                      >
+                        {stepIssueCount > 0 ? `Issues (${stepIssueCount}) +` : "Flag issue"}
+                      </Button>
+                    </Tooltip>
+                  );
+                })()}
+              </Stack>
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                <Tooltip title="Save progress and close - resume later from where you left off">
                   <Button
                     size="small"
                     variant="outlined"
-                    color="error"
-                    startIcon={<ReportProblemOutlined fontSize="small" />}
-                    onClick={() => openFlagDialog()}
+                    color="warning"
+                    startIcon={<PauseOutlined fontSize="small" />}
+                    onClick={handlePause}
                   >
-                    {stepIssueCount > 0 ? `Issues (${stepIssueCount}) +` : "Flag issue"}
+                    Pause
                   </Button>
                 </Tooltip>
-              );
-            })()}
-          </Stack>
-          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
-            <Tooltip title="Save progress and close - resume later from where you left off">
-              <Button
-                size="small"
-                variant="outlined"
-                color="warning"
-                startIcon={<PauseOutlined fontSize="small" />}
-                onClick={handlePause}
-              >
-                Pause
-              </Button>
-            </Tooltip>
-            <Tooltip title="Discard all captured data, photos, and reset the time tracker">
-              <Button size="small" color="inherit" onClick={requestDiscardRun}>
-                Cancel
-              </Button>
-            </Tooltip>
-            {!needsConfirmation && !needsCountPicker && (hasDecisions ? (
-              (currentStep.decisions ?? []).map((d) => (
-                <Button
-                  key={d.id}
-                  variant="contained"
-                  size="small"
-                  onClick={() => handleDecision(d.targetStepId)}
-                >
-                  {d.label || "Decision"}
-                </Button>
-              ))
-            ) : (
-              <Button
-                variant="contained"
-                color={isLast ? "success" : "primary"}
-                size="small"
-                onClick={handleNext}
-              >
-                {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && repeatIdx + 1 < repeatCount
-                  ? `Next ${unitLabel} ->`
-                  : isLast ? "Complete" : "Next step ->"}
-              </Button>
-            ))}
-          </Stack>
+                <Tooltip title="Discard all captured data, photos, and reset the time tracker">
+                  <Button size="small" color="inherit" onClick={requestDiscardRun}>
+                    Cancel
+                  </Button>
+                </Tooltip>
+                {!needsConfirmation && !needsCountPicker && (hasDecisions ? (
+                  (currentStep.decisions ?? []).map((d) => (
+                    <Button
+                      key={d.id}
+                      variant="contained"
+                      size="small"
+                      onClick={() => handleDecision(d.targetStepId)}
+                    >
+                      {d.label || "Decision"}
+                    </Button>
+                  ))
+                ) : (
+                  <Button
+                    variant="contained"
+                    color={isLast ? "success" : "primary"}
+                    size="small"
+                    onClick={handleNext}
+                  >
+                    {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && repeatIdx + 1 < repeatCount
+                      ? `Next ${unitLabel} ->`
+                      : isLast ? "Complete" : "Next step ->"}
+                  </Button>
+                ))}
+              </Stack>
+            </>
+          )}
         </DialogActions>
       </>
     );
@@ -2583,6 +2643,48 @@ export default function WorkOrderRunner({
   // Stage: summary
   // ---------------------------------------------------------------
   function renderSummary() {
+    if (isPreviewWalkthrough) {
+      return (
+        <>
+          <DialogTitle>
+            <Stack direction="row" alignItems="center" spacing={1}>
+              <CheckCircleOutlined color="success" />
+              <Typography variant="subtitle1" fontWeight={600}>Workflow preview complete</Typography>
+            </Stack>
+          </DialogTitle>
+          <DialogContent dividers sx={{ overflowX: "hidden" }}>
+            <Stack spacing={2} sx={{ mt: 1 }}>
+              <Paper variant="outlined" sx={{ p: 2 }}>
+                <Stack spacing={1.25}>
+                  <Typography variant="h6" fontWeight={700}>
+                    Previewed all workflow steps
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    This was a preview walkthrough only. No run was created, no asset data was loaded, and no validation was enforced.
+                  </Typography>
+                  <Chip
+                    size="small"
+                    color="success"
+                    variant="outlined"
+                    label={`${stepsSorted.length} step${stepsSorted.length === 1 ? "" : "s"} previewed`}
+                    sx={{ alignSelf: "flex-start" }}
+                  />
+                </Stack>
+              </Paper>
+            </Stack>
+          </DialogContent>
+          <DialogActions sx={{ justifyContent: "space-between" }}>
+            <Button onClick={() => setStage("running")} variant="outlined" size="small">
+              Back to steps
+            </Button>
+            <Button onClick={onClose} variant="contained" size="small">
+              Close preview
+            </Button>
+          </DialogActions>
+        </>
+      );
+    }
+
     const stepsData = buildStepsData();
     const summaryStepResultsJson = JSON.stringify(stepsData);
     const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
