@@ -151,15 +151,18 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** read/write through abstraction locally ✅; S3 provider available for staging.
 
-### PHASE 3 — CORS, HTTPS, forwarded headers, API base URL (partial)
+### PHASE 3 — CORS, HTTPS, forwarded headers, API base URL (partial ✅)
 
 **What shipped:**
 - `UseForwardedHeaders` in non-Development (respects `X-Forwarded-Proto` behind App Runner/CloudFront)
-- `appsettings.Production.json` template
-- `/api/health` now checks database connectivity (for load balancers)
+- `appsettings.Production.json` + **`appsettings.Staging.json`** templates
+- `/api/health` checks database connectivity + reports `databaseProvider`
 - Optional `Cors:AllowedOrigins` (LAN fallback unchanged when empty)
+- **`.env.production.example`** + **`.env.staging.example`**
+- **`npm run build:cloud-web`** / **`build:cloud-native`** — validates `VITE_API_BASE` (HTTPS for prod)
+- **`docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`** — staging → prod AWS steps
 
-**Still required:** prod `VITE_API_BASE` builds, Capacitor release pipeline.
+**Still required:** Staging build deployed to real URL; CORS + Capacitor store release verified.
 
 **Gate:** prod-config build + CORS verified in staging.
 
@@ -178,11 +181,11 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** pre-deploy checklist PASS on staging; single-instance deploy only until SSE resolved.
 
-### PHASE 5 — Containerize + deploy to AWS (Dockerfile ✅)
+### PHASE 5 — Containerize + deploy to AWS (Dockerfile ✅, runbook ✅)
 
-**What shipped:** multi-stage `Dockerfile` + `.dockerignore` (API on port 8080).
+**What shipped:** multi-stage `Dockerfile` + `.dockerignore` (API on port 8080); **[`CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`](./CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md)**.
 
-**Still required:**
+**Execute in AWS (after pre-deploy checklist PASS):**
 
 1. RDS Postgres + Secrets Manager.
 2. S3 for media.
@@ -199,10 +202,10 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 2. ✅ **Phase 1 parity prep** — PostgresSchemaEnsurer, docker-compose, SearchDocumentChunks port
 3. **Phase 1 gate** — full Postgres soak + optional data migration (Sqlite stays default until passes)
 4. ✅ **Phase 2 S3 provider** — S3FileStorageService + MinIO local parity
-5. **Phase 3 frontend builds** — prod `VITE_API_BASE` + Capacitor release pipeline
-6. **Pre-deploy gate** — [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) PASS on staging (web + phone)
-7. **Phase 4 complete** — SSE soak; multi-instance only after hub strategy
-8. **Phase 5 deploy** — AWS cutover after sign-off
+5. ✅ **Phase 3 build scripts + deploy runbook** — `build:cloud-web`, AWS runbook
+6. **Pre-deploy gate** — checklist PASS on staging (web + phone)
+7. **Phase 4 complete** — SSE soak on staging host
+8. **Phase 5 execute** — AWS cutover per runbook after sign-off
 
 ## Open decisions
 
@@ -220,4 +223,4 @@ dotnet user-secrets set "SeedAdmin:Password" "YourStrongPassword!"
 dotnet user-secrets set "ConnectionStrings:DefaultConnection" "Data Source=C:\path\to\commtrac.db"
 ```
 
-See also: `docs/RESEND_EMAIL_SETUP.md`, `server/README.md`, `docs/WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`.
+See also: `docs/RESEND_EMAIL_SETUP.md`, `server/README.md`, `docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`, `docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`, `docs/WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`, `docs/IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`.

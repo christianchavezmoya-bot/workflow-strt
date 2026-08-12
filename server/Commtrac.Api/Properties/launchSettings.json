@@ -63,6 +63,17 @@
         "AWS_SECRET_ACCESS_KEY": "commtrac_dev",
         "ENABLE_BOM_PROJECT_MODULE": "true"
       }
+    },
+    "Staging": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:8080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Staging",
+        "ENABLE_BOM_PROJECT_MODULE": "true"
+      }
     }
   }
 }

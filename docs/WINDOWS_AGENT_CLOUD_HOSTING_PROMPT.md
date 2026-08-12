@@ -177,10 +177,9 @@ Pick **one** phase per PR; branch name `cursor/cloud-hosting-<topic>-cd21`.
 
 | Next work | Suggested branch focus |
 |-----------|------------------------|
-| Phase 1 gate | Postgres soak fixes, data migration script, CI migration job |
-| Phase 3 | Staging `VITE_API_BASE` build script, CORS e2e doc |
-| Phase 4 | SSE multi-instance spike doc/code, disable migrate-on-boot in prod |
-| Phase 5 | Terraform/CDK or runbook: RDS, S3, Secrets Manager, App Runner |
+| Phase 1 gate | Postgres soak fixes, data migration script |
+| Staging AWS | Follow [`CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`](./CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md) |
+| Phase 4 | SSE multi-instance spike doc/code |
 
 Update `docs/CLOUD_HOSTING_AWS_PLAN.md` when shipping. Run `dotnet build` + `dotnet test` + `npm run build` before push.
 

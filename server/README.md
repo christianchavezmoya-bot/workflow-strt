@@ -58,6 +58,16 @@ COMMTRAC_POSTGRES_TEST=1 dotnet test server/Commtrac.Api.Tests
 
 Before AWS cutover, complete [`docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](../docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) — full web + phone sign-off on staging.
 
+Deploy steps: [`docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`](../docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md).
+
+### Cloud web / native builds
+
+```bash
+cp .env.staging.example .env.staging.local   # set VITE_API_BASE
+npm run build:cloud-web:staging              # web dist/
+npm run build:cloud-native:staging           # web + cap sync
+```
+
 ## IIS / production environment variables
 - `ConnectionStrings__DefaultConnection`
 - `Jwt__Key`, `Jwt__Issuer`, `Jwt__Audience`
