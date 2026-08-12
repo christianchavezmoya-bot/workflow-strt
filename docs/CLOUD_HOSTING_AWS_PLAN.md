@@ -8,6 +8,8 @@ testing locally at every step and only deploy when ready.
 *Dockerfile* landed in code. **Sqlite** and **local disk** remain defaults — local dev
 unchanged.
 
+**Staging standup:** [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) — local Docker first, then AWS.
+
 ---
 
 # PART 1 — ASSESSMENT (what the code is today)
