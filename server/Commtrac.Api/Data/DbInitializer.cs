@@ -3,6 +3,7 @@ using BCrypt.Net;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 
 namespace Commtrac.Api.Data;
 
@@ -10,45 +11,54 @@ public static class DbInitializer
 {
     public static void Initialize(AppDbContext db, IConfiguration config)
     {
-        // Fix partially-applied Add2faFields migration:
-        // The 2FA columns may already exist from a failed run, but the migration
-        // wasn't recorded. Detect this and mark it as applied before running migrations.
-        FixPartialMigration(db);
+        var isSqlite = db.Database.IsSqlite();
 
-        // Fix migrations that were applied via Ensure* helpers before EF migration files existed.
-        FixEnsuredMigrations(db);
+        if (isSqlite)
+        {
+            // Fix partially-applied Add2faFields migration:
+            // The 2FA columns may already exist from a failed run, but the migration
+            // wasn't recorded. Detect this and mark it as applied before running migrations.
+            FixPartialMigration(db);
+
+            // Fix migrations that were applied via Ensure* helpers before EF migration files existed.
+            FixEnsuredMigrations(db);
+        }
 
         db.Database.Migrate();
-        ConfigureSqlitePragmas(db);       // WAL mode + busy timeout — must run first
-        EnsurePerformanceIndexes(db);     // composite indexes for hot read queries
-        EnsureAuditLogTable(db);
-        EnsureSessionsTable(db);
-        EnsurePasswordChangedAtColumn(db);
-        EnsureMobileUploadTokensTable(db);
-        EnsureDocumentTables(db);
-        EnsureAssetDocumentTables(db);
-        EnsureAssetDocumentLinksTables(db);
-        EnsureRunTimeTrackingColumns(db);
-        EnsureMarch15Columns(db);
-        EnsureFeatureProcurementColumns(db);
-        EnsureProjectMinimumCompletionPercentColumn(db);
-        EnsureProjectTimeZoneColumn(db);
-        // Must run before any query touches InspectionImports (dashboard-workspace does).
-        EnsureInspectionImportColumnNames(db);
-        EnsureNotificationInboxTable(db);
-        EnsureRunAmendmentSchema(db);
-        EnsureLinkableKeyFieldDefinitions(db);
-        // Soft-delete columns are model-only (no migration creates them); add them
-        // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
-        // database crashes with "no such column: IsDeleted".
-        EnsureSoftDeleteColumns(db);
-        EnsureNotificationSettingsResendFrom(db);
-        EnsurePushDeviceTokensTable(db);
+
+        if (isSqlite)
+        {
+            ConfigureSqlitePragmas(db);       // WAL mode + busy timeout — must run first
+            EnsurePerformanceIndexes(db);     // composite indexes for hot read queries
+            EnsureAuditLogTable(db);
+            EnsureSessionsTable(db);
+            EnsurePasswordChangedAtColumn(db);
+            EnsureMobileUploadTokensTable(db);
+            EnsureDocumentTables(db);
+            EnsureAssetDocumentTables(db);
+            EnsureAssetDocumentLinksTables(db);
+            EnsureRunTimeTrackingColumns(db);
+            EnsureMarch15Columns(db);
+            EnsureFeatureProcurementColumns(db);
+            EnsureProjectMinimumCompletionPercentColumn(db);
+            EnsureProjectTimeZoneColumn(db);
+            // Must run before any query touches InspectionImports (dashboard-workspace does).
+            EnsureInspectionImportColumnNames(db);
+            EnsureNotificationInboxTable(db);
+            EnsureRunAmendmentSchema(db);
+            EnsureLinkableKeyFieldDefinitions(db);
+            // Soft-delete columns are model-only (no migration creates them); add them
+            // BEFORE any seeding query below hits a !IsDeleted query filter, or a fresh
+            // database crashes with "no such column: IsDeleted".
+            EnsureSoftDeleteColumns(db);
+            EnsureNotificationSettingsResendFrom(db);
+            EnsurePushDeviceTokensTable(db);
+        }
 
         if (!db.Users.Any())
         {
             var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
-            var adminPassword = config["SeedAdmin:Password"] ?? "Admin123!";
+            var adminPassword = ResolveSeedAdminPassword(config);
             var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
             var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
 
@@ -183,6 +193,28 @@ public static class DbInitializer
         }
 
         db.SaveChanges();
+    }
+
+    private static string ResolveSeedAdminPassword(IConfiguration config)
+    {
+        var configured = config["SeedAdmin:Password"];
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return configured;
+        }
+
+        var isDevelopment = string.Equals(
+            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+            Environments.Development,
+            StringComparison.OrdinalIgnoreCase);
+
+        if (isDevelopment)
+        {
+            return "Admin123!";
+        }
+
+        throw new InvalidOperationException(
+            "SeedAdmin:Password must be configured before the first run in non-Development environments.");
     }
 
     /// <summary>

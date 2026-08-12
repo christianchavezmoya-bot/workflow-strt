@@ -6,11 +6,13 @@ using System.Text;
 using System.Text.Json;
 using BCrypt.Net;
 using Commtrac.Api.Data;
+using Commtrac.Api.Hosting;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.IdentityModel.Tokens;
 using OtpNet;
 
@@ -23,6 +25,7 @@ public class AuthController : ControllerBase
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly AppDbContext _db;
     private readonly IConfiguration _config;
+    private readonly IHostEnvironment _environment;
     private readonly IEmailSender _emailSender;
     private readonly NotificationSettingsService _notificationSettings;
 
@@ -35,13 +38,16 @@ public class AuthController : ControllerBase
     private static readonly TimeSpan LockoutDuration = TimeSpan.FromMinutes(15);
     private static readonly ConcurrentDictionary<string, (int Count, DateTime FirstAttempt)> _2faAttempts = new();
 
-    public AuthController(AppDbContext db, IConfiguration config, IEmailSender emailSender, NotificationSettingsService notificationSettings)
+    public AuthController(AppDbContext db, IConfiguration config, IHostEnvironment environment, IEmailSender emailSender, NotificationSettingsService notificationSettings)
     {
         _db = db;
         _config = config;
+        _environment = environment;
         _emailSender = emailSender;
         _notificationSettings = notificationSettings;
     }
+
+    private string JwtKey => JwtKeyResolver.Resolve(_config, _environment);
 
     // Password expiry: 90 days
     private const int PasswordExpiryDays = 90;
@@ -642,7 +648,7 @@ public class AuthController : ControllerBase
 
     private string CreateTrustedDeviceToken(string userId)
     {
-        var key = _config["Jwt:Key"] ?? "dev-only-change-me";
+        var key = JwtKey;
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, userId),
@@ -666,7 +672,7 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var key = _config["Jwt:Key"] ?? "dev-only-change-me";
+            var key = JwtKey;
             var keyBytes = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
             var handler = new JwtSecurityTokenHandler();
             var principal = handler.ValidateToken(token, new TokenValidationParameters
@@ -695,7 +701,7 @@ public class AuthController : ControllerBase
 
     private string CreateToken(UserEntity user, string? sessionId = null)
     {
-        var key = _config["Jwt:Key"] ?? "dev-only-change-me";
+        var key = JwtKey;
         var issuer = _config["Jwt:Issuer"] ?? "commtrac";
         var audience = _config["Jwt:Audience"] ?? "commtrac-ui";
         var expiresMinutes = int.TryParse(_config["Jwt:ExpiresMinutes"], out var minutes) ? minutes : 1440;
@@ -730,7 +736,7 @@ public class AuthController : ControllerBase
     /// <summary>Creates a short-lived JWT (5 min) for the 2FA verification step. Not usable for API access.</summary>
     private string Create2faToken(string userId)
     {
-        var key = _config["Jwt:Key"] ?? "dev-only-change-me";
+        var key = JwtKey;
         var claims = new[]
         {
             new Claim(ClaimTypes.NameIdentifier, userId),
@@ -755,7 +761,7 @@ public class AuthController : ControllerBase
     {
         try
         {
-            var key = _config["Jwt:Key"] ?? "dev-only-change-me";
+            var key = JwtKey;
             var keyBytes = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(key));
             var handler = new JwtSecurityTokenHandler();
             var principal = handler.ValidateToken(token, new TokenValidationParameters
