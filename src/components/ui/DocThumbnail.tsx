@@ -1,5 +1,5 @@
 import { Box, CircularProgress } from "@mui/material";
-import { DescriptionOutlined, ImageOutlined } from "@mui/icons-material";
+import { DescriptionOutlined, ImageOutlined, VideocamOutlined } from "@mui/icons-material";
 import { useEffect, useRef, useState } from "react";
 import { documentService } from "../../services/documentService";
 
@@ -12,6 +12,10 @@ interface Props {
 
 function isImage(ct?: string | null) {
   return !!ct && ct.startsWith("image/");
+}
+
+function isVideo(ct?: string | null) {
+  return !!ct && ct.startsWith("video/");
 }
 
 function isPdf(ct?: string | null, url?: string) {
@@ -52,6 +56,11 @@ export default function DocThumbnail({ downloadUrl, contentType, width = 320, he
     mountedRef.current = true;
     setSrc(null);
     setStatus("loading");
+
+    if (isVideo(contentType)) {
+      setStatus("error");
+      return () => { mountedRef.current = false; };
+    }
 
     (async () => {
       try {
@@ -109,7 +118,9 @@ export default function DocThumbnail({ downloadUrl, contentType, width = 320, he
       {status === "error" && (
         isImage(contentType)
           ? <ImageOutlined sx={{ fontSize: 40, color: "text.disabled" }} />
-          : <DescriptionOutlined sx={{ fontSize: 40, color: "text.disabled" }} />
+          : isVideo(contentType)
+            ? <VideocamOutlined sx={{ fontSize: 40, color: "text.disabled" }} />
+            : <DescriptionOutlined sx={{ fontSize: 40, color: "text.disabled" }} />
       )}
     </Box>
   );
