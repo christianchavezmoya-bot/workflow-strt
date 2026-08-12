@@ -4,7 +4,7 @@ One document: (1) honest readiness assessment, (2) opinion, (3) a concrete AWS m
 plan built around a **two-profile model (local + cloud)** so you can keep developing and
 testing locally at every step and only deploy when ready.
 
-**Status:** Phase 0 + Phase 1 *prep* + Phase 2 *abstraction* + Phase 3 *partial* + Phase 5
+**Status:** Phase 0 + Phase 1 *parity prep* + Phase 2 *abstraction* + Phase 3 *partial* + Phase 5
 *Dockerfile* landed in code. **Sqlite** and **local disk** remain defaults — local dev
 unchanged.
 
@@ -110,20 +110,26 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 
 **Gate:** ✅ app runs locally; no secrets in base `appsettings.json`.
 
-### PHASE 1 — Database: SQLite → PostgreSQL (prep started)
+### PHASE 1 — Database: SQLite → PostgreSQL (parity prep ✅ partial)
 
 **What shipped (safe prep only):**
 
 - `Database:Provider` config (`Sqlite` default).
 - Npgsql package + `UseNpgsql` branch in `Program.cs`.
 - SQLite-only `Ensure*` / `Fix*` gated behind `db.Database.IsSqlite()`.
+- **`PostgresSchemaEnsurer`** — PostgreSQL equivalents of all 20 Ensure* patches.
+- **`docker-compose.yml`** — Postgres 16 for local cloud-profile testing.
+- **`appsettings.PostgresLocal.json`** + `PostgresLocal` launch profile.
+- Provider-aware **`SearchDocumentChunks`** (SQLite + Postgres DDL).
+- Migrations: `INSERT OR IGNORE` → `ON CONFLICT DO NOTHING` (cross-database).
+- SQLite backup hosted service skipped when `Database:Provider=Postgres`.
+- Optional test: `COMMTRAC_POSTGRES_TEST=1 dotnet test`.
 
 **Still required before switching prod to Postgres:**
 
-1. Regenerate/test EF migrations on Postgres.
-2. Port or replace `SearchDocumentChunks` raw SQL.
-3. One-time data migration from `commtrac.db` if keeping field data.
-4. Local Docker Postgres parity testing.
+1. End-to-end soak on Postgres (login, workflows, search, uploads).
+2. One-time data migration from `commtrac.db` if keeping field data.
+3. Controlled migrations in CI (not N instances racing `Migrate()` on boot).
 
 **Gate:** app runs end-to-end locally on Postgres; migrations apply cleanly.
 
@@ -170,19 +176,19 @@ before committing — Beanstalk/ECS+ALB may be safer if SSE cannot tolerate time
 **Still required:**
 
 1. RDS Postgres + Secrets Manager.
-3. S3 for media.
-4. App Runner **or** Beanstalk (SSE spike first).
-5. S3 + CloudFront for web `dist/`.
-6. Custom domains via ACM.
-7. Migration as CI/CD step, not blind multi-instance startup migrate.
+2. S3 for media.
+3. App Runner **or** Beanstalk (SSE spike first).
+4. S3 + CloudFront for web `dist/`.
+5. Custom domains via ACM.
+6. Migration as CI/CD step, not blind multi-instance startup migrate.
 
 ---
 
 ## Recommended sequence
 
 1. ✅ **Phase 0** — done
-2. **Phase 1** — Postgres migrations + local Docker parity (Sqlite stays default until gate passes)
-3. ✅ **Phase 2 abstraction + Phase 3 partial** — local disk via `IFileStorageService`; forwarded headers + health DB check
+2. ✅ **Phase 1 parity prep** — PostgresSchemaEnsurer, docker-compose, SearchDocumentChunks port
+3. **Phase 1 gate** — full Postgres soak + optional data migration (Sqlite stays default until passes)
 4. **Phase 2 S3 + Phase 3 frontend builds** — S3 provider + prod `VITE_API_BASE`
 5. **Phase 4** — before scaling past one instance
 6. **Phase 5 deploy** — Dockerfile ready; wire RDS/S3/secrets + SSE spike

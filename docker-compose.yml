@@ -1,0 +1,23 @@
+# Local Postgres for cloud-profile parity testing.
+# Sqlite remains the default for day-to-day dev — opt in with appsettings.PostgresLocal.json.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: commtrac-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: commtrac
+      POSTGRES_PASSWORD: commtrac_dev
+      POSTGRES_DB: commtrac
+    volumes:
+      - commtrac_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commtrac -d commtrac"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  commtrac_pgdata:

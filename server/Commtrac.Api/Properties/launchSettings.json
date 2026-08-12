@@ -39,6 +39,17 @@
         "ASPNETCORE_ENVIRONMENT": "Development",
         "ENABLE_BOM_PROJECT_MODULE": "true"
       }
+    },
+    "PostgresLocal": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:4000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "PostgresLocal",
+        "ENABLE_BOM_PROJECT_MODULE": "true"
+      }
     }
   }
 }

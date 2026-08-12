@@ -39,9 +39,9 @@ namespace Commtrac.Api.Migrations
                 column: "Name",
                 value: "Global Offices");
 
-            // Use INSERT OR IGNORE to handle pre-existing seed data
+            // Use ON CONFLICT for idempotent seed (SQLite 3.24+ and Postgres)
             migrationBuilder.Sql(@"
-                INSERT OR IGNORE INTO FieldDefinitions (Id, ActionType, FieldType, IsActive, LinkToFieldId, Name, SortOrder, TablesJson)
+                INSERT INTO FieldDefinitions (Id, ActionType, FieldType, IsActive, LinkToFieldId, Name, SortOrder, TablesJson)
                 VALUES
                     ('field-customer-id', NULL, 'text', 1, NULL, 'Customer ID', 43, '[""customers""]'),
                     ('field-customer-industry', NULL, 'text', 1, NULL, 'Industry', 44, '[""customers""]'),
@@ -52,7 +52,8 @@ namespace Commtrac.Api.Migrations
                     ('field-site-contact-phone', NULL, 'text', 1, NULL, 'Contact Phone', 40, '[""sites""]'),
                     ('field-site-notes', NULL, 'text', 1, NULL, 'Notes', 42, '[""sites""]'),
                     ('field-site-state', NULL, 'text', 1, NULL, 'State/Country', 37, '[""sites""]'),
-                    ('field-site-zipcode', NULL, 'text', 1, NULL, 'Zip Code', 38, '[""sites""]');
+                    ('field-site-zipcode', NULL, 'text', 1, NULL, 'Zip Code', 38, '[""sites""]')
+                ON CONFLICT (Id) DO NOTHING;
             ");
         }
 

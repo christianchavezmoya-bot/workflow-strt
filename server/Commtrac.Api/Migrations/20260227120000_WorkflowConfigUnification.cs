@@ -128,11 +128,12 @@ namespace Commtrac.Api.Migrations
 
             // ── 6. Seed default WorkflowTypes ──────────────────────────────────────────
             migrationBuilder.Sql(@"
-                INSERT OR IGNORE INTO WorkflowTypes (Id, Name, Icon, SortOrder, IsActive) VALUES
+                INSERT INTO WorkflowTypes (Id, Name, Icon, SortOrder, IsActive) VALUES
                 ('wftype-installation',  'Installation',  NULL, 1, 1),
                 ('wftype-commissioning', 'Commissioning', NULL, 2, 1),
                 ('wftype-inspection',    'Inspection',    NULL, 3, 1),
                 ('wftype-repair',        'Repair',        NULL, 4, 1)
+                ON CONFLICT (Id) DO NOTHING
             ");
 
             // ── 7. Migrate WorkInstructionTemplates → WorkflowConfigs ─────────────────

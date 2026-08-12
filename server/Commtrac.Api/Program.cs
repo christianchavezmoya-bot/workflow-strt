@@ -81,7 +81,10 @@ builder.Services.AddScoped<WorkflowCompletenessService>();
 builder.Services.AddScoped<RolePermissionService>();
 builder.Services.AddSingleton<SseHub>();
 builder.Services.AddSingleton<SqliteBackupService>();
-builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
+if (!string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
+}
 builder.Services.AddScoped<RecoveryService>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddHttpClient(nameof(ResendEmailService));

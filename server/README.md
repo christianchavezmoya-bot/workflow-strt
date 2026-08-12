@@ -23,6 +23,22 @@ Cloud migration plan: `docs/CLOUD_HOSTING_AWS_PLAN.md`
 - **Optional:** `Database:Provider=Postgres` + Postgres connection string (cloud prep; Sqlite remains default)
 - Migrations applied automatically at startup via `DbInitializer`
 
+### Local Postgres parity (optional)
+```bash
+# From repo root
+docker compose up -d postgres
+
+# Run API against local Postgres (throwaway profile)
+cd server/Commtrac.Api
+dotnet run --launch-profile PostgresLocal
+```
+Uses `appsettings.PostgresLocal.json` (same admin login as Development).
+
+Optional integration test (requires Postgres running):
+```bash
+COMMTRAC_POSTGRES_TEST=1 dotnet test server/Commtrac.Api.Tests
+```
+
 ## Migrations (EF Core)
 - Add a migration: `dotnet tool run dotnet-ef migrations add <Name>`
 - Update DB: `dotnet tool run dotnet-ef database update`
