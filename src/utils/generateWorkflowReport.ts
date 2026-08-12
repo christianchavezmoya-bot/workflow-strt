@@ -60,12 +60,78 @@ function detectImageFormat(dataUrl: string): string | null {
   return null;
 }
 
+const OFFLINE_MEDIA_REF_PREFIX = "offline-media-ref:";
+
+function isLikelyPhotoSource(src: string): boolean {
+  if (!src) return false;
+  if (detectImageFormat(src)) return true;
+  if (src.startsWith("data:")) return true;
+  if (src.startsWith(OFFLINE_MEDIA_REF_PREFIX)) return true;
+  if (src.startsWith("blob:")) return true;
+  if (src.startsWith("http://") || src.startsWith("https://") || src.startsWith("/")) return true;
+  return false;
+}
+
+function extractPhotoSources(val: string | undefined, isSignature: boolean): string[] {
+  if (!val) return [];
+  if (isSignature) return isLikelyPhotoSource(val) ? [val] : [];
+  try {
+    const parsed = JSON.parse(val) as unknown;
+    if (Array.isArray(parsed)) {
+      return parsed.filter((item): item is string => typeof item === "string" && isLikelyPhotoSource(item));
+    }
+  } catch { /* fall through */ }
+  return isLikelyPhotoSource(val) ? [val] : [];
+}
+
+function loadDataUrlAsPng(dataUrl: string): Promise<string | null> {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth || 800;
+      canvas.height = img.naturalHeight || 600;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) { resolve(null); return; }
+      ctx.drawImage(img, 0, 0);
+      resolve(canvas.toDataURL("image/jpeg", 0.92));
+    };
+    img.onerror = () => resolve(null);
+    img.src = dataUrl;
+  });
+}
+
+export async function resolvePhotoForPdf(src: string): Promise<string | null> {
+  if (!src) return null;
+  if (detectImageFormat(src)) return src;
+  if (src.startsWith(OFFLINE_MEDIA_REF_PREFIX)) {
+    try {
+      const { mediaStore } = await import("../services/mediaStore");
+      const resolved = await mediaStore.resolveMediaValue(src);
+      if (detectImageFormat(resolved)) return resolved;
+      if (resolved.startsWith("data:")) return loadDataUrlAsPng(resolved);
+      return resolveImageToDataUrl(resolved);
+    } catch {
+      return null;
+    }
+  }
+  if (src.startsWith("data:")) return loadDataUrlAsPng(src);
+  return resolveImageToDataUrl(src);
+}
+
 export async function resolveImageToDataUrl(src: string): Promise<string | null> {
   if (!src) return null;
   if (detectImageFormat(src)) return src;
   if (src.startsWith("data:image/svg")) return svgDataUrlToPng(src);
+  if (src.startsWith("data:")) return loadDataUrlAsPng(src);
   try {
-    const resp = await fetch(src, { mode: "cors" });
+    let fetchUrl = src;
+    if (src.startsWith("/")) {
+      const { getApiBaseUrl } = await import("../services/apiBase");
+      const origin = getApiBaseUrl().replace(/\/api\/?$/i, "");
+      fetchUrl = `${origin}${src}`;
+    }
+    const resp = await fetch(fetchUrl, { mode: "cors" });
     if (!resp.ok) return null;
     const blob = await resp.blob();
     if (blob.type.includes("svg")) {
@@ -125,6 +191,39 @@ function parseSteps(snapshotJson: string): WorkflowStep[] {
 function parseStepResults(json: string): StepResult[] {
   try { return (JSON.parse(json) as StepResult[]).filter((r) => r.stepId !== "__nav__"); }
   catch { return []; }
+}
+
+function buildStepResultMap(stepResults: StepResult[]): Map<string, StepResult> {
+  const map = new Map<string, StepResult>();
+  for (const sr of stepResults) {
+    const existing = map.get(sr.stepId);
+    if (!existing) {
+      map.set(sr.stepId, sr);
+      continue;
+    }
+    const mergedValues = { ...existing.values };
+    for (const [key, val] of Object.entries(sr.values ?? {})) {
+      if (!(key in mergedValues) || !mergedValues[key]) {
+        mergedValues[key] = val;
+        continue;
+      }
+      try {
+        const left = JSON.parse(mergedValues[key]) as unknown;
+        const right = JSON.parse(val) as unknown;
+        if (Array.isArray(left) && Array.isArray(right)) {
+          mergedValues[key] = JSON.stringify([...left, ...right]);
+          continue;
+        }
+      } catch { /* keep existing */ }
+      mergedValues[key] = val;
+    }
+    map.set(sr.stepId, {
+      ...existing,
+      values: mergedValues,
+      completedAt: sr.completedAt || existing.completedAt,
+    });
+  }
+  return map;
 }
 
 function parseVisitedStepIds(json: string): Set<string> {
@@ -501,7 +600,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
   // â”€â”€ 3. Workflow Steps — individual cards â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // In "full" mode iterate ALL snapshot steps; in standard mode only captured results.
-  const stepResultMap = new Map(stepResults.map((sr) => [sr.stepId, sr]));
+  const stepResultMap = buildStepResultMap(stepResults);
   const stepsToRender: Array<{ step: WorkflowStep; sr: StepResult | undefined }> = includeAllSteps
     ? [...steps].sort((a, b) => a.order - b.order).map((s) => ({ step: s, sr: stepResultMap.get(s.id) }))
     : [...steps]
@@ -668,10 +767,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
             let photos: string[] = [];
             if (inputDef.type === "signature") {
-              if (val && detectImageFormat(val)) photos = [val];
+              photos = extractPhotoSources(val, true);
             } else {
-              try { photos = (JSON.parse(val ?? "[]") as string[]).filter((s) => detectImageFormat(s)); } catch {}
-              if (photos.length === 0 && val && detectImageFormat(val)) photos = [val];
+              photos = extractPhotoSources(val, false);
             }
 
             if (photos.length > 0) {
@@ -840,9 +938,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           let colIdx = 0;
 
           for (const src of media.photos.slice(0, 8)) {
-            const fmt = detectImageFormat(src);
+            const resolved = await resolvePhotoForPdf(src);
+            if (!resolved) continue;
+            const fmt = detectImageFormat(resolved);
             if (!fmt) continue;
-            const size = await getImageNaturalSize(src);
+            const size = await getImageNaturalSize(resolved);
             if (!size) continue;
 
             const aspect = size.w / size.h;
@@ -850,7 +950,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             const drawH  = media.isSig ? Math.min(IMG_H, drawW / aspect) : IMG_H;
 
             y = ensureSpace(y, drawH + 4);
-            doc.addImage(src, fmt, imgX, y, drawW, drawH, undefined, "FAST");
+            doc.addImage(resolved, fmt, imgX, y, drawW, drawH, undefined, "FAST");
             // Thin border around image
             doc.setDrawColor(...BORDER);
             doc.setLineWidth(0.2);

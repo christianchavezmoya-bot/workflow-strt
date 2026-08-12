@@ -92,7 +92,13 @@ export async function buildPublicSignReportContext(
     siteName: summary.siteName,
     siteLocation: summary.assetLocation,
     assignedTechnician: summary.assignedTechnicianName,
-    timeZoneId: resolveReportTimeZone({ timeZoneId: summary.timeZoneId }),
+    timeZoneId: resolveReportTimeZone({
+      timeZoneId: summary.timeZoneId,
+      office: summary.office,
+      region: summary.region,
+      officeCountry: summary.officeCountry,
+      officeState: summary.officeState,
+    }),
     signatureEvents,
     productFeatures: parseProductFeatures(summary.productFeaturesJson),
   };

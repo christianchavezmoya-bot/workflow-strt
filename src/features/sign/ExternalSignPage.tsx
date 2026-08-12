@@ -257,7 +257,13 @@ export default function ExternalSignPage() {
     (inputMode === "typed" || drawnData !== null);
 
   const assetTagLabel = summary?.assetTag ?? summary?.assetName ?? "Asset";
-  const reportTimeZone = resolveReportTimeZone({ timeZoneId: summary?.timeZoneId });
+  const reportTimeZone = resolveReportTimeZone({
+    timeZoneId: summary?.timeZoneId,
+    office: summary?.office,
+    region: summary?.region,
+    officeCountry: summary?.officeCountry,
+    officeState: summary?.officeState,
+  });
   const completedLabel = summary?.completedAt
     ? formatInstant(summary.completedAt, reportTimeZone, { withZone: true })
     : null;
