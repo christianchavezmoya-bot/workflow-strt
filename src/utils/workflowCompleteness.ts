@@ -18,6 +18,8 @@ function hasTextValue(val: string | undefined): boolean {
 export function parseMediaCaptureCount(val: string | undefined): number {
   if (!val) return 0;
   if (val.startsWith("data:image/") || val.startsWith("data:video/")) return 1;
+  // step-media uploads store photos as application/octet-stream data URLs
+  if (val.startsWith("data:application/octet-stream") || val.startsWith("data:application/binary")) return 1;
   try {
     const parsed = JSON.parse(val);
     return Array.isArray(parsed) ? parsed.filter((item) => typeof item === "string" && item).length : 0;

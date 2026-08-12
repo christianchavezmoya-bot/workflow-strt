@@ -1602,12 +1602,14 @@ export const assetWorkflowRunService = {
   async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string, bomActualJson?: string): Promise<AssetWorkflowRun> {
     if (!isMobileNativePlatform()) {
       const body = {
-        useStoredStepResults: true,
+        useStoredStepResults: false,
+        stepResultsJson,
         issuesJson,
         completedByName: completedByName ?? null,
         bomActualJson: bomActualJson ?? null,
       };
-      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, body, {
+      const requestBody = await mediaStore.resolveUploadPayload(body);
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
       });
       // Completing a run also changes the asset's own status server-side
