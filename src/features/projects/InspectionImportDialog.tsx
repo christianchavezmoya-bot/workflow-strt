@@ -30,6 +30,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { inspectionImportService } from "../../services/inspectionImportService";
 import type { InspectionImport } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
+import { INSPECTION_DIALOG_SOURCE_OPTIONS, INSPECTION_IMPORT_STATUS_COLOR } from "./inspectionInboxShared";
 import api from "../../services/api";
 
 type Props = {
@@ -38,21 +39,6 @@ type Props = {
   projectId: string;
   asset: ProjectAsset;
   onChanged?: () => void | Promise<void>;
-};
-
-const SOURCE_OPTIONS = [
-  { value: "LOCAL", label: "Local / Manual (canonical)" },
-  { value: "ONEDRIVE", label: "OneDrive (canonical)" },
-  { value: "EMAIL", label: "Email attachment (canonical)" },
-  { value: "API", label: "External system / API (canonical)" },
-  { value: "generic-kv", label: "Generic Key-Value (auto-adapted)" },
-];
-
-const STATUS_COLOR: Record<string, "default" | "info" | "warning" | "success" | "error"> = {
-  RECEIVED: "info",
-  NEEDS_ASSIGNMENT: "warning",
-  MAPPED: "success",
-  FAILED: "error",
 };
 
 export default function InspectionImportDialog({ open, onClose, projectId, asset, onChanged }: Props) {
@@ -261,7 +247,7 @@ export default function InspectionImportDialog({ open, onClose, projectId, asset
                       label="Source"
                       onChange={(e) => setSource(e.target.value as typeof source)}
                     >
-                      {SOURCE_OPTIONS.map((o) => (
+                      {INSPECTION_DIALOG_SOURCE_OPTIONS.map((o) => (
                         <MenuItem key={o.value} value={o.value}>{o.label}</MenuItem>
                       ))}
                     </Select>
@@ -363,7 +349,7 @@ export default function InspectionImportDialog({ open, onClose, projectId, asset
                           <Chip
                             label={item.status}
                             size="small"
-                            color={STATUS_COLOR[item.status] ?? "default"}
+                            color={INSPECTION_IMPORT_STATUS_COLOR[item.status] ?? "default"}
                           />
                           <Tooltip title="View raw JSON">
                             <IconButton size="small" onClick={() => void handleViewRaw(item)}>

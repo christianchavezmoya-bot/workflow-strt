@@ -30,14 +30,6 @@ public sealed class NotificationService
         _logger = logger;
     }
 
-    public async Task NotifyInstallationCompletedAsync(InstallationEntity installation)
-    {
-        var adminEmail = _config["SeedAdmin:Email"] ?? "admin@commtrac.local";
-        var subject = $"Installation completed: {installation.InstallationNumber}";
-        var body = $"Installation {installation.InstallationNumber} is now 100% complete.";
-        await _emailSender.SendNotificationAsync(adminEmail, subject, body);
-    }
-
     public async Task NotifyWorkflowCompletedAsync(
         AssetWorkflowRunEntity run,
         ProjectAssetEntity asset,
@@ -83,26 +75,6 @@ public sealed class NotificationService
         {
             _logger.LogError(ex, "Workflow completion email failed for run {RunId}", run.Id);
         }
-    }
-
-    public async Task NotifyInspectionAssignedAsync(InspectionEntity inspection)
-    {
-        var recipient = await ResolveRecipientAsync(inspection.Inspector);
-        if (recipient is null)
-        {
-            _logger.LogInformation("No email found for inspector {Inspector}", inspection.Inspector);
-            return;
-        }
-
-        var subject = $"New inspection assigned: {inspection.Name}";
-        var body = $"You have been assigned inspection {inspection.Name}.";
-        var resolved = recipient.Value;
-        if (resolved.Kind == "sms")
-        {
-            await _smsSender.SendAsync(resolved.Value, body);
-            return;
-        }
-        await _emailSender.SendNotificationAsync(resolved.Value, subject, body);
     }
 
     public async Task NotifyIssueAssignedAsync(IssueEntity issue)

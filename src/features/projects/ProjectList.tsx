@@ -6,10 +6,6 @@ import {
   Chip,
   CircularProgress,
   Collapse,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
   Divider,
   FormControl,
   FormControlLabel,
@@ -36,7 +32,7 @@ import {
 } from "@mui/material";
 import { ArrowDropDown, CalendarTodayOutlined, DeleteForeverOutlined, DeleteOutline, EditOutlined, ExpandLess, ExpandMore, FilterAltOffOutlined, PersonOutlined, RestoreOutlined } from "@mui/icons-material";
 import ProjectChevronPanel from "./ProjectChevronPanel";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import StatusChip from "../../components/ui/StatusChip";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
@@ -54,10 +50,18 @@ import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
-import { deleteProject, fetchProjects, setProjects, updateProjectStatus } from "../../store/projectSlice";
+import { deleteProject, fetchProjects, setProjects } from "../../store/projectSlice";
 import { projectService } from "../../services/projectService";
 import { Project, ProjectStatus } from "../../types/project";
-import ProjectForm from "./ProjectForm";
+import ProjectEditDialog from "./ProjectEditDialog";
+import { buildProjectListFilters } from "./buildProjectListFilters";
+import { buildProjectChevronProps } from "./projectChevronProps";
+import {
+  executeProjectWorkflowAction,
+  getProjectWorkflowActions,
+  installationEnabledForProject,
+  type ProjectWorkflowAction,
+} from "./projectWorkflowActions";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
 import { CACHE_SOFT_LIMIT_MS, syncMetaGet } from "../../services/localDB";
@@ -294,6 +298,7 @@ const ProjectList = () => {
   const { activeOffice } = useActiveOffice();
   const { isMyWork, canUseOfficeView } = useWorkScope();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const dispatch = useAppDispatch();
   const { items, total, loading, error } = useAppSelector((state) => state.projects);
   const { isOnline } = useSyncEngine();
@@ -386,31 +391,22 @@ const ProjectList = () => {
     });
   }, [items.length]);
 
-  const currentRequestKey = useMemo(() => buildProjectRequestKey({
-    country: activeOffice !== "All" ? activeOffice : undefined,
-    scope: "browse",
-    ownershipScope: "all",
-    status: statusFilter,
-    projectNumber: projectNumberFilter.trim() || undefined,
-    page: page + 1,
-    pageSize: rowsPerPage,
-    includeDeleted: showArchived,
-  }), [activeOffice, page, projectNumberFilter, rowsPerPage, showArchived, statusFilter]);
+  const listFilters = useMemo(
+    () =>
+      buildProjectListFilters({
+        activeOffice,
+        statusFilter,
+        projectNumberFilter,
+        showArchived,
+      }),
+    [activeOffice, projectNumberFilter, showArchived, statusFilter]
+  );
+
+  const currentRequestKey = useMemo(() => buildProjectRequestKey(listFilters), [listFilters]);
 
   const reloadProjects = useCallback(() => {
-    dispatch(
-      fetchProjects({
-        country: activeOffice !== "All" ? activeOffice : undefined,
-        scope: "browse",
-        ownershipScope: "all",
-        status: statusFilter,
-        projectNumber: projectNumberFilter.trim() || undefined,
-        page: page + 1,
-        pageSize: rowsPerPage,
-        includeDeleted: showArchived,
-      })
-    );
-  }, [activeOffice, dispatch, page, projectNumberFilter, rowsPerPage, showArchived, statusFilter]);
+    dispatch(fetchProjects(listFilters));
+  }, [dispatch, listFilters]);
 
   useEffect(() => {
     reloadProjects();
@@ -440,15 +436,21 @@ const ProjectList = () => {
     dispatch(fetchProducts());
   }, [dispatch]);
 
+  useEffect(() => {
+    const openId = searchParams.get("open");
+    if (!openId || loading) return;
+    const exists = items.some((project) => project.id === openId);
+    if (!exists) return;
+    setExpandedProjectId(openId);
+    const next = new URLSearchParams(searchParams);
+    next.delete("open");
+    setSearchParams(next, { replace: true });
+  }, [items, loading, searchParams, setSearchParams]);
 
   const sourceProjects = items;
   const products = productsState.items;
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
-  const officeIdsForRegion = useMemo(() => {
-    if (activeOffice === "All") return null;
-    return new Set(globalOffices.filter((o) => o.country === activeOffice).map((o) => o.id));
-  }, [activeOffice, globalOffices]);
 
   const projectAccessors = useMemo(
     () => ({
@@ -507,7 +509,58 @@ const ProjectList = () => {
     return numberedProjects.slice(start, start + rowsPerPage);
   }, [numberedProjects, page, rowsPerPage]);
 
-  const totalCount = items.length ? total : filteredProjects.length;
+  const totalCount = filteredProjects.length;
+
+  const projectActionOptions = useMemo(
+    () => ({
+      userRole: user?.role,
+      canApprove: !!can.projects?.approve,
+    }),
+    [can.projects?.approve, user?.role]
+  );
+
+  const handleAction = async (project: Project, label: ProjectWorkflowAction) => {
+    await executeProjectWorkflowAction(dispatch, navigate, project, label, {
+      onBeforeClose: () => setClosingProjectId(project.id ?? null),
+      onAfterClose: () => setClosingProjectId(null),
+      onError: (message) => window.alert(message),
+    });
+  };
+
+  const renderActions = (project: Project, surface: "list-web" | "list-mobile") => {
+    const actions = getProjectWorkflowActions(project, {
+      ...projectActionOptions,
+      canEditProject:
+        surface === "list-web"
+          ? canEditProjectFromWebTable(project)
+          : canEditProject(project),
+      installationEnabled: installationEnabledForProject(project.workflowMode),
+      surface,
+    });
+
+    if (actions.length === 0) {
+      return null;
+    }
+
+    return (
+      <Stack direction="row" spacing={1} flexWrap="nowrap">
+        {actions.map((label) => (
+          <Button
+            key={label}
+            size="small"
+            variant="outlined"
+            color="primary"
+            disabled={label === "Mark as Closed" && closingProjectId === project.id}
+            startIcon={label === "Mark as Closed" && closingProjectId === project.id
+              ? <CircularProgress size={12} /> : undefined}
+            onClick={() => void handleAction(project, label)}
+          >
+            {label}
+          </Button>
+        ))}
+      </Stack>
+    );
+  };
 
   const projectFilterOptions = useMemo(
     () => ({
@@ -576,84 +629,6 @@ const ProjectList = () => {
       })
       .filter((col): col is NonNullable<typeof col> => col !== null);
   }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
-
-  const handleAction = async (project: Project, label: string) => {
-    if (!project.id) {
-      return;
-    }
-
-    if (label === "Approve") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Approved", approvalDecision: "Approved" } }));
-    }
-
-    if (label === "Request Info") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Pending Approval", approvalDecision: "More Info Required" } }));
-    }
-
-    if (label === "Reject") {
-      dispatch(updateProjectStatus({ id: project.id, payload: { status: "Cancelled", approvalDecision: "Rejected" } }));
-    }
-
-    if (label === "Start Work") {
-      const updated = await dispatch(updateProjectStatus({ id: project.id, payload: { status: "In Progress" } })).unwrap();
-      navigate(
-        `/installations/assets?product=${encodeURIComponent(updated.productIds?.[0] ?? project.productIds?.[0] ?? "")}&project=${encodeURIComponent(project.id)}`
-      );
-    }
-
-    if (label === "Mark as Closed") {
-      // Enforce: all installation assets must be Complete before project can be marked Completed.
-      // Project Managers (and above) are subject to the same rule — no exceptions.
-      setClosingProjectId(project.id);
-      try {
-        await dispatch(updateProjectStatus({ id: project.id, payload: { status: "Closed" } })).unwrap();
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "Unable to close this project right now.";
-        window.alert(message);
-      } finally {
-        setClosingProjectId(null);
-      }
-    }
-  };
-
-  const renderActions = (project: Project) => {
-    const actions: string[] = [];
-
-    if (project.status === "Pending Approval" && can.projects?.approve) {
-      actions.push("Approve", "Request Info", "Reject");
-    }
-
-    if (project.status === "Approved" && canEditProjectFromWebTable(project)) {
-      actions.push("Start Work");
-    }
-
-    if (project.status === "Completed" && canEditProjectFromWebTable(project)) {
-      actions.push("Mark as Closed");
-    }
-
-    if (actions.length === 0) {
-      return null;
-    }
-
-    return (
-      <Stack direction="row" spacing={1} flexWrap="nowrap">
-        {actions.map((label) => (
-          <Button
-            key={label}
-            size="small"
-            variant="outlined"
-            color="primary"
-            disabled={label === "Mark as Closed" && closingProjectId === project.id}
-            startIcon={label === "Mark as Closed" && closingProjectId === project.id
-              ? <CircularProgress size={12} /> : undefined}
-            onClick={() => handleAction(project, label)}
-          >
-            {label}
-          </Button>
-        ))}
-      </Stack>
-    );
-  };
 
   return (
     <Stack spacing={3}>
@@ -778,14 +753,12 @@ const ProjectList = () => {
               .map((id) => products.find((p) => p.id === id)?.name ?? id)
               .join(", ");
 
-            // Mobile actions — excludes "Start Work"
-            const mobileActions = (() => {
-              const actions: string[] = [];
-              if (project.status === "Draft" && user?.role === "Project Manager") actions.push("Submit for Approval");
-              if (project.status === "Pending Approval" && user?.role === "Admin") actions.push("Approve", "Request Info", "Reject");
-              if (project.status === "Completed" && canEditProjectFromWebTable(project)) actions.push("Mark as Closed");
-              return actions;
-            })();
+            const mobileActions = getProjectWorkflowActions(project, {
+              ...projectActionOptions,
+              canEditProject: canEditProject(project),
+              installationEnabled: installationEnabledForProject(project.workflowMode),
+              surface: "list-mobile",
+            });
 
             return (
               <Box key={project.id} className="glass-card" sx={{
@@ -866,7 +839,7 @@ const ProjectList = () => {
                     {mobileActions.map((label) => (
                       <Button key={label} size="small" variant="outlined" color="primary"
                         sx={{ fontSize: "0.7rem", py: 0.25, px: 1, height: 26, flexShrink: 0 }}
-                        onClick={() => handleAction(project, label)}>
+                        onClick={() => void handleAction(project, label)}>
                         {label}
                       </Button>
                     ))}
@@ -890,20 +863,7 @@ const ProjectList = () => {
                 <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                   <Divider />
                   <Box sx={{ overflow: "hidden" }}>
-                    <ProjectChevronPanel
-                      projectId={project.id}
-                      productId={project.productIds?.[0]}
-                      projectJobNumber={project.jobNumber}
-                      projectCustomer={project.customerName}
-                      projectSite={project.siteName}
-                      projectManager={project.projectManager}
-                      projectStatus={project.status}
-                      projectStartDate={project.startDate}
-                      projectFinishDate={project.finishDate}
-                      projectDescription={project.description}
-                      projectCustomerId={project.customerId}
-                      projectTimeZoneId={project.timeZoneId}
-                    />
+                    <ProjectChevronPanel {...buildProjectChevronProps(project)} />
                   </Box>
                 </Collapse>
               </Box>
@@ -1046,7 +1006,7 @@ const ProjectList = () => {
                     ))}
                     <TableCell sx={{ padding: '8px 12px' }}>
                       <Stack direction="row" spacing={1} alignItems="center" flexWrap="nowrap">
-                        {!project.isDeleted && renderActions(project)}
+                        {!project.isDeleted && renderActions(project, "list-web")}
                         {can.projects?.edit && canEditProjectFromWebTable(project) && !project.isDeleted && (
                           <IconButton size="small" onClick={() => setEditTarget(project)}>
                             <EditOutlined fontSize="small" />
@@ -1070,17 +1030,7 @@ const ProjectList = () => {
                                 try {
                                   setDeleteSavingId(project.id);
                                   await projectService.restoreProject(project.id);
-                                  await dispatch(
-                                    fetchProjects({
-                                      country: activeOffice !== "All" ? activeOffice : undefined,
-                                      scope: "browse",
-                                      ownershipScope: "all",
-                                      projectNumber: projectNumberFilter.trim() || undefined,
-                                      page: page + 1,
-                                      pageSize: rowsPerPage,
-                                      includeDeleted: showArchived
-                                    })
-                                  );
+                                  await dispatch(fetchProjects(listFilters));
                                 } finally {
                                   setDeleteSavingId(null);
                                 }
@@ -1097,7 +1047,7 @@ const ProjectList = () => {
                               </IconButton>
                             </>
                           )}
-                        {!renderActions(project) && !(can.projects?.edit && canEditProjectFromWebTable(project) && !project.isDeleted)
+                        {!renderActions(project, "list-web") && !(can.projects?.edit && canEditProjectFromWebTable(project) && !project.isDeleted)
                           && !(can.projects?.delete && canEditProjectFromWebTable(project))
                           && (
                             <Typography variant="caption" color="text.disabled">
@@ -1111,20 +1061,7 @@ const ProjectList = () => {
                     <TableCell colSpan={colSpan} sx={{ p: 0, border: 0 }}>
                       <Collapse in={isExpanded} timeout="auto" unmountOnExit>
                         <Box sx={{ position: "sticky", left: 0, width: "calc(100vw - 20px)", maxWidth: "100%", overflow: "hidden" }}>
-                          <ProjectChevronPanel
-                            projectId={project.id}
-                            productId={project.productIds?.[0]}
-                            projectJobNumber={project.jobNumber}
-                            projectCustomer={project.customerName}
-                            projectSite={project.siteName}
-                            projectManager={project.projectManager}
-                      projectStatus={project.status}
-                      projectStartDate={project.startDate}
-                      projectFinishDate={project.finishDate}
-                      projectDescription={project.description}
-                      projectCustomerId={project.customerId}
-                      projectTimeZoneId={project.timeZoneId}
-                    />
+                          <ProjectChevronPanel {...buildProjectChevronProps(project)} />
                         </Box>
                       </Collapse>
                     </TableCell>
@@ -1269,17 +1206,7 @@ const ProjectList = () => {
             setDeleteSavingId(purgeTarget.id);
             await projectService.purgeProject(purgeTarget.id);
             setPurgeTarget(null);
-            await dispatch(
-              fetchProjects({
-                country: activeOffice !== "All" ? activeOffice : undefined,
-                scope: "browse",
-                ownershipScope: "all",
-                projectNumber: projectNumberFilter.trim() || undefined,
-                page: page + 1,
-                pageSize: rowsPerPage,
-                includeDeleted: showArchived
-              })
-            );
+            await dispatch(fetchProjects(listFilters));
           } catch (e) {
             console.error("Purge project failed:", e);
             alert("Unable to permanently delete project. Check your permissions and API availability.");
@@ -1372,43 +1299,15 @@ const ProjectList = () => {
         }}
       />
 
-      <Dialog
+      <ProjectEditDialog
         open={!!editTarget}
+        projectId={editTarget?.id ?? ""}
         onClose={() => setEditTarget(null)}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{
-          className: "glass-card",
-          sx: { backgroundColor: "var(--panel)", border: "1px solid var(--stroke)", minHeight: "80vh" }
+        onSaved={async () => {
+          setEditTarget(null);
+          await dispatch(fetchProjects(listFilters));
         }}
-      >
-        <DialogTitle>Edit project</DialogTitle>
-        <DialogContent dividers sx={{ p: 0 }}>
-          {editTarget && (
-            <Box sx={{ p: 3 }}>
-              <ProjectForm
-                embedded
-                projectId={editTarget.id}
-                onClose={() => setEditTarget(null)}
-                onSaved={async () => {
-                  setEditTarget(null);
-                  await dispatch(
-                    fetchProjects({
-                      country: activeOffice !== "All" ? activeOffice : undefined,
-                      scope: "browse",
-                      ownershipScope: "all",
-                      projectNumber: projectNumberFilter.trim() || undefined,
-                      page: page + 1,
-                      pageSize: rowsPerPage,
-                      includeDeleted: showArchived
-                    })
-                  );
-                }}
-              />
-            </Box>
-          )}
-        </DialogContent>
-      </Dialog>
+      />
     </Stack>
   );
 };

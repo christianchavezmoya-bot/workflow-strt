@@ -57,7 +57,6 @@ import { projectContactService } from "../../services/projectContactService";
 import { projectAssetService } from "../../services/projectAssetService";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { quickbaseService } from "../../services/quickbaseService";
-import { settingsService } from "../../services/settingsService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { customerService } from "../../services/customerService";
 import type {
@@ -95,7 +94,6 @@ import ClosedSignedAssetsDialog from "./ClosedSignedAssetsDialog";
 
 const SIGN_METHODS: { value: SignMethod; label: string }[] = [
   { value: "email", label: "Email link" },
-  { value: "sms",   label: "SMS link"   }
 ];
 const CONDITIONS: InboundCondition[] = ["Good", "Damaged", "Needs Assessment"];
 const ITEM_TYPES: InboundItemType[]  = ["Part", "Warranty", "Return", "Other"];
