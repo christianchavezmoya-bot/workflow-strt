@@ -20,6 +20,7 @@ import { invalidateWebCacheByPrefix } from "../services/webFreshCache";
 import { probePendingConflictsFromSse } from "../services/syncConflictProbe";
 import { isMobileNativePlatform } from "../utils/platform";
 import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
+import { markServerDataChanged } from "../utils/bootstrapFreshness";
 import { prefetchAssignedAssetsInProject, prefetchAssetIds } from "../services/assetPrefetchService";
 import { ProjectRepository } from "../repositories/ProjectRepository";
 import type { User } from "../types/user";
@@ -59,6 +60,8 @@ export function useSseEvents() {
       window.dispatchEvent(new Event("notifications:refresh"));
       if (!isMobileNativePlatform()) return;
 
+      void markServerDataChanged();
+
       const projectId = typeof detail.projectId === "string" ? detail.projectId : undefined;
       const assetId = typeof detail.assetId === "string" ? detail.assetId : undefined;
       const userId = currentUserId();
@@ -70,7 +73,7 @@ export function useSseEvents() {
         } else if (projectId && userId) {
           void prefetchAssignedAssetsInProject(projectId, userId);
         } else {
-          scheduleBootstrapAfterUploadDrain("assigned");
+          scheduleBootstrapAfterUploadDrain("assigned", SSE_PREFETCH_DEBOUNCE_MS, false, "sse-fallback");
         }
       }, SSE_PREFETCH_DEBOUNCE_MS);
     };
@@ -128,7 +131,14 @@ export function useSseEvents() {
           }
           window.dispatchEvent(new CustomEvent("sse:projects:updated", { detail }));
           if (isMobileNativePlatform()) {
-            void ProjectRepository.syncCatalogFromServer();
+            void markServerDataChanged();
+            void ProjectRepository.syncCatalogFromServer().then(() => {
+              const projectId = typeof detail.projectId === "string" ? detail.projectId : undefined;
+              const userId = currentUserId();
+              if (projectId && userId) {
+                void prefetchAssignedAssetsInProject(projectId, userId);
+              }
+            });
           }
         } catch { /* malformed JSON — ignore */ }
       });
@@ -153,6 +163,7 @@ export function useSseEvents() {
       const detail = (e as CustomEvent<{ assetId?: string; projectId?: string }>).detail ?? {};
       const assetId = typeof detail.assetId === "string" ? detail.assetId : undefined;
       if (!assetId) return;
+      void markServerDataChanged();
       clearPrefetchDebounce();
       prefetchRef.current = setTimeout(() => {
         prefetchRef.current = null;
