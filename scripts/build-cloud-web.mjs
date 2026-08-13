@@ -4,7 +4,7 @@
  *
  * Usage:
  *   VITE_API_BASE=https://api.staging.example.com/api node scripts/build-cloud-web.mjs
- *   node scripts/build-cloud-web.mjs --staging   # allows http (staging only)
+ *   node scripts/build-cloud-web.mjs --staging   # allows http + localhost (local Docker staging)
  *
  * Loads (in order): .env.production.local, .env.production, .env.staging.local, .env.staging
  * when --staging; otherwise production files only.
@@ -62,7 +62,7 @@ if (!isStaging && !apiBase.startsWith("https://")) {
   fail("Production builds require HTTPS VITE_API_BASE (use --staging for http staging URLs)");
 }
 
-if (apiBase.includes("localhost") || apiBase.includes("127.0.0.1")) {
+if (!isStaging && (apiBase.includes("localhost") || apiBase.includes("127.0.0.1"))) {
   fail("Cloud web build must not use localhost — use staging/production API URL");
 }
 
