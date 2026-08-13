@@ -59,6 +59,7 @@ services:
       - "8080:8080"
     environment:
       ASPNETCORE_ENVIRONMENT: StagingDocker
+      ENABLE_BOM_PROJECT_MODULE: "true"
       AWS_ACCESS_KEY_ID: commtrac
       AWS_SECRET_ACCESS_KEY: commtrac_dev
       AWS_EC2_METADATA_DISABLED: "true"
