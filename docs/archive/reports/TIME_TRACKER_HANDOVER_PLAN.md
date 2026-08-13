@@ -1,7 +1,7 @@
 # Time Tracker Handover — Validated Status + Implementation Plan
 
 **Validated against:** `origin/main @ 30686e4` (2026-08-03)  
-**Source handover:** [`HANDOVER_TIME_TRACKER_V2.md`](../HANDOVER_TIME_TRACKER_V2.md) — **canonical; finalized 2026-08-03**  
+**Source handover:** [`HANDOVER_TIME_TRACKER_V2.md`](./HANDOVER_TIME_TRACKER_V2.md) — **canonical; finalized 2026-08-03**  
 **Branch for this review:** `cursor/time-tracker-handover-plan-cd21`
 
 > **Note:** Phase A, timezone (#48–#52), and time editor v3 (#50–#51) are **merged to main**.  

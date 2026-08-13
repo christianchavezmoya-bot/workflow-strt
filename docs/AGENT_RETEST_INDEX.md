@@ -1,6 +1,22 @@
 # Agent retest prompts — index
 
-Use this index whenever the cloud agent finishes a change set and field agents need to **install, verify, and sign off** before merge.
+Use this index when field agents need to **install, verify, and sign off** on `main`.
+
+---
+
+## Current active prompts (Aug 2026)
+
+| Round | Branch | Mac prompt | Windows prompt |
+|-------|--------|------------|----------------|
+| **Docker cloud-shaped staging** | `main` @ **`2c85427+`** (#173–#181) | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
+| Standup guide | | [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) | same |
+| Pre-deploy gate | | [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) | same |
+| **Cloud hosting AWS prep** | `main` @ `c4b4125+` | [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) | [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md) |
+| **Native N-go sanity** | `main` (latest) | [`IOS_MAC_AGENT_NGO_LATEST_PROMPT.md`](./IOS_MAC_AGENT_NGO_LATEST_PROMPT.md) | — (API on Windows `:4000` or Docker `:8080`) |
+
+**Strata NGO Docker login:** `admin@StrataNgo.local` / `Admin123!`
+
+**Copy:** PROMPT START → PROMPT END into Cursor on the target machine.
 
 ---
 
@@ -8,106 +24,48 @@ Use this index whenever the cloud agent finishes a change set and field agents n
 
 | Agent | Machine | Scope |
 |-------|---------|--------|
-| **Mac iOS agent** | Mac + Xcode + physical iPhone | Native **N-go** build, install, offline/sync UX on device |
-| **Windows agent** | Windows PC | API + Vite dev server, web app verification, JWT/config, LAN health |
+| **Mac Docker staging agent** | Mac + Docker Desktop | Postgres/MinIO/API `:8080`, web `:5174`, Strata seed, BOM |
+| **Mac iOS agent** | Mac + Xcode + iPhone | Native **N-go** build, offline/sync on device |
+| **Windows agent** | Windows PC | API + web verification, JWT/config, Docker staging |
 
-**Rule:** Mac agent does **not** change `server/`. Windows agent does **not** build iOS. Both may fix S0/S1 in their allowed paths — report before merging.
-
----
-
-## Current active prompts (update after each change round)
-
-| Round | Branch | PR | Mac prompt | Windows prompt |
-|-------|--------|-----|------------|----------------|
-| **Cloud hosting AWS plan** | **`main` @ `c4b4125+`** | — | [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) | [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md) |
-| **Docker cloud-shaped staging** | **`main` @ `a18f91d+`** | #173 ✅ | (phone later: LAN `:8080`) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
-| | Standup: [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) · Pre-deploy: [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) | | | |
-| **Phase 0 time-tracker smoke** | **`cursor/time-tracker-handover-plan-cd21` @ `dfe06e6`** | [#45](https://github.com/christianchavezmoya-bot/workflow-strt/pull/45) | [`IOS_MAC_AGENT_PHASE0_TIME_TRACKER_PROMPT.md`](./IOS_MAC_AGENT_PHASE0_TIME_TRACKER_PROMPT.md) | [`WINDOWS_AGENT_PHASE0_TIME_TRACKER_PROMPT.md`](./WINDOWS_AGENT_PHASE0_TIME_TRACKER_PROMPT.md) |
-| **Connectivity UI + bulk email share** | **`main` @ `c39f674+`** (merged #42 + #43) | #42, #43 ✅ | [`IOS_MAC_AGENT_MAIN_COMBINED_TEST_PROMPT.md`](./IOS_MAC_AGENT_MAIN_COMBINED_TEST_PROMPT.md) | [`WINDOWS_AGENT_MAIN_COMBINED_TEST_PROMPT.md`](./WINDOWS_AGENT_MAIN_COMBINED_TEST_PROMPT.md) |
-| **Offline labels + sync conflict UX** | **`main` @ `bdf5135+`** (merged [#37](https://github.com/christianchavezmoya-bot/workflow-strt/pull/37)) | #37 ✅ | [`IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./IOS_MAC_AGENT_OFFLINE_SYNC_UX_PROMPT.md) | [`WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md`](./WINDOWS_AGENT_OFFLINE_SYNC_UX_PROMPT.md) |
-| Session timeout + auth (prior) | `main` @ `62da009+` | #25–#36 | [`IOS_MAC_AGENT_SESSION_SYNC_PROMPT.md`](./IOS_MAC_AGENT_SESSION_SYNC_PROMPT.md) | (Windows: set `ExpiresMinutes` per that prompt) |
-
-When a new round ships, add a row here and archive or supersede the old “current” prompts.
+**Rule:** Mac iOS agent does **not** change `server/` unless assigned. Windows agent does **not** build iOS.
 
 ---
 
-## How to run a retest (every time)
+## How to run a retest
 
-### 1 — Cloud / PR agent (after code changes)
-
-1. Commit + push branch; open or update PR.
-2. Copy **Mac prompt** + **Windows prompt** for this round into the PR description or a comment.
-3. Fill in: branch name, commit hash, PR link, API IP, test user, what changed.
-4. Tell field agents: **“Copy PROMPT START → PROMPT END into Cursor on Mac / Windows.”**
-
-### 2 — Windows agent (first)
-
-1. Pull branch (or `main` after merge).
-2. Confirm API health + JWT setting for this test round.
-3. Start API (+ Vite if web checks needed).
-4. Post: commit hash, `ExpiresMinutes`, health curl result.
-5. Tell Mac agent: **“API ready — install @ `<hash>`”**
-
-### 3 — Mac agent (second)
-
-1. Pull same branch @ commit Windows confirmed.
-2. `npm run build` + `npx cap sync ios` + install on **physical iPhone**.
-3. Phone user runs test matrix in the Mac prompt.
-4. Post filled results table + screenshots on the PR.
-
-### 4 — Sign-off
-
-| Outcome | Action |
-|---------|--------|
-| All tests pass | Windows reverts test-only JWT if used; cloud agent merges PR |
-| S0/S1 fail | Do **not** merge; cloud agent fixes and issues **new prompt round** |
-| S2 UX only | Document waiver or fix in follow-up PR |
+1. Cloud agent merges to `main` and points field agents at the row above.
+2. **Mac Docker agent** runs first for staging stack (executable prompt — agent runs all commands).
+3. **Windows agent** optional for Sqlite dev `:4000` regression.
+4. **Mac iOS agent** after API confirmed — physical iPhone, same Strata logins against LAN `:8080` or dev `:4000`.
 
 ---
 
-## Prompt file template (for cloud agent — next round)
+## Archived prompts (do not use for new runs)
 
-Create `docs/IOS_MAC_AGENT_<TOPIC>_PROMPT.md` and `docs/WINDOWS_AGENT_<TOPIC>_PROMPT.md` with:
+Superseded rounds live under [`archive/prompts/`](./archive/prompts/) — Phase 0 time-tracker, connectivity UI, offline UX, session sync, etc.
 
-```markdown
-# Mac/Windows agent — <short title>
+Historical field reports: [`archive/reports/`](./archive/reports/).
 
-**Copy everything below the line into your Mac/Windows Cursor agent.**
-
-**Branch:** `cursor/<name>-cd21` @ **`<commit>`**
-**PR:** #NN
-**API:** `http://<LAN-IP>:4000/api`
-**Test user:** ...
+Maintenance policy: [`REPO_MAINTENANCE.md`](./REPO_MAINTENANCE.md).
 
 ---
 
-## PROMPT START
-(role, rules, checkout, build, test matrix, deliverables table, troubleshooting)
-## PROMPT END
-```
+## Shared constants
 
-Update [`AGENT_RETEST_INDEX.md`](./AGENT_RETEST_INDEX.md) current-round table.
+| Item | Docker staging | Default dev |
+|------|----------------|-------------|
+| Web URL | http://localhost:**5174** | http://localhost:**5173** |
+| API | http://localhost:**8080**/api | http://localhost:**4000**/api |
+| Native app name | **N-go** | **N-go** |
+| Admin (Strata seed) | `admin@StrataNgo.local` / `Admin123!` | `admin@commtrac.local` / `Admin123!` |
 
----
-
-## Shared constants (adjust per site)
-
-| Item | Typical value |
-|------|----------------|
-| API base | `http://172.20.8.16:4000/api` |
-| Web dev | `http://172.20.8.16:5173` |
-| Native app name | **N-go** (Strata N-go in-app) |
-| Installer test user | `c_chavez_m@hotmail.com` |
-| Production JWT | `ExpiresMinutes: 1440` (24 h) |
-| Offline session grace (native) | 24 h since last online login (`OFFLINE_GRACE_MS`) |
-| Short JWT test | `ExpiresMinutes: 2` or `960` (16 h) — **document which round uses which** |
-
-Device IP goes in **untracked** `.env.production.local` on Mac — never commit.
+Device LAN IP → **untracked** `.env.production.local` on Mac — never commit.
 
 ---
 
 ## Related docs
 
-- [`OFFLINE_ACCEPTANCE_MATRIX.md`](./OFFLINE_ACCEPTANCE_MATRIX.md) — full native matrix
+- [`OFFLINE_ACCEPTANCE_MATRIX.md`](./OFFLINE_ACCEPTANCE_MATRIX.md) — native device matrix
 - [`BUG_TRIAGE.md`](./BUG_TRIAGE.md) — severity + support bundle
 - [`NATIVE_SESSION_SYNC_RESOLUTION_PLAN.md`](./NATIVE_SESSION_SYNC_RESOLUTION_PLAN.md) — auth/session findings
