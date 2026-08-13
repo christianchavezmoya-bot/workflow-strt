@@ -744,6 +744,8 @@ public class AssetWorkflowRunsController : ControllerBase
                 }
             }
 
+            result = DedupeOpenIssues(result);
+
             var severityOrder = new Dictionary<string, int> { ["high"] = 0, ["medium"] = 1, ["low"] = 2 };
             result.Sort((a, b) =>
             {
@@ -883,6 +885,8 @@ public class AssetWorkflowRunsController : ControllerBase
                     ));
                 }
             }
+
+            result = DedupeClosedIssues(result);
 
             // Sort by most recently closed first
             result.Sort((a, b) => string.Compare(b.ResolvedAt ?? "", a.ResolvedAt ?? "", StringComparison.Ordinal));
@@ -2580,5 +2584,67 @@ public class AssetWorkflowRunsController : ControllerBase
         {
             message = "This workflow run is signed and closed. Start a new workflow run to change captured data.",
         });
+    }
+
+    /// <summary>
+    /// Same issue can appear on both a workflow run and the parent asset JSON.
+    /// Prefer the run row (richer context: step title, run id) when ids match.
+    /// </summary>
+    private static List<OpenIssueDto> DedupeOpenIssues(List<OpenIssueDto> issues)
+    {
+        var withId = new Dictionary<string, OpenIssueDto>(StringComparer.OrdinalIgnoreCase);
+        var withoutId = new List<OpenIssueDto>();
+
+        foreach (var issue in issues)
+        {
+            if (string.IsNullOrWhiteSpace(issue.IssueId))
+            {
+                withoutId.Add(issue);
+                continue;
+            }
+
+            if (!withId.TryGetValue(issue.IssueId, out var existing))
+            {
+                withId[issue.IssueId] = issue;
+                continue;
+            }
+
+            if (string.Equals(existing.Source, "asset", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(issue.Source, "run", StringComparison.OrdinalIgnoreCase))
+            {
+                withId[issue.IssueId] = issue;
+            }
+        }
+
+        return withId.Values.Concat(withoutId).ToList();
+    }
+
+    private static List<ClosedIssueDto> DedupeClosedIssues(List<ClosedIssueDto> issues)
+    {
+        var withId = new Dictionary<string, ClosedIssueDto>(StringComparer.OrdinalIgnoreCase);
+        var withoutId = new List<ClosedIssueDto>();
+
+        foreach (var issue in issues)
+        {
+            if (string.IsNullOrWhiteSpace(issue.IssueId))
+            {
+                withoutId.Add(issue);
+                continue;
+            }
+
+            if (!withId.TryGetValue(issue.IssueId, out var existing))
+            {
+                withId[issue.IssueId] = issue;
+                continue;
+            }
+
+            if (string.Equals(existing.Source, "asset", StringComparison.OrdinalIgnoreCase)
+                && string.Equals(issue.Source, "run", StringComparison.OrdinalIgnoreCase))
+            {
+                withId[issue.IssueId] = issue;
+            }
+        }
+
+        return withId.Values.Concat(withoutId).ToList();
     }
 }
