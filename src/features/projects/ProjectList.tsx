@@ -276,6 +276,36 @@ const builtInColumnConfigs: ColumnConfig[] = [
   }
 ];
 
+const PROJECT_BUILTIN_COLUMN_IDS = new Set(builtInColumnConfigs.map((col) => col.id));
+
+/** Dynamic field names that duplicate built-in project columns (Mac DB had overlaps). */
+const PROJECT_DUPLICATE_DYNAMIC_NAMES = new Set([
+  "job number",
+  "project manager",
+  "customer name",
+  "customer",
+  "product name",
+  "products",
+  "site",
+  "country/state",
+  "description",
+  "start date",
+  "finish date",
+  "status",
+  "project type",
+  "customer id",
+  "office",
+  "global offices",
+  "global office",
+]);
+
+function isDuplicateProjectDynamicField(field: { id: string; name: string }): boolean {
+  if (PROJECT_BUILTIN_COLUMN_IDS.has(field.id)) return true;
+  const normalized = field.name.trim().toLowerCase();
+  if (PROJECT_DUPLICATE_DYNAMIC_NAMES.has(normalized)) return true;
+  return builtInColumnConfigs.some((col) => col.name.trim().toLowerCase() === normalized);
+}
+
 const applyAutoFilter = <T,>(
   rows: T[],
   filters: Record<string, Set<string>>,
@@ -308,13 +338,18 @@ const ProjectList = () => {
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
 
+  const projectsDynamicFieldDefs = useMemo(
+    () => projectsDynamic.definitions.filter((field) => !isDuplicateProjectDynamicField(field)),
+    [projectsDynamic.definitions]
+  );
+
   useEffect(() => {
     officesService.getAll().then(setGlobalOffices);
   }, []);
 
   const projectsTableConfig = useTableConfig(
     "projects",
-    projectsDynamic.definitions.map((field) => ({
+    projectsDynamicFieldDefs.map((field) => ({
       id: field.id,
       name: field.name,
       type: field.fieldType,
