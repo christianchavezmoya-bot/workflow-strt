@@ -179,7 +179,7 @@ Pick **one** phase per PR; branch name `cursor/cloud-hosting-<topic>-cd21`.
 |-----------|------------------------|
 | Phase 1 gate | Postgres soak fixes, data migration script |
 | Staging AWS | Follow [`CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`](./CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md) |
-| **Stand up local staging** | `.\scripts\standup-staging.ps1 -BuildWeb` — see [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) |
+| **Stand up + verify local Docker staging** | Field test: [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) · `.\scripts\standup-staging.ps1 -BuildWeb` · [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) |
 | Phase 4 | SSE multi-instance spike doc/code |
 
 Update `docs/CLOUD_HOSTING_AWS_PLAN.md` when shipping. Run `dotnet build` + `dotnet test` + `npm run build` before push.

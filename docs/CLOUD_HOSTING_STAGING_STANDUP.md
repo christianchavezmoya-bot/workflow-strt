@@ -9,6 +9,8 @@ Two paths to staging. **Run local Docker first** to validate cloud profiles befo
 
 Pre-deploy gate (web + phone): [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)
 
+**Windows field agent:** copy [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) (PROMPT START → PROMPT END) into Cursor on your PC.
+
 ---
 
 ## 1 — Local Docker staging (recommended first)
