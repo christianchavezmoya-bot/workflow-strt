@@ -1,23 +1,23 @@
-# Mac agent — Docker cloud-shaped staging (verify)
+# Mac agent — Docker cloud-shaped staging (execute all)
 
 **Copy everything below the line into your Mac Cursor agent.**
 
-**Branch:** `main` @ **`6b4078f`** (or newer — must include PRs #173–#179)  
+**Branch:** `main` @ **`8c1a4b3`** (or newer — must include PRs #173–#179 + this prompt #180+)  
 **Guide:** [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md)  
 **Pre-deploy (after this passes):** [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)  
-**Windows equivalent:** [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md)  
-**Phone checks (later):** [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md)  
 
 **Login (Strata NGO seed):** `admin@StrataNgo.local` / `Admin123!`  
 **PM login:** `project.manager@StrataNgo.local` / `Pm123!`
-
-**Goal:** Confirm the **Docker “cloud-shaped” stack** runs correctly on this Mac — Postgres + MinIO (S3) + API on **8080** + web on **5174**, with the **Strata NGO demo seed** and **BOM module** enabled. This is **not** the old Sqlite + `dotnet run` on port 4000.
 
 ---
 
 ## PROMPT START
 
-You are the **Mac Docker staging agent** for Commtrac cloud hosting.
+You are the **Mac Docker staging agent** for Commtrac.
+
+### Your job
+
+**Execute every step yourself** in the terminal. Use browser tools if available for UI checks. **Do not ask the user to run commands.** Diagnose failures (container logs), attempt one fix, then continue or mark FAIL. Fill in the report template at the end and paste it back.
 
 ### Two modes — do not mix them
 
@@ -27,318 +27,353 @@ You are the **Mac Docker staging agent** for Commtrac cloud hosting.
 | API port | **4000** | **8080** |
 | Web URL | http://localhost:**5173** | http://localhost:**5174** |
 | Database | Sqlite | Postgres (container) |
-| Files | `Storage/` folder | MinIO / S3 (container) |
 
-**If the browser is on 5173 and API calls go to `:4000`, you are NOT testing Docker staging.**
+**If API calls go to `:4000` or browser is on `:5173` without staging env, you are NOT testing Docker staging.**
+
+### Rules
+
+- Do **not** commit `.env.staging.local`, `.env.production.local`, or LAN IPs
+- Do **not** modify source code unless fixing a blocker you found
+- Prefer `git pull --no-rebase` over `reset --hard` unless local commits are clearly disposable WIP
 
 ---
 
-## Part 0 — Pull + prerequisites (~2 min)
+## Step 1 — Find repo and sync `main`
+
+Run these commands **in order**. Stop and fix before continuing if a step fails.
 
 ```bash
-cd ~/path/to/workflow-strt   # adjust path
+# 1a — locate repo (adjust if needed)
+if git rev-parse --show-toplevel >/dev/null 2>&1; then
+  cd "$(git rev-parse --show-toplevel)"
+else
+  cd ~/Documents/Commtrac/workflow-strt 2>/dev/null || cd ~/path/to/workflow-strt
+fi
+pwd
+git remote -v
+```
+
+```bash
+# 1b — fetch + checkout main
 git fetch origin
 git checkout main
-git pull origin main
-git log -1 --oneline
-# expect: 6b4078f Merge pull request #179 ...  (or newer)
 ```
-
-**If `git pull` fails** (local changes would be overwritten):
 
 ```bash
-git stash push -m "local wip before staging verify"
-git pull origin main
-# stash pop later if needed: git stash pop
+# 1c — pull (handles "no default pull strategy" on this repo)
+git pull --no-rebase origin main
 ```
 
-| Prerequisite | Check |
-|--------------|-------|
-| Docker Desktop | Running (whale icon in menu bar) |
-| Ports free | Nothing else using **8080**, **5174**, **9001** |
-| Old dev stopped | Stop any `dotnet run` on 4000 if you want a clean test (optional but clearer) |
+**If step 1c fails**, run diagnostics then retry:
 
-Verify Docker works:
+```bash
+git status
+git log --oneline -5 HEAD
+git log --oneline -5 origin/main
+```
+
+| Situation | Action |
+|-----------|--------|
+| **"Need to specify how to reconcile divergent branches"** | `git pull --no-rebase origin main` (creates merge commit — safe) |
+| **Uncommitted local changes block pull** | `git stash push -u -m "mac staging agent wip"` then `git pull --no-rebase origin main` |
+| **Merge conflicts after pull** | `git merge --abort`; if local commits are disposable agent WIP: `git reset --hard origin/main` |
+| **Local commits you must keep** | Resolve conflicts manually, then continue |
+
+```bash
+# 1d — confirm expected commits present
+git log -1 --oneline
+# PASS: hash is 8c1a4b3 or newer (includes #179 BOM + #178 Strata seed + #175–#177 parity)
+git merge-base --is-ancestor 6b4078f HEAD && echo "PR #179 ancestor OK" || echo "WARN: may be too old"
+```
+
+| ID | PASS if |
+|----|---------|
+| G1 | On `main`, pull succeeded |
+| G2 | `git log -1` is #180+ or includes merges for #175–#179 |
+
+---
+
+## Step 2 — Prerequisites
 
 ```bash
 docker version
 docker compose version
+docker info >/dev/null 2>&1 && echo "Docker daemon OK" || echo "FAIL: start Docker Desktop"
 chmod +x scripts/standup-staging.sh
 ```
 
+```bash
+# Ports should be free before standup (ignore errors if nothing listening)
+lsof -i :8080 -i :5174 -i :9001 2>/dev/null | head -20 || true
+```
+
 | ID | PASS if |
 |----|---------|
-| R0 | `git log -1` shows #179 merge or newer (includes #175–#178 parity fixes + Strata seed) |
-| R1 | `docker version` succeeds |
-| R2 | Docker Desktop is running |
+| G3 | `docker version` succeeds |
+| G4 | Docker daemon running |
 
 ---
 
-## Part 1 — Fresh Strata NGO seed (required first run)
+## Step 3 — Fresh Strata NGO seed (required)
 
-The Strata demo seed runs **only on a fresh Postgres volume**. If you previously stood up staging with the old Commtrac seed, wipe data first:
+Strata seed runs **only on empty Postgres**. Wipe old staging data:
 
 ```bash
 docker compose -f docker-compose.staging.yml down -v
-```
-
-Then confirm volumes are gone:
-
-```bash
-docker volume ls | grep commtrac_staging || echo "no staging volumes — good for fresh seed"
+docker volume ls | grep commtrac_staging || echo "volumes cleared"
 ```
 
 | ID | PASS if |
 |----|---------|
-| R3 | `down -v` completed; no stale `commtrac_staging_pgdata` if you intended a fresh run |
-
-**Skip `down -v`** only if you already verified Strata seed on this volume and want to keep existing data.
+| G5 | `down -v` completed without error |
 
 ---
 
-## Part 2 — Is staging already running? (~1 min)
+## Step 4 — Start Docker staging stack
 
-Run **before** starting anything new (after Part 1 if you wiped volumes):
+```bash
+# Ensure staging web env includes BOM flag (script copies example if missing)
+cp .env.staging.docker.example .env.staging.local
+grep VITE_ENABLE_BOM_MODULE .env.staging.local
+
+./scripts/standup-staging.sh --build-web
+```
+
+First run may take 5–15 min (Docker build + `npm run build:cloud-web:staging`).
+
+**If standup fails:**
+
+```bash
+docker compose -f docker-compose.staging.yml logs api --tail 80
+docker compose -f docker-compose.staging.yml logs postgres --tail 40
+docker ps -a --filter "name=commtrac-staging"
+```
+
+| ID | PASS if |
+|----|---------|
+| S1 | Script exits 0 |
+| S2 | `curl -sf http://localhost:8080/api/health` returns JSON with healthy status |
+| S3 | Health JSON includes Postgres as database provider |
+| S4 | `curl -sf -o /dev/null -w '%{http_code}\n' http://localhost:5174/` → `200` |
 
 ```bash
 docker ps --filter "name=commtrac-staging" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 ```
 
+---
+
+## Step 5 — Automated API verification (run this block)
+
+Copy and run as one script. It sets `PASS`/`FAIL` lines you paste into the report.
+
 ```bash
-curl -s http://localhost:8080/api/health | python3 -m json.tool 2>/dev/null || curl -s http://localhost:8080/api/health
+API=http://localhost:8080/api
+WEB=http://localhost:5174
+ADMIN_EMAIL="admin@StrataNgo.local"
+ADMIN_PASS="Admin123!"
+PM_EMAIL="project.manager@StrataNgo.local"
+PM_PASS="Pm123!"
+CHAMBERS_PRODUCT_ID="prod-chambers"
+
+fail=0
+pass() { echo "PASS: $1"; }
+fail_msg() { echo "FAIL: $1"; fail=1; }
+
+# --- Health ---
+HEALTH=$(curl -sf "$API/health" 2>/dev/null) || { fail_msg "health endpoint"; HEALTH=""; }
+echo "$HEALTH" | grep -qi postgres && pass "health Postgres provider" || fail_msg "health Postgres provider"
+echo "$HEALTH" | grep -qi healthy && pass "health status" || fail_msg "health status"
+
+# --- Admin login ---
+LOGIN=$(curl -sf -X POST "$API/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$ADMIN_EMAIL\",\"password\":\"$ADMIN_PASS\"}" 2>/dev/null) || LOGIN=""
+TOKEN=$(echo "$LOGIN" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token') or '')" 2>/dev/null)
+[[ -n "$TOKEN" ]] && pass "admin login token" || fail_msg "admin login token"
+
+auth() { curl -sf -H "Authorization: Bearer $TOKEN" "$1" 2>/dev/null; }
+
+# --- Strata brand ---
+BRAND=$(auth "$API/brand-settings")
+echo "$BRAND" | grep -qi "Strata N-Go" && pass "brand app-name Strata N-Go" || fail_msg "brand app-name Strata N-Go"
+
+# --- Offices (expect 2: Newcastle + Perth) ---
+OFFICES=$(auth "$API/offices")
+OCOUNT=$(echo "$OFFICES" | python3 -c "import sys,json; d=json.load(sys.stdin); print(len(d) if isinstance(d,list) else 0)" 2>/dev/null)
+echo "$OFFICES" | grep -qi Newcastle && pass "office Newcastle" || fail_msg "office Newcastle"
+echo "$OFFICES" | grep -qi Perth && pass "office Perth" || fail_msg "office Perth"
+[[ "${OCOUNT:-0}" -ge 2 ]] && pass "offices count >= 2 ($OCOUNT)" || fail_msg "offices count >= 2 ($OCOUNT)"
+
+# --- Customers ---
+CUSTOMERS=$(auth "$API/customers")
+echo "$CUSTOMERS" | grep -qi "BHP/Mining" && pass "customer BHP/Mining" || fail_msg "customer BHP/Mining"
+
+# --- Users ---
+USERS=$(auth "$API/users")
+echo "$USERS" | grep -qi "admin@StrataNgo.local" && pass "user admin seeded" || fail_msg "user admin seeded"
+echo "$USERS" | grep -qi "project.manager@StrataNgo.local" && pass "user PM seeded" || fail_msg "user PM seeded"
+
+# --- Chambers workflow ---
+WFS=$(auth "$API/workflow-configs/by-product/$CHAMBERS_PRODUCT_ID?status=Published")
+echo "$WFS" | grep -qi "Chambers_default" && pass "Chambers_default workflow" || fail_msg "Chambers_default workflow"
+STEP_COUNT=$(echo "$WFS" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+if not data: print(0); sys.exit()
+cfg=data[0]
+steps=json.loads(cfg.get('stepsJson') or '{}')
+print(len(steps.get('steps',[])))
+" 2>/dev/null)
+[[ "${STEP_COUNT:-0}" -eq 10 ]] && pass "Chambers workflow 10 steps" || fail_msg "Chambers workflow 10 steps (got ${STEP_COUNT:-0})"
+
+# --- BOM API (must NOT 503) ---
+BOM_CODE=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "$API/bom-import-runs")
+[[ "$BOM_CODE" == "200" ]] && pass "BOM API enabled (HTTP 200)" || fail_msg "BOM API enabled (HTTP $BOM_CODE, want 200)"
+
+# --- Open issues dedupe (PR #175) ---
+OPEN=$(auth "$API/asset-workflow-runs/open-issues")
+DEDUPE=$(echo "$OPEN" | python3 -c "
+import sys,json
+data=json.load(sys.stdin)
+if not isinstance(data,list):
+  print('ok'); sys.exit()
+ids=[x.get('issueId') for x in data if x.get('issueId')]
+print('ok' if len(ids)==len(set(ids)) else 'dup')
+" 2>/dev/null)
+[[ "$DEDUPE" == "ok" ]] && pass "open-issues no duplicate issueIds" || fail_msg "open-issues duplicate issueIds"
+
+# --- PM login + BOM ---
+PM_LOGIN=$(curl -sf -X POST "$API/auth/login" \
+  -H 'Content-Type: application/json' \
+  -d "{\"email\":\"$PM_EMAIL\",\"password\":\"$PM_PASS\"}" 2>/dev/null) || PM_LOGIN=""
+PM_TOKEN=$(echo "$PM_LOGIN" | python3 -c "import sys,json; print(json.load(sys.stdin).get('token') or '')" 2>/dev/null)
+[[ -n "$PM_TOKEN" ]] && pass "PM login token" || fail_msg "PM login token"
+PM_BOM=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $PM_TOKEN" "$API/bom-import-runs")
+[[ "$PM_BOM" == "200" ]] && pass "PM BOM API access" || fail_msg "PM BOM API access (HTTP $PM_BOM)"
+
+# --- Web bundle BOM flag baked in ---
+grep -rq "bom-project\|BomDashboard" dist/assets/*.js 2>/dev/null && pass "web bundle includes BOM module" || fail_msg "web bundle includes BOM module"
+
+# --- Workflow label strings in built bundle (PR #177) ---
+grep -rq "Search workflows" dist/assets/WorkInstructions*.js 2>/dev/null && pass "bundle Search workflows label" || fail_msg "bundle Search workflows label"
+! grep -rq "Search work instructions" dist/assets/WorkInstructions*.js 2>/dev/null && pass "bundle no old Search work instructions" || fail_msg "bundle still has Search work instructions"
+
+# --- Web nginx ---
+WEB_CODE=$(curl -sf -o /dev/null -w '%{http_code}' "$WEB/")
+[[ "$WEB_CODE" == "200" ]] && pass "web 5174 serves login shell" || fail_msg "web 5174 (HTTP $WEB_CODE)"
+
+echo "--- API verification done; failures=$fail ---"
+exit $fail
 ```
 
-| Container name | Expected |
-|----------------|----------|
-| `commtrac-staging-api` | Up |
-| `commtrac-staging-postgres` | Up (healthy) |
-| `commtrac-staging-minio` | Up; ports 9000–9001 |
-| `commtrac-staging-web` | Up if `--build-web` was used; port **5174→80** |
-
-| ID | PASS if |
-|----|---------|
-| S0 | `commtrac-staging-api` container is **Up** |
-| S1 | Health at http://localhost:8080/api/health → `"status":"healthy"` |
-| S2 | Health JSON includes `"databaseProvider":"Postgres"` (or equivalent Postgres indicator) |
-
-**If S0–S2 fail:** staging is **not** running → go to Part 3.
-
-**If S0–S2 pass:** skip Part 3 start; go to Part 4 verification.
+| ID | Maps from script output |
+|----|-------------------------|
+| A1 | health Postgres + status |
+| A2 | admin login |
+| A3 | Strata brand + offices + BHP customer |
+| A4 | Chambers_default 10-step workflow |
+| A5 | BOM API 200 (not 503) |
+| A6 | open-issues dedupe |
+| A7 | PM login + BOM |
+| A8 | web bundle BOM + workflow labels |
+| A9 | web 5174 HTTP 200 |
 
 ---
 
-## Part 3 — Start Docker staging (~5–15 min first time)
+## Step 6 — Browser verification (if browser tools available)
 
-From repo root:
+Open **http://localhost:5174**. Login `admin@StrataNgo.local` / `Admin123!`.
 
-```bash
-./scripts/standup-staging.sh --build-web
-```
+DevTools → Network: confirm requests go to **`localhost:8080`**, not `:4000`.
 
-What this does:
-1. `docker compose -f docker-compose.staging.yml up -d --build` — Postgres, MinIO, API (`ENABLE_BOM_PROJECT_MODULE=true`)
-2. Waits for API health on **8080**
-3. Creates `.env.staging.local` from docker example if missing (`VITE_ENABLE_BOM_MODULE=true`)
-4. Builds web with `VITE_API_BASE=http://localhost:8080/api`
-5. Starts nginx web on **5174**
+| ID | Check | PASS if |
+|----|-------|---------|
+| W1 | Login → Dashboard | Loads, no redirect loop |
+| W2 | Admin sidebar | **BOM Project** menu item visible |
+| W3 | Admin → Workflows | **Chambers_default** visible for Chambers product |
+| W4 | Projects list | Column picker has no duplicate Customer / Job Number / Status / Global Offices |
+| W5 | Documents upload | Small file uploads; preview works (MinIO) |
 
-**Watch for errors.** If the script fails:
+If no browser tools: mark W1–W5 **SKIPPED (API-only)** — Step 5 API results are sufficient for seed/BOM/auth.
 
-```bash
-docker compose -f docker-compose.staging.yml logs api --tail 80
-docker compose -f docker-compose.staging.yml logs postgres --tail 40
-```
-
-| ID | PASS if |
-|----|---------|
-| S3 | Script completes without error |
-| S4 | `curl -s http://localhost:8080/api/health` → healthy + Postgres |
-| S5 | Browser opens http://localhost:5174 → login page loads (not blank / not 502) |
-
-**Do not use `npm run dev` on 5173 for this test** — unless you copy `.env.staging.docker.example` → `.env.staging.local` first; default browser dev targets port 4000, not 8080.
+Optional — open MinIO console http://localhost:9001 (`commtrac` / `commtrac_dev`), confirm bucket `commtrac-staging`.
 
 ---
 
-## Part 4 — Web verification on staging (5174)
-
-Open **Chrome or Safari**, wide window. URL: **http://localhost:5174**
-
-Login: `admin@StrataNgo.local` / `Admin123!`
-
-Open DevTools → Network. Confirm API calls go to **`localhost:8080`**, not `:4000`.
-
-### Core staging checks
-
-| ID | Area | Steps | PASS if |
-|----|------|-------|---------|
-| W0 | Mode check | Debug panel or Network tab | `api.baseUrl` / requests use **8080** |
-| W1 | Auth | Login / logout | Dashboard loads; no redirect loop |
-| W2 | Dashboard | Load dashboard | No flood of Network Error in console |
-| W3 | Strata seed | Settings → brand / Admin tables | App name **Strata N-Go**; 2 offices (Newcastle, Perth); customer **BHP/Mining** |
-| W4 | Workflows | Admin → Workflows | **Chambers_default** workflow exists (Published, 10 steps) on Chambers product |
-| W5 | Documents | Upload small PDF or image | Upload succeeds; preview/download works (**S3/MinIO**) |
-| W6 | Admin | Admin → Users tab | Page loads; admin + PM users present |
-| W7 | Health (browser) | Visit http://localhost:8080/api/health | JSON healthy, Postgres |
-| W8 | MinIO console | http://localhost:9001 login `commtrac` / `commtrac_dev` | Console loads; bucket `commtrac-staging` exists |
-| W9 | Backups API | `curl http://localhost:8080/api/backups` (with auth if needed) | **501** on Postgres is **expected** (SQLite backups disabled) |
-
-### Mac parity fixes (PRs #175–#177)
-
-| ID | Area | Steps | PASS if |
-|----|------|-------|---------|
-| P1 | Issue dedupe | Dashboard open-issues count vs Issues Board | Same issue not counted twice (run + asset source) |
-| P2 | Project columns | Projects list column picker | No duplicate **Customer**, **Job Number**, **Status**, **Global Offices** vs dynamic fields |
-| P3 | Workflow labels | Workflows screen + builder | User-facing text says **Workflow** (not “Work Instruction”); builder toggle says **List** |
-
-### BOM module (PR #179)
-
-| ID | Area | Steps | PASS if |
-|----|------|-------|---------|
-| B1 | BOM sidebar | Admin logged in | **Admin → BOM Project** appears in sidebar |
-| B2 | BOM page | Open BOM Project | Page loads; no 503 from API |
-| B3 | PM access | Login as `project.manager@StrataNgo.local` / `Pm123!` | PM also sees BOM (role default) |
-
-**Known noise (ignore):**
-- `favicon.ico 404` on 5174 — harmless
-- No tips/documents seeded — empty Tips/Documents is expected
-- BHP / business logos not seeded — Settings may show no logo image
-
-**Blockers:** `ERR_CONNECTION_REFUSED` on **8080**, CORS errors, upload fails, login loop, BOM 503, Strata seed missing after fresh `-v` run.
-
----
-
-## Part 5 — Optional: confirm old dev still works (~3 min)
-
-After Docker staging verification, optionally confirm default dev was not broken:
-
-```bash
-# Stop Docker staging first (avoids port confusion)
-docker compose -f docker-compose.staging.yml down
-
-cd server/Commtrac.Api
-dotnet run
-```
-
-New terminal: `npm run dev` → http://localhost:5173 → login (`admin@commtrac.local` / `Admin123!` on Sqlite seed).
-
-| ID | PASS if |
-|----|---------|
-| D0 | http://localhost:4000/api/health → healthy (Sqlite) |
-| D1 | Login on 5173 works |
-
-Then you can bring Docker staging back:
-
-```bash
-./scripts/standup-staging.sh --build-web
-```
-
----
-
-## Part 6 — Optional: phone against Docker API on LAN
-
-For native iPhone testing against this Mac’s Docker API (not localhost on device):
-
-1. Find Mac LAN IP: `ipconfig getifaddr en0` (Wi‑Fi) or `en1`
-2. Ensure Docker publishes `8080:8080` (default in compose)
-3. macOS firewall: allow incoming on 8080 if prompted
-4. Build native with **untracked** `.env.production.local`:
-
-```bash
-echo "VITE_API_BASE=http://$(ipconfig getifaddr en0):8080/api" > .env.production.local
-npm run build
-npx cap sync ios
-```
-
-5. Run on physical iPhone from Xcode; use same Strata NGO logins
-
-See [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) for full phone matrix (P1–P8).
-
----
-
-## Part 7 — Automated gates (optional)
+## Step 7 — Optional automated build gates
 
 ```bash
 cd server/Commtrac.Api && dotnet build
 cd ../.. && npx tsc -b
-cp .env.staging.docker.example .env.staging.local
-npm run build:cloud-web:staging
 ```
 
-**Note:** `dotnet test` may fail on some setups. Report result but do not block staging sign-off if Docker + web checks pass.
+| ID | PASS if |
+|----|---------|
+| T1 | `dotnet build` exit 0 |
+| T2 | `npx tsc -b` exit 0 |
 
 ---
 
-## Part 8 — Teardown (when done)
+## Step 8 — Teardown (only if user asked to stop stack)
 
 ```bash
 docker compose -f docker-compose.staging.yml down
-# Wipe DB + MinIO for completely fresh Strata seed next time:
-# docker compose -f docker-compose.staging.yml down -v
+# Fresh seed next time: add -v
 ```
+
+**Leave stack running** unless user wants teardown — they may test manually after your report.
 
 ---
 
-## Report format (paste back to cloud agent / PR)
+## Report template (fill and paste back)
 
 ```
-Docker staging Mac @ <git hash>
+Docker staging Mac @ <git hash from git log -1>
 
-PREREQS
-R0 pull (#179+): PASS / FAIL
-R1 docker: PASS / FAIL
-R2 docker desktop: PASS / FAIL
-R3 fresh volume (-v): PASS / FAIL / SKIPPED
+GIT
+G1 pull main: PASS / FAIL
+G2 commits #175-#179+: PASS / FAIL
+G3 docker CLI: PASS / FAIL
+G4 docker daemon: PASS / FAIL
+G5 fresh volume (-v): PASS / FAIL
 
-ALREADY RUNNING (Part 2)
-S0 containers: PASS / FAIL — <list container names or "none">
-S1 health 8080: PASS / FAIL
-S2 Postgres provider: PASS / FAIL
+STANDUP
+S1 standup script: PASS / FAIL
+S2 health 8080: PASS / FAIL
+S3 Postgres provider: PASS / FAIL
+S4 web 5174 HTTP: PASS / FAIL
 
-STANDUP (Part 3)
-S3 script: PASS / FAIL / SKIPPED (already up)
-S4 health after start: PASS / FAIL
-S5 web 5174 loads: PASS / FAIL
+API (Step 5 script)
+A1 health: PASS / FAIL
+A2 admin login: PASS / FAIL
+A3 strata seed data: PASS / FAIL
+A4 Chambers_default workflow: PASS / FAIL
+A5 BOM API: PASS / FAIL
+A6 issue dedupe: PASS / FAIL
+A7 PM + BOM: PASS / FAIL
+A8 bundle BOM + labels: PASS / FAIL
+A9 web shell: PASS / FAIL
 
-WEB STAGING (Part 4)
-W0 api host 8080: PASS / FAIL
-W1 auth: PASS / FAIL
-W2 dashboard: PASS / FAIL
-W3 strata seed: PASS / FAIL
-W4 chambers workflow: PASS / FAIL
-W5 upload S3: PASS / FAIL
-W6 admin users: PASS / FAIL
-W7 health browser: PASS / FAIL
-W8 minio console: PASS / FAIL
-W9 backups 501: PASS / FAIL / SKIPPED
-
-PARITY FIXES
-P1 issue dedupe: PASS / FAIL
-P2 project columns: PASS / FAIL
-P3 workflow labels: PASS / FAIL
-
-BOM
-B1 sidebar: PASS / FAIL
-B2 page load: PASS / FAIL
-B3 PM access: PASS / FAIL / SKIPPED
-
-DEFAULT DEV (Part 5 — optional)
-D0 Sqlite health: PASS / FAIL / SKIPPED
-D1 login 5173: PASS / FAIL / SKIPPED
+BROWSER (Step 6 — or SKIPPED)
+W1 login dashboard: PASS / FAIL / SKIPPED
+W2 BOM sidebar: PASS / FAIL / SKIPPED
+W3 workflows UI: PASS / FAIL / SKIPPED
+W4 project columns: PASS / FAIL / SKIPPED
+W5 document upload: PASS / FAIL / SKIPPED
 
 AUTOMATED
-dotnet build: PASS / FAIL
-tsc -b: PASS / FAIL
-build:cloud-web:staging: PASS / FAIL / SKIPPED
+T1 dotnet build: PASS / FAIL / SKIPPED
+T2 tsc -b: PASS / FAIL / SKIPPED
 
-URLs used:
+URLs:
   Web:  http://localhost:5174
   API:  http://localhost:8080/api
   MinIO: http://localhost:9001
 
-Blockers: none / <list>
-Next: AWS staging runbook OR iPhone P1–P8 against http://<LAN-IP>:8080/api
+Blockers: none / <list with log excerpts>
+Next: user manual UX pass OR iPhone against http://<LAN-IP>:8080/api
 ```
 
-**Rules:** Do not commit LAN IPs, `.env.production.local`, `.env.staging.local`, or secrets. Screenshot MinIO bucket + health JSON + Strata seed screens if anything fails.
+**On failure:** attach `docker compose -f docker-compose.staging.yml logs api --tail 50` and the failing curl output.
 
 ## PROMPT END
