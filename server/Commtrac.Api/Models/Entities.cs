@@ -263,6 +263,7 @@ public class ProjectEntity
     public List<string> ProductIds { get; set; } = new();
     public string ProductFeatureValuesJson { get; set; } = "{}";
     public string TeamMemberIdsJson { get; set; } = "[]";
+    public string? ScheduledReportJson { get; set; }
     public bool IsDeleted { get; set; }
     public DateTime? DeletedAtUtc { get; set; }
     [MaxLength(100)]
@@ -1218,6 +1219,8 @@ public class SignatureTokenEntity
     public string Id { get; set; } = Guid.NewGuid().ToString();
     [MaxLength(100)]
     public string RunId { get; set; } = string.Empty;
+    [MaxLength(40)]
+    public string SignerRole { get; set; } = "Customer";
     [MaxLength(100)]
     public string? ContactId { get; set; }
     [MaxLength(200)]

@@ -452,7 +452,18 @@ public record ProjectDto(
     string? DeleteReason = null,
     // IANA timezone id for the project site (e.g. "Australia/Sydney"). Display-only;
     // instants stay UTC. Null falls back to UTC when rendering reports/timestamps.
-    string? TimeZoneId = null
+    string? TimeZoneId = null,
+    ProjectScheduledReportDto? ScheduledReport = null
+);
+
+public record ProjectScheduledReportDto(
+    bool Enabled,
+    string Frequency,
+    List<string>? DaysOfWeek,
+    string? SendTimeLocal,
+    List<string>? RecipientEmails,
+    bool AssetClosedNotificationEnabled = false,
+    DateTime? LastSentAtUtc = null
 );
 
 public record UpdateProjectStatusRequest(
@@ -1289,6 +1300,7 @@ public record SubmitSignatureRequest(
 public record SignatureTokenDto(
     string Id,
     string RunId,
+    string SignerRole,
     string? ContactId,
     string RecipientEmail,
     string? RecipientName,
@@ -1302,8 +1314,9 @@ public record SignatureTokenDto(
 
 public record CreateSignatureTokenRequest(
     string RunId,
+    string? SignerRole,
     string? ContactId,
-    string RecipientEmail,
+    string? RecipientEmail,
     string? RecipientName,
     int ExpiresInHours,
     string? CustomMessage
@@ -1319,6 +1332,7 @@ public record PublicRunSummaryDto(
     string CompletedByName,
     DateTime CompletedAt,
     string SignatureStatus,
+    string SignerRole,
     string RecipientName,
     string RecipientEmail,
     bool TokenValid,

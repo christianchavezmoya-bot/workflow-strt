@@ -198,6 +198,7 @@ public class PublicSignController : ControllerBase
             run.CompletedByName ?? "",
             run.CompletedAt ?? run.UpdatedAt,
             run.SignatureStatus,
+            token.SignerRole,
             token.RecipientName ?? "",
             token.RecipientEmail,
             true,
@@ -269,11 +270,19 @@ public class PublicSignController : ControllerBase
         var now = DateTime.UtcNow;
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
         var ua = Request.Headers["User-Agent"].ToString();
+        var signerRole = string.Equals(token.SignerRole, "Installer", StringComparison.OrdinalIgnoreCase)
+            ? "Installer"
+            : "Customer";
+
+        if (signerRole == "Installer" && run.SignatureStatus != "PendingInstaller")
+            return BadRequest(new { message = "Run is not awaiting installer sign-off." });
+        if (signerRole == "Customer" && run.SignatureStatus != "PendingCustomer")
+            return BadRequest(new { message = "Installer must sign before customer." });
 
         var evt = new SignatureEventEntity
         {
             RunId         = run.Id,
-            SignerRole    = "Customer",
+            SignerRole    = signerRole,
             SignerName    = req.SignerName,
             SignerEmail   = token.RecipientEmail,
             SignerTitle   = req.SignerTitle,
@@ -287,13 +296,23 @@ public class PublicSignController : ControllerBase
         };
         _db.SignatureEvents.Add(evt);
 
-        run.SignatureStatus  = req.ReasonCode == "Declined" ? "Declined" : "Signed";
-        run.CustomerSignedAt = now;
+        if (signerRole == "Installer")
+        {
+            run.SignatureStatus = "PendingCustomer";
+            run.InstallerSignedAt = now;
+        }
+        else
+        {
+            run.SignatureStatus = req.ReasonCode == "Declined" ? "Declined" : "Signed";
+            run.CustomerSignedAt = now;
+        }
         run.UpdatedAt        = now;
 
         if (asset is not null)
         {
-            asset.Status = req.ReasonCode == "Declined" ? "Complete" : "Closed";
+            asset.Status = signerRole == "Installer"
+                ? "Complete"
+                : (req.ReasonCode == "Declined" ? "Complete" : "Closed");
             asset.UpdatedAt = now;
         }
 
@@ -306,7 +325,19 @@ public class PublicSignController : ControllerBase
             var actorName = req.SignerName;
             await _projectLifecycle.SyncFromAssetsAsync(asset.ProjectId, actorUserId: null, actorName);
 
-            if (req.ReasonCode == "Declined")
+            if (signerRole == "Installer")
+            {
+                await NotifyAssetEventAsync(
+                    asset,
+                    "asset-completed",
+                    "success",
+                    "Asset completed",
+                    $"{asset.AssetTag} field work was completed on job {{job}} and is now waiting for customer sign-off.",
+                    run.Id,
+                    actorName,
+                    project?.JobNumber);
+            }
+            else if (req.ReasonCode == "Declined")
             {
                 await NotifyAssetEventAsync(
                     asset,

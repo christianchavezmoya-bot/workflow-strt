@@ -43,6 +43,8 @@ import {
 } from "../../utils/datetime";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import TimeEntriesTimelineEditor from "./TimeEntriesTimelineEditor";
+import OfflineGuardDialog from "./OfflineGuardDialog";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 interface Props {
   open: boolean;
@@ -136,8 +138,32 @@ const BLANK_FORM = {
   category: "productive" as "productive" | "downtime",
   reason: "",
   startStr: "",
+  startDate: "",
+  startTime: "",
   endStr: "",
+  endDate: "",
+  endTime: "",
 };
+
+function splitDateTimeValue(localValue: string): { date: string; time: string } {
+  if (!localValue) {
+    return { date: "", time: "" };
+  }
+
+  const [datePart, timePart] = localValue.split("T");
+  return {
+    date: datePart ?? "",
+    time: (timePart ?? "").slice(0, 5),
+  };
+}
+
+function composeDateTimeValue(datePart: string, timePart: string): string {
+  if (!datePart || !timePart) {
+    return "";
+  }
+
+  return `${datePart}T${timePart}`;
+}
 
 const DURATION_PRESETS = [
   { label: "30m", minutes: 30 },
@@ -162,6 +188,7 @@ export default function TimeEntriesEditorDialog({
   onClose,
   onSaved,
 }: Props) {
+  const isPhoneApp = isMobileNativePlatform();
   const fetchedTimeZone = useProjectTimeZone(projectId ?? undefined);
   const timeZoneId = timeZoneIdProp ?? fetchedTimeZone;
   const [entries, setEntries] = useState<RunTimeEntry[]>([]);
@@ -176,6 +203,7 @@ export default function TimeEntriesEditorDialog({
   const [addCategory, setAddCategory] = useState<"productive" | "downtime">("productive");
   const [addDurationMin, setAddDurationMin] = useState(60);
   const [addReason, setAddReason] = useState("");
+  const [showOfflineDialog, setShowOfflineDialog] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -185,8 +213,9 @@ export default function TimeEntriesEditorDialog({
       setError(null);
       setFormError(null);
       setViewMode("timeline");
+      setShowOfflineDialog(isPhoneApp && !readOnly && !navigator.onLine);
     }
-  }, [open, run.timeTrackingJson]);
+  }, [open, run.timeTrackingJson, isPhoneApp, readOnly]);
 
   const nowIso = useMemo(() => new Date().toISOString(), []);
   const totals = useMemo(() => computeTotals(entries, nowIso), [entries, nowIso]);
@@ -228,12 +257,20 @@ export default function TimeEntriesEditorDialog({
   }
 
   function openEditForm(entry: RunTimeEntry) {
+    const startLocal = toDatetimeLocal(entry.startedAtUtc, timeZoneId);
+    const endLocal = toDatetimeLocal(entry.endedAtUtc ?? null, timeZoneId);
+    const startParts = splitDateTimeValue(startLocal);
+    const endParts = splitDateTimeValue(endLocal);
     setEditingId(entry.id);
     setForm({
       category: entry.category,
       reason: entry.reason ?? "",
-      startStr: toDatetimeLocal(entry.startedAtUtc, timeZoneId),
-      endStr: toDatetimeLocal(entry.endedAtUtc ?? null, timeZoneId),
+      startStr: startLocal,
+      startDate: startParts.date,
+      startTime: startParts.time,
+      endStr: endLocal,
+      endDate: endParts.date,
+      endTime: endParts.time,
     });
     setFormError(null);
     setFormOpen(true);
@@ -246,9 +283,21 @@ export default function TimeEntriesEditorDialog({
   }
 
   function handleFormSave() {
-    if (!form.startStr) { setFormError("Start time is required."); return; }
-    const startIso = fromDatetimeLocal(form.startStr, timeZoneId);
-    const endIso = form.endStr ? fromDatetimeLocal(form.endStr, timeZoneId) : null;
+    const startLocal = isPhoneApp
+      ? composeDateTimeValue(form.startDate, form.startTime)
+      : form.startStr;
+    const endLocal = isPhoneApp
+      ? (form.endDate || form.endTime ? composeDateTimeValue(form.endDate, form.endTime) : "")
+      : form.endStr;
+
+    if (!startLocal) { setFormError("Start time is required."); return; }
+    if (isPhoneApp && ((form.endDate && !form.endTime) || (!form.endDate && form.endTime))) {
+      setFormError("End date and end time must both be set, or both left blank.");
+      return;
+    }
+
+    const startIso = fromDatetimeLocal(startLocal, timeZoneId);
+    const endIso = endLocal ? fromDatetimeLocal(endLocal, timeZoneId) : null;
     if (endIso && new Date(endIso) <= new Date(startIso)) {
       setFormError("End time must be after start time.");
       return;
@@ -293,6 +342,19 @@ export default function TimeEntriesEditorDialog({
     } finally {
       setSaving(false);
     }
+  }
+
+  if (open && isPhoneApp && !readOnly && showOfflineDialog) {
+    return (
+      <OfflineGuardDialog
+        open
+        message="Time cannot be adjusted while the phone is offline. Reconnect to the internet and try again."
+        onClose={() => {
+          setShowOfflineDialog(false);
+          onClose();
+        }}
+      />
+    );
   }
 
   return (
@@ -407,21 +469,43 @@ export default function TimeEntriesEditorDialog({
               <TextField
                 size="small"
                 label="Start"
-                type="datetime-local"
-                value={form.startStr}
-                onChange={(e) => setForm((f) => ({ ...f, startStr: e.target.value }))}
+                type={isPhoneApp ? "date" : "datetime-local"}
+                value={isPhoneApp ? form.startDate : form.startStr}
+                onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value, startStr: e.target.value }))}
                 InputLabelProps={{ shrink: true }}
                 sx={{ minWidth: 200 }}
               />
+              {isPhoneApp && (
+                <TextField
+                  size="small"
+                  label="Start time"
+                  type="time"
+                  value={form.startTime}
+                  onChange={(e) => setForm((f) => ({ ...f, startTime: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ minWidth: 160 }}
+                />
+              )}
               <TextField
                 size="small"
                 label="End (leave blank = still open)"
-                type="datetime-local"
-                value={form.endStr}
-                onChange={(e) => setForm((f) => ({ ...f, endStr: e.target.value }))}
+                type={isPhoneApp ? "date" : "datetime-local"}
+                value={isPhoneApp ? form.endDate : form.endStr}
+                onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value, endStr: e.target.value }))}
                 InputLabelProps={{ shrink: true }}
                 sx={{ minWidth: 200 }}
               />
+              {isPhoneApp && (
+                <TextField
+                  size="small"
+                  label="End time"
+                  type="time"
+                  value={form.endTime}
+                  onChange={(e) => setForm((f) => ({ ...f, endTime: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                  sx={{ minWidth: 160 }}
+                />
+              )}
               <Stack direction="row" spacing={0.75} alignItems="center">
                 <Button size="small" variant="contained" startIcon={<SaveOutlined />} onClick={handleFormSave}>
                   {editingId ? "Update" : "Add"}

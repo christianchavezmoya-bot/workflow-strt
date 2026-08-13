@@ -26,6 +26,7 @@ import type { ProjectContact } from "../../types/projectContact";
 import { projectContactService } from "../../services/projectContactService";
 import { signatureService, type CreateTokenPayload } from "../../services/signatureService";
 import { resolvePublicFrontendBaseUrl } from "../../services/publicFrontendBase";
+import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 
 type Props = {
   open: boolean;
@@ -34,6 +35,7 @@ type Props = {
   jobNumber?: string;
   onClose: () => void;
   onSent?: () => void;
+  onWaived?: () => void;
 };
 
 export default function RequestCustomerSignatureDialog({
@@ -43,6 +45,7 @@ export default function RequestCustomerSignatureDialog({
   jobNumber,
   onClose,
   onSent,
+  onWaived,
 }: Props) {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
@@ -57,6 +60,7 @@ export default function RequestCustomerSignatureDialog({
   const [autoContact, setAutoContact] = useState<ProjectContact | null>(null);
   const [tokenEditMode, setTokenEditMode] = useState(false);
   const [tokenSaveAsNew, setTokenSaveAsNew] = useState(false);
+  const [waiving, setWaiving] = useState(false);
 
   const buildDefaultMessage = () => {
     const assetLabel = asset.assetTag || asset.assetName || "this asset";
@@ -158,6 +162,20 @@ export default function RequestCustomerSignatureDialog({
       setTokenError(apiMessage?.message ?? apiMessage?.detail ?? "Customer signature email could not be sent.");
     } finally {
       setTokenSending(false);
+    }
+  };
+
+  const handleWaiveCustomerSignature = async () => {
+    setWaiving(true);
+    setTokenError(null);
+    try {
+      await assetWorkflowRunService.waiveCustomerSignature(run.id);
+      onWaived?.();
+    } catch (error: unknown) {
+      const apiMessage = (error as { response?: { data?: { message?: string; detail?: string } } })?.response?.data;
+      setTokenError(apiMessage?.message ?? apiMessage?.detail ?? "Asset run could not be closed without customer signature.");
+    } finally {
+      setWaiving(false);
     }
   };
 
@@ -269,6 +287,17 @@ export default function RequestCustomerSignatureDialog({
         <Button onClick={handleClose} fullWidth={isPhone}>
           {tokenLink ? "Done" : "Cancel"}
         </Button>
+        {!tokenLink && (
+          <Button
+            variant="outlined"
+            color="warning"
+            onClick={() => { void handleWaiveCustomerSignature(); }}
+            disabled={tokenSending || waiving}
+            fullWidth={isPhone}
+          >
+            {waiving ? <CircularProgress size={18} /> : "Close asset run without customer signature"}
+          </Button>
+        )}
         {!tokenLink && (
           <Button
             variant="contained"

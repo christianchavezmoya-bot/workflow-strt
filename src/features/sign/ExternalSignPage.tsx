@@ -257,6 +257,7 @@ export default function ExternalSignPage() {
     (inputMode === "typed" || drawnData !== null);
 
   const assetTagLabel = summary?.assetTag ?? summary?.assetName ?? "Asset";
+  const isInstallerSigner = summary?.signerRole === "Installer";
   const reportTimeZone = resolveReportTimeZone({
     timeZoneId: summary?.timeZoneId,
     office: summary?.office,
@@ -294,7 +295,9 @@ export default function ExternalSignPage() {
         <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.75)", maxWidth: 360, mx: "auto" }}>
           {reasonCode === "Declined"
             ? "Your decline has been recorded and the team has been notified."
-            : "Thank you. Your signature has been recorded and the installation certificate is now complete."}
+            : isInstallerSigner
+              ? "Thank you. Your installer sign-off has been recorded and the workflow is now ready for customer sign-off."
+              : "Thank you. Your signature has been recorded and the installation certificate is now complete."}
         </Typography>
       </Box>
     );
@@ -334,10 +337,12 @@ export default function ExternalSignPage() {
       <Box sx={{ display: "flex", flexDirection: "column", height: "100vh", bgcolor: PAGE.bg, color: "#fff" }}>
         <Box sx={{ px: { xs: 2, sm: 3 }, py: 2, borderBottom: "1px solid rgba(255,255,255,0.12)" }}>
           <Typography variant="h5" fontWeight={700} gutterBottom>
-            Installation Record — {assetTagLabel}
+            {isInstallerSigner ? "Workflow Review" : "Installation Record"} — {assetTagLabel}
           </Typography>
           <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.78)", mb: 1 }}>
-            Review the full installation record below, including photos and installer signature, before signing.
+            {isInstallerSigner
+              ? "Review the completed workflow below, including photos and captured data, before signing as installer."
+              : "Review the full installation record below, including photos and installer signature, before signing."}
           </Typography>
           <Box sx={{ bgcolor: PAGE.panel, borderRadius: 1, px: 1.5, py: 1 }}>
             <SummaryMeta />
@@ -402,7 +407,7 @@ export default function ExternalSignPage() {
             </Button>
           </Stack>
           <Typography variant="caption" sx={{ display: "block", mt: 1.5, textAlign: "center", color: "rgba(255,255,255,0.6)" }}>
-            By proceeding, you acknowledge you have reviewed the installation record above.
+            By proceeding, you acknowledge you have reviewed the workflow record above.
           </Typography>
         </Box>
       </Box>
@@ -417,7 +422,7 @@ export default function ExternalSignPage() {
           ← Back to review
         </Button>
         <Typography variant="h5" fontWeight={700} gutterBottom sx={{ color: PAGE.text }}>
-          Sign Document — {assetTagLabel}
+          {isInstallerSigner ? "Installer Sign-off" : "Sign Document"} — {assetTagLabel}
         </Typography>
 
         <Box sx={{ border: `1px solid ${PAGE.border}`, borderRadius: 2, p: 2, mb: 3, bgcolor: PAGE.panel }}>
@@ -530,7 +535,9 @@ export default function ExternalSignPage() {
             control={<Checkbox checked={consent} onChange={(e) => setConsent(e.target.checked)} />}
             label={
               <Typography variant="body2" sx={{ color: PAGE.text }}>
-                I confirm that I am authorised to sign this document and the information is correct.
+                {isInstallerSigner
+                  ? "I confirm the recorded time, captured fields, and workflow completion details are correct."
+                  : "I confirm that I am authorised to sign this document and the information is correct."}
               </Typography>
             }
           />

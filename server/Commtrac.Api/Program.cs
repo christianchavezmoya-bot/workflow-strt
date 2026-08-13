@@ -91,6 +91,7 @@ builder.Services.AddScoped<IEmailSender>(sp => sp.GetRequiredService<ResendEmail
 builder.Services.Configure<SmsSettings>(builder.Configuration.GetSection("Sms"));
 builder.Services.AddScoped<ISmsSender, SmsSender>();
 builder.Services.AddScoped<NotificationService>();
+builder.Services.AddHostedService<ProjectScheduledReportWorker>();
 builder.Services.AddScoped<IDocumentContentSearchService, DocumentContentSearchService>();
 builder.Services.AddScoped<TimeAnalyticsSnapshotService>();
 builder.Services.AddSingleton<DocumentSearchIndexStatusStore>();

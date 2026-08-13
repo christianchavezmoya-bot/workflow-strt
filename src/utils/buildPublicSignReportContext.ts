@@ -2,6 +2,7 @@ import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { PublicRunSummary, SignatureEvent } from "../types/signature";
+import { normalizeCapturedValueForDisplay, isRenderableImageValue } from "./capturedValueFormat";
 import { resolveReportTimeZone } from "./datetime";
 import { resolveImageToDataUrl, resolvePhotoForPdf, type GenerateReportParams } from "./generateWorkflowReport";
 import { normalizeBinaryDataUrl } from "./reportMediaResolve";
@@ -36,6 +37,9 @@ async function hydrateCaptureValue(val: string): Promise<string> {
   }
 
   const normalized = normalizeBinaryDataUrl(val.trim());
+  if (!isRenderableImageValue(normalized)) {
+    return normalizeCapturedValueForDisplay(normalized);
+  }
   const resolved = await resolvePhotoForPdf(normalized);
   return resolved ?? normalized;
 }

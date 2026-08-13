@@ -29,6 +29,7 @@ export interface SignatureEvent {
 export interface SignatureToken {
   id: string;
   runId: string;
+  signerRole: SignerRole;
   contactId?: string;
   recipientEmail: string;
   recipientName?: string;
@@ -49,6 +50,7 @@ export interface PublicRunSummary {
   completedByName: string;
   completedAt: string;
   signatureStatus: SignatureStatus;
+  signerRole: SignerRole;
   recipientName: string;
   recipientEmail: string;
   tokenValid: boolean;

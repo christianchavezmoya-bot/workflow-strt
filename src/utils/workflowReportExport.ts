@@ -5,6 +5,7 @@ import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import type { WorkflowStep } from "../types/workflow";
 import { formatInstant, resolveProjectTimeZone } from "./datetime";
+import { normalizeCapturedValueForDisplay } from "./capturedValueFormat";
 
 export interface WorkflowReportExportContext {
   run: AssetWorkflowRun;
@@ -160,19 +161,20 @@ export function buildCapturedFields(context: WorkflowReportExportContext): Captu
       const captureDef = inputDef ? undefined : step?.captureFields?.find((item) => item.id === inputId);
       const featureId = inputDef?.featureId ?? captureDef?.featureId ?? step?.stepFeatureId;
       const feature = featureId ? featureMap.get(featureId) : undefined;
+      const inputType = inputDef?.type ?? (captureDef ? `capture:${captureDef.type}` : "unknown");
       rows.push({
         stepId: result.stepId,
         stepTitle: step?.title,
         iterationIndex: result.iterationIndex,
         inputId,
         inputLabel: inputDef?.label ?? captureDef?.label ?? inputId,
-        inputType: inputDef?.type ?? (captureDef ? `capture:${captureDef.type}` : "unknown"),
+        inputType,
         featureId,
         featureName: feature?.name,
         manufacturerPartNumber: feature?.manufacturerPartNumber,
         businessPartNumber: feature?.alternativePartNumber,
         fieldKey: captureDef?.key ?? inputDef?.id ?? inputId,
-        selectedValue: rawValue,
+        selectedValue: normalizeCapturedValueForDisplay(rawValue),
         allOptions: inputDef?.type === "choice" ? (inputDef.options ?? []) : undefined,
         capturedAt: result.completedAt,
       });

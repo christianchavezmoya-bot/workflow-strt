@@ -2,6 +2,7 @@ import {
   Alert,
   Box,
   Button,
+  Chip,
   Autocomplete,
   Checkbox,
   Dialog,
@@ -26,7 +27,7 @@ import {
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs from "dayjs";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -45,7 +46,15 @@ import { fetchCustomers } from "../../store/customersSlice";
 import { fetchProducts } from "../../store/productsSlice";
 import { fetchUsers } from "../../store/usersSlice";
 import { createProject, updateProject } from "../../store/projectSlice";
-import { ApprovalDecision, Office, Project, ProjectStatus, WorkflowMode } from "../../types/project";
+import {
+  ApprovalDecision,
+  Office,
+  Project,
+  ProjectScheduledReport,
+  ProjectScheduledReportFrequency,
+  ProjectStatus,
+  WorkflowMode,
+} from "../../types/project";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { ProductFeatureDefinition } from "../../types/product";
@@ -60,6 +69,34 @@ import type { FieldDefinition } from "../../services/fieldService";
 
 const getLocalDateString = (offsetDays = 0) => dayjs().add(offsetDays, "day").format("YYYY-MM-DD");
 const INSTALLATION_ENABLED_MODES: WorkflowMode[] = ["INSTALLATION_ONLY", "MIXED"];
+const SCHEDULE_DAY_OPTIONS = [
+  { value: "M", label: "M" },
+  { value: "T", label: "T" },
+  { value: "W", label: "W" },
+  { value: "TH", label: "T" },
+  { value: "F", label: "F" },
+  { value: "S", label: "S" },
+  { value: "SU", label: "S" },
+] as const;
+
+function defaultScheduledReport(): ProjectScheduledReport {
+  return {
+    enabled: false,
+    frequency: "weekly",
+    daysOfWeek: ["M", "W", "F"],
+    sendTimeLocal: "08:00",
+    recipientEmails: [],
+    assetClosedNotificationEnabled: false,
+    lastSentAtUtc: null,
+  };
+}
+
+function normalizeRecipientEmails(input: string): string[] {
+  return input
+    .split(/[\n,;]+/)
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
 
 const schema = z
   .object({
@@ -227,6 +264,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
 
   useEffect(() => {
     if (!id) {
+      setScheduledReport(defaultScheduledReport());
+      setScheduledRecipientsInput("");
       reset({
         customerName: "",
         customerId: "",
@@ -275,6 +314,9 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         teamMemberIds: localProject.teamMemberIds ?? []
       });
       setProductFeatureValues(localProject.productFeatureValues || {});
+      const nextScheduled = localProject.scheduledReport ?? defaultScheduledReport();
+      setScheduledReport(nextScheduled);
+      setScheduledRecipientsInput((nextScheduled.recipientEmails ?? []).join("\n"));
     }
 
     projectService.getProject(id).then((project) => {
@@ -301,6 +343,9 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         teamMemberIds: project.teamMemberIds ?? []
       });
       setProductFeatureValues(project.productFeatureValues || {});
+      const nextScheduled = project.scheduledReport ?? defaultScheduledReport();
+      setScheduledReport(nextScheduled);
+      setScheduledRecipientsInput((nextScheduled.recipientEmails ?? []).join("\n"));
     });
   }, [id, items, reset, globalOffices]);
 
@@ -346,6 +391,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const [dynamicFieldErrors, setDynamicFieldErrors] = useState<Record<string, string>>({});
   const [globalOfficePrompt, setGlobalOfficePrompt] = useState<{ country: string; managerName: string } | null>(null);
   const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
+  const [scheduledReport, setScheduledReport] = useState<ProjectScheduledReport>(defaultScheduledReport);
+  const [scheduledRecipientsInput, setScheduledRecipientsInput] = useState("");
 
   useEffect(() => {
     const nextIsInstallationProject = INSTALLATION_ENABLED_MODES.includes((workflowMode || "INSTALLATION_ONLY") as WorkflowMode);
@@ -650,7 +697,11 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
       teamMemberIds: data.teamMemberIds ?? [],
-      productFeatureValues
+      productFeatureValues,
+      scheduledReport: {
+        ...scheduledReport,
+        recipientEmails: normalizeRecipientEmails(scheduledRecipientsInput),
+      },
     };
 
     try {
@@ -1008,6 +1059,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         return (
           <Grid item xs={12} md={6} key={fieldId}>
             <FormControl fullWidth error={!!errors.customerName}>
+              <FormLabel>{labelWithRequired("customerName", labelCustomer)}</FormLabel>
               <Select
                 value={selectedCustomerId}
                 displayEmpty
@@ -1525,6 +1577,33 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     );
   };
 
+  const renderFieldSlot = (fieldId: string) => {
+    const field = renderFormField(fieldId);
+    if (!field || !isValidElement(field)) return null;
+    return cloneElement(field as any, {
+      xs: 12,
+      md: 12,
+    });
+  };
+
+  const leftColumnFieldIds = [
+    "jobNumber",
+    "purchaseOrderNumber",
+    "siteName",
+    "customerName",
+    cityFieldId,
+    "region",
+    "startDate",
+  ].filter((fieldId): fieldId is string => fieldId != null && visibleIdSet.has(fieldId));
+
+  const rightColumnFieldIds = [
+    "products",
+    "projectManager",
+    "teamMembers",
+    "timeZoneId",
+    "finishDate",
+  ].filter((fieldId) => visibleIdSet.has(fieldId));
+
   return (
     <Stack spacing={3}>
       <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" spacing={2}>
@@ -1545,28 +1624,147 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         <form onSubmit={handleSubmit(onSubmit, onInvalid)}>
           <LocalizationProvider dateAdapter={AdapterDayjs}>
           <Grid container spacing={2}>
-            {visibleIdSet.has("jobNumber") && renderFormField("jobNumber")}
-            {visibleIdSet.has("purchaseOrderNumber") && renderFormField("purchaseOrderNumber")}
-            {visibleIdSet.has("customerName") ? renderFormField("customerName") : <Grid item xs={12} md={6} />}
+            <Grid item xs={12} md={6}>
+              <Grid container spacing={2}>
+                {leftColumnFieldIds.map((fieldId) => renderFieldSlot(fieldId))}
+              </Grid>
+            </Grid>
 
-            {visibleIdSet.has("siteName") && renderFormField("siteName")}
-            {cityFieldId && visibleIdSet.has(cityFieldId) ? renderFormField(cityFieldId) : <Grid item xs={12} md={6} />}
+            <Grid item xs={12} md={6}>
+              <Grid container spacing={2}>
+                {rightColumnFieldIds.map((fieldId) => renderFieldSlot(fieldId))}
+                <Grid item xs={12}>
+                  <Box
+                    sx={{
+                      border: "1px solid rgba(45,212,191,0.28)",
+                      borderRadius: 3,
+                      p: 2,
+                      background: "linear-gradient(180deg, rgba(18,28,30,0.92), rgba(14,22,24,0.92))",
+                    }}
+                  >
+                    <Stack spacing={1.5}>
+                      <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={2}>
+                        <Typography variant="subtitle1" sx={{ fontFamily: "Sora", fontWeight: 700 }}>
+                          Scheduled Email Report
+                        </Typography>
+                        <FormControlLabel
+                          control={
+                            <Checkbox
+                              checked={scheduledReport.enabled}
+                              onChange={(event) =>
+                                setScheduledReport((prev) => ({ ...prev, enabled: event.target.checked }))
+                              }
+                            />
+                          }
+                          label="Enable"
+                        />
+                      </Stack>
 
-            {visibleIdSet.has("products") && renderFormField("products")}
-            <Grid item xs={12} md={6} />
+                      <Typography variant="caption" color="text.secondary">
+                        Email will be sent until the project scheduled finish date.
+                      </Typography>
 
-            {visibleIdSet.has("projectManager") && renderFormField("projectManager")}
-            {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}
+                      <FormControlLabel
+                        control={
+                          <Checkbox
+                            checked={Boolean(scheduledReport.assetClosedNotificationEnabled)}
+                            onChange={(event) =>
+                              setScheduledReport((prev) => ({
+                                ...prev,
+                                assetClosedNotificationEnabled: event.target.checked,
+                              }))
+                            }
+                            disabled={!scheduledReport.enabled}
+                          />
+                        }
+                        label="Asset closed email notification"
+                      />
 
-            {visibleIdSet.has("teamMembers") && renderFormField("teamMembers")}
-            {visibleIdSet.has("region") ? renderFormField("region") : <Grid item xs={12} md={6} />}
-            {visibleIdSet.has("timeZoneId") ? renderFormField("timeZoneId") : <Grid item xs={12} md={6} />}
-
-            {visibleIdSet.has("startDate") && renderFormField("startDate")}
-            {visibleIdSet.has("finishDate") ? renderFormField("finishDate") : <Grid item xs={12} md={6} />}
+                      <Grid container spacing={1.5}>
+                        <Grid item xs={12} sm={5}>
+                          <TextField
+                            select
+                            fullWidth
+                            size="small"
+                            label="Weekly/daily"
+                            value={scheduledReport.frequency}
+                            onChange={(event) =>
+                              setScheduledReport((prev) => ({
+                                ...prev,
+                                frequency: event.target.value as ProjectScheduledReportFrequency,
+                              }))
+                            }
+                            disabled={!scheduledReport.enabled}
+                          >
+                            <MenuItem value="daily">Daily</MenuItem>
+                            <MenuItem value="weekly">Weekly</MenuItem>
+                          </TextField>
+                        </Grid>
+                        <Grid item xs={12} sm={7}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            type="time"
+                            label="Scheduled time"
+                            value={scheduledReport.sendTimeLocal}
+                            onChange={(event) =>
+                              setScheduledReport((prev) => ({ ...prev, sendTimeLocal: event.target.value }))
+                            }
+                            disabled={!scheduledReport.enabled}
+                            InputLabelProps={{ shrink: true }}
+                          />
+                        </Grid>
+                        <Grid item xs={12}>
+                          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 0.75 }}>
+                            Scheduled Days (M-T-W-T-F-S-S)
+                          </Typography>
+                          <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
+                            {SCHEDULE_DAY_OPTIONS.map((day) => {
+                              const selected = scheduledReport.daysOfWeek.includes(day.value);
+                              return (
+                                <Chip
+                                  key={day.value}
+                                  label={day.label}
+                                  clickable={scheduledReport.enabled && scheduledReport.frequency === "weekly"}
+                                  color={selected ? "primary" : "default"}
+                                  variant={selected ? "filled" : "outlined"}
+                                  onClick={() => {
+                                    if (!scheduledReport.enabled || scheduledReport.frequency !== "weekly") return;
+                                    setScheduledReport((prev) => ({
+                                      ...prev,
+                                      daysOfWeek: prev.daysOfWeek.includes(day.value)
+                                        ? prev.daysOfWeek.filter((value) => value !== day.value)
+                                        : [...prev.daysOfWeek, day.value],
+                                    }));
+                                  }}
+                                  sx={{ minWidth: 36 }}
+                                />
+                              );
+                            })}
+                          </Stack>
+                        </Grid>
+                        <Grid item xs={12}>
+                          <TextField
+                            fullWidth
+                            size="small"
+                            multiline
+                            minRows={2}
+                            label="Add more recipients"
+                            value={scheduledRecipientsInput}
+                            onChange={(event) => setScheduledRecipientsInput(event.target.value)}
+                            disabled={!scheduledReport.enabled}
+                            helperText="Enter one email per line, or separate multiple emails with commas."
+                          />
+                        </Grid>
+                      </Grid>
+                    </Stack>
+                  </Box>
+                </Grid>
+              </Grid>
+            </Grid>
 
             {visibleIdSet.has("description") && renderFormField("description")}
-            <Grid item xs={12} md={6} />
+            {visibleIdSet.has("office") ? renderFormField("office") : <Grid item xs={12} md={6} />}
 
             {visibleIdSet.has("projectType") && renderFormField("projectType")}
             <Grid item xs={12} md={6} />

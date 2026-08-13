@@ -215,7 +215,8 @@ public class ProjectsController : ControllerBase
             MinimumCompletionPercent = Math.Clamp(request.MinimumCompletionPercent <= 0 ? 100 : request.MinimumCompletionPercent, 1, 100),
             ProductIds = request.ProductIds ?? new List<string>(),
             ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions),
-            TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions)
+            TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions),
+            ScheduledReportJson = request.ScheduledReport is null ? null : JsonSerializer.Serialize(request.ScheduledReport, JsonOptions),
         };
 
         _db.Projects.Add(project);
@@ -269,6 +270,7 @@ public class ProjectsController : ControllerBase
         project.ProductIds = request.ProductIds ?? new List<string>();
         project.ProductFeatureValuesJson = JsonSerializer.Serialize(request.ProductFeatureValues ?? new Dictionary<string, string>(), JsonOptions);
         project.TeamMemberIdsJson = JsonSerializer.Serialize(request.TeamMemberIds ?? new List<string>(), JsonOptions);
+        project.ScheduledReportJson = request.ScheduledReport is null ? null : JsonSerializer.Serialize(request.ScheduledReport, JsonOptions);
 
         await _db.SaveChangesAsync();
         string? siteName = null;
@@ -636,7 +638,10 @@ public class ProjectsController : ControllerBase
             project.DeletedAtUtc,
             project.DeletedByUserId,
             project.DeleteReason,
-            project.TimeZoneId
+            project.TimeZoneId,
+            string.IsNullOrWhiteSpace(project.ScheduledReportJson)
+                ? null
+                : JsonSerializer.Deserialize<ProjectScheduledReportDto>(project.ScheduledReportJson, JsonOptions)
         );
     }
 

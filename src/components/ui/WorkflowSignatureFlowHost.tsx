@@ -87,6 +87,7 @@ export default function WorkflowSignatureFlowHost({
           jobNumber={target.jobNumber}
           onClose={onClose}
           onSent={handleComplete}
+          onWaived={handleComplete}
         />
       )}
     </>

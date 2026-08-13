@@ -46,21 +46,47 @@ public class SignatureTokensController : ControllerBase
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == req.RunId);
         if (run is null) return NotFound(new { message = "Run not found." });
-        if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before requesting customer signature." });
+        if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before requesting a signature." });
         if (run.SignatureStatus == "Signed" || run.SignatureStatus == "Declined" || run.SignatureStatus == "WaivedCustomer")
-            return BadRequest(new { message = "Run is already finalized and cannot request customer signature." });
-        if (run.SignatureStatus != "PendingCustomer")
+            return BadRequest(new { message = "Run is already finalized and cannot request another signature." });
+
+        var signerRole = string.Equals(req.SignerRole, "Installer", StringComparison.OrdinalIgnoreCase)
+            ? "Installer"
+            : "Customer";
+
+        if (signerRole == "Customer" && run.SignatureStatus != "PendingCustomer")
             return BadRequest(new { message = "Customer signature can only be requested after installer sign-off." });
-        if (string.IsNullOrWhiteSpace(req.RecipientEmail))
-            return BadRequest(new { message = "Recipient email is required." });
+        if (signerRole == "Installer" && run.SignatureStatus != "PendingInstaller")
+            return BadRequest(new { message = "Installer signature can only be requested while installer sign-off is pending." });
 
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "unknown";
         var expiresHours = Math.Clamp(req.ExpiresInHours <= 0 ? 72 : req.ExpiresInHours, 1, 720);
         var now = DateTime.UtcNow;
-        var normalizedEmail = req.RecipientEmail.Trim();
-        var recipientName = req.RecipientName?.Trim();
         var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
         var assetLabel = asset?.AssetTag ?? asset?.AssetName ?? asset?.SerialNumber ?? "Asset";
+        var recipientEmail = req.RecipientEmail?.Trim();
+        var recipientName = req.RecipientName?.Trim();
+
+        if (signerRole == "Installer" && (string.IsNullOrWhiteSpace(recipientEmail) || string.IsNullOrWhiteSpace(recipientName)))
+        {
+            if (string.IsNullOrWhiteSpace(asset?.AssignedUserId))
+            {
+                return BadRequest(new { message = "This asset does not have an assigned installer." });
+            }
+
+            var assignedUser = await _db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == asset.AssignedUserId);
+            if (assignedUser is null || string.IsNullOrWhiteSpace(assignedUser.Email))
+            {
+                return BadRequest(new { message = "The assigned installer does not have an email address configured." });
+            }
+
+            recipientEmail = assignedUser.Email.Trim();
+            recipientName = string.IsNullOrWhiteSpace(recipientName) ? assignedUser.FullName?.Trim() : recipientName;
+        }
+
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+            return BadRequest(new { message = "Recipient email is required." });
+
         var baseUrl = (await _notificationSettings.GetFrontendBaseUrlAsync()).TrimEnd('/');
         var requestHostBaseUrl = GetRequestHostFrontendBaseUrl(Request.Scheme);
         var detectedLanBaseUrl = DetectLanFrontendBaseUrl(Request.Scheme);
@@ -82,8 +108,9 @@ public class SignatureTokensController : ControllerBase
         var token = new SignatureTokenEntity
         {
             RunId            = req.RunId,
+            SignerRole       = signerRole,
             ContactId        = req.ContactId,
-            RecipientEmail   = normalizedEmail,
+            RecipientEmail   = recipientEmail,
             RecipientName    = recipientName,
             CreatedByUserId  = userId,
             CreatedAtUtc     = now,
@@ -106,7 +133,9 @@ public class SignatureTokensController : ControllerBase
                     signLink,
                     assetLabel,
                     token.ExpiresAtUtc,
-                    req.CustomMessage);
+                    string.IsNullOrWhiteSpace(req.CustomMessage) && signerRole == "Installer"
+                        ? $"Please review the completed workflow for {assetLabel} and provide your installer sign-off using the link below."
+                        : req.CustomMessage);
             }
             catch (Exception ex)
             {
@@ -143,6 +172,7 @@ public class SignatureTokensController : ControllerBase
     private static SignatureTokenDto ToDto(SignatureTokenEntity t) => new(
         t.Id,
         t.RunId,
+        t.SignerRole,
         t.ContactId,
         t.RecipientEmail,
         t.RecipientName,

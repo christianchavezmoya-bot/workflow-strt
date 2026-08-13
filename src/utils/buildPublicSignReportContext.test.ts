@@ -13,6 +13,7 @@ function sampleSummary(overrides: Partial<PublicRunSummary> = {}): PublicRunSumm
     completedByName: "Juan Perez",
     completedAt: "2026-08-09T09:20:00.000Z",
     signatureStatus: "PendingCustomer",
+    signerRole: "Customer",
     recipientName: "Customer",
     recipientEmail: "customer@example.com",
     tokenValid: true,

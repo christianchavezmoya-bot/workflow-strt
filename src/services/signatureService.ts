@@ -8,7 +8,7 @@ import { randomId } from "../utils/randomId";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import { shouldSkipRunMutation } from "./connectivityMonitor";
 import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun, applyWebRunMutationCache } from "./assetWorkflowRunService";
-import { webCachedGet, invalidateWebCache } from "./webFreshCache";
+import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
 export interface SubmitSignaturePayload {
   signerRole: "Installer" | "Customer";
@@ -23,8 +23,9 @@ export interface SubmitSignaturePayload {
 
 export interface CreateTokenPayload {
   runId: string;
+  signerRole?: "Installer" | "Customer";
   contactId?: string;
-  recipientEmail: string;
+  recipientEmail?: string;
   recipientName?: string;
   expiresInHours: number;
   customMessage?: string;
@@ -257,6 +258,9 @@ export const signatureService = {
     if (!isMobileNativePlatform()) {
       const r = await api.post<SignatureToken>("/signature-tokens", payload);
       invalidateWebCache(`/signature-tokens?runId=${payload.runId}`);
+      invalidateWebCacheByPrefix("/asset-workflow-runs/pending-signatures");
+      window.dispatchEvent(new Event("notifications:run-state-changed"));
+      window.dispatchEvent(new Event("notifications:refresh"));
       return r.data;
     }
 

@@ -1,12 +1,14 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Options;
+using System.Text.Json;
 
 namespace Commtrac.Api.Services;
 
 public sealed class NotificationService
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
+
     private readonly AppDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly ISmsSender _smsSender;
@@ -44,18 +46,12 @@ public sealed class NotificationService
             var reportLink = string.IsNullOrWhiteSpace(frontendBase)
                 ? null
                 : $"{frontendBase}/projects/{asset.ProjectId}/installations";
-
-            var recipients = await _db.Users.AsNoTracking()
-                .Where(u => u.IsActive && (u.Role == "Admin" || u.Role == "Project Manager"))
-                .Select(u => u.Email)
-                .Where(email => !string.IsNullOrWhiteSpace(email))
-                .Distinct()
-                .ToListAsync(cancellationToken);
+            var recipients = await ResolveWorkflowCompletionRecipientsAsync(project, cancellationToken);
 
             if (recipients.Count == 0)
             {
                 _logger.LogInformation(
-                    "Workflow completion email skipped — no Admin/PM recipients for asset {AssetTag}",
+                    "Workflow completion email skipped: no configured recipients for asset {AssetTag}",
                     asset.AssetTag);
                 return;
             }
@@ -95,6 +91,69 @@ public sealed class NotificationService
             return;
         }
         await _emailSender.SendNotificationAsync(resolved.Value, subject, body);
+    }
+
+    private async Task<List<string>> ResolveWorkflowCompletionRecipientsAsync(
+        ProjectEntity? project,
+        CancellationToken cancellationToken)
+    {
+        if (project is null)
+        {
+            return [];
+        }
+
+        var recipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pmNameOrEmail = project.ProjectManager?.Trim();
+        if (!string.IsNullOrWhiteSpace(pmNameOrEmail))
+        {
+            if (pmNameOrEmail.Contains('@'))
+            {
+                recipients.Add(pmNameOrEmail);
+            }
+            else
+            {
+                var pmEmail = await _db.Users.AsNoTracking()
+                    .Where(u => u.IsActive && u.FullName == pmNameOrEmail)
+                    .Select(u => u.Email)
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (!string.IsNullOrWhiteSpace(pmEmail))
+                {
+                    recipients.Add(pmEmail);
+                }
+            }
+        }
+
+        var schedule = ParseScheduledReport(project.ScheduledReportJson);
+        if (schedule?.AssetClosedNotificationEnabled == true)
+        {
+            foreach (var email in schedule.RecipientEmails ?? [])
+            {
+                if (!string.IsNullOrWhiteSpace(email))
+                {
+                    recipients.Add(email.Trim());
+                }
+            }
+        }
+
+        return recipients.ToList();
+    }
+
+    private static ProjectScheduledReportDto? ParseScheduledReport(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            return JsonSerializer.Deserialize<ProjectScheduledReportDto>(json, JsonOptions);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     private async Task<(string Kind, string Value)?> ResolveRecipientAsync(string nameOrEmail)

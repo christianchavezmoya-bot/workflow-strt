@@ -96,6 +96,13 @@ export default function RunAmendDialog({ open, asset, run, projectId, onClose, o
   }, [features.length, run, table.columns, table.rows]);
 
   const editableColumns = useMemo(() => selectAmendableColumns(columns), [columns]);
+  const dirtyColumns = useMemo(
+    () => editableColumns.filter((column) => {
+      const draft = drafts[column.id];
+      return draft !== undefined && draft !== (cells[column.id] ?? "");
+    }),
+    [cells, drafts, editableColumns],
+  );
 
   const editableFeatureGroups = useMemo(
     () => groupCaptureColumnsByFeature(editableColumns, table.groups),
@@ -130,6 +137,12 @@ export default function RunAmendDialog({ open, asset, run, projectId, onClose, o
       setSavingColumnId(null);
     }
   }, [cells, drafts, loadHistory, onRunUpdated, run, user.email, user.fullName]);
+
+  const saveAllDirtyFields = useCallback(async () => {
+    for (const column of dirtyColumns) {
+      await saveField(column);
+    }
+  }, [dirtyColumns, saveField]);
 
   if (!run) {
     return (
@@ -284,6 +297,15 @@ export default function RunAmendDialog({ open, asset, run, projectId, onClose, o
         </DialogContent>
 
         <DialogActions>
+          {perms.data && editableColumns.length > 0 && (
+            <Button
+              variant="contained"
+              onClick={() => void saveAllDirtyFields()}
+              disabled={dirtyColumns.length === 0 || savingColumnId !== null}
+            >
+              Save changes
+            </Button>
+          )}
           <Button onClick={onClose}>Close</Button>
         </DialogActions>
       </Dialog>

@@ -91,6 +91,8 @@ import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
 import { entityGetAsset } from "../../services/localDB";
+import { signatureService } from "../../services/signatureService";
+import { notificationService } from "../../services/notificationService";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
@@ -572,6 +574,8 @@ const Dashboard = () => {
   );
   const issueDetailTimeZone = useProjectTimeZone(issueDetailProjectId);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
+  const [dashboardNotice, setDashboardNotice] = useState<string | null>(null);
+  const [installerReminderSentByRunId, setInstallerReminderSentByRunId] = useState<Record<string, boolean>>({});
   const [resolvingDashboardIssueId, setResolvingDashboardIssueId] = useState<string | null>(null);
   // Per-asset, not a shared boolean: with one flag every "View" button in Job
   // History span and disabled at once, so pressing one row looked like the app
@@ -1968,47 +1972,39 @@ const Dashboard = () => {
         return;
       }
 
-      if (isPendingInstallerSignature(run.signatureStatus)) {
-        markWorkflowOpenTap("dashboard-signoff-review", run.workflowConfigId);
-        setRunnerLoading(sig.assetId);
-        try {
-          const payload = await loadWorkflowOpenPayload(run.workflowConfigId, { id: asset.id }, {
-            workflowConfigIdForRun: run.workflowConfigId,
-            mergeMedia: true,
-          });
-          if (!payload) {
-            setDashboardError("Workflow config not found for sign-off review.");
-            return;
-          }
-          const proj = projectById.get(asset.projectId);
-          const dashAsset = {
-            id: asset.id,
-            projectId: asset.projectId,
-            jobNumber: sig.jobNumber || proj?.jobNumber || "",
-            assetTag: asset.assetTag,
-            assetName: asset.assetName,
-            assetModel: asset.assetModel,
-            location: asset.location,
-            status: asset.status,
-            historyStatus: "Active",
-            completedSteps: 0,
-            totalSteps: 0,
-            missingItems: 0,
-            workflowMode: proj?.workflowMode ?? "INSTALL",
-            isDeleted: false,
-            hasOpenIssues: false,
-            assignedUserId: asset.assignedUserId,
-          };
-          setRunnerExistingRunId(run.id);
-          setRunnerSignoffReviewMode(true);
-          setRunnerAsset(dashAsset);
-          setRunnerWorkflow(payload.workflow);
-          setRunnerWorkflowConfigId(run.workflowConfigId);
-          setRunnerOpen(true);
-          refreshWorkflowOpenDataInBackground(asset.id, run.workflowConfigId);
-        } finally {
-          setRunnerLoading((current) => (current === sig.assetId ? null : current));
+      if (isPendingInstallerSignature(run.signatureStatus) && isManager) {
+        if (!asset.assignedUserId) {
+          setDashboardError("This asset does not have an assigned installer.");
+          return;
         }
+
+        await signatureService.createToken({
+          runId: run.id,
+          signerRole: "Installer",
+          expiresInHours: 72,
+          customMessage: `Please review the completed workflow for ${asset.assetTag} and provide your installer sign-off using the link below.`,
+        });
+        await notificationService.create({
+          eventType: "installer-signature-reminder",
+          severity: "warning",
+          title: "Installer sign-off required",
+          message: `${asset.assetTag} on job ${sig.jobNumber || projectById.get(sig.projectId)?.jobNumber || "unknown"} is waiting for your sign-off.`,
+          recipientUserIds: [asset.assignedUserId],
+          projectId: asset.projectId,
+          assetId: asset.id,
+          runId: run.id,
+          entityType: "project-asset",
+          entityId: asset.id,
+        });
+        setInstallerReminderSentByRunId((prev) => ({ ...prev, [run.id]: true }));
+        window.setTimeout(() => {
+          setInstallerReminderSentByRunId((prev) => {
+            const next = { ...prev };
+            delete next[run.id];
+            return next;
+          });
+        }, 4000);
+        setDashboardNotice("Installer sign-off reminder sent.");
         return;
       }
 
@@ -2027,8 +2023,9 @@ const Dashboard = () => {
         action: "signature",
         runId: sig.runId,
       }));
-    } catch {
-      setDashboardError("Could not open sign-off. Check your connection and try again.");
+    } catch (err) {
+      const message = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setDashboardError(message || "Could not open sign-off. Check your connection and try again.");
     }
   }, [buildAssetRepairPath, isManager, navigate, projectById]);
 
@@ -3591,6 +3588,7 @@ const Dashboard = () => {
     actionLabel,
     customerLinkSentAt,
     projectTimeZoneId,
+    requestSent,
   }: {
     label: string;
     sub?: string;
@@ -3598,6 +3596,7 @@ const Dashboard = () => {
     actionLabel?: string;
     customerLinkSentAt?: string | null;
     projectTimeZoneId?: string | null;
+    requestSent?: boolean;
   }) => (
     <Stack
       direction="row"
@@ -3618,6 +3617,17 @@ const Dashboard = () => {
       </Box>
       {actionLabel && (
         <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
+          {requestSent && (
+            <Stack direction="row" spacing={0.35} alignItems="center">
+              <CheckCircleOutlined
+                sx={{ fontSize: 16, color: "success.main" }}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <Typography variant="caption" color="success.main" sx={{ fontSize: "0.6rem" }}>
+                Request sent
+              </Typography>
+            </Stack>
+          )}
           {customerLinkSentAt && (
             <Tooltip
               title={`Link sent ${formatInstant(customerLinkSentAt, projectTimeZoneId, { withZone: true })}`}
@@ -3746,6 +3756,7 @@ const Dashboard = () => {
                     label={assetAttentionLabel(s)}
                     sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                     actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
+                    requestSent={Boolean(isManager && isPendingInstallerSignature(s.signatureStatus) && installerReminderSentByRunId[s.runId])}
                     {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
                       ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
                       : {})}
@@ -6890,6 +6901,16 @@ const Dashboard = () => {
       >
         <Alert severity="error" onClose={() => setDashboardError(null)} sx={{ width: "100%" }}>
           {dashboardError}
+        </Alert>
+      </Snackbar>
+      <Snackbar
+        open={!!dashboardNotice}
+        autoHideDuration={5000}
+        onClose={() => setDashboardNotice(null)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert severity="success" onClose={() => setDashboardNotice(null)} sx={{ width: "100%" }}>
+          {dashboardNotice}
         </Alert>
       </Snackbar>
 

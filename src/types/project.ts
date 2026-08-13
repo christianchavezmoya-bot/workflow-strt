@@ -21,6 +21,18 @@ export type ProjectStatus =
 
 export type WorkflowMode = "INSTALLATION_ONLY" | "INSPECTION_ONLY" | "MIXED";
 
+export type ProjectScheduledReportFrequency = "daily" | "weekly";
+
+export interface ProjectScheduledReport {
+  enabled: boolean;
+  frequency: ProjectScheduledReportFrequency;
+  daysOfWeek: string[];
+  sendTimeLocal: string;
+  recipientEmails: string[];
+  assetClosedNotificationEnabled?: boolean;
+  lastSentAtUtc?: string | null;
+}
+
 export interface Project {
   id: string;
   customerName: string;
@@ -62,6 +74,7 @@ export interface Project {
   deletedAtUtc?: string;
   deletedByUserId?: string;
   deleteReason?: string;
+  scheduledReport?: ProjectScheduledReport | null;
 }
 
 // ── Inspection Imports ────────────────────────────────────────────────────────

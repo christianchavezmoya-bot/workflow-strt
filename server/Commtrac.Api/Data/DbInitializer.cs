@@ -42,6 +42,8 @@ public static class DbInitializer
             EnsureFeatureProcurementColumns(db);
             EnsureProjectMinimumCompletionPercentColumn(db);
             EnsureProjectTimeZoneColumn(db);
+            EnsureProjectScheduledReportColumn(db);
+            EnsureSignatureTokenSignerRoleColumn(db);
             // Must run before any query touches InspectionImports (dashboard-workspace does).
             EnsureInspectionImportColumnNames(db);
             EnsureNotificationInboxTable(db);
@@ -841,6 +843,46 @@ public static class DbInitializer
             if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
             {
                 cmd.CommandText = "ALTER TABLE Projects ADD COLUMN TimeZoneId TEXT NULL";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureProjectScheduledReportColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='ScheduledReportJson'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE Projects ADD COLUMN ScheduledReportJson TEXT NULL";
+                cmd.ExecuteNonQuery();
+            }
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureSignatureTokenSignerRoleColumn(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = "SELECT COUNT(*) FROM pragma_table_info('SignatureTokens') WHERE name='SignerRole'";
+            if (Convert.ToInt64(cmd.ExecuteScalar()) == 0)
+            {
+                cmd.CommandText = "ALTER TABLE SignatureTokens ADD COLUMN SignerRole TEXT NOT NULL DEFAULT 'Customer'";
                 cmd.ExecuteNonQuery();
             }
         }

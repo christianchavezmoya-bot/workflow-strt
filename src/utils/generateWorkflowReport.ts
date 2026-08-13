@@ -21,6 +21,7 @@ import type { SignatureEvent } from "../types/signature";
 import { getMissingWorkflowItems } from "./workflowCompleteness";
 import { openObjectUrl } from "./printWindow";
 import { formatInstant, resolveProjectTimeZone, zoneAbbreviation } from "./datetime";
+import { normalizeCapturedValueForDisplay } from "./capturedValueFormat";
 import { normalizeBinaryDataUrl } from "./reportMediaResolve";
 
 // â”€â”€â”€ Colour palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -753,9 +754,10 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           const IMPORT_LABELS: Record<string, string> = { value: "Measured Value", unit: "Unit", pass: "Result", notes: "Notes" };
           for (const [inputId, val] of entries) {
             const label   = IMPORT_LABELS[inputId] ?? inputId;
+            const displayValue = normalizeCapturedValueForDisplay(val);
             const display = inputId === "pass"
               ? (val === "true" ? "✓ Pass" : "✗ Fail")
-              : (val === "true" ? "Yes" : val === "false" ? "No" : val);
+              : (displayValue === "true" ? "Yes" : displayValue === "false" ? "No" : displayValue);
             bodyRows.push([label, display]);
           }
         } else {
@@ -828,7 +830,8 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             continue;
           }
 
-          const display = val === "true" ? "Yes" : val === "false" ? "No" : (val || "-");
+          const displayValue = normalizeCapturedValueForDisplay(val);
+          const display = displayValue === "true" ? "Yes" : displayValue === "false" ? "No" : (displayValue || "-");
           bodyRows.push([label, display]);
         }
 
@@ -837,7 +840,8 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           const val = values[captureDef.id];
           const missing = missingItems.get(captureDef.id);
           const label = captureDef.label ?? captureDef.key ?? captureDef.id;
-          bodyRows.push([label, missing ? "MISSING - required capture not provided" : (val || "-")]);
+          const displayValue = normalizeCapturedValueForDisplay(val);
+          bodyRows.push([label, missing ? "MISSING - required capture not provided" : (displayValue || "-")]);
           handledIds.add(captureDef.id);
         }
 
@@ -847,9 +851,10 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           const inputDef   = inputDefs.find((i) => i.id === inputId);
           const captureDef = !inputDef ? (step.captureFields ?? []).find((f) => f.id === inputId) : undefined;
           const label      = inputDef?.label ?? captureDef?.label ?? IMPORT_LABELS[inputId] ?? inputId;
+          const displayValue = normalizeCapturedValueForDisplay(val);
           const display = inputId === "pass"
             ? (val === "true" ? "✓ Pass" : "✗ Fail")
-            : (val === "true" ? "Yes" : val === "false" ? "No" : val);
+            : (displayValue === "true" ? "Yes" : displayValue === "false" ? "No" : displayValue);
           bodyRows.push([label, display]);
         }
         } // end normal workflow completion block
