@@ -45,7 +45,9 @@ chmod +x scripts/standup-staging.sh
 | MinIO console | http://localhost:9001 | `commtrac` / `commtrac_dev` |
 | Web (with `--build-web`) | http://localhost:5174 | nginx serving `dist/` |
 
-**Login:** `admin@commtrac.local` / `Admin123!`
+**Login:** `admin@StrataNgo.local` / `Admin123!` (PM: `project.manager@StrataNgo.local` / `Pm123!`)
+
+Fresh Docker volume seeds: 2 offices, 2 customers (BHP/Mining), 3 Strata divisions, 6 products, `Chambers_default` workflow. No tips/documents.
 
 ### Web without nginx
 

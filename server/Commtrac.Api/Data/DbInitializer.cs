@@ -71,36 +71,45 @@ public static class DbInitializer
             EnsureNotificationSettingsResendFrom(db);
         }
 
+        var strataNgoSeed = StrataNgoSeeder.IsEnabled(config);
+
         if (!db.Users.Any())
         {
-            var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
-            var adminPassword = ResolveSeedAdminPassword(config);
-            var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
-            var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
-
-            db.Users.Add(new UserEntity
+            if (strataNgoSeed)
             {
-                Email = adminEmail,
-                FullName = adminFullName,
-                Role = "Admin",
-                Office = "USA",
-                IsActive = true,
-                IsFirstLogin = false,
-                PasswordHash = passwordHash
-            });
-
-            db.Users.Add(new UserEntity
+                StrataNgoSeeder.SeedFreshDatabase(db, config);
+            }
+            else
             {
-                Email = "pm@commtrac.local",
-                FullName = "Project Manager",
-                Role = "Project Manager",
-                Office = "USA",
-                IsActive = true,
-                IsFirstLogin = false,
-                PasswordHash = BCrypt.Net.BCrypt.HashPassword("Pm123!")
-            });
+                var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
+                var adminPassword = ResolveSeedAdminPassword(config);
+                var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
+                var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
+
+                db.Users.Add(new UserEntity
+                {
+                    Email = adminEmail,
+                    FullName = adminFullName,
+                    Role = "Admin",
+                    Office = "USA",
+                    IsActive = true,
+                    IsFirstLogin = false,
+                    PasswordHash = passwordHash
+                });
+
+                db.Users.Add(new UserEntity
+                {
+                    Email = "pm@commtrac.local",
+                    FullName = "Project Manager",
+                    Role = "Project Manager",
+                    Office = "USA",
+                    IsActive = true,
+                    IsFirstLogin = false,
+                    PasswordHash = BCrypt.Net.BCrypt.HashPassword("Pm123!")
+                });
+            }
         }
-        else
+        else if (!strataNgoSeed)
         {
             var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
             var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
@@ -114,9 +123,12 @@ public static class DbInitializer
         // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
         // Removed default customers to avoid conflicts
 
-        CleanupSeederArtifacts(db);
-        SeedDivisions(db);
-        SeedProducts(db);
+        if (!strataNgoSeed)
+        {
+            CleanupSeederArtifacts(db);
+            SeedDivisions(db);
+            SeedProducts(db);
+        }
         db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
 
         EnsureAim100Features(db);
