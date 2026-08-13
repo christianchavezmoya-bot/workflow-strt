@@ -433,10 +433,10 @@ function printWorkflowPreview(cfg: WorkflowConfig, productName: string) {
     )
     .join("");
 
-  const html = `<html><head><title>Work Instruction - ${escapeHtml(cfg.name)}</title>
+  const html = `<html><head><title>Workflow - ${escapeHtml(cfg.name)}</title>
     <style>body{font-family:Arial,sans-serif;padding:30px;color:#1a1a1a}@media print{body{padding:0}}</style>
     </head><body>
-    <h2 style="margin:0 0 4px">Work Instruction: ${escapeHtml(cfg.name)}</h2>
+    <h2 style="margin:0 0 4px">Workflow: ${escapeHtml(cfg.name)}</h2>
     <p style="margin:0 0 16px;font-size:13px;color:#666">
       Product: ${escapeHtml(productName)}&nbsp;|&nbsp;
       Configuration Type: ${escapeHtml(cfg.configType ?? "-")}&nbsp;|&nbsp;
@@ -571,7 +571,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
           <Box sx={{ p: 3, flex: 1 }}>
             <Alert severity="info">
               {!workflow
-                ? "No workflow steps defined for this work instruction."
+                ? "No workflow steps defined yet."
                 : "This workflow has no steps defined yet."}
             </Alert>
           </Box>
@@ -1300,7 +1300,7 @@ const WorkInstructions = () => {
           >
             <ToggleButton value="instructions">
               <FormatListBulletedOutlined fontSize="small" sx={{ mr: 0.75 }} />
-              Instructions
+              List
             </ToggleButton>
             {wiCan.build && (
               <ToggleButton value="builder">
@@ -1386,7 +1386,7 @@ const WorkInstructions = () => {
                 <Stack direction={{ xs: "column", md: "row" }} spacing={1} alignItems={{ md: "center" }} sx={{ width: "100%" }}>
                   <TextField
                     size="small"
-                    placeholder="Search work instructions…"
+                    placeholder="Search workflows…"
                     value={configSearch}
                     onChange={(e) => setConfigSearch(e.target.value)}
                     InputProps={{
@@ -1433,7 +1433,7 @@ const WorkInstructions = () => {
                 </Stack>
                 {wiCan.build && (
                   <Button variant="contained" size="small" onClick={openNewConfig}>
-                    + New Work Instruction
+                    + New Workflow
                   </Button>
                 )}
               </Stack>
@@ -1441,8 +1441,8 @@ const WorkInstructions = () => {
               {filteredConfigs.length === 0 ? (
                 <Alert severity="info">
                   {configs.length === 0
-                    ? `No work instructions yet for ${activeProduct.name}. Click "+ New Work Instruction" to create one.`
-                    : "No work instructions match the search."}
+                    ? `No workflows yet for ${activeProduct.name}. Click "+ New Workflow" to create one.`
+                    : "No workflows match the search."}
                 </Alert>
               ) : isPhone ? (
                 <Stack spacing={1.25}>
@@ -1718,23 +1718,23 @@ const WorkInstructions = () => {
         />
       )}
 
-      {/* Work instruction create/edit dialog */}
+      {/* Workflow create/edit dialog */}
       <Dialog
         open={configDialogOpen}
         onClose={() => !configSaving && closeConfigDialog()}
         maxWidth="sm"
         fullWidth
       >
-        <DialogTitle>{editingConfig ? "Edit Work Instruction" : "New Work Instruction"}</DialogTitle>
+        <DialogTitle>{editingConfig ? "Edit Workflow" : "New Workflow"}</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             {!editingConfig && (
               <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
-                New work instructions are created as <strong>Draft</strong>. Use the Builder to add steps, then publish when ready.
+                New workflows are created as <strong>Draft</strong>. Use the Builder to add steps, then publish when ready.
               </Alert>
             )}
             <TextField
-              label="Work Instruction Name"
+              label="Workflow Name"
               value={configForm.name}
               onChange={(e) => setConfigForm((p) => ({ ...p, name: e.target.value }))}
               fullWidth
@@ -1829,7 +1829,7 @@ const WorkInstructions = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Delete Work Instruction?</DialogTitle>
+        <DialogTitle>Delete Workflow?</DialogTitle>
         <DialogContent>
           {deleteConfig?.status === "Published" && (
             <Alert severity="warning" sx={{ mb: 1.5 }}>
@@ -1854,7 +1854,7 @@ const WorkInstructions = () => {
         maxWidth="xs"
         fullWidth
       >
-        <DialogTitle>Archive Work Instruction?</DialogTitle>
+        <DialogTitle>Archive Workflow?</DialogTitle>
         <DialogContent>
           <Alert severity="info" sx={{ mb: 1.5 }}>
             Archiving keeps the workflow and all its run history, but retires it: it can no longer be assigned to new assets, and it's hidden from this list unless you tick <strong>Show archived</strong>. Existing runs are unaffected.

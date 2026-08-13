@@ -1051,13 +1051,13 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       {/* Read-only banner for Published/Archived */}
       {isReadOnly && (
         <Alert severity={currentConfig?.status === "Archived" ? "warning" : "info"}>
-          This work instruction is <strong>{currentConfig?.status}</strong> and is read-only.
+          This workflow is <strong>{currentConfig?.status}</strong> and is read-only.
           {currentConfig?.status === "Published" && " Use \"Create new version\" from the instructions list to make changes."}
         </Alert>
       )}
       {!initialConfigId && (
         <Alert severity="info">
-          Select a work instruction from the list to start editing, or create a new one.
+          Select a workflow from the list to start editing, or create a new one.
         </Alert>
       )}
       {/* Toolbar */}
@@ -1091,7 +1091,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           {onNewConfig && (
             <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={onNewConfig}>
-              New Work Instruction
+              New Workflow
             </Button>
           )}
           <Button
@@ -1371,15 +1371,15 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       >
         <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
           <PublishOutlined color="primary" />
-          Publish Work Instruction
+          Publish Workflow
         </DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
             <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
-              Review and confirm details before publishing. Once published, this work instruction will be <strong>locked</strong> and ready to assign to assets.
+              Review and confirm details before publishing. Once published, this workflow will be <strong>locked</strong> and ready to assign to assets.
             </Alert>
             <TextField
-              label="Work Instruction Name"
+              label="Workflow Name"
               value={publishForm.name}
               onChange={(e) => setPublishForm((p) => ({ ...p, name: e.target.value }))}
               fullWidth
