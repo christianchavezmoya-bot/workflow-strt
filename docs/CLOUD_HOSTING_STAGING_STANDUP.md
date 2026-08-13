@@ -11,7 +11,7 @@ Pre-deploy gate (web + phone): [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD
 
 **Windows field agent:** copy [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) (PROMPT START → PROMPT END) into Cursor on your PC.
 
-**Mac field agent:** copy [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) (PROMPT START → PROMPT END) into Cursor on your Mac.
+**Mac field agent:** copy [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) (**PROMPT START → PROMPT END**) into Cursor on your Mac. The agent runs all terminal steps itself, including `git pull --no-rebase origin main` when branches diverge.
 
 ---
 

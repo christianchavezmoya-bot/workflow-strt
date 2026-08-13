@@ -59,7 +59,7 @@ cat <<EOF
   API:          http://localhost:8080/api
   Health:       http://localhost:8080/api/health
   MinIO console http://localhost:9001  (commtrac / commtrac_dev)
-  Login:        admin@commtrac.local / Admin123!
+  Login:        admin@StrataNgo.local / Admin123!
 
 EOF
 
