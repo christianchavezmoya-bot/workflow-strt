@@ -24,7 +24,15 @@ public static class DbInitializer
             FixEnsuredMigrations(db);
         }
 
-        db.Database.Migrate();
+        var runMigrations = config.GetValue("Database:RunMigrationsOnStartup", true);
+        if (runMigrations)
+        {
+            db.Database.Migrate();
+        }
+        else
+        {
+            Console.WriteLine("[DB] Skipping EF Migrate() — Database:RunMigrationsOnStartup=false (use CI/job before instance boot).");
+        }
 
         if (isSqlite)
         {
@@ -55,6 +63,12 @@ public static class DbInitializer
             EnsureSoftDeleteColumns(db);
             EnsureNotificationSettingsResendFrom(db);
             EnsurePushDeviceTokensTable(db);
+        }
+        else if (db.Database.IsNpgsql())
+        {
+            PostgresSchemaEnsurer.EnsureSchema(db);
+            EnsureLinkableKeyFieldDefinitions(db);
+            EnsureNotificationSettingsResendFrom(db);
         }
 
         if (!db.Users.Any())

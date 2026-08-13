@@ -1,0 +1,87 @@
+# Full local staging stack — Postgres + MinIO + API (cloud profile parity).
+# Does NOT replace AWS staging; use this to verify before AWS cutover.
+#
+# Start:  ./scripts/standup-staging.sh   or   .\scripts\standup-staging.ps1
+# Stop:   docker compose -f docker-compose.staging.yml down
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: commtrac-staging-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: commtrac
+      POSTGRES_PASSWORD: commtrac_dev
+      POSTGRES_DB: commtrac
+    volumes:
+      - commtrac_staging_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commtrac -d commtrac"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+    container_name: commtrac-staging-minio
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    environment:
+      MINIO_ROOT_USER: commtrac
+      MINIO_ROOT_PASSWORD: commtrac_dev
+    volumes:
+      - commtrac_staging_minio:/data
+
+  minio-setup:
+    image: minio/mc:RELEASE.2025-04-22T08-00-08Z
+    container_name: commtrac-staging-minio-setup
+    depends_on:
+      minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 commtrac commtrac_dev 2>/dev/null; do sleep 2; done;
+      mc mb --ignore-existing local/commtrac-staging;
+      echo 'Bucket commtrac-staging ready';
+      "
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: commtrac-staging-api
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      ASPNETCORE_ENVIRONMENT: StagingDocker
+      AWS_ACCESS_KEY_ID: commtrac
+      AWS_SECRET_ACCESS_KEY: commtrac_dev
+      AWS_EC2_METADATA_DISABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio-setup:
+        condition: service_completed_successfully
+
+  web:
+    profiles: ["with-web"]
+    image: nginx:1.27-alpine
+    container_name: commtrac-staging-web
+    restart: unless-stopped
+    ports:
+      - "5174:80"
+    volumes:
+      - ./dist:/usr/share/nginx/html:ro
+      - ./infra/staging/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      api:
+        condition: service_started
+
+volumes:
+  commtrac_staging_pgdata:
+  commtrac_staging_minio:

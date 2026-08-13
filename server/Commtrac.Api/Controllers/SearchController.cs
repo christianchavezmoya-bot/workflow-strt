@@ -4,7 +4,6 @@ using Commtrac.Api.Models;
 using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 
 namespace Commtrac.Api.Controllers;
@@ -387,87 +386,14 @@ public class SearchController : ControllerBase
         }
     }
 
-    private async Task<List<IndexedChunkRow>> QueryIndexRowsByFirstTermAsync(string firstTerm, int maxRows)
-    {
-        var rows = new List<IndexedChunkRow>();
-        var connection = (SqliteConnection)_db.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-        {
-            await connection.OpenAsync();
-        }
+    private Task<List<IndexedChunkRow>> QueryIndexRowsByFirstTermAsync(string firstTerm, int maxRows)
+        => SearchDocumentChunksStore.QueryByFirstTermAsync(_db, firstTerm, maxRows);
 
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = @"
-SELECT SourceType, SourceId, Context, ChunkText, ChunkOrder
-FROM SearchDocumentChunks
-WHERE lower(ChunkText) LIKE @needle
-ORDER BY UpdatedAt DESC, ChunkOrder ASC
-LIMIT @maxRows;";
-
-        cmd.Parameters.AddWithValue("@needle", $"%{firstTerm.ToLowerInvariant()}%");
-        cmd.Parameters.AddWithValue("@maxRows", Math.Clamp(maxRows, 50, 2000));
-
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            rows.Add(new IndexedChunkRow(
-                SourceType: reader.GetString(0),
-                SourceId: reader.GetString(1),
-                Context: reader.GetString(2),
-                ChunkText: reader.GetString(3),
-                ChunkOrder: reader.GetInt32(4)
-            ));
-        }
-
-        return rows;
-    }
-
-    private async Task<List<IndexedChunkRow>> QueryIndexRowsBySourceAsync(string sourceType, string sourceId, int maxRows)
-    {
-        var rows = new List<IndexedChunkRow>();
-        var connection = (SqliteConnection)_db.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-        {
-            await connection.OpenAsync();
-        }
-
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = @"
-SELECT SourceType, SourceId, Context, ChunkText, ChunkOrder
-FROM SearchDocumentChunks
-WHERE SourceType = @sourceType AND SourceId = @sourceId
-ORDER BY ChunkOrder ASC
-LIMIT @maxRows;";
-        cmd.Parameters.AddWithValue("@sourceType", sourceType);
-        cmd.Parameters.AddWithValue("@sourceId", sourceId);
-        cmd.Parameters.AddWithValue("@maxRows", Math.Clamp(maxRows, 20, 2000));
-
-        await using var reader = await cmd.ExecuteReaderAsync();
-        while (await reader.ReadAsync())
-        {
-            rows.Add(new IndexedChunkRow(
-                SourceType: reader.GetString(0),
-                SourceId: reader.GetString(1),
-                Context: reader.GetString(2),
-                ChunkText: reader.GetString(3),
-                ChunkOrder: reader.GetInt32(4)
-            ));
-        }
-
-        return rows;
-    }
+    private Task<List<IndexedChunkRow>> QueryIndexRowsBySourceAsync(string sourceType, string sourceId, int maxRows)
+        => SearchDocumentChunksStore.QueryBySourceAsync(_db, sourceType, sourceId, maxRows);
 
     private Task EnsureIndexTableExistsAsync()
-        => _db.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
-    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-    SourceType TEXT NOT NULL,
-    SourceId TEXT NOT NULL,
-    Context TEXT NOT NULL,
-    ChunkText TEXT NOT NULL,
-    ChunkOrder INTEGER NOT NULL,
-    UpdatedAt TEXT NOT NULL
-);");
+        => SearchDocumentChunksStore.EnsureTableAsync(_db);
 
     private static List<string> ParseTerms(string query)
     {
@@ -830,14 +756,6 @@ CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
         return true;
     }
 }
-
-internal record IndexedChunkRow(
-    string SourceType,
-    string SourceId,
-    string Context,
-    string ChunkText,
-    int ChunkOrder
-);
 
 public record GlobalSearchResultDto(
     string Id,

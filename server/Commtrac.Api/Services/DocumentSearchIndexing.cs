@@ -2,9 +2,7 @@ using System.Threading.Channels;
 using System.Diagnostics.CodeAnalysis;
 using Commtrac.Api.Data;
 using Commtrac.Api.Services.Storage;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 
 namespace Commtrac.Api.Services;
 
@@ -331,8 +329,7 @@ public class DocumentSearchIndexWorker : BackgroundService
 
         foreach (var doc in docs)
         {
-            var fullPath = files.GetAbsolutePath(doc.FilePath!);
-            await IndexSourceAsync(db, extractor, SourceLibrary, doc.Id, fullPath, ct);
+            await IndexSourceAsync(db, extractor, files, SourceLibrary, doc.Id, doc.FilePath!, ct);
             processed++;
             _status.OnRebuildProgress(processed, total);
         }
@@ -340,8 +337,8 @@ public class DocumentSearchIndexWorker : BackgroundService
         foreach (var ad in assetDocs)
         {
             if (!latestByDoc.TryGetValue(ad.Id, out var rev)) continue;
-            var fullPath = files.GetAbsolutePath(files.BuildRelativePath("Storage", "Documents", ad.AssetId, rev.StoredName));
-            await IndexSourceAsync(db, extractor, SourceAsset, ad.Id, fullPath, ct);
+            var relativePath = files.BuildRelativePath("Storage", "Documents", ad.AssetId, rev.StoredName);
+            await IndexSourceAsync(db, extractor, files, SourceAsset, ad.Id, relativePath, ct);
             processed++;
             _status.OnRebuildProgress(processed, total);
         }
@@ -358,8 +355,7 @@ public class DocumentSearchIndexWorker : BackgroundService
         var doc = await db.Documents.AsNoTracking().FirstOrDefaultAsync(d => d.Id == docId, ct);
         if (doc is null || string.IsNullOrWhiteSpace(doc.FilePath)) return;
 
-        var fullPath = files.GetAbsolutePath(doc.FilePath);
-        await IndexSourceAsync(db, extractor, SourceLibrary, docId, fullPath, ct);
+        await IndexSourceAsync(db, extractor, files, SourceLibrary, docId, doc.FilePath, ct);
     }
 
     private async Task IndexAssetDocumentAsync(
@@ -384,8 +380,8 @@ public class DocumentSearchIndexWorker : BackgroundService
 
             if (latest is null) return;
 
-            var fullPath = files.GetAbsolutePath(files.BuildRelativePath("Storage", "Documents", assetDoc.AssetId, latest.StoredName));
-            await IndexSourceAsync(db, extractor, SourceAsset, assetDocId, fullPath, ct);
+            var relativePath = files.BuildRelativePath("Storage", "Documents", assetDoc.AssetId, latest.StoredName);
+            await IndexSourceAsync(db, extractor, files, SourceAsset, assetDocId, relativePath, ct);
         }
         catch
         {
@@ -393,17 +389,20 @@ public class DocumentSearchIndexWorker : BackgroundService
         }
     }
 
-    private async Task IndexSourceAsync(
+    private static async Task IndexSourceAsync(
         AppDbContext db,
         IDocumentContentSearchService extractor,
+        IFileStorageService files,
         string sourceType,
         string sourceId,
-        string fullPath,
+        string relativePath,
         CancellationToken ct)
     {
-        if (!File.Exists(fullPath)) return;
+        if (!files.Exists(relativePath)) return;
 
-        var segments = await extractor.ExtractSegmentsAsync(fullPath, ct);
+        await using var stream = files.OpenRead(relativePath);
+        var fileName = Path.GetFileName(relativePath);
+        var segments = await extractor.ExtractSegmentsAsync(stream, fileName, ct);
         if (segments.Count == 0) return;
 
         var chunks = BuildChunks(segments);
@@ -454,45 +453,7 @@ public class DocumentSearchIndexWorker : BackgroundService
         List<(string Context, string Text, int ChunkOrder)> chunks,
         CancellationToken ct)
     {
-        await using var tx = await db.Database.BeginTransactionAsync(ct);
-        var connection = (SqliteConnection)db.Database.GetDbConnection();
-        if (connection.State != System.Data.ConnectionState.Open)
-        {
-            await connection.OpenAsync(ct);
-        }
-
-        await using var cmd = connection.CreateCommand();
-        cmd.Transaction = (SqliteTransaction?)tx.GetDbTransaction();
-        cmd.CommandText =
-            "INSERT INTO SearchDocumentChunks (SourceType, SourceId, Context, ChunkText, ChunkOrder, UpdatedAt) " +
-            "VALUES (@sourceType, @sourceId, @context, @chunkText, @chunkOrder, @updatedAt);";
-
-        var pSourceType = cmd.CreateParameter(); pSourceType.ParameterName = "@sourceType";
-        var pSourceId = cmd.CreateParameter(); pSourceId.ParameterName = "@sourceId";
-        var pContext = cmd.CreateParameter(); pContext.ParameterName = "@context";
-        var pChunkText = cmd.CreateParameter(); pChunkText.ParameterName = "@chunkText";
-        var pChunkOrder = cmd.CreateParameter(); pChunkOrder.ParameterName = "@chunkOrder";
-        var pUpdatedAt = cmd.CreateParameter(); pUpdatedAt.ParameterName = "@updatedAt";
-        cmd.Parameters.Add(pSourceType);
-        cmd.Parameters.Add(pSourceId);
-        cmd.Parameters.Add(pContext);
-        cmd.Parameters.Add(pChunkText);
-        cmd.Parameters.Add(pChunkOrder);
-        cmd.Parameters.Add(pUpdatedAt);
-
-        var now = DateTime.UtcNow.ToString("O");
-        foreach (var chunk in chunks)
-        {
-            pSourceType.Value = sourceType;
-            pSourceId.Value = sourceId;
-            pContext.Value = chunk.Context;
-            pChunkText.Value = chunk.Text;
-            pChunkOrder.Value = chunk.ChunkOrder;
-            pUpdatedAt.Value = now;
-            await cmd.ExecuteNonQueryAsync(ct);
-        }
-
-        await tx.CommitAsync(ct);
+        await SearchDocumentChunksStore.InsertChunksAsync(db, sourceType, sourceId, chunks, ct);
     }
 
     private static Task DeleteSourceChunksAsync(AppDbContext db, string sourceType, string sourceId, CancellationToken ct)
@@ -502,19 +463,6 @@ public class DocumentSearchIndexWorker : BackgroundService
     {
         using var scope = _scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-        await db.Database.ExecuteSqlRawAsync(@"
-CREATE TABLE IF NOT EXISTS SearchDocumentChunks (
-    Id INTEGER PRIMARY KEY AUTOINCREMENT,
-    SourceType TEXT NOT NULL,
-    SourceId TEXT NOT NULL,
-    Context TEXT NOT NULL,
-    ChunkText TEXT NOT NULL,
-    ChunkOrder INTEGER NOT NULL,
-    UpdatedAt TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS IX_SearchDocumentChunks_Source ON SearchDocumentChunks(SourceType, SourceId);
-CREATE INDEX IF NOT EXISTS IX_SearchDocumentChunks_Order ON SearchDocumentChunks(SourceType, SourceId, ChunkOrder);
-", ct);
+        await SearchDocumentChunksStore.EnsureTableAsync(db, ct);
     }
 }

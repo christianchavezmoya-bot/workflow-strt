@@ -39,6 +39,41 @@
         "ASPNETCORE_ENVIRONMENT": "Development",
         "ENABLE_BOM_PROJECT_MODULE": "true"
       }
+    },
+    "PostgresLocal": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:4000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "PostgresLocal",
+        "ENABLE_BOM_PROJECT_MODULE": "true"
+      }
+    },
+    "S3Local": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:4000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "S3Local",
+        "AWS_ACCESS_KEY_ID": "commtrac",
+        "AWS_SECRET_ACCESS_KEY": "commtrac_dev",
+        "ENABLE_BOM_PROJECT_MODULE": "true"
+      }
+    },
+    "Staging": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:8080",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Staging",
+        "ENABLE_BOM_PROJECT_MODULE": "true"
+      }
     }
   }
 }
