@@ -15,10 +15,11 @@ namespace Commtrac.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             var runs = MigrationSql.Q("AssetWorkflowRuns");
+            var locked = MigrationSql.BoolTrue(migrationBuilder);
             migrationBuilder.Sql($@"
                 UPDATE {runs}
                 SET ""SignatureStatus"" = 'PendingInstaller'
-                WHERE ""IsLocked"" = 1 AND ""SignatureStatus"" = 'None'
+                WHERE ""IsLocked"" = {locked} AND ""SignatureStatus"" = 'None'
             ");
         }
 
@@ -26,10 +27,11 @@ namespace Commtrac.Api.Migrations
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             var runs = MigrationSql.Q("AssetWorkflowRuns");
+            var locked = MigrationSql.BoolTrue(migrationBuilder);
             migrationBuilder.Sql($@"
                 UPDATE {runs}
                 SET ""SignatureStatus"" = 'None'
-                WHERE ""IsLocked"" = 1 AND ""SignatureStatus"" = 'PendingInstaller'
+                WHERE ""IsLocked"" = {locked} AND ""SignatureStatus"" = 'PendingInstaller'
                   AND ""InstallerSignedAt"" IS NULL
             ");
         }

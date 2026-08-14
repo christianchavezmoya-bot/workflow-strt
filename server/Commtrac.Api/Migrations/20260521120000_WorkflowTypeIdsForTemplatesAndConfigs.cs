@@ -41,9 +41,10 @@ public partial class WorkflowTypeIdsForTemplatesAndConfigs : Migration
         var workflowConfigs = MigrationSql.Q("WorkflowConfigs");
         var workflowTemplates = MigrationSql.Q("WorkflowTemplates");
 
+        var active = MigrationSql.BoolTrue(migrationBuilder);
         migrationBuilder.Sql($"""
             INSERT INTO {workflowTypes} ("Id", "Name", "Icon", "SortOrder", "IsActive")
-            VALUES ('wftype-other', 'Other', NULL, 5, 1)
+            VALUES ('wftype-other', 'Other', NULL, 5, {active})
             ON CONFLICT ("Id") DO NOTHING;
             """);
 

@@ -42,19 +42,20 @@ namespace Commtrac.Api.Migrations
 
             // Use ON CONFLICT for idempotent seed (SQLite 3.24+ and Postgres)
             var fieldDefs = MigrationSql.Q("FieldDefinitions");
+            var active = MigrationSql.BoolTrue(migrationBuilder);
             migrationBuilder.Sql($@"
                 INSERT INTO {fieldDefs} (""Id"", ""ActionType"", ""FieldType"", ""IsActive"", ""LinkToFieldId"", ""Name"", ""SortOrder"", ""TablesJson"")
                 VALUES
-                    ('field-customer-id', NULL, 'text', 1, NULL, 'Customer ID', 43, '[""customers""]'),
-                    ('field-customer-industry', NULL, 'text', 1, NULL, 'Industry', 44, '[""customers""]'),
-                    ('field-site-address', NULL, 'text', 1, NULL, 'Address', 35, '[""sites""]'),
-                    ('field-site-city', NULL, 'text', 1, NULL, 'City', 36, '[""sites""]'),
-                    ('field-site-contact-email', NULL, 'email', 1, NULL, 'Contact Email', 41, '[""sites""]'),
-                    ('field-site-contact-name', NULL, 'text', 1, NULL, 'Contact Name', 39, '[""sites""]'),
-                    ('field-site-contact-phone', NULL, 'text', 1, NULL, 'Contact Phone', 40, '[""sites""]'),
-                    ('field-site-notes', NULL, 'text', 1, NULL, 'Notes', 42, '[""sites""]'),
-                    ('field-site-state', NULL, 'text', 1, NULL, 'State/Country', 37, '[""sites""]'),
-                    ('field-site-zipcode', NULL, 'text', 1, NULL, 'Zip Code', 38, '[""sites""]')
+                    ('field-customer-id', NULL, 'text', {active}, NULL, 'Customer ID', 43, '[""customers""]'),
+                    ('field-customer-industry', NULL, 'text', {active}, NULL, 'Industry', 44, '[""customers""]'),
+                    ('field-site-address', NULL, 'text', {active}, NULL, 'Address', 35, '[""sites""]'),
+                    ('field-site-city', NULL, 'text', {active}, NULL, 'City', 36, '[""sites""]'),
+                    ('field-site-contact-email', NULL, 'email', {active}, NULL, 'Contact Email', 41, '[""sites""]'),
+                    ('field-site-contact-name', NULL, 'text', {active}, NULL, 'Contact Name', 39, '[""sites""]'),
+                    ('field-site-contact-phone', NULL, 'text', {active}, NULL, 'Contact Phone', 40, '[""sites""]'),
+                    ('field-site-notes', NULL, 'text', {active}, NULL, 'Notes', 42, '[""sites""]'),
+                    ('field-site-state', NULL, 'text', {active}, NULL, 'State/Country', 37, '[""sites""]'),
+                    ('field-site-zipcode', NULL, 'text', {active}, NULL, 'Zip Code', 38, '[""sites""]')
                 ON CONFLICT (""Id"") DO NOTHING;
             ");
         }

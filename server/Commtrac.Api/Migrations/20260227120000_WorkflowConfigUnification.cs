@@ -136,12 +136,13 @@ namespace Commtrac.Api.Migrations
             var workOrders = MigrationSql.Q("WorkOrders");
 
             // ── 6. Seed default WorkflowTypes ──────────────────────────────────────────
+            var active = MigrationSql.BoolTrue(migrationBuilder);
             migrationBuilder.Sql($@"
                 INSERT INTO {workflowTypes} (""Id"", ""Name"", ""Icon"", ""SortOrder"", ""IsActive"") VALUES
-                ('wftype-installation',  'Installation',  NULL, 1, 1),
-                ('wftype-commissioning', 'Commissioning', NULL, 2, 1),
-                ('wftype-inspection',    'Inspection',    NULL, 3, 1),
-                ('wftype-repair',        'Repair',        NULL, 4, 1)
+                ('wftype-installation',  'Installation',  NULL, 1, {active}),
+                ('wftype-commissioning', 'Commissioning', NULL, 2, {active}),
+                ('wftype-inspection',    'Inspection',    NULL, 3, {active}),
+                ('wftype-repair',        'Repair',        NULL, 4, {active})
                 ON CONFLICT (""Id"") DO NOTHING
             ");
 
@@ -196,7 +197,7 @@ namespace Commtrac.Api.Migrations
                     pa.""Id"" AS ""AssetId"",
                     pa.""ProductConfigId"" AS ""WorkflowConfigId"",
                     'wftype-installation' AS ""WorkflowTypeId"",
-                    1 AS ""Active"",
+                    {active} AS ""Active"",
                     NULL AS ""AssignedBy"",
                     pa.""CreatedAt"" AS ""AssignedAt""
                 FROM {projectAssets} pa
@@ -221,7 +222,7 @@ namespace Commtrac.Api.Migrations
                     '{{}}' AS ""WorkflowSnapshotJson"",
                     wo.""Id"" AS ""WorkOrderId"",
                     wo.""Status"",
-                    CASE WHEN wo.""Status"" = 'Complete' THEN 1 ELSE 0 END AS ""IsLocked"",
+                    {MigrationSql.BoolCase(migrationBuilder, @"wo.""Status"" = 'Complete'")} AS ""IsLocked"",
                     NULL AS ""TechnicianUserId"",
                     COALESCE(wo.""StepsDataJson"", '[]') AS ""StepResultsJson"",
                     COALESCE(pa.""IssuesJson"", '[]') AS ""IssuesJson"",
