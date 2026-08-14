@@ -1,6 +1,6 @@
+using Commtrac.Api.Data;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Infrastructure;
-using Commtrac.Api.Data;
 
 #nullable disable
 
@@ -12,9 +12,10 @@ namespace Commtrac.Api.Migrations
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql("ALTER TABLE ProjectAssets ADD COLUMN ConfigLabel TEXT NULL;");
-            migrationBuilder.Sql("ALTER TABLE ProjectAssets ADD COLUMN InstalledAt TEXT NULL;");
-            migrationBuilder.Sql("ALTER TABLE ProjectAssets ADD COLUMN InstalledBy TEXT NULL;");
+            var projectAssets = MigrationSql.Q("ProjectAssets");
+            migrationBuilder.Sql($@"ALTER TABLE {projectAssets} ADD COLUMN IF NOT EXISTS ""ConfigLabel"" TEXT NULL;");
+            migrationBuilder.Sql($@"ALTER TABLE {projectAssets} ADD COLUMN IF NOT EXISTS ""InstalledAt"" TEXT NULL;");
+            migrationBuilder.Sql($@"ALTER TABLE {projectAssets} ADD COLUMN IF NOT EXISTS ""InstalledBy"" TEXT NULL;");
         }
 
         protected override void Down(MigrationBuilder migrationBuilder) { }

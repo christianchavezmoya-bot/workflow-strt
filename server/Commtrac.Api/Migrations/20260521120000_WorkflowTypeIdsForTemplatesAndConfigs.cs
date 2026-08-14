@@ -37,15 +37,19 @@ public partial class WorkflowTypeIdsForTemplatesAndConfigs : Migration
             table: "WorkflowConfigs",
             column: "WorkflowTypeId");
 
-        migrationBuilder.Sql("""
-            INSERT INTO WorkflowTypes (Id, Name, Icon, SortOrder, IsActive)
+        var workflowTypes = MigrationSql.Q("WorkflowTypes");
+        var workflowConfigs = MigrationSql.Q("WorkflowConfigs");
+        var workflowTemplates = MigrationSql.Q("WorkflowTemplates");
+
+        migrationBuilder.Sql($"""
+            INSERT INTO {workflowTypes} ("Id", "Name", "Icon", "SortOrder", "IsActive")
             VALUES ('wftype-other', 'Other', NULL, 5, 1)
-            ON CONFLICT (Id) DO NOTHING;
+            ON CONFLICT ("Id") DO NOTHING;
             """);
 
-        migrationBuilder.Sql("""
-            UPDATE WorkflowConfigs
-            SET WorkflowTypeId = CASE LOWER(TRIM(COALESCE(ConfigType, '')))
+        migrationBuilder.Sql($"""
+            UPDATE {workflowConfigs}
+            SET "WorkflowTypeId" = CASE LOWER(TRIM(COALESCE("ConfigType", '')))
                 WHEN 'installation' THEN 'wftype-installation'
                 WHEN 'commissioning' THEN 'wftype-commissioning'
                 WHEN 'inspection' THEN 'wftype-inspection'
@@ -53,19 +57,19 @@ public partial class WorkflowTypeIdsForTemplatesAndConfigs : Migration
                 WHEN 'other' THEN 'wftype-other'
                 ELSE 'wftype-installation'
             END
-            WHERE WorkflowTypeId IS NULL;
+            WHERE "WorkflowTypeId" IS NULL;
             """);
 
-        migrationBuilder.Sql("""
-            UPDATE WorkflowTemplates
-            SET WorkflowTypeId = CASE
-                WHEN LOWER(COALESCE(Name, '')) LIKE '%inspection%' THEN 'wftype-inspection'
-                WHEN LOWER(COALESCE(Name, '')) LIKE '%commission%' THEN 'wftype-commissioning'
-                WHEN LOWER(COALESCE(Name, '')) LIKE '%repair%' THEN 'wftype-repair'
-                WHEN LOWER(COALESCE(Name, '')) LIKE '%other%' THEN 'wftype-other'
+        migrationBuilder.Sql($"""
+            UPDATE {workflowTemplates}
+            SET "WorkflowTypeId" = CASE
+                WHEN LOWER(COALESCE("Name", '')) LIKE '%inspection%' THEN 'wftype-inspection'
+                WHEN LOWER(COALESCE("Name", '')) LIKE '%commission%' THEN 'wftype-commissioning'
+                WHEN LOWER(COALESCE("Name", '')) LIKE '%repair%' THEN 'wftype-repair'
+                WHEN LOWER(COALESCE("Name", '')) LIKE '%other%' THEN 'wftype-other'
                 ELSE 'wftype-installation'
             END
-            WHERE WorkflowTypeId IS NULL;
+            WHERE "WorkflowTypeId" IS NULL;
             """);
     }
 
@@ -87,9 +91,10 @@ public partial class WorkflowTypeIdsForTemplatesAndConfigs : Migration
             name: "WorkflowTypeId",
             table: "WorkflowConfigs");
 
-        migrationBuilder.Sql("""
-            DELETE FROM WorkflowTypes
-            WHERE Id = 'wftype-other';
+        var workflowTypes = MigrationSql.Q("WorkflowTypes");
+        migrationBuilder.Sql($"""
+            DELETE FROM {workflowTypes}
+            WHERE "Id" = 'wftype-other';
             """);
     }
 }

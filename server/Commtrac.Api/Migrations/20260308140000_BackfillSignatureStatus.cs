@@ -14,24 +14,23 @@ namespace Commtrac.Api.Migrations
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            // Any locked (completed) run that still has the default 'None' status
-            // was completed before the signature feature was introduced.
-            // Advance them to PendingInstaller so the installer can sign retroactively.
-            migrationBuilder.Sql(@"
-                UPDATE AssetWorkflowRuns
-                SET SignatureStatus = 'PendingInstaller'
-                WHERE IsLocked = 1 AND SignatureStatus = 'None'
+            var runs = MigrationSql.Q("AssetWorkflowRuns");
+            migrationBuilder.Sql($@"
+                UPDATE {runs}
+                SET ""SignatureStatus"" = 'PendingInstaller'
+                WHERE ""IsLocked"" = 1 AND ""SignatureStatus"" = 'None'
             ");
         }
 
         /// <inheritdoc />
         protected override void Down(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"
-                UPDATE AssetWorkflowRuns
-                SET SignatureStatus = 'None'
-                WHERE IsLocked = 1 AND SignatureStatus = 'PendingInstaller'
-                  AND InstallerSignedAt IS NULL
+            var runs = MigrationSql.Q("AssetWorkflowRuns");
+            migrationBuilder.Sql($@"
+                UPDATE {runs}
+                SET ""SignatureStatus"" = 'None'
+                WHERE ""IsLocked"" = 1 AND ""SignatureStatus"" = 'PendingInstaller'
+                  AND ""InstallerSignedAt"" IS NULL
             ");
         }
     }

@@ -126,99 +126,112 @@ namespace Commtrac.Api.Migrations
             migrationBuilder.CreateIndex(name: "IX_AssetWorkflowRuns_AssetId",          table: "AssetWorkflowRuns", column: "AssetId");
             migrationBuilder.CreateIndex(name: "IX_AssetWorkflowRuns_WorkflowConfigId", table: "AssetWorkflowRuns", column: "WorkflowConfigId");
 
+            var workflowTypes = MigrationSql.Q("WorkflowTypes");
+            var workflowConfigs = MigrationSql.Q("WorkflowConfigs");
+            var workInstructionTemplates = MigrationSql.Q("WorkInstructionTemplates");
+            var workflowTemplates = MigrationSql.Q("WorkflowTemplates");
+            var assetWorkflowAssignments = MigrationSql.Q("AssetWorkflowAssignments");
+            var projectAssets = MigrationSql.Q("ProjectAssets");
+            var assetWorkflowRuns = MigrationSql.Q("AssetWorkflowRuns");
+            var workOrders = MigrationSql.Q("WorkOrders");
+
             // ── 6. Seed default WorkflowTypes ──────────────────────────────────────────
-            migrationBuilder.Sql(@"
-                INSERT INTO WorkflowTypes (Id, Name, Icon, SortOrder, IsActive) VALUES
+            migrationBuilder.Sql($@"
+                INSERT INTO {workflowTypes} (""Id"", ""Name"", ""Icon"", ""SortOrder"", ""IsActive"") VALUES
                 ('wftype-installation',  'Installation',  NULL, 1, 1),
                 ('wftype-commissioning', 'Commissioning', NULL, 2, 1),
                 ('wftype-inspection',    'Inspection',    NULL, 3, 1),
                 ('wftype-repair',        'Repair',        NULL, 4, 1)
-                ON CONFLICT (Id) DO NOTHING
+                ON CONFLICT (""Id"") DO NOTHING
             ");
 
             // ── 7. Migrate WorkInstructionTemplates → WorkflowConfigs ─────────────────
             // LEFT JOIN with WorkflowTemplates to pull in steps/media where linked.
             // Status mapping: Active → Published, Draft → Draft, Archived → Archived.
-            migrationBuilder.Sql(@"
-                INSERT INTO WorkflowConfigs (
-                    Id, ProductId, Name, DisplayName, ConfigType,
-                    Status, Version, TemplateSourceId,
-                    StepsJson, MediaJson, FeatureSelectionsJson,
-                    Notes, CreatedBy, CreatedAt, UpdatedAt
+            migrationBuilder.Sql($@"
+                INSERT INTO {workflowConfigs} (
+                    ""Id"", ""ProductId"", ""Name"", ""DisplayName"", ""ConfigType"",
+                    ""Status"", ""Version"", ""TemplateSourceId"",
+                    ""StepsJson"", ""MediaJson"", ""FeatureSelectionsJson"",
+                    ""Notes"", ""CreatedBy"", ""CreatedAt"", ""UpdatedAt""
                 )
                 SELECT
-                    wit.Id,
-                    wit.ProductId,
-                    wit.Name,
-                    wit.Name AS DisplayName,
-                    wit.ConfigType,
-                    CASE wit.Status
+                    wit.""Id"",
+                    wit.""ProductId"",
+                    wit.""Name"",
+                    wit.""Name"" AS ""DisplayName"",
+                    wit.""ConfigType"",
+                    CASE wit.""Status""
                         WHEN 'Active' THEN 'Published'
-                        ELSE wit.Status
-                    END AS Status,
-                    1 AS Version,
-                    NULL AS TemplateSourceId,
-                    COALESCE(wt.StepsJson, '[]') AS StepsJson,
-                    COALESCE(wt.MediaJson, '[]') AS MediaJson,
-                    COALESCE(wit.FeatureSelectionsJson, '[]') AS FeatureSelectionsJson,
-                    wit.Notes,
-                    wit.CreatedBy,
-                    wit.CreatedAt,
-                    wit.UpdatedAt
-                FROM WorkInstructionTemplates wit
-                LEFT JOIN WorkflowTemplates wt ON wt.Id = wit.WorkflowTemplateId
+                        ELSE wit.""Status""
+                    END AS ""Status"",
+                    1 AS ""Version"",
+                    NULL AS ""TemplateSourceId"",
+                    COALESCE(wt.""StepsJson"", '[]') AS ""StepsJson"",
+                    COALESCE(wt.""MediaJson"", '[]') AS ""MediaJson"",
+                    COALESCE(wit.""FeatureSelectionsJson"", '[]') AS ""FeatureSelectionsJson"",
+                    wit.""Notes"",
+                    wit.""CreatedBy"",
+                    wit.""CreatedAt"",
+                    wit.""UpdatedAt""
+                FROM {workInstructionTemplates} wit
+                LEFT JOIN {workflowTemplates} wt ON wt.""Id"" = wit.""WorkflowTemplateId""
             ");
 
             // ── 8. Create AssetWorkflowAssignments from ProjectAssets ─────────────────
-            migrationBuilder.Sql(@"
-                INSERT INTO AssetWorkflowAssignments (
-                    Id, AssetId, WorkflowConfigId, WorkflowTypeId, Active, AssignedBy, AssignedAt
-                )
-                SELECT
-                    lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
+            var assignmentIdExpr = MigrationSql.IsPostgres(migrationBuilder)
+                ? "gen_random_uuid()::text"
+                : @"lower(hex(randomblob(4))) || '-' || lower(hex(randomblob(2))) || '-4' ||
                         substr(lower(hex(randomblob(2))),2) || '-' ||
                         substr('89ab',abs(random()) % 4 + 1, 1) ||
                         substr(lower(hex(randomblob(2))),2) || '-' ||
-                        lower(hex(randomblob(6))) AS Id,
-                    pa.Id AS AssetId,
-                    pa.ProductConfigId AS WorkflowConfigId,
-                    'wftype-installation' AS WorkflowTypeId,
-                    1 AS Active,
-                    NULL AS AssignedBy,
-                    pa.CreatedAt AS AssignedAt
-                FROM ProjectAssets pa
-                WHERE pa.ProductConfigId IS NOT NULL
-                  AND EXISTS (SELECT 1 FROM WorkflowConfigs wc WHERE wc.Id = pa.ProductConfigId)
+                        lower(hex(randomblob(6)))";
+
+            migrationBuilder.Sql($@"
+                INSERT INTO {assetWorkflowAssignments} (
+                    ""Id"", ""AssetId"", ""WorkflowConfigId"", ""WorkflowTypeId"", ""Active"", ""AssignedBy"", ""AssignedAt""
+                )
+                SELECT
+                    {assignmentIdExpr} AS ""Id"",
+                    pa.""Id"" AS ""AssetId"",
+                    pa.""ProductConfigId"" AS ""WorkflowConfigId"",
+                    'wftype-installation' AS ""WorkflowTypeId"",
+                    1 AS ""Active"",
+                    NULL AS ""AssignedBy"",
+                    pa.""CreatedAt"" AS ""AssignedAt""
+                FROM {projectAssets} pa
+                WHERE pa.""ProductConfigId"" IS NOT NULL
+                  AND EXISTS (SELECT 1 FROM {workflowConfigs} wc WHERE wc.""Id"" = pa.""ProductConfigId"")
             ");
 
             // ── 9. Create AssetWorkflowRuns from WorkOrders ───────────────────────────
             // Historical runs don't have a snapshot (WorkflowSnapshotJson = '{}').
-            migrationBuilder.Sql(@"
-                INSERT INTO AssetWorkflowRuns (
-                    Id, AssetId, WorkflowConfigId, WorkflowVersion,
-                    WorkflowSnapshotJson, WorkOrderId, Status, IsLocked,
-                    TechnicianUserId, StepResultsJson, IssuesJson,
-                    StartedAt, CompletedAt, CreatedAt, UpdatedAt
+            migrationBuilder.Sql($@"
+                INSERT INTO {assetWorkflowRuns} (
+                    ""Id"", ""AssetId"", ""WorkflowConfigId"", ""WorkflowVersion"",
+                    ""WorkflowSnapshotJson"", ""WorkOrderId"", ""Status"", ""IsLocked"",
+                    ""TechnicianUserId"", ""StepResultsJson"", ""IssuesJson"",
+                    ""StartedAt"", ""CompletedAt"", ""CreatedAt"", ""UpdatedAt""
                 )
                 SELECT
-                    wo.Id AS Id,
-                    wo.ProjectAssetId AS AssetId,
-                    COALESCE(pa.ProductConfigId, '') AS WorkflowConfigId,
-                    1 AS WorkflowVersion,
-                    '{}' AS WorkflowSnapshotJson,
-                    wo.Id AS WorkOrderId,
-                    wo.Status,
-                    CASE WHEN wo.Status = 'Complete' THEN 1 ELSE 0 END AS IsLocked,
-                    NULL AS TechnicianUserId,
-                    COALESCE(wo.StepsDataJson, '[]') AS StepResultsJson,
-                    COALESCE(pa.IssuesJson, '[]') AS IssuesJson,
-                    wo.CreatedAt AS StartedAt,
-                    CASE WHEN wo.Status = 'Complete' THEN wo.UpdatedAt ELSE NULL END AS CompletedAt,
-                    wo.CreatedAt,
-                    wo.UpdatedAt
-                FROM WorkOrders wo
-                LEFT JOIN ProjectAssets pa ON pa.Id = wo.ProjectAssetId
-                WHERE wo.ProjectAssetId IS NOT NULL
+                    wo.""Id"" AS ""Id"",
+                    wo.""ProjectAssetId"" AS ""AssetId"",
+                    COALESCE(pa.""ProductConfigId"", '') AS ""WorkflowConfigId"",
+                    1 AS ""WorkflowVersion"",
+                    '{{}}' AS ""WorkflowSnapshotJson"",
+                    wo.""Id"" AS ""WorkOrderId"",
+                    wo.""Status"",
+                    CASE WHEN wo.""Status"" = 'Complete' THEN 1 ELSE 0 END AS ""IsLocked"",
+                    NULL AS ""TechnicianUserId"",
+                    COALESCE(wo.""StepsDataJson"", '[]') AS ""StepResultsJson"",
+                    COALESCE(pa.""IssuesJson"", '[]') AS ""IssuesJson"",
+                    wo.""CreatedAt"" AS ""StartedAt"",
+                    CASE WHEN wo.""Status"" = 'Complete' THEN wo.""UpdatedAt"" ELSE NULL END AS ""CompletedAt"",
+                    wo.""CreatedAt"",
+                    wo.""UpdatedAt""
+                FROM {workOrders} wo
+                LEFT JOIN {projectAssets} pa ON pa.""Id"" = wo.""ProjectAssetId""
+                WHERE wo.""ProjectAssetId"" IS NOT NULL
             ");
         }
 
