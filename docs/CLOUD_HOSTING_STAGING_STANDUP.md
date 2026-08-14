@@ -51,7 +51,7 @@ chmod +x scripts/standup-staging.sh
 
 Fresh Docker volume seeds: 2 offices, 2 customers (BHP/Mining), 3 Strata divisions, 6 products, `Chambers_default` workflow. No tips/documents.
 
-**BOM module:** enabled in Docker staging (frontend `VITE_ENABLE_BOM_MODULE=true`, API `ENABLE_BOM_PROJECT_MODULE=true`). After login as Admin, **Admin → BOM Project** appears in the sidebar.
+**If standup fails on Postgres migrations** (e.g. `InvalidCastException` on `SeedDemoCustomerAndSite`): pull latest `main`, then `docker compose -f docker-compose.staging.yml down -v` and re-run standup — partial migration state requires a fresh volume.
 
 ### Web without nginx
 

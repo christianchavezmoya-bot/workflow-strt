@@ -1,5 +1,4 @@
-﻿using System;
-using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -8,6 +7,9 @@ namespace Commtrac.Api.Migrations
     /// <inheritdoc />
     public partial class SeedDemoCustomerAndSite : Migration
     {
+        // Sites.CreatedAt is stored as TEXT (SQLite-origin migration). InsertData must use a string on Postgres.
+        private const string DemoSiteCreatedAt = "2026-02-06T06:54:33.0000000Z";
+
         /// <inheritdoc />
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -22,7 +24,7 @@ namespace Commtrac.Api.Migrations
             migrationBuilder.InsertData(
                 table: "Sites",
                 columns: new[] { "Id", "CustomerId", "Name", "Address", "City", "State", "ZipCode", "ContactName", "ContactPhone", "ContactEmail", "Notes", "CreatedAt" },
-                values: new object[] { "demo-site-001", "demo-customer-001", "Main Office", "123 Business Ave", "New York", "NY", "10001", "John Doe", "(555) 123-4567", "john.doe@acme.com", "Headquarters location", DateTime.UtcNow }
+                values: new object[] { "demo-site-001", "demo-customer-001", "Main Office", "123 Business Ave", "New York", "NY", "10001", "John Doe", "(555) 123-4567", "john.doe@acme.com", "Headquarters location", DemoSiteCreatedAt }
             );
         }
 

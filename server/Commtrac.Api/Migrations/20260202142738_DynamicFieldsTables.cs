@@ -21,7 +21,7 @@ namespace Commtrac.Api.Migrations
                     FieldType = table.Column<string>(type: "TEXT", maxLength: 40, nullable: false),
                     TablesJson = table.Column<string>(type: "TEXT", maxLength: 400, nullable: false),
                     SortOrder = table.Column<int>(type: "INTEGER", nullable: false),
-                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false)
+                    IsActive = table.Column<bool>(type: "boolean", nullable: false)
                 },
                 constraints: table =>
                 {
