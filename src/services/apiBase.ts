@@ -29,15 +29,20 @@ export function getDefaultApiBaseUrl(): string {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
   const localBrowserDefault = `${protocol}//${hostname}:4000/api`;
+  const baked = import.meta.env.VITE_API_BASE
+    ? normalizeApiBaseUrl(import.meta.env.VITE_API_BASE)
+    : "";
 
-  // Browser dev on localhost should talk to localhost by default even if
-  // VITE_API_BASE is set to a LAN IP for native phone builds.
   if (!isMobileNativePlatform() && (hostname === "localhost" || hostname === "127.0.0.1")) {
+    // Docker staging web (:5174) bakes VITE_API_BASE=http://localhost:8080/api — honour it.
+    if (baked && /localhost|127\.0\.0\.1/i.test(baked)) {
+      return baked;
+    }
     return localBrowserDefault;
   }
 
-  if (import.meta.env.VITE_API_BASE) {
-    return normalizeApiBaseUrl(import.meta.env.VITE_API_BASE);
+  if (baked) {
+    return baked;
   }
   return localBrowserDefault;
 }
