@@ -1,4 +1,5 @@
 ﻿using System;
+using Commtrac.Api.Data;
 using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
@@ -31,11 +32,12 @@ namespace Commtrac.Api.Migrations
                 nullable: true);
 
             // Create BrandSettings key/value table (logo stored as base64 under key="logo").
-            migrationBuilder.Sql(@"
-                CREATE TABLE IF NOT EXISTS BrandSettings (
-                    Key TEXT PRIMARY KEY NOT NULL,
-                    Value TEXT NOT NULL DEFAULT '',
-                    UpdatedAt TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+            var brandSettings = MigrationSql.Q("BrandSettings");
+            migrationBuilder.Sql($@"
+                CREATE TABLE IF NOT EXISTS {brandSettings} (
+                    ""Key"" TEXT PRIMARY KEY NOT NULL,
+                    ""Value"" TEXT NOT NULL DEFAULT '',
+                    ""UpdatedAt"" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
                 )
             ");
         }

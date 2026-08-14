@@ -13,11 +13,10 @@ namespace Commtrac.Api.Migrations
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
-            migrationBuilder.Sql(@"
-                ALTER TABLE QuickbaseSettings ADD COLUMN GoodsMovementsTableId TEXT NOT NULL DEFAULT '';
-                ALTER TABLE QuickbaseSettings ADD COLUMN GoodsMovementsJobFid INTEGER NOT NULL DEFAULT 0;
-                ALTER TABLE QuickbaseSettings ADD COLUMN GoodsMovementsDirectionFid INTEGER NOT NULL DEFAULT 0;
-            ");
+            var quickbaseSettings = MigrationSql.Q("QuickbaseSettings");
+            migrationBuilder.Sql($@"ALTER TABLE {quickbaseSettings} ADD COLUMN IF NOT EXISTS ""GoodsMovementsTableId"" TEXT NOT NULL DEFAULT '';");
+            migrationBuilder.Sql($@"ALTER TABLE {quickbaseSettings} ADD COLUMN IF NOT EXISTS ""GoodsMovementsJobFid"" INTEGER NOT NULL DEFAULT 0;");
+            migrationBuilder.Sql($@"ALTER TABLE {quickbaseSettings} ADD COLUMN IF NOT EXISTS ""GoodsMovementsDirectionFid"" INTEGER NOT NULL DEFAULT 0;");
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

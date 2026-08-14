@@ -12,8 +12,9 @@ namespace Commtrac.Api.Migrations
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
+            var projects = MigrationSql.Q("Projects");
             migrationBuilder.Sql(
-                "ALTER TABLE Projects ADD COLUMN PurchaseOrderNumber TEXT NOT NULL DEFAULT '';");
+                $@"ALTER TABLE {projects} ADD COLUMN IF NOT EXISTS ""PurchaseOrderNumber"" TEXT NOT NULL DEFAULT '';");
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -40,8 +41,9 @@ namespace Commtrac.Api.Migrations
                 value: "Global Offices");
 
             // Use ON CONFLICT for idempotent seed (SQLite 3.24+ and Postgres)
-            migrationBuilder.Sql(@"
-                INSERT INTO FieldDefinitions (Id, ActionType, FieldType, IsActive, LinkToFieldId, Name, SortOrder, TablesJson)
+            var fieldDefs = MigrationSql.Q("FieldDefinitions");
+            migrationBuilder.Sql($@"
+                INSERT INTO {fieldDefs} (""Id"", ""ActionType"", ""FieldType"", ""IsActive"", ""LinkToFieldId"", ""Name"", ""SortOrder"", ""TablesJson"")
                 VALUES
                     ('field-customer-id', NULL, 'text', 1, NULL, 'Customer ID', 43, '[""customers""]'),
                     ('field-customer-industry', NULL, 'text', 1, NULL, 'Industry', 44, '[""customers""]'),
@@ -53,7 +55,7 @@ namespace Commtrac.Api.Migrations
                     ('field-site-notes', NULL, 'text', 1, NULL, 'Notes', 42, '[""sites""]'),
                     ('field-site-state', NULL, 'text', 1, NULL, 'State/Country', 37, '[""sites""]'),
                     ('field-site-zipcode', NULL, 'text', 1, NULL, 'Zip Code', 38, '[""sites""]')
-                ON CONFLICT (Id) DO NOTHING;
+                ON CONFLICT (""Id"") DO NOTHING;
             ");
         }
 
