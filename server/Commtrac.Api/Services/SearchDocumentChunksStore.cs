@@ -63,7 +63,7 @@ internal static class SearchDocumentChunksStore
         await using var cmd = connection.CreateCommand();
         cmd.Transaction = tx.GetDbTransaction();
         cmd.CommandText =
-            "INSERT INTO SearchDocumentChunks (SourceType, SourceId, Context, ChunkText, ChunkOrder, UpdatedAt) " +
+            """INSERT INTO "SearchDocumentChunks" ("SourceType", "SourceId", "Context", "ChunkText", "ChunkOrder", "UpdatedAt") """ +
             "VALUES (@sourceType, @sourceId, @context, @chunkText, @chunkOrder, @updatedAt);";
 
         AddParameter(cmd, "@sourceType");
@@ -103,10 +103,10 @@ internal static class SearchDocumentChunksStore
 
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
-            SELECT SourceType, SourceId, Context, ChunkText, ChunkOrder
-            FROM SearchDocumentChunks
-            WHERE lower(ChunkText) LIKE @needle
-            ORDER BY UpdatedAt DESC, ChunkOrder ASC
+            SELECT "SourceType", "SourceId", "Context", "ChunkText", "ChunkOrder"
+            FROM "SearchDocumentChunks"
+            WHERE lower("ChunkText") LIKE @needle
+            ORDER BY "UpdatedAt" DESC, "ChunkOrder" ASC
             LIMIT @maxRows;
             """;
         SetParameter(cmd, "@needle", $"%{firstTerm.ToLowerInvariant()}%");
@@ -142,10 +142,10 @@ internal static class SearchDocumentChunksStore
 
         await using var cmd = connection.CreateCommand();
         cmd.CommandText = """
-            SELECT SourceType, SourceId, Context, ChunkText, ChunkOrder
-            FROM SearchDocumentChunks
-            WHERE SourceType = @sourceType AND SourceId = @sourceId
-            ORDER BY ChunkOrder ASC
+            SELECT "SourceType", "SourceId", "Context", "ChunkText", "ChunkOrder"
+            FROM "SearchDocumentChunks"
+            WHERE "SourceType" = @sourceType AND "SourceId" = @sourceId
+            ORDER BY "ChunkOrder" ASC
             LIMIT @maxRows;
             """;
         SetParameter(cmd, "@sourceType", sourceType);
@@ -173,6 +173,10 @@ internal static class SearchDocumentChunksStore
         cmd.Parameters.Add(p);
     }
 
+    /// <summary>
+    /// Assigns a parameter value, registering the parameter first if needed. Insert reuses one
+    /// command across many rows, so parameters there are registered up front and only reassigned.
+    /// </summary>
     private static void SetParameter(DbCommand cmd, string name, object value)
     {
         foreach (DbParameter p in cmd.Parameters)
@@ -184,7 +188,10 @@ internal static class SearchDocumentChunksStore
             }
         }
 
-        throw new InvalidOperationException($"Parameter {name} was not registered.");
+        var added = cmd.CreateParameter();
+        added.ParameterName = name;
+        added.Value = value;
+        cmd.Parameters.Add(added);
     }
 }
 

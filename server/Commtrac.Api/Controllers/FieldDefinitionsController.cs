@@ -159,17 +159,17 @@ public class FieldDefinitionsController : ControllerBase
             {
                 // Update FieldValues that reference this field
                 await _db.Database.ExecuteSqlRawAsync(
-                    "UPDATE FieldValues SET FieldDefinitionId = {0} WHERE FieldDefinitionId = {1}",
+                    """UPDATE "FieldValues" SET "FieldDefinitionId" = {0} WHERE "FieldDefinitionId" = {1}""",
                     newId, oldId);
 
                 // Update LinkToFieldId references in other field definitions
                 await _db.Database.ExecuteSqlRawAsync(
-                    "UPDATE FieldDefinitions SET LinkToFieldId = {0} WHERE LinkToFieldId = {1}",
+                    """UPDATE "FieldDefinitions" SET "LinkToFieldId" = {0} WHERE "LinkToFieldId" = {1}""",
                     newId, oldId);
 
                 // Update the field definition ID itself
                 await _db.Database.ExecuteSqlRawAsync(
-                    "UPDATE FieldDefinitions SET Id = {0} WHERE Id = {1}",
+                    """UPDATE "FieldDefinitions" SET "Id" = {0} WHERE "Id" = {1}""",
                     newId, oldId);
             }
 

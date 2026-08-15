@@ -8,6 +8,7 @@ namespace Commtrac.Api.Tests;
 /// Optional Postgres parity test — runs only when COMMTRAC_POSTGRES_TEST=1.
 /// Use a throwaway database (not production). Start Postgres: docker compose up -d postgres
 /// </summary>
+[Collection(PostgresTestCollection.Name)]
 public class PostgresMigrationsTests
 {
     [Fact]

@@ -301,7 +301,7 @@ public class DocumentSearchIndexWorker : BackgroundService
         IFileStorageService files,
         CancellationToken ct)
     {
-        await db.Database.ExecuteSqlRawAsync("DELETE FROM SearchDocumentChunks;", ct);
+        await db.Database.ExecuteSqlRawAsync("""DELETE FROM "SearchDocumentChunks";""", ct);
 
         var docs = await db.Documents
             .AsNoTracking()
@@ -457,7 +457,8 @@ public class DocumentSearchIndexWorker : BackgroundService
     }
 
     private static Task DeleteSourceChunksAsync(AppDbContext db, string sourceType, string sourceId, CancellationToken ct)
-        => db.Database.ExecuteSqlInterpolatedAsync($"DELETE FROM SearchDocumentChunks WHERE SourceType = {sourceType} AND SourceId = {sourceId};", ct);
+        => db.Database.ExecuteSqlInterpolatedAsync(
+            $"""DELETE FROM "SearchDocumentChunks" WHERE "SourceType" = {sourceType} AND "SourceId" = {sourceId};""", ct);
 
     private async Task EnsureIndexTableAsync(CancellationToken ct)
     {

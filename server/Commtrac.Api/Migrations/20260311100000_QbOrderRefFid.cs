@@ -13,8 +13,8 @@ namespace Commtrac.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             var quickbaseSettings = MigrationSql.Q("QuickbaseSettings");
-            migrationBuilder.Sql(
-                $@"ALTER TABLE {quickbaseSettings} ADD COLUMN IF NOT EXISTS ""GoodsMovementsOrderRefFid"" INTEGER NOT NULL DEFAULT 0;");
+            migrationBuilder.Sql(MigrationSql.AddColumn(
+                migrationBuilder, quickbaseSettings, @"""GoodsMovementsOrderRefFid"" INTEGER NOT NULL DEFAULT 0"));
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

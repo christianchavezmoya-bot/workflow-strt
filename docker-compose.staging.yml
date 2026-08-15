@@ -36,7 +36,7 @@ services:
       - commtrac_staging_minio:/data
 
   minio-setup:
-    image: minio/mc:RELEASE.2025-04-22T08-00-08Z
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z
     container_name: commtrac-staging-minio-setup
     depends_on:
       minio:

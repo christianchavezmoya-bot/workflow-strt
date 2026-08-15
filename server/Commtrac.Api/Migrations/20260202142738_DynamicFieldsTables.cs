@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -21,7 +22,7 @@ namespace Commtrac.Api.Migrations
                     FieldType = table.Column<string>(type: "TEXT", maxLength: 40, nullable: false),
                     TablesJson = table.Column<string>(type: "TEXT", maxLength: 400, nullable: false),
                     SortOrder = table.Column<int>(type: "INTEGER", nullable: false),
-                    IsActive = table.Column<bool>(type: "boolean", nullable: false)
+                    IsActive = table.Column<bool>(type: "INTEGER", nullable: false)
                 },
                 constraints: table =>
                 {
@@ -44,45 +45,50 @@ namespace Commtrac.Api.Migrations
                     table.PrimaryKey("PK_FieldValues", x => x.Id);
                 });
 
+            // "IsActive" is an INTEGER column on both providers, but InsertData types the parameter
+            // differently per provider: Npgsql infers it from the CLR value (a bool would be sent as
+            // boolean and rejected), while the SQLite generator coerces to the column's bool type.
+            object active = MigrationSql.IsPostgres(migrationBuilder) ? 1 : true;
+
             migrationBuilder.InsertData(
                 table: "FieldDefinitions",
                 columns: new[] { "Id", "FieldType", "IsActive", "Name", "SortOrder", "TablesJson" },
                 values: new object[,]
                 {
-                    { "field-active", "checkbox", true, "Active", 34, "[\"users\"]" },
-                    { "field-asset-id", "primary key", true, "Asset ID#", 22, "[\"assets\"]" },
-                    { "field-comments", "text", true, "Comments", 26, "[\"assets\"]" },
-                    { "field-customer", "text", true, "Customer", 3, "[\"projects\",\"customers\"]" },
-                    { "field-document", "file", true, "Document", 27, "[\"documents\"]" },
-                    { "field-document-type", "text", true, "Document Type", 28, "[\"documents\"]" },
-                    { "field-email", "email", true, "Email", 32, "[\"users\"]" },
-                    { "field-finish-date", "date", true, "Finish Date", 9, "[\"issues\"]" },
-                    { "field-inspector", "text", true, "Inspector", 12, "[\"inspections\"]" },
-                    { "field-installer", "text", true, "Installer", 11, "[\"installations\",\"inspections\"]" },
-                    { "field-issue", "text", true, "Issue", 14, "[\"issues\"]" },
-                    { "field-job-number", "primary key", true, "Job Number", 1, "[\"projects\",\"installations\"]" },
-                    { "field-linked-to", "text", true, "Linked To", 29, "[\"documents\"]" },
-                    { "field-machine-id", "text", true, "Machine ID", 23, "[\"assets\"]" },
-                    { "field-machine-type", "text", true, "Machine Type", 17, "[\"installations\",\"assets\"]" },
-                    { "field-office", "text", true, "Office", 6, "[\"projects\",\"customers\",\"users\"]" },
-                    { "field-owner", "text", true, "Owner", 16, "[\"issues\"]" },
-                    { "field-photos", "number", true, "Photos", 13, "[\"inspections\"]" },
-                    { "field-pm-count", "number", true, "PM Count", 25, "[\"assets\"]" },
-                    { "field-pm1", "text", true, "PM-1 S/N", 18, "[\"installations\"]" },
-                    { "field-pm2", "text", true, "PM-2 S/N", 19, "[\"installations\"]" },
-                    { "field-pm3", "text", true, "PM-3 S/N", 20, "[\"installations\"]" },
-                    { "field-pm4", "text", true, "PM-4 S/N", 21, "[\"installations\"]" },
-                    { "field-priority", "text", true, "Priority", 15, "[\"issues\"]" },
-                    { "field-products", "multi-select", true, "Products", 4, "[\"projects\",\"products\"]" },
-                    { "field-progress", "percentage", true, "Progress", 10, "[\"installations\"]" },
-                    { "field-project-type", "text", true, "Project Type", 2, "[\"projects\"]" },
-                    { "field-role", "text", true, "Role", 33, "[\"users\"]" },
-                    { "field-serial-number", "text", true, "Serial Number", 24, "[\"assets\"]" },
-                    { "field-site-name", "text", true, "Site Name", 7, "[\"installations\"]" },
-                    { "field-start-date", "date", true, "Start Date", 8, "[\"installations\",\"issues\"]" },
-                    { "field-status", "text", true, "Status", 5, "[\"projects\",\"installations\",\"inspections\",\"issues\"]" },
-                    { "field-uploaded-at", "date", true, "Uploaded At", 30, "[\"documents\"]" },
-                    { "field-user-name", "text", true, "User Name", 31, "[\"users\"]" }
+                    { "field-active", "checkbox", active, "Active", 34, "[\"users\"]" },
+                    { "field-asset-id", "primary key", active, "Asset ID#", 22, "[\"assets\"]" },
+                    { "field-comments", "text", active, "Comments", 26, "[\"assets\"]" },
+                    { "field-customer", "text", active, "Customer", 3, "[\"projects\",\"customers\"]" },
+                    { "field-document", "file", active, "Document", 27, "[\"documents\"]" },
+                    { "field-document-type", "text", active, "Document Type", 28, "[\"documents\"]" },
+                    { "field-email", "email", active, "Email", 32, "[\"users\"]" },
+                    { "field-finish-date", "date", active, "Finish Date", 9, "[\"issues\"]" },
+                    { "field-inspector", "text", active, "Inspector", 12, "[\"inspections\"]" },
+                    { "field-installer", "text", active, "Installer", 11, "[\"installations\",\"inspections\"]" },
+                    { "field-issue", "text", active, "Issue", 14, "[\"issues\"]" },
+                    { "field-job-number", "primary key", active, "Job Number", 1, "[\"projects\",\"installations\"]" },
+                    { "field-linked-to", "text", active, "Linked To", 29, "[\"documents\"]" },
+                    { "field-machine-id", "text", active, "Machine ID", 23, "[\"assets\"]" },
+                    { "field-machine-type", "text", active, "Machine Type", 17, "[\"installations\",\"assets\"]" },
+                    { "field-office", "text", active, "Office", 6, "[\"projects\",\"customers\",\"users\"]" },
+                    { "field-owner", "text", active, "Owner", 16, "[\"issues\"]" },
+                    { "field-photos", "number", active, "Photos", 13, "[\"inspections\"]" },
+                    { "field-pm-count", "number", active, "PM Count", 25, "[\"assets\"]" },
+                    { "field-pm1", "text", active, "PM-1 S/N", 18, "[\"installations\"]" },
+                    { "field-pm2", "text", active, "PM-2 S/N", 19, "[\"installations\"]" },
+                    { "field-pm3", "text", active, "PM-3 S/N", 20, "[\"installations\"]" },
+                    { "field-pm4", "text", active, "PM-4 S/N", 21, "[\"installations\"]" },
+                    { "field-priority", "text", active, "Priority", 15, "[\"issues\"]" },
+                    { "field-products", "multi-select", active, "Products", 4, "[\"projects\",\"products\"]" },
+                    { "field-progress", "percentage", active, "Progress", 10, "[\"installations\"]" },
+                    { "field-project-type", "text", active, "Project Type", 2, "[\"projects\"]" },
+                    { "field-role", "text", active, "Role", 33, "[\"users\"]" },
+                    { "field-serial-number", "text", active, "Serial Number", 24, "[\"assets\"]" },
+                    { "field-site-name", "text", active, "Site Name", 7, "[\"installations\"]" },
+                    { "field-start-date", "date", active, "Start Date", 8, "[\"installations\",\"issues\"]" },
+                    { "field-status", "text", active, "Status", 5, "[\"projects\",\"installations\",\"inspections\",\"issues\"]" },
+                    { "field-uploaded-at", "date", active, "Uploaded At", 30, "[\"documents\"]" },
+                    { "field-user-name", "text", active, "User Name", 31, "[\"users\"]" }
                 });
         }
 

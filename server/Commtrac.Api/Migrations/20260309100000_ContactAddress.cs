@@ -14,9 +14,7 @@ namespace Commtrac.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             var projectContacts = MigrationSql.Q("ProjectContacts");
-            migrationBuilder.Sql($@"
-                ALTER TABLE {projectContacts} ADD COLUMN IF NOT EXISTS ""Address"" TEXT NULL;
-            ");
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, projectContacts, @"""Address"" TEXT NULL"));
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)

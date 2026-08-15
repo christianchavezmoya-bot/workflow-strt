@@ -13,9 +13,9 @@ namespace Commtrac.Api.Migrations
         protected override void Up(MigrationBuilder migrationBuilder)
         {
             var projectAssets = MigrationSql.Q("ProjectAssets");
-            migrationBuilder.Sql($@"ALTER TABLE {projectAssets} ADD COLUMN IF NOT EXISTS ""ConfigLabel"" TEXT NULL;");
-            migrationBuilder.Sql($@"ALTER TABLE {projectAssets} ADD COLUMN IF NOT EXISTS ""InstalledAt"" TEXT NULL;");
-            migrationBuilder.Sql($@"ALTER TABLE {projectAssets} ADD COLUMN IF NOT EXISTS ""InstalledBy"" TEXT NULL;");
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, projectAssets, @"""ConfigLabel"" TEXT NULL"));
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, projectAssets, @"""InstalledAt"" TEXT NULL"));
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, projectAssets, @"""InstalledBy"" TEXT NULL"));
         }
 
         protected override void Down(MigrationBuilder migrationBuilder) { }

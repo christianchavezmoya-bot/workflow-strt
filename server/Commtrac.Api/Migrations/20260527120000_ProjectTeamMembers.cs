@@ -14,9 +14,9 @@ public partial class ProjectTeamMembers : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         var projects = MigrationSql.Q("Projects");
-        migrationBuilder.Sql($"""
-            ALTER TABLE {projects} ADD COLUMN IF NOT EXISTS "TeamMemberIdsJson" TEXT NOT NULL DEFAULT '[]';
-            """);
+        migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, projects, """
+            "TeamMemberIdsJson" TEXT NOT NULL DEFAULT '[]'
+            """));
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

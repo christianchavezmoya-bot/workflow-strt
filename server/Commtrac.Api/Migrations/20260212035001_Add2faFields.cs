@@ -41,6 +41,8 @@ namespace Commtrac.Api.Migrations
                 value: "Global Offices");
 
             // Use ON CONFLICT for idempotent seed (SQLite 3.24+ and Postgres)
+            // "IsActive" is an INTEGER column on both providers (see DynamicFieldsTables), so
+            // raw SQL seeds it with 1; EF bridges bool→int on Postgres (see AppDbContext).
             var fieldDefs = MigrationSql.Q("FieldDefinitions");
             migrationBuilder.Sql($@"
                 INSERT INTO {fieldDefs} (""Id"", ""ActionType"", ""FieldType"", ""IsActive"", ""LinkToFieldId"", ""Name"", ""SortOrder"", ""TablesJson"")
