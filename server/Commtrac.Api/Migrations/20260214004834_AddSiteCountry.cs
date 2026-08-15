@@ -1,4 +1,5 @@
-﻿using Microsoft.EntityFrameworkCore.Migrations;
+﻿using Commtrac.Api.Data;
+using Microsoft.EntityFrameworkCore.Migrations;
 
 #nullable disable
 
@@ -73,10 +74,14 @@ namespace Commtrac.Api.Migrations
                 column: "SortOrder",
                 value: 39);
 
+            // See DynamicFieldsTables: "IsActive" is INTEGER, and InsertData needs a
+            // provider-appropriate CLR value for it.
+            object active = MigrationSql.IsPostgres(migrationBuilder) ? 1 : true;
+
             migrationBuilder.InsertData(
                 table: "FieldDefinitions",
                 columns: new[] { "Id", "ActionType", "FieldType", "IsActive", "LinkToFieldId", "Name", "SortOrder", "TablesJson" },
-                values: new object[] { "field-site-country", null, "text", true, null, "Country", 38, "[\"sites\"]" });
+                values: new object[] { "field-site-country", null, "text", active, null, "Country", 38, "[\"sites\"]" });
         }
 
         /// <inheritdoc />

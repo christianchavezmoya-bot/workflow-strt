@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
@@ -430,5 +431,53 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<InspectionImportEntity>()
             .HasIndex(i => i.Status);
+
+        if (Database.IsNpgsql())
+        {
+            ApplySqliteShapedPostgresConversions(modelBuilder);
+        }
+    }
+
+    /// <summary>
+    /// The migration chain declares SQLite storage types verbatim (<c>TEXT</c> for dates,
+    /// <c>INTEGER</c> for flags), and <see cref="PostgresSchemaEnsurer"/> follows the same shape,
+    /// so a Postgres database ends up with <c>text</c>/<c>integer</c> columns behind
+    /// <see cref="DateTime"/> and <see cref="bool"/> properties. Npgsql is strict about this and
+    /// refuses to read them, unlike SQLite. Bridging in the model keeps one schema for both
+    /// providers instead of a provider-specific migration chain.
+    /// Dates use round-trip ISO-8601 so ordering and range filters still work as text.
+    /// </summary>
+    private static void ApplySqliteShapedPostgresConversions(ModelBuilder modelBuilder)
+    {
+        var dateTime = new ValueConverter<DateTime, string>(
+            v => v.ToString("O", CultureInfo.InvariantCulture),
+            v => DateTime.Parse(v, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+
+        var nullableDateTime = new ValueConverter<DateTime?, string?>(
+            v => v.HasValue ? v.Value.ToString("O", CultureInfo.InvariantCulture) : null,
+            v => string.IsNullOrWhiteSpace(v)
+                ? null
+                : DateTime.Parse(v, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind));
+
+        var boolean = new ValueConverter<bool, int>(v => v ? 1 : 0, v => v != 0);
+        var nullableBoolean = new ValueConverter<bool?, int?>(
+            v => v.HasValue ? (v.Value ? 1 : 0) : null,
+            v => v.HasValue ? v.Value != 0 : null);
+
+        foreach (var property in modelBuilder.Model.GetEntityTypes().SelectMany(e => e.GetProperties()))
+        {
+            if (property.GetValueConverter() is not null) continue;
+
+            var converter = property.ClrType switch
+            {
+                var t when t == typeof(DateTime) => dateTime,
+                var t when t == typeof(DateTime?) => nullableDateTime,
+                var t when t == typeof(bool) => boolean,
+                var t when t == typeof(bool?) => (ValueConverter)nullableBoolean,
+                _ => null
+            };
+
+            if (converter is not null) property.SetValueConverter(converter);
+        }
     }
 }

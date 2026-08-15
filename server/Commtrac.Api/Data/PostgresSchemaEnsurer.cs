@@ -34,6 +34,9 @@ public static class PostgresSchemaEnsurer
             EnsureRunAmendmentSchema(conn);
             EnsureSoftDeleteColumns(conn);
             EnsurePushDeviceTokensTable(conn);
+            EnsureScheduledReportColumn(conn);
+            EnsureSignatureTokenSignerRoleColumn(conn);
+            EnsureDecimalColumnTypes(conn);
         }
         finally
         {
@@ -317,6 +320,77 @@ public static class PostgresSchemaEnsurer
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_PushDeviceTokens_Token" ON "PushDeviceTokens" ("Token");
             CREATE INDEX IF NOT EXISTS "IX_PushDeviceTokens_UserId" ON "PushDeviceTokens" ("UserId");
             """);
+    }
+
+    private static void EnsureScheduledReportColumn(DbConnection conn)
+    {
+        ExecuteNonQuery(conn, """
+            ALTER TABLE "Projects" ADD COLUMN IF NOT EXISTS "ScheduledReportJson" TEXT;
+            """);
+    }
+
+    private static void EnsureSignatureTokenSignerRoleColumn(DbConnection conn)
+    {
+        if (!TableExists(conn, "SignatureTokens")) return;
+        ExecuteNonQuery(conn, """
+            ALTER TABLE "SignatureTokens" ADD COLUMN IF NOT EXISTS "SignerRole" TEXT NOT NULL DEFAULT 'Customer';
+            """);
+    }
+
+    /// <summary>
+    /// Money and quantity columns were declared with SQLite storage types (TEXT or REAL), which
+    /// Postgres takes literally, so EF cannot read them as <see cref="decimal"/>. Unlike dates and
+    /// flags — bridged in the model, see AppDbContext — these are few and are used for arithmetic,
+    /// so they get a real numeric type.
+    /// </summary>
+    private static void EnsureDecimalColumnTypes(DbConnection conn)
+    {
+        (string Table, string Column)[] columns =
+        [
+            ("Projects", "ContractValue"),
+            ("Features", "UnitPrice"),
+            ("FeatureDependencies", "UnitPrice"),
+            ("FeatureDependencies", "DefaultQty"),
+            ("ProjectInboundItems", "Quantity"),
+            ("DispatchLines", "QuantityRequested"),
+            ("DispatchLines", "QuantityShipped"),
+            ("DispatchLines", "UnitCost"),
+        ];
+
+        foreach (var (table, column) in columns)
+        {
+            if (!TableExists(conn, table)) continue;
+            var current = ColumnDataType(conn, table, column);
+            if (current is null || current == "numeric") continue;
+
+            // Empty strings are not valid numerics; treat them as NULL (or 0 for NOT NULL columns).
+            var cast = current is "text" or "character varying"
+                ? $@"NULLIF(TRIM(""{column}""), '')::numeric"
+                : $@"""{column}""::numeric";
+
+            ExecuteNonQuery(conn, $"""
+                ALTER TABLE "{table}" ALTER COLUMN "{column}" DROP DEFAULT;
+                ALTER TABLE "{table}" ALTER COLUMN "{column}" TYPE numeric USING {cast};
+                """);
+        }
+    }
+
+    private static string? ColumnDataType(DbConnection conn, string table, string column)
+    {
+        using var cmd = conn.CreateCommand();
+        cmd.CommandText = """
+            SELECT data_type FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = @table AND column_name = @column;
+            """;
+        var tableParam = cmd.CreateParameter();
+        tableParam.ParameterName = "@table";
+        tableParam.Value = table;
+        cmd.Parameters.Add(tableParam);
+        var columnParam = cmd.CreateParameter();
+        columnParam.ParameterName = "@column";
+        columnParam.Value = column;
+        cmd.Parameters.Add(columnParam);
+        return cmd.ExecuteScalar() as string;
     }
 
     private static bool TableExists(DbConnection conn, string table)

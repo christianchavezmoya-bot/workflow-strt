@@ -52,7 +52,7 @@ namespace Commtrac.Api.Migrations
                     Name      = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     Icon      = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
                     SortOrder = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 0),
-                    IsActive  = table.Column<bool>(nullable: false, defaultValue: true)
+                    IsActive  = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true)
                 },
                 constraints: table => table.PrimaryKey("PK_WorkflowTypes", x => x.Id));
 
@@ -91,7 +91,7 @@ namespace Commtrac.Api.Migrations
                     AssetId          = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     WorkflowConfigId = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     WorkflowTypeId   = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    Active           = table.Column<bool>(nullable: false, defaultValue: true),
+                    Active           = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
                     AssignedBy       = table.Column<string>(type: "TEXT", maxLength: 200, nullable: true),
                     AssignedAt       = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
@@ -112,7 +112,7 @@ namespace Commtrac.Api.Migrations
                     WorkflowSnapshotJson = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "{}"),
                     WorkOrderId          = table.Column<string>(type: "TEXT", maxLength: 100, nullable: true),
                     Status               = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false, defaultValue: "InProgress"),
-                    IsLocked             = table.Column<bool>(nullable: false, defaultValue: false),
+                    IsLocked             = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: false),
                     TechnicianUserId     = table.Column<string>(type: "TEXT", maxLength: 80, nullable: true),
                     StepResultsJson      = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "[]"),
                     IssuesJson           = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "[]"),
@@ -136,13 +136,12 @@ namespace Commtrac.Api.Migrations
             var workOrders = MigrationSql.Q("WorkOrders");
 
             // ── 6. Seed default WorkflowTypes ──────────────────────────────────────────
-            var active = MigrationSql.BoolTrue(migrationBuilder);
             migrationBuilder.Sql($@"
                 INSERT INTO {workflowTypes} (""Id"", ""Name"", ""Icon"", ""SortOrder"", ""IsActive"") VALUES
-                ('wftype-installation',  'Installation',  NULL, 1, {active}),
-                ('wftype-commissioning', 'Commissioning', NULL, 2, {active}),
-                ('wftype-inspection',    'Inspection',    NULL, 3, {active}),
-                ('wftype-repair',        'Repair',        NULL, 4, {active})
+                ('wftype-installation',  'Installation',  NULL, 1, 1),
+                ('wftype-commissioning', 'Commissioning', NULL, 2, 1),
+                ('wftype-inspection',    'Inspection',    NULL, 3, 1),
+                ('wftype-repair',        'Repair',        NULL, 4, 1)
                 ON CONFLICT (""Id"") DO NOTHING
             ");
 
@@ -197,7 +196,7 @@ namespace Commtrac.Api.Migrations
                     pa.""Id"" AS ""AssetId"",
                     pa.""ProductConfigId"" AS ""WorkflowConfigId"",
                     'wftype-installation' AS ""WorkflowTypeId"",
-                    {active} AS ""Active"",
+                    1 AS ""Active"",
                     NULL AS ""AssignedBy"",
                     pa.""CreatedAt"" AS ""AssignedAt""
                 FROM {projectAssets} pa
@@ -222,7 +221,7 @@ namespace Commtrac.Api.Migrations
                     '{{}}' AS ""WorkflowSnapshotJson"",
                     wo.""Id"" AS ""WorkOrderId"",
                     wo.""Status"",
-                    {MigrationSql.BoolCase(migrationBuilder, @"wo.""Status"" = 'Complete'")} AS ""IsLocked"",
+                    CASE WHEN wo.""Status"" = 'Complete' THEN 1 ELSE 0 END AS ""IsLocked"",
                     NULL AS ""TechnicianUserId"",
                     COALESCE(wo.""StepsDataJson"", '[]') AS ""StepResultsJson"",
                     COALESCE(pa.""IssuesJson"", '[]') AS ""IssuesJson"",
