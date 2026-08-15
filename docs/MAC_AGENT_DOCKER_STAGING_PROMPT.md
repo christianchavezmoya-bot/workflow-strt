@@ -21,14 +21,19 @@ You are the **Mac Docker staging agent** for Commtrac. You are **taking over fro
 
 ### Where the previous agent stopped
 
-The stack would not start and the API would not migrate, so **Step 5 onward was never run**. Two blockers were found and both are **now fixed on `main` by PR #185** — you should not need to reproduce or re-patch them:
+The stack would not start and the API would not migrate, so **Step 5 onward was never run**. Everything below is **fixed on `main` by PR #185** — do not reproduce or re-patch any of it:
 
-| Blocker | Symptom | Fix on `main` |
-|---------|---------|---------------|
-| Invalid MinIO client image | `minio/mc:RELEASE.2025-04-22T08-00-08Z` does not exist; `minio-setup` container fails to pull | tag pinned to `RELEASE.2025-04-16T18-13-26Z` |
-| Postgres boolean vs integer | API crash: `Applying migration '20260212035001_Add2faFields'` → `42804: column "IsActive" is of type boolean but expression is of type integer` | `MigrationSql.BoolTrue/BoolFalse/BoolCase` helpers; applied in `Add2faFields`, `WorkflowConfigUnification`, `WorkflowTypeIdsForTemplatesAndConfigs`, `BackfillSignatureStatus` |
+| Blocker | Symptom |
+|---------|---------|
+| Invalid MinIO client image | `minio/mc:RELEASE.2025-04-22T08-00-08Z` does not exist, so `minio-setup` could not pull and the stack never started |
+| Postgres boolean vs integer | `Applying migration '20260212035001_Add2faFields'` → `42804: column "IsActive" is of type boolean but expression is of type integer` |
+| SQLite regression | `ADD COLUMN IF NOT EXISTS` is Postgres-only; it had broken local SQLite dev, native builds, and the backend test suite on `main` |
+| Postgres runtime type mismatches | Migrations applied but requests failed with `Reading as 'System.DateTime' is not supported for fields having DataTypeName 'text'` (and the same for bool and decimal) |
+| Missing columns and unquoted raw SQL | `Projects.ScheduledReportJson` absent; `relation "searchdocumentchunks" does not exist` |
 
-The previous agent patched both **locally**. Those local edits are obsolete and must be discarded (Step 0) — keeping them will mask whether `main` is actually correct.
+Since that report, the Postgres path was verified end to end against a real Postgres 16: migrations apply, the Strata NGO seed completes, the API boots clean, and login, brand, offices, customers, the 10-step Chambers workflow, BOM, search and project create/update all pass. **Your run is to confirm the same inside Docker**, plus the web tier and MinIO, which could not be exercised outside Docker.
+
+The previous agent patched the first two blockers **locally**. Those edits are obsolete and must be discarded (Step 0) — keeping them will mask whether `main` is actually correct.
 
 ### Critical rule — do not patch migrations locally
 
@@ -142,12 +147,14 @@ git log -1 --oneline
 echo "--- minio mc tag (must NOT be RELEASE.2025-04-22T08-00-08Z) ---"
 grep -n 'minio/mc:' docker-compose.staging.yml
 
-echo "--- Postgres boolean helpers present ---"
-grep -n 'BoolTrue\|BoolCase' server/Commtrac.Api/Data/MigrationSql.cs
+echo "--- Postgres runtime type bridge present ---"
+grep -n 'ApplySqliteShapedPostgresConversions' server/Commtrac.Api/Data/AppDbContext.cs
 
-echo "--- Add2faFields uses BoolTrue, not integer 1 ---"
-grep -n 'BoolTrue(migrationBuilder)' server/Commtrac.Api/Migrations/20260212035001_Add2faFields.cs
-grep -n "'text', 1, NULL" server/Commtrac.Api/Migrations/20260212035001_Add2faFields.cs && echo "FAIL: old integer literal still present" || echo "OK: no integer IsActive literal"
+echo "--- Postgres schema fixups present ---"
+grep -n 'EnsureDecimalColumnTypes\|EnsureScheduledReportColumn' server/Commtrac.Api/Data/PostgresSchemaEnsurer.cs
+
+echo "--- SQLite-incompatible DDL is gone ---"
+grep -rn 'ADD COLUMN IF NOT EXISTS' server/Commtrac.Api/Migrations/ && echo "FAIL: SQLite-breaking DDL still present" || echo "OK: none in migrations"
 ```
 
 **If any check above fails, stop.** Your `main` predates PR #185 — re-run Step 1c, and if it still fails tell the user `main` does not yet contain #185. Do not hand-patch.
@@ -156,7 +163,7 @@ grep -n "'text', 1, NULL" server/Commtrac.Api/Migrations/20260212035001_Add2faFi
 |----|---------|
 | G1 | On `main`, pull succeeded |
 | G2a | `minio/mc:` tag is `RELEASE.2025-04-16T18-13-26Z` (or another tag that pulls) |
-| G2b | `MigrationSql.cs` contains `BoolTrue`, and `Add2faFields` calls `BoolTrue(migrationBuilder)` with no `'text', 1, NULL` literal |
+| G2b | `AppDbContext` has `ApplySqliteShapedPostgresConversions`, `PostgresSchemaEnsurer` has `EnsureDecimalColumnTypes`, and no migration contains `ADD COLUMN IF NOT EXISTS` |
 
 ---
 
@@ -391,13 +398,19 @@ Optional — open MinIO console http://localhost:9001 (`commtrac` / `commtrac_de
 
 ```bash
 cd server/Commtrac.Api && dotnet build
+cd ../Commtrac.Api.Tests && dotnet test --nologo
 cd ../.. && npx tsc -b
 ```
+
+The backend suite includes a migration-chain test that applies every migration to a fresh SQLite
+database — it is what caught the `ADD COLUMN IF NOT EXISTS` regression, so a failure here means
+`main` is broken for local dev and native, not just staging.
 
 | ID | PASS if |
 |----|---------|
 | T1 | `dotnet build` exit 0 |
-| T2 | `npx tsc -b` exit 0 |
+| T2 | `dotnet test` exit 0 (5 passed) |
+| T3 | `npx tsc -b` exit 0 |
 
 ---
 
@@ -454,7 +467,8 @@ W5 document upload: PASS / FAIL / SKIPPED
 
 AUTOMATED
 T1 dotnet build: PASS / FAIL / SKIPPED
-T2 tsc -b: PASS / FAIL / SKIPPED
+T2 dotnet test: PASS / FAIL / SKIPPED
+T3 tsc -b: PASS / FAIL / SKIPPED
 
 URLs:
   Web:  http://localhost:5174
