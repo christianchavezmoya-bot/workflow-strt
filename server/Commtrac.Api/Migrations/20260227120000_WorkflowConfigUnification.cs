@@ -52,7 +52,7 @@ namespace Commtrac.Api.Migrations
                     Name      = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     Icon      = table.Column<string>(type: "TEXT", maxLength: 50, nullable: true),
                     SortOrder = table.Column<int>(type: "INTEGER", nullable: false, defaultValue: 0),
-                    IsActive  = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true)
+                    IsActive  = table.Column<bool>(nullable: false, defaultValue: true)
                 },
                 constraints: table => table.PrimaryKey("PK_WorkflowTypes", x => x.Id));
 
@@ -91,7 +91,7 @@ namespace Commtrac.Api.Migrations
                     AssetId          = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     WorkflowConfigId = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
                     WorkflowTypeId   = table.Column<string>(type: "TEXT", maxLength: 100, nullable: false),
-                    Active           = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: true),
+                    Active           = table.Column<bool>(nullable: false, defaultValue: true),
                     AssignedBy       = table.Column<string>(type: "TEXT", maxLength: 200, nullable: true),
                     AssignedAt       = table.Column<DateTime>(type: "TEXT", nullable: false)
                 },
@@ -112,7 +112,7 @@ namespace Commtrac.Api.Migrations
                     WorkflowSnapshotJson = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "{}"),
                     WorkOrderId          = table.Column<string>(type: "TEXT", maxLength: 100, nullable: true),
                     Status               = table.Column<string>(type: "TEXT", maxLength: 20, nullable: false, defaultValue: "InProgress"),
-                    IsLocked             = table.Column<bool>(type: "INTEGER", nullable: false, defaultValue: false),
+                    IsLocked             = table.Column<bool>(nullable: false, defaultValue: false),
                     TechnicianUserId     = table.Column<string>(type: "TEXT", maxLength: 80, nullable: true),
                     StepResultsJson      = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "[]"),
                     IssuesJson           = table.Column<string>(type: "TEXT", nullable: false, defaultValue: "[]"),

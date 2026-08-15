@@ -30,4 +30,14 @@ internal static class MigrationSql
         IsPostgres(builder)
             ? $"CASE WHEN {condition} THEN true ELSE false END"
             : $"CASE WHEN {condition} THEN 1 ELSE 0 END";
+
+    /// <summary>
+    /// <c>ALTER TABLE … ADD COLUMN</c>, with <c>IF NOT EXISTS</c> only where supported.
+    /// Postgres accepts it; SQLite has no such form and raises a syntax error.
+    /// </summary>
+    internal static string AddColumn(MigrationBuilder builder, string quotedTable, string columnDefinition)
+    {
+        var guard = IsPostgres(builder) ? "IF NOT EXISTS " : string.Empty;
+        return $"ALTER TABLE {quotedTable} ADD COLUMN {guard}{columnDefinition}";
+    }
 }

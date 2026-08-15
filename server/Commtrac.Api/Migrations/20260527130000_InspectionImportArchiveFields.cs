@@ -14,11 +14,11 @@ public partial class InspectionImportArchiveFields : Migration
     protected override void Up(MigrationBuilder migrationBuilder)
     {
         var inspectionImports = MigrationSql.Q("InspectionImports");
-        migrationBuilder.Sql($@"ALTER TABLE {inspectionImports} ADD COLUMN IF NOT EXISTS ""IsArchived""    INTEGER NOT NULL DEFAULT 0;");
-        migrationBuilder.Sql($@"ALTER TABLE {inspectionImports} ADD COLUMN IF NOT EXISTS ""ArchivedAt""    TEXT NULL;");
-        migrationBuilder.Sql($@"ALTER TABLE {inspectionImports} ADD COLUMN IF NOT EXISTS ""ArchivedBy""    TEXT NULL;");
-        migrationBuilder.Sql($@"ALTER TABLE {inspectionImports} ADD COLUMN IF NOT EXISTS ""ArchiveReason"" TEXT NULL;");
-        migrationBuilder.Sql($@"ALTER TABLE {inspectionImports} ADD COLUMN IF NOT EXISTS ""ArchiveRef""    TEXT NULL;");
+        migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, inspectionImports, @"""IsArchived"" INTEGER NOT NULL DEFAULT 0"));
+        migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, inspectionImports, @"""ArchivedAt"" TEXT NULL"));
+        migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, inspectionImports, @"""ArchivedBy"" TEXT NULL"));
+        migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, inspectionImports, @"""ArchiveReason"" TEXT NULL"));
+        migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, inspectionImports, @"""ArchiveRef"" TEXT NULL"));
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)

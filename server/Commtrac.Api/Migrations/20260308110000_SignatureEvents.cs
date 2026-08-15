@@ -18,9 +18,9 @@ namespace Commtrac.Api.Migrations
             var sigEvents = MigrationSql.Q("SignatureEvents");
             var sigTokens = MigrationSql.Q("SignatureTokens");
 
-            migrationBuilder.Sql($@"ALTER TABLE {runs} ADD COLUMN IF NOT EXISTS ""SignatureStatus"" TEXT NOT NULL DEFAULT 'None'");
-            migrationBuilder.Sql($@"ALTER TABLE {runs} ADD COLUMN IF NOT EXISTS ""InstallerSignedAt"" TEXT NULL");
-            migrationBuilder.Sql($@"ALTER TABLE {runs} ADD COLUMN IF NOT EXISTS ""CustomerSignedAt"" TEXT NULL");
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, runs, @"""SignatureStatus"" TEXT NOT NULL DEFAULT 'None'"));
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, runs, @"""InstallerSignedAt"" TEXT NULL"));
+            migrationBuilder.Sql(MigrationSql.AddColumn(migrationBuilder, runs, @"""CustomerSignedAt"" TEXT NULL"));
 
             migrationBuilder.Sql($@"
                 CREATE TABLE IF NOT EXISTS {sigEvents} (
