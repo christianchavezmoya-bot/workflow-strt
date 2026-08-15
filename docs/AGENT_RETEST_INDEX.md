@@ -9,6 +9,7 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 | Round | Branch | Mac prompt | Windows prompt |
 |-------|--------|------------|----------------|
 | **Docker cloud-shaped staging** | `main` including **#185** (Postgres bool + MinIO tag) | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
+| **Full device test (web + iPhone + Android)** | `main` after staging sign-off | [`MAC_AGENT_DEVICE_TEST_PROMPT.md`](./MAC_AGENT_DEVICE_TEST_PROMPT.md) | — (needs Xcode/Android Studio) |
 | Standup guide | | [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) | same |
 | Pre-deploy gate | | [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) | same |
 | **Cloud hosting AWS prep** | `main` @ `c4b4125+` | [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) | [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md) |
