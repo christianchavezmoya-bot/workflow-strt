@@ -2,7 +2,7 @@
 
 **Copy everything below the line into your Mac Cursor agent.**
 
-**Branch:** `main` @ **`8c1a4b3`** (or newer — must include PRs #173–#179 + this prompt #180+)  
+**Branch:** `main` — must include **PR #185** (Postgres boolean migration fix + valid MinIO `mc` tag). Step 0 verifies this by content, not by hash.  
 **Guide:** [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md)  
 **Pre-deploy (after this passes):** [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)  
 
@@ -13,11 +13,36 @@
 
 ## PROMPT START
 
-You are the **Mac Docker staging agent** for Commtrac.
+You are the **Mac Docker staging agent** for Commtrac. You are **taking over from a previous Mac agent** — read Step 0 before touching anything.
 
 ### Your job
 
 **Execute every step yourself** in the terminal. Use browser tools if available for UI checks. **Do not ask the user to run commands.** Diagnose failures (container logs), attempt one fix, then continue or mark FAIL. Fill in the report template at the end and paste it back.
+
+### Where the previous agent stopped
+
+The stack would not start and the API would not migrate, so **Step 5 onward was never run**. Two blockers were found and both are **now fixed on `main` by PR #185** — you should not need to reproduce or re-patch them:
+
+| Blocker | Symptom | Fix on `main` |
+|---------|---------|---------------|
+| Invalid MinIO client image | `minio/mc:RELEASE.2025-04-22T08-00-08Z` does not exist; `minio-setup` container fails to pull | tag pinned to `RELEASE.2025-04-16T18-13-26Z` |
+| Postgres boolean vs integer | API crash: `Applying migration '20260212035001_Add2faFields'` → `42804: column "IsActive" is of type boolean but expression is of type integer` | `MigrationSql.BoolTrue/BoolFalse/BoolCase` helpers; applied in `Add2faFields`, `WorkflowConfigUnification`, `WorkflowTypeIdsForTemplatesAndConfigs`, `BackfillSignatureStatus` |
+
+The previous agent patched both **locally**. Those local edits are obsolete and must be discarded (Step 0) — keeping them will mask whether `main` is actually correct.
+
+### Critical rule — do not patch migrations locally
+
+If a **migration fails on Postgres**, do **not** edit files under `server/Commtrac.Api/Migrations/` to get past it. Local patches make the run unverifiable and the fix never reaches other machines.
+
+Instead: stop, collect the evidence below, and report it. The cloud agent lands the fix on `main`, then you re-pull and retry with a fresh volume.
+
+```bash
+# Migration failure evidence — paste ALL of this in your report
+docker compose -f docker-compose.staging.yml logs api --tail 120
+docker compose -f docker-compose.staging.yml logs api 2>&1 | grep -iE "applying migration|error|[0-9]{5}:" | tail -30
+```
+
+Report: the **exact migration name**, the **Postgres error code** (e.g. `42804`), the **column name**, and the **failing SQL** if the log shows it.
 
 ### Two modes — do not mix them
 
@@ -33,8 +58,39 @@ You are the **Mac Docker staging agent** for Commtrac.
 ### Rules
 
 - Do **not** commit `.env.staging.local`, `.env.production.local`, or LAN IPs
-- Do **not** modify source code unless fixing a blocker you found
+- Do **not** modify migrations, `docker-compose.staging.yml`, or `src/services/apiBase.ts` locally — report instead
 - Prefer `git pull --no-rebase` over `reset --hard` unless local commits are clearly disposable WIP
+
+---
+
+## Step 0 — Clean slate (do this first)
+
+The previous agent left local edits to `docker-compose.staging.yml`, migrations, and possibly `src/services/apiBase.ts`. All are superseded by `main`. Discard them.
+
+```bash
+# 0a — see what is dirty before you throw anything away
+cd "$(git rev-parse --show-toplevel)"
+git status
+git stash list
+git diff --stat
+```
+
+```bash
+# 0b — discard tracked local modifications (env files are untracked and survive)
+git restore --staged --worktree docker-compose.staging.yml 2>/dev/null || true
+git checkout -- server/Commtrac.Api/Migrations/ src/services/apiBase.ts docker-compose.staging.yml 2>/dev/null || true
+git status --porcelain
+```
+
+If `git status --porcelain` still lists tracked files you did not create, and you are certain there is no work worth keeping:
+
+```bash
+git stash push -u -m "pre-handoff mac agent leftovers"   # recoverable if wrong
+```
+
+| ID | PASS if |
+|----|---------|
+| H1 | `git status --porcelain` shows no modified tracked files (untracked `.env.*.local` is fine) |
 
 ---
 
@@ -80,16 +136,27 @@ git log --oneline -5 origin/main
 | **Local commits you must keep** | Resolve conflicts manually, then continue |
 
 ```bash
-# 1d — confirm expected commits present
+# 1d — verify the fixes are actually in your working tree (content check, not hash)
 git log -1 --oneline
-# PASS: hash is 8c1a4b3 or newer (includes #179 BOM + #178 Strata seed + #175–#177 parity)
-git merge-base --is-ancestor 6b4078f HEAD && echo "PR #179 ancestor OK" || echo "WARN: may be too old"
+
+echo "--- minio mc tag (must NOT be RELEASE.2025-04-22T08-00-08Z) ---"
+grep -n 'minio/mc:' docker-compose.staging.yml
+
+echo "--- Postgres boolean helpers present ---"
+grep -n 'BoolTrue\|BoolCase' server/Commtrac.Api/Data/MigrationSql.cs
+
+echo "--- Add2faFields uses BoolTrue, not integer 1 ---"
+grep -n 'BoolTrue(migrationBuilder)' server/Commtrac.Api/Migrations/20260212035001_Add2faFields.cs
+grep -n "'text', 1, NULL" server/Commtrac.Api/Migrations/20260212035001_Add2faFields.cs && echo "FAIL: old integer literal still present" || echo "OK: no integer IsActive literal"
 ```
+
+**If any check above fails, stop.** Your `main` predates PR #185 — re-run Step 1c, and if it still fails tell the user `main` does not yet contain #185. Do not hand-patch.
 
 | ID | PASS if |
 |----|---------|
 | G1 | On `main`, pull succeeded |
-| G2 | `git log -1` is #180+ or includes merges for #175–#179 |
+| G2a | `minio/mc:` tag is `RELEASE.2025-04-16T18-13-26Z` (or another tag that pulls) |
+| G2b | `MigrationSql.cs` contains `BoolTrue`, and `Add2faFields` calls `BoolTrue(migrationBuilder)` with no `'text', 1, NULL` literal |
 
 ---
 
@@ -114,18 +181,27 @@ lsof -i :8080 -i :5174 -i :9001 2>/dev/null | head -20 || true
 
 ---
 
-## Step 3 — Fresh Strata NGO seed (required)
+## Step 3 — Fresh Strata NGO seed (required, non-negotiable)
 
-Strata seed runs **only on empty Postgres**. Wipe old staging data:
+Two reasons this must be a **fresh volume**, not a restart:
+
+1. The Strata seed runs **only on empty Postgres**.
+2. The previous run died mid-migration, so the existing volume holds a **half-applied schema**. Reusing it will fail in confusing ways even with the #185 fix.
 
 ```bash
 docker compose -f docker-compose.staging.yml down -v
 docker volume ls | grep commtrac_staging || echo "volumes cleared"
 ```
 
+`grep` printing nothing (i.e. "volumes cleared") is the expected result. If volumes persist:
+
+```bash
+docker volume rm commtrac_staging_pgdata commtrac_staging_minio 2>/dev/null || true
+```
+
 | ID | PASS if |
 |----|---------|
-| G5 | `down -v` completed without error |
+| G5 | `down -v` completed and no `commtrac_staging_*` volumes remain |
 
 ---
 
@@ -144,10 +220,21 @@ First run may take 5–15 min (Docker build + `npm run build:cloud-web:staging`)
 **If standup fails:**
 
 ```bash
-docker compose -f docker-compose.staging.yml logs api --tail 80
+docker compose -f docker-compose.staging.yml logs api --tail 120
 docker compose -f docker-compose.staging.yml logs postgres --tail 40
+docker compose -f docker-compose.staging.yml logs minio-setup --tail 30
 docker ps -a --filter "name=commtrac-staging"
 ```
+
+Triage by symptom:
+
+| Symptom in logs | Meaning | Action |
+|-----------------|---------|--------|
+| `manifest ... not found` on a `minio/mc` or `minio/minio` pull | image tag does not exist upstream | Confirm Step 1d tag check passed. If the pinned tag has since been removed, report it — do not silently swap tags |
+| `Applying migration '<name>'` then a 5-digit Postgres error (`42804`, `42703`, `42P01`, …) | provider mismatch in that migration's raw SQL | **Stop. Do not patch.** Collect the evidence block from "Critical rule" above and report the migration name + error code + column |
+| `relation "<lowercase_name>" does not exist` | unquoted PascalCase identifier in raw SQL | Same as above — report, don't patch |
+| API healthy but web calls `:4000` | staging web env not baked in | Confirm `.env.staging.local` exists and rebuild with `--build-web` |
+| Port already allocated | leftover container or host process | `docker compose -f docker-compose.staging.yml down` then re-check `lsof` from Step 2 |
 
 | ID | PASS if |
 |----|---------|
@@ -330,12 +417,16 @@ docker compose -f docker-compose.staging.yml down
 ```
 Docker staging Mac @ <git hash from git log -1>
 
+HANDOFF
+H1 clean tree (no leftover local patches): PASS / FAIL
+
 GIT
 G1 pull main: PASS / FAIL
-G2 commits #175-#179+: PASS / FAIL
+G2a minio/mc tag valid: PASS / FAIL
+G2b Add2faFields uses BoolTrue (PR #185 present): PASS / FAIL
 G3 docker CLI: PASS / FAIL
 G4 docker daemon: PASS / FAIL
-G5 fresh volume (-v): PASS / FAIL
+G5 fresh volume (-v), no stale volumes: PASS / FAIL
 
 STANDUP
 S1 standup script: PASS / FAIL
@@ -371,9 +462,12 @@ URLs:
   MinIO: http://localhost:9001
 
 Blockers: none / <list with log excerpts>
+Local patches applied: NONE (expected) / <list — explain why>
 Next: user manual UX pass OR iPhone against http://<LAN-IP>:8080/api
 ```
 
-**On failure:** attach `docker compose -f docker-compose.staging.yml logs api --tail 50` and the failing curl output.
+**On failure:** attach `docker compose -f docker-compose.staging.yml logs api --tail 120` and the failing curl output.
+
+**If a migration failed:** also state the migration name, Postgres error code, and column, and confirm you did **not** patch it locally. That report is enough for the cloud agent to land a fix on `main`; you then repeat Step 1c → Step 3 (`down -v`) → Step 4.
 
 ## PROMPT END

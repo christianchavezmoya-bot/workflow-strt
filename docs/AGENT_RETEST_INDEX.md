@@ -8,7 +8,7 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 
 | Round | Branch | Mac prompt | Windows prompt |
 |-------|--------|------------|----------------|
-| **Docker cloud-shaped staging** | `main` @ **`2c85427+`** (#173–#181) | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
+| **Docker cloud-shaped staging** | `main` including **#185** (Postgres bool + MinIO tag) | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
 | Standup guide | | [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) | same |
 | Pre-deploy gate | | [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) | same |
 | **Cloud hosting AWS prep** | `main` @ `c4b4125+` | [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) | [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md) |
@@ -38,6 +38,12 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 2. **Mac Docker agent** runs first for staging stack (executable prompt — agent runs all commands).
 3. **Windows agent** optional for Sqlite dev `:4000` regression.
 4. **Mac iOS agent** after API confirmed — physical iPhone, same Strata logins against LAN `:8080` or dev `:4000`.
+
+### Migration failures are cloud-agent work, not field-agent work
+
+Field agents must **not** patch `server/Commtrac.Api/Migrations/` locally to get a stack running. A local patch means the run proves nothing and the next machine hits the same wall. The agent reports the migration name, Postgres error code, and column; the cloud agent fixes it on `main`; the field agent re-pulls and retries with `down -v`.
+
+Postgres/SQLite differences belong in [`MigrationSql`](../server/Commtrac.Api/Data/MigrationSql.cs) — `Q()` for identifiers, `BoolTrue`/`BoolFalse`/`BoolCase` for boolean literals.
 
 ---
 
