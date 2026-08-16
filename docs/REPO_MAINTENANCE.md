@@ -90,6 +90,8 @@ done
 - **Offline ops:** `OFFLINE_*`, `RELEASE_CHECKLIST.md`, `BUG_TRIAGE.md`, `MOBILE_BUILD.md`
 - **Generated:** `ARCHITECTURE.md` (via `npm run docs:update` — do not hand-edit)
 - **Agent index:** `AGENT_RETEST_INDEX.md`
+- **Code quality:** `CODE_QUALITY_ASSESSMENT.md` (dated snapshot — re-run rather than edit),
+  `CODE_QUALITY_REMEDIATION_PLAN.md` (living; update phase status as work lands)
 
 ### Archived → `docs/archive/`
 
