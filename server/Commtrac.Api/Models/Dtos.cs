@@ -1755,3 +1755,72 @@ public record AssetReportShareManifestDto(
     List<AssetReportShareFileDto> Files,
     string DownloadUrl
 );
+
+// ── Fault reporting ─────────────────────────────────────────────────────────────
+
+public record SubmitFaultReportRequest(
+    string? Kind,
+    string? Severity,
+    string Title,
+    string? Description,
+    string? Platform,
+    string? AppVersion,
+    string? UserAgent,
+    string? RoutePath,
+    string? ErrorName,
+    string? ErrorMessage,
+    string? ErrorStack,
+    string? TraceId,
+    string? BreadcrumbsJson,
+    string? DiagnosticsJson,
+    bool? WasOffline,
+    DateTime? OccurredAtUtc,
+    string? ClientReferenceCode
+);
+
+public record FaultReportDto(
+    string Id,
+    string ReferenceCode,
+    string Kind,
+    string Severity,
+    string Status,
+    string Title,
+    string? Description,
+    string Platform,
+    string? AppVersion,
+    string? UserAgent,
+    string? RoutePath,
+    string? UserId,
+    string? UserEmail,
+    string? UserRole,
+    string? ErrorName,
+    string? ErrorMessage,
+    string? TraceId,
+    bool WasOffline,
+    DateTime OccurredAtUtc,
+    DateTime CreatedAtUtc,
+    string? Notes,
+    DateTime? ResolvedAtUtc
+);
+
+/// <summary>List rows omit stack, breadcrumbs and diagnostics — fetch one report for those.</summary>
+public record FaultReportDetailDto(
+    FaultReportDto Report,
+    string? ErrorStack,
+    string? BreadcrumbsJson,
+    string? DiagnosticsJson
+);
+
+public record UpdateFaultReportRequest(
+    string? Status,
+    string? Severity,
+    string? Notes
+);
+
+public record FaultReportSummaryDto(
+    int Total,
+    int New,
+    int Investigating,
+    int Unresolved,
+    int LastSevenDays
+);

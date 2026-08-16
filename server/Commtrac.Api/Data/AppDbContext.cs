@@ -81,6 +81,7 @@ public class AppDbContext : DbContext
     // ─── Inspection Imports ───────────────────────────────────────────────────
     public DbSet<InspectionImportEntity> InspectionImports => Set<InspectionImportEntity>();
     public DbSet<PushDeviceTokenEntity> PushDeviceTokens => Set<PushDeviceTokenEntity>();
+    public DbSet<FaultReportEntity> FaultReports => Set<FaultReportEntity>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

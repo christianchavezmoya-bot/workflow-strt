@@ -12,6 +12,36 @@ Use this guide for every production or field bug report.
 | **S3 — Minor** | UI glitch, cosmetic, non-blocking | Backlog | Scheduled release |
 | **S4 — Enhancement** | Not a defect | Product backlog | Planned |
 
+## In-app fault reporting (preferred intake)
+
+Users report from the app itself: **avatar menu → Report a problem**, or the **Tell us what happened**
+button on the crash screen. The app attaches everything this document asks for automatically —
+platform, app version, screen, connectivity, sync/queue state, recent API calls and the trail of
+screens leading up to it — so the reporter only supplies what the app cannot know: what they were
+doing and what they expected.
+
+Every report gets a code like **`FR-7QK2M4`**, shown to the user. Quote it in tickets and calls.
+
+| Task | Where |
+|---|---|
+| Read reports | **Admin → Fault Reports** (`/admin/fault-reports`, needs settings access) |
+| Find the one a user is quoting | `GET /api/fault-reports/by-reference/FR-7QK2M4` |
+| Triage | Set status/severity and add notes in the report dialog |
+| Full device diagnostics | **Diagnostics JSON** button in the report — same sanitized bundle as Sync Center |
+
+Impact choices in the dialog map to the severity levels above: *I lost work* → S0, *I can't carry
+on* → S1, *Something's broken* → S2, *Minor problem* → S3.
+
+Reports raised offline are stored on the device and send themselves on reconnect, so a field user
+never has to be online to file one. Crashes and unhandled promise rejections are captured
+automatically as S1 (deduplicated, capped per session) — a blank screen is no longer a silent failure.
+
+Reports are also written to the server log, so they land wherever cloud logs are shipped.
+
+> **Adding a hosted service later.** Destinations are pluggable: implement `FaultReportSink` and
+> register it via `registerFaultReportSink` (see `src/services/faultReporting`). Capture and UI code
+> is unaffected, and sinks are independent, so a hosted service can run alongside the API sink.
+
 ## Required information in every report
 
 - Platform: web / Android / iOS + OS version

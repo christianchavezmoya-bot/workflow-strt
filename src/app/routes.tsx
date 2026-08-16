@@ -27,6 +27,7 @@ const AssetReportShareViewPage = lazy(() => import("../features/reports/AssetRep
 const IssuesBoard = lazy(() => import("../features/issues/IssuesBoard"));
 const MobileUploadPage = lazy(() => import("../features/mobile-upload/MobileUploadPage"));
 const TimeAnalyticsPage = lazy(() => import("../features/timeAnalytics"));
+const FaultReportsPage = lazy(() => import("../features/support/FaultReportsPage"));
 
 const BomProjectProvider = lazy(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomProjectProvider }))
@@ -95,6 +96,12 @@ const CustomerSitesRoute = () => {
   return can.createUsers || can.settings.view ? <CustomerSites /> : <Navigate to="/" replace />;
 };
 
+const FaultReportsRoute = () => {
+  const can = usePermissions();
+  if (!can.permissionsReady) return null;
+  return can.settings.view ? <FaultReportsPage /> : <Navigate to="/" replace />;
+};
+
 const TipsRoute = () => {
   const can = usePermissions();
   if (!can.permissionsReady) return null;
@@ -144,6 +151,7 @@ const AppRoutes = () => {
         <Route path="/tips" element={<LazyRoute><TipsRoute /></LazyRoute>} />
         <Route path="/admin" element={<LazyRoute><AdminRoute /></LazyRoute>} />
         <Route path="/admin/customers/:customerId/sites" element={<LazyRoute><CustomerSitesRoute /></LazyRoute>} />
+        <Route path="/admin/fault-reports" element={<LazyRoute><FaultReportsRoute /></LazyRoute>} />
         <Route path="/issues" element={<LazyRoute><IssuesBoard /></LazyRoute>} />
         <Route path="/time-analytics" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
         <Route path="/time-analytics/:view" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />

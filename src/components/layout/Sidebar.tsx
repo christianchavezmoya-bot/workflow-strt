@@ -20,6 +20,7 @@ import FolderOutlinedIcon from "@mui/icons-material/FolderOutlined";
 import LightbulbOutlinedIcon from "@mui/icons-material/LightbulbOutlined";
 import MenuBookOutlinedIcon from "@mui/icons-material/MenuBookOutlined";
 import AdminPanelSettingsOutlinedIcon from "@mui/icons-material/AdminPanelSettingsOutlined";
+import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import SettingsOutlinedIcon from "@mui/icons-material/SettingsOutlined";
 import PersonOutlineOutlinedIcon from "@mui/icons-material/PersonOutlineOutlined";
 import TableChartOutlinedIcon from "@mui/icons-material/TableChartOutlined";
@@ -53,6 +54,7 @@ const navItems = [
   ...(!isNativeMobile ? [
     { label: "Time Analytics", icon: <QueryStatsOutlinedIcon />, to: "/time-analytics", tourKey: "nav-time-analytics", requiresFullAccess: false },
     { label: "Admin",    icon: <AdminPanelSettingsOutlinedIcon />, to: "/admin",    end: true,  tourKey: "nav-admin",     requiresFullAccess: false },
+    { label: "Fault Reports", icon: <ReportProblemOutlinedIcon />, to: "/admin/fault-reports", tourKey: "nav-fault-reports", requiresFullAccess: true },
     { label: "Settings", icon: <SettingsOutlinedIcon />,           to: "/settings",            tourKey: "nav-settings",  requiresFullAccess: true  },
   ] : []),
   { label: "Profile",           icon: <PersonOutlineOutlinedIcon />,              to: "/profile",                           tourKey: "nav-profile" },
@@ -76,6 +78,7 @@ const Sidebar = () => {
       case "/tips":                return can.tips.view;
       case "/time-analytics":      return can.analytics.view;
       case "/admin/bom-project":   return can.bomProject.view;
+      case "/admin/fault-reports": return can.settings.view;
       case "/work-instructions":   return can.workInstructionsBuilder.view;
       case "/documents":           return can.documents.view;
       default:                     return true;

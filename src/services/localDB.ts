@@ -234,6 +234,21 @@ interface CommtracDB extends DBSchema {
     value: ConfigMediaRecord;
     indexes: { by_config: string };
   };
+  /** Fault reports captured while offline, flushed when the server is reachable. */
+  fault_reports_pending: {
+    key: string;
+    value: PendingFaultReportRecord;
+  };
+}
+
+/** A fault report awaiting submission. `payload` is the request body sent verbatim. */
+export interface PendingFaultReportRecord {
+  id: string;
+  referenceCode: string;
+  queuedAt: string;
+  attempts: number;
+  lastError?: string;
+  payload: Record<string, unknown>;
 }
 
 // ── Singleton ─────────────────────────────────────────────────────────────────
@@ -261,7 +276,7 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   // v2 (schema version 2) adds offline-bootstrap stores: workflow_assignments,
   // features, reference_data, config_media. The upgrade is additive and
   // idempotent so existing v1 databases migrate without data loss.
-  _db = await openDB<CommtracDB>("commtrac_offline_v2", 3, {
+  _db = await openDB<CommtracDB>("commtrac_offline_v2", 4, {
     upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains("cache")) {
         db.createObjectStore("cache", { keyPath: "key" });
@@ -310,6 +325,9 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       }
       if (oldVersion < 3 && !db.objectStoreNames.contains("sync_diagnostics")) {
         db.createObjectStore("sync_diagnostics", { keyPath: "id" });
+      }
+      if (oldVersion < 4 && !db.objectStoreNames.contains("fault_reports_pending")) {
+        db.createObjectStore("fault_reports_pending", { keyPath: "id" });
       }
     },
   });

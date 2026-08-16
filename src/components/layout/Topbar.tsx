@@ -9,6 +9,7 @@ import DashboardOutlinedIcon from "@mui/icons-material/DashboardOutlined";
 import CheckIcon from "@mui/icons-material/Check";
 import StarOutlinedIcon from "@mui/icons-material/StarOutlined";
 import StarBorderOutlinedIcon from "@mui/icons-material/StarBorderOutlined";
+import ReportProblemOutlinedIcon from "@mui/icons-material/ReportProblemOutlined";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth";
@@ -18,6 +19,7 @@ import { useViewMode } from "../../contexts/ViewModeContext";
 import { useFavoritesContext } from "../../contexts/FavoritesContext";
 import { useAppSelector } from "../../store/hooks";
 import GlobalSearchDialog from "./GlobalSearchDialog";
+import ReportProblemDialog from "../../features/support/ReportProblemDialog";
 import { searchIndexService, type SearchIndexStatus } from "../../services/searchIndexService";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { APP_NAME } from "../../constants/branding";
@@ -135,6 +137,7 @@ const Topbar = () => {
   }, [isAdminUser]);
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [reportProblemOpen, setReportProblemOpen] = useState(false);
   const [notificationsAnchor, setNotificationsAnchor] = useState<null | HTMLElement>(null);
   const menuOpen = Boolean(anchorEl);
   const [roleMenuAnchor, setRoleMenuAnchor] = useState<null | HTMLElement>(null);
@@ -763,8 +766,21 @@ const Topbar = () => {
           >
             Profile
           </MenuItem>
+          <MenuItem
+            onClick={() => {
+              handleClose();
+              setReportProblemOpen(true);
+            }}
+          >
+            <Stack direction="row" spacing={1} alignItems="center">
+              <ReportProblemOutlinedIcon fontSize="small" sx={{ color: "text.secondary" }} />
+              <Typography variant="body2">Report a problem</Typography>
+            </Stack>
+          </MenuItem>
           <MenuItem onClick={handleLogout}>Logout</MenuItem>
         </Menu>
+
+        <ReportProblemDialog open={reportProblemOpen} onClose={() => setReportProblemOpen(false)} />
 
         {/* Role switcher submenu */}
         <Menu

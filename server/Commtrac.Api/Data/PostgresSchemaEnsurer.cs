@@ -36,6 +36,7 @@ public static class PostgresSchemaEnsurer
             EnsurePushDeviceTokensTable(conn);
             EnsureScheduledReportColumn(conn);
             EnsureSignatureTokenSignerRoleColumn(conn);
+            EnsureFaultReportsTable(conn);
             EnsureDecimalColumnTypes(conn);
         }
         finally
@@ -334,6 +335,43 @@ public static class PostgresSchemaEnsurer
         if (!TableExists(conn, "SignatureTokens")) return;
         ExecuteNonQuery(conn, """
             ALTER TABLE "SignatureTokens" ADD COLUMN IF NOT EXISTS "SignerRole" TEXT NOT NULL DEFAULT 'Customer';
+            """);
+    }
+
+    private static void EnsureFaultReportsTable(DbConnection conn)
+    {
+        ExecuteNonQuery(conn, """
+            CREATE TABLE IF NOT EXISTS "FaultReports" (
+                "Id"               TEXT PRIMARY KEY NOT NULL,
+                "ReferenceCode"    TEXT NOT NULL DEFAULT '',
+                "Kind"             TEXT NOT NULL DEFAULT 'user-report',
+                "Severity"         TEXT NOT NULL DEFAULT 'S2',
+                "Status"           TEXT NOT NULL DEFAULT 'New',
+                "Title"            TEXT NOT NULL DEFAULT '',
+                "Description"      TEXT,
+                "Platform"         TEXT NOT NULL DEFAULT 'web',
+                "AppVersion"       TEXT,
+                "UserAgent"        TEXT,
+                "RoutePath"        TEXT,
+                "UserId"           TEXT,
+                "UserEmail"        TEXT,
+                "UserRole"         TEXT,
+                "ErrorName"        TEXT,
+                "ErrorMessage"     TEXT,
+                "ErrorStack"       TEXT,
+                "TraceId"          TEXT,
+                "BreadcrumbsJson"  TEXT,
+                "DiagnosticsJson"  TEXT,
+                "WasOffline"       INTEGER NOT NULL DEFAULT 0,
+                "OccurredAtUtc"    TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                "CreatedAtUtc"     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                "Notes"            TEXT,
+                "ResolvedAtUtc"    TEXT,
+                "ResolvedByUserId" TEXT
+            );
+            CREATE INDEX IF NOT EXISTS "IX_FaultReports_CreatedAtUtc" ON "FaultReports" ("CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_FaultReports_Status" ON "FaultReports" ("Status");
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_FaultReports_ReferenceCode" ON "FaultReports" ("ReferenceCode");
             """);
     }
 
