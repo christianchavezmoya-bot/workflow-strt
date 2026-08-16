@@ -1470,3 +1470,90 @@ public class PushDeviceTokenEntity
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
+/// <summary>
+/// A fault reported from the web or phone app — either raised by a user or captured
+/// automatically from a crash. Carries the sanitized diagnostics needed to reproduce it
+/// (see docs/BUG_TRIAGE.md for what triage expects).
+/// </summary>
+public class FaultReportEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    /// <summary>Short code shown to the user so a phone call can be tied to this record.</summary>
+    [MaxLength(20)]
+    public string ReferenceCode { get; set; } = string.Empty;
+
+    /// <summary>user-report | crash | unhandled-rejection.</summary>
+    [MaxLength(30)]
+    public string Kind { get; set; } = "user-report";
+
+    /// <summary>S0–S4, per docs/BUG_TRIAGE.md.</summary>
+    [MaxLength(4)]
+    public string Severity { get; set; } = "S2";
+
+    /// <summary>New | Investigating | Fixed | WontFix | Duplicate.</summary>
+    [MaxLength(20)]
+    public string Status { get; set; } = "New";
+
+    [MaxLength(200)]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>What the user was doing, and what they expected.</summary>
+    public string? Description { get; set; }
+
+    [MaxLength(20)]
+    public string Platform { get; set; } = "web";
+
+    [MaxLength(40)]
+    public string? AppVersion { get; set; }
+
+    [MaxLength(500)]
+    public string? UserAgent { get; set; }
+
+    /// <summary>In-app route where the fault happened.</summary>
+    [MaxLength(300)]
+    public string? RoutePath { get; set; }
+
+    [MaxLength(100)]
+    public string? UserId { get; set; }
+
+    [MaxLength(200)]
+    public string? UserEmail { get; set; }
+
+    [MaxLength(50)]
+    public string? UserRole { get; set; }
+
+    [MaxLength(200)]
+    public string? ErrorName { get; set; }
+
+    [MaxLength(2000)]
+    public string? ErrorMessage { get; set; }
+
+    public string? ErrorStack { get; set; }
+
+    /// <summary>Server trace id of the failing request, when the client knows it.</summary>
+    [MaxLength(100)]
+    public string? TraceId { get; set; }
+
+    /// <summary>Recent route/action trail leading up to the fault, as JSON.</summary>
+    public string? BreadcrumbsJson { get; set; }
+
+    /// <summary>Sanitized support bundle as JSON — no tokens or request bodies.</summary>
+    public string? DiagnosticsJson { get; set; }
+
+    /// <summary>True when the client was offline at the time.</summary>
+    public bool WasOffline { get; set; }
+
+    public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+
+    /// <summary>Triage notes added by an admin.</summary>
+    public string? Notes { get; set; }
+
+    public DateTime? ResolvedAtUtc { get; set; }
+
+    [MaxLength(100)]
+    public string? ResolvedByUserId { get; set; }
+}
+

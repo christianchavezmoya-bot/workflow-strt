@@ -17,6 +17,7 @@ import Login from "../features/auth/Login";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { useNativeSyncLifecycle } from "../hooks/useNativeSyncLifecycle";
+import { useRouteBreadcrumbs } from "../hooks/useRouteBreadcrumbs";
 
 const App = () => {
   const [authState, setAuthState] = useState<BiometricCheckResult | null>(null);
@@ -25,6 +26,7 @@ const App = () => {
   const [loginGateTick, setLoginGateTick] = useState(0);
 
   useNativeSyncLifecycle();
+  useRouteBreadcrumbs();
 
   const forceLogin = useCallback(() => {
     console.log("[App] Forcing Login — JWT expired while online");

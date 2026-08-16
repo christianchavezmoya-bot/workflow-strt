@@ -12,11 +12,17 @@ import { AccessModeProvider } from "./contexts/AccessModeContext";
 import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
 import { ComplexViewProvider } from "./contexts/ComplexViewContext";
 import { OfflineModeProvider } from "./contexts/OfflineModeContext";
+import FaultBoundary from "./components/FaultBoundary";
+import { installFaultCapture } from "./services/faultReporting";
 import "./index.css";
 import { defineCustomElements } from "@ionic/pwa-elements/loader";
 
 // Bootstrap Ionic PWA elements for Camera/FilePicker web fallbacks
 defineCustomElements(window);
+
+// Catch uncaught errors and rejections, and flush anything queued offline.
+// Installed before render so a crash during mount is still recorded.
+installFaultCapture();
 
 // React Router v7 prep — non-blocking navigations (web perf Phase 4).
 const ROUTER_FUTURE: Partial<FutureConfig> = {
@@ -31,21 +37,23 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <Provider store={store}>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <BrowserRouter future={ROUTER_FUTURE}>
-          <ComplexViewProvider>
-            <AccessModeProvider>
-              <NotificationInboxProvider>
-                <ViewModeProvider>
-                  <OfflineModeProvider>
-                    <FieldNotificationProvider>
-                      <App />
-                    </FieldNotificationProvider>
-                  </OfflineModeProvider>
-                </ViewModeProvider>
-              </NotificationInboxProvider>
-            </AccessModeProvider>
-          </ComplexViewProvider>
-        </BrowserRouter>
+        <FaultBoundary>
+          <BrowserRouter future={ROUTER_FUTURE}>
+            <ComplexViewProvider>
+              <AccessModeProvider>
+                <NotificationInboxProvider>
+                  <ViewModeProvider>
+                    <OfflineModeProvider>
+                      <FieldNotificationProvider>
+                        <App />
+                      </FieldNotificationProvider>
+                    </OfflineModeProvider>
+                  </ViewModeProvider>
+                </NotificationInboxProvider>
+              </AccessModeProvider>
+            </ComplexViewProvider>
+          </BrowserRouter>
+        </FaultBoundary>
       </ThemeProvider>
     </Provider>
   </React.StrictMode>
