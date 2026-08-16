@@ -127,14 +127,21 @@ var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigin
     ?.Where(origin => !string.IsNullOrWhiteSpace(origin))
     .ToArray();
 
+// Capacitor WebViews and phones on the LAN have origins that cannot be enumerated up front:
+// iOS uses capacitor://localhost, Android http://localhost, and a phone browser uses the host's
+// LAN IP. Staging opts in so devices can be tested; production keeps the explicit list only.
+var allowDeviceOrigins = builder.Configuration.GetValue("Cors:AllowDeviceOrigins", false);
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>
     {
         if (configuredCorsOrigins is { Length: > 0 })
         {
+            var allowList = new HashSet<string>(configuredCorsOrigins, StringComparer.OrdinalIgnoreCase);
             policy
-                .WithOrigins(configuredCorsOrigins)
+                .SetIsOriginAllowed(origin =>
+                    allowList.Contains(origin) || (allowDeviceOrigins && IsDeviceOrigin(origin)))
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials();
@@ -303,6 +310,21 @@ if (app.Environment.IsDevelopment())
 app.MapControllers();
 
 app.Run();
+
+// Origins a Capacitor app or a phone on the LAN presents: the native WebView schemes, plus any
+// IP-literal host (the dev machine's LAN address). Enabled by Cors:AllowDeviceOrigins.
+static bool IsDeviceOrigin(string origin)
+{
+    if (string.Equals(origin, "capacitor://localhost", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(origin, "ionic://localhost", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(origin, "http://localhost", StringComparison.OrdinalIgnoreCase))
+    {
+        return true;
+    }
+
+    return Uri.TryCreate(origin, UriKind.Absolute, out var uri)
+        && IPAddress.TryParse(uri.Host, out _);
+}
 
 // Exposes the implicit Program class to the test project's WebApplicationFactory<Program>.
 public partial class Program { }

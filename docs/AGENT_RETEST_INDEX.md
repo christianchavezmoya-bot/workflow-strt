@@ -9,6 +9,7 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 | Round | Branch | Mac prompt | Windows prompt |
 |-------|--------|------------|----------------|
 | **Docker cloud-shaped staging** | `main` including **#185** — **signed off on Mac @ `f3bcfed`** | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
+| **Full device test (web + iPhone + Android)** | `main` including **#187** (device CORS) | [`MAC_AGENT_DEVICE_TEST_PROMPT.md`](./MAC_AGENT_DEVICE_TEST_PROMPT.md) | — (needs Xcode/Android Studio) |
 | Standup guide | | [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) | same |
 | Pre-deploy gate | | [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) | same |
 | **Cloud hosting AWS prep** | `main` @ `c4b4125+` | [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) | [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md) |
@@ -16,7 +17,13 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 
 **Strata NGO Docker login:** `admin@StrataNgo.local` / `Admin123!`
 
-**Docker staging status (Aug 2026):** all git, standup, API (A1–A9) and build/test gates PASS on Mac at `f3bcfed`, including a terminal document upload → list → download → purge round-trip against MinIO. **Still outstanding: the browser checks W1–W5** (login dashboard, BOM sidebar, workflows UI, project column dedupe) — skipped for want of browser automation on that machine. The Playwright suite in `e2e/` targets the dev server on :5173, not the staging stack on :5174, so W1–W5 are currently a manual pass.
+**Docker staging status (Aug 2026): signed off.** All git, standup, API (A1–A9) and build/test gates
+passed on Mac at `f3bcfed`, including a terminal document upload → list → download → purge
+round-trip against MinIO, and the browser checks (W1–W5) passed a manual pass by the product owner.
+The agent could not automate W1–W5 because the Playwright suite in `e2e/` targets the dev server on
+:5173, not the staging stack on :5174 — automating them against staging is still open.
+
+**Next round:** the full device test above (web + iPhone + Android, users and invites, offline sync).
 
 **Copy:** PROMPT START → PROMPT END into Cursor on the target machine.
 
