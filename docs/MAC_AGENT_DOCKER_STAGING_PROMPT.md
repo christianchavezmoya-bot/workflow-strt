@@ -436,7 +436,7 @@ H1 clean tree (no leftover local patches): PASS / FAIL
 GIT
 G1 pull main: PASS / FAIL
 G2a minio/mc tag valid: PASS / FAIL
-G2b Add2faFields uses BoolTrue (PR #185 present): PASS / FAIL
+G2b Postgres fixes present (#185): PASS / FAIL
 G3 docker CLI: PASS / FAIL
 G4 docker daemon: PASS / FAIL
 G5 fresh volume (-v), no stale volumes: PASS / FAIL

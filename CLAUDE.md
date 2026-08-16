@@ -32,7 +32,13 @@ Mobile:
 - `npm run build && npx cap sync` — rebuild web assets and copy into native projects
 - Android from a terminal: `source scripts/android-env.sh` first (aligns JDK/SDK with Android Studio), then `cd android && ./gradlew assembleDebug`
 
-**There is no lint step and no test suite.** No ESLint/Prettier config exists; Playwright is a dependency but there are no configs or specs. Do not invent `npm test`/`npm run lint` — they don't exist.
+Tests and lint (all of these exist and run in CI — `.github/workflows/ci.yml`):
+- `npm test` — Vitest unit suite (`vitest.config.ts`), 234 tests across 53 files under `src/**/*.test.ts`
+- `npm run lint` — ESLint (`eslint.config.js`). **Currently not clean** (~10 errors, ~244 warnings) and marked `continue-on-error` in CI, so it is a backlog gate, not a blocker. Don't "fix the lint" wholesale as a side quest; don't add new findings either.
+- `npm run test:e2e` — Playwright specs in `e2e/` against the Vite dev server on **:5173** (`playwright.config.ts` starts it). Variants: `test:e2e:full`, `test:e2e:perf`, `test:e2e:web-perf`, `test:e2e:pm-smoke`, `test:e2e:workflow-consistency`, each with its own config.
+- `cd server/Commtrac.Api.Tests && dotnet test` — xUnit backend suite. Includes a **migration-chain test** that applies every migration to a fresh SQLite database, plus opt-in Postgres tests (see below).
+
+CI jobs: `frontend` (build + bundle budget + vitest + lint), `backend` (build + test), `standards` (docs/hygiene gates), and four Playwright jobs. A pre-push hook runs typecheck, `dotnet build`, docs, and hygiene locally.
 
 ## Local dev setup
 
@@ -60,6 +66,17 @@ Flat controllers (one per resource, `Controllers/`), thin over EF Core. **Routes
 
 ### Database initialization is unusual (`Data/DbInitializer.cs`)
 On startup it runs `db.Database.Migrate()` **and then a series of hand-written `Ensure*` methods** that patch schema/indexes/columns outside the EF migration history (plus `Fix*` methods that repair partially-applied migrations). When adding schema, prefer a proper EF migration, but be aware these idempotent `Ensure*` patches exist and run every boot. SQLite is put in WAL mode with a busy timeout here. There are ~98 migrations under `Migrations/`.
+
+### Two DB providers, one SQLite-shaped schema (`Database:Provider`)
+Sqlite is the default; **Postgres** is used for cloud parity (Docker staging, `appsettings.StagingDocker.json`). The migration chain was written for SQLite and declares its storage types verbatim — `type: "TEXT"` for `DateTime`, `type: "INTEGER"` for `bool`, `REAL` for `decimal`. Postgres takes those literally, so a Postgres database has `text`/`integer`/`real` columns behind `DateTime`/`bool`/`decimal` properties. Consequences to respect when touching migrations or raw SQL:
+
+- **Npgsql refuses to read those columns**, so `AppDbContext.ApplySqliteShapedPostgresConversions` bridges `DateTime`↔`text` and `bool`↔`int` **on Npgsql only**. Dates use round-trip ISO-8601 so ordering and range filters still work as text. Don't "fix" a column to `boolean`/`timestamptz` in one migration — that breaks the converter for that column (this exact one-off caused a staging outage).
+- **Raw SQL bypasses converters**, so it must match the real column: integer `1`/`0` for flags, ISO strings for dates.
+- **Quote every PascalCase identifier** in raw SQL (`MigrationSql.Q`) — Postgres folds unquoted names to lowercase, so `FROM Projects` becomes `projects` and fails.
+- `ADD COLUMN IF NOT EXISTS` is **Postgres-only**; use `MigrationSql.AddColumn`, which omits the guard on SQLite. Plain `IF NOT EXISTS` on `CREATE TABLE`/`CREATE INDEX` is fine on both.
+- `InsertData` types its parameters per-provider (Npgsql infers from the CLR value; the SQLite generator coerces to the column type), so bool-ish seed values need `MigrationSql.IsPostgres(...) ? 1 : true`.
+- `Data/PostgresSchemaEnsurer.cs` is the Postgres counterpart to `DbInitializer`'s SQLite `Ensure*` patches. Add to **both** when adding schema outside migrations, or Postgres silently lacks the column until a request touches it.
+- Verify with the opt-in tests: `COMMTRAC_POSTGRES_TEST=1 dotnet test` runs the full chain against a real Postgres plus `PostgresSchemaParityTests`, which diffs every mapped property against `information_schema`. `scripts/pgtest.sh` is the local helper.
 
 ### Feature-flagged BOM module
 `src/modules/bom-project/` is a self-contained, flag-gated module. Import it **only** through `src/modules/bom-project/index.ts` (never reach into internals). Enabled by `VITE_ENABLE_BOM_MODULE=true` (frontend) and `ENABLE_BOM_PROJECT_MODULE=true` (backend, set in `launchSettings.json`). Routes/menus/APIs all disappear when off.

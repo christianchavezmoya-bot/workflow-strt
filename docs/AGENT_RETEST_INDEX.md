@@ -8,13 +8,15 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 
 | Round | Branch | Mac prompt | Windows prompt |
 |-------|--------|------------|----------------|
-| **Docker cloud-shaped staging** | `main` including **#185** (Postgres bool + MinIO tag) | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
+| **Docker cloud-shaped staging** | `main` including **#185** — **signed off on Mac @ `f3bcfed`** | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | [`WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md`](./WINDOWS_AGENT_DOCKER_STAGING_PROMPT.md) |
 | Standup guide | | [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md) | same |
 | Pre-deploy gate | | [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md) | same |
 | **Cloud hosting AWS prep** | `main` @ `c4b4125+` | [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md) | [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md) |
 | **Native N-go sanity** | `main` (latest) | [`IOS_MAC_AGENT_NGO_LATEST_PROMPT.md`](./IOS_MAC_AGENT_NGO_LATEST_PROMPT.md) | — (API on Windows `:4000` or Docker `:8080`) |
 
 **Strata NGO Docker login:** `admin@StrataNgo.local` / `Admin123!`
+
+**Docker staging status (Aug 2026):** all git, standup, API (A1–A9) and build/test gates PASS on Mac at `f3bcfed`, including a terminal document upload → list → download → purge round-trip against MinIO. **Still outstanding: the browser checks W1–W5** (login dashboard, BOM sidebar, workflows UI, project column dedupe) — skipped for want of browser automation on that machine. The Playwright suite in `e2e/` targets the dev server on :5173, not the staging stack on :5174, so W1–W5 are currently a manual pass.
 
 **Copy:** PROMPT START → PROMPT END into Cursor on the target machine.
 
@@ -43,7 +45,7 @@ Use this index when field agents need to **install, verify, and sign off** on `m
 
 Field agents must **not** patch `server/Commtrac.Api/Migrations/` locally to get a stack running. A local patch means the run proves nothing and the next machine hits the same wall. The agent reports the migration name, Postgres error code, and column; the cloud agent fixes it on `main`; the field agent re-pulls and retries with `down -v`.
 
-Postgres/SQLite differences belong in [`MigrationSql`](../server/Commtrac.Api/Data/MigrationSql.cs) — `Q()` for identifiers, `BoolTrue`/`BoolFalse`/`BoolCase` for boolean literals.
+Postgres/SQLite differences belong in [`MigrationSql`](../server/Commtrac.Api/Data/MigrationSql.cs) — `Q()` to quote identifiers, `AddColumn()` for `ADD COLUMN` (the `IF NOT EXISTS` guard is Postgres-only), `IsPostgres()` to branch. Runtime type differences are bridged in `AppDbContext`; see the dual-provider section of `CLAUDE.md`.
 
 ---
 
