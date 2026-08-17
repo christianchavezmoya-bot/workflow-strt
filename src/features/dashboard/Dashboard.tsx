@@ -31,7 +31,6 @@ import {
   type OpenIssueRecord,
   type PendingSignatureRecord,
 } from "../../services/assetWorkflowRunService";
-import { IssueRepository } from "../../repositories/IssueRepository";
 import {
   projectAssetService,
   type DashboardWorkspace,
@@ -148,6 +147,7 @@ import {
   type MyJobsCardWidget,
 } from "./dashboardPageLogic";
 import { useDashboardWorkspace } from "./useDashboardWorkspace";
+import { useDashboardAttention } from "./useDashboardAttention";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
@@ -163,7 +163,6 @@ type NativeMyJobsCardContext = {
 };
 
 const ALL_DASHBOARDS_VALUE = "__all__";
-const DASHBOARD_ATTENTION_SESSION_PREFIX = "dashboard:web:attention:";
 const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery";
 const DASHBOARD_RUN_STATE_RECOVERY_KEY = "dashboard:pending-run-state-recovery";
 const DASHBOARD_PROJECT_REQUEST_KEY = buildProjectRequestKey();
@@ -208,9 +207,6 @@ const Dashboard = () => {
 
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
-  const [openIssues,         setOpenIssues]         = useState<OpenIssueRecord[]>([]);
-  const [pendingSigs,        setPendingSigs]        = useState<PendingSignatureRecord[]>([]);
-  const [attentionLoading,   setAttentionLoading]   = useState(false);
   const [openAssets,         setOpenAssets]         = useState<OpenAssetItem[]>([]);
   const [projectAssetSummary, setProjectAssetSummary] = useState<ProjectAssetSummaryItem[]>([]);
   const [workload,           setWorkload]           = useState<TechnicianWorkloadSummaryItem[]>([]);
@@ -294,13 +290,6 @@ const Dashboard = () => {
     runId?: string;
     source: "asset" | "run";
   } | null>(null);
-  const issueDetailProjectId = useMemo(
-    () => (issueDetailTarget
-      ? openIssues.find((issue) => issue.issueId === issueDetailTarget.issue.id)?.projectId
-      : undefined),
-    [issueDetailTarget, openIssues],
-  );
-  const issueDetailTimeZone = useProjectTimeZone(issueDetailProjectId);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
   const [dashboardNotice, setDashboardNotice] = useState<string | null>(null);
   const [installerReminderSentByRunId, setInstallerReminderSentByRunId] = useState<Record<string, boolean>>({});
@@ -313,9 +302,6 @@ const Dashboard = () => {
   const dashboardRefreshWhenVisibleRef = useRef(false);
   const dashboardRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const dashboardRefreshQueuedRef = useRef(false);
-  const attentionInFlightRef = useRef<Promise<void> | null>(null);
-  const attentionQueuedRef = useRef(false);
-  const attentionLoadedOnceRef = useRef(false);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
@@ -377,6 +363,32 @@ const Dashboard = () => {
     shouldUseDashboardWorkspaceSessionCache,
   });
 
+  const markNativeDashboardCacheHydrated = useCallback(() => {
+    setCacheHydrated(true);
+  }, [setCacheHydrated]);
+
+  const {
+    openIssues,
+    setOpenIssues,
+    pendingSigs,
+    attentionLoading,
+    loadAttention,
+    refreshAttentionFromIssueCache,
+  } = useDashboardAttention({
+    isManager,
+    isNativePlatform,
+    userId: user.id,
+    onNativeCacheHydrated: markNativeDashboardCacheHydrated,
+  });
+
+  const issueDetailProjectId = useMemo(
+    () => (issueDetailTarget
+      ? openIssues.find((issue) => issue.issueId === issueDetailTarget.issue.id)?.projectId
+      : undefined),
+    [issueDetailTarget, openIssues],
+  );
+  const issueDetailTimeZone = useProjectTimeZone(issueDetailProjectId);
+
   const seedNativeDashboardSummariesFromLocal = useCallback(() => {
     if (!isNativePlatform) return;
 
@@ -433,148 +445,24 @@ const Dashboard = () => {
     });
   }, []);
 
-  const attentionRequestSeqRef = useRef(0);
-
-  const loadAttention = useCallback((options?: { silent?: boolean }): Promise<void> => {
-    if (attentionInFlightRef.current) {
-      attentionQueuedRef.current = true;
-      return attentionInFlightRef.current;
-    }
-
-    const requestSeq = ++attentionRequestSeqRef.current;
-    const promise = (async () => {
-      const showLoading = !(options?.silent && attentionLoadedOnceRef.current);
-      if (showLoading) setAttentionLoading(true);
-      const attentionUserId = isManager ? undefined : user.id;
-      const applyAttention = (iss: OpenIssueRecord[], sigs: PendingSignatureRecord[]) => {
-        if (requestSeq !== attentionRequestSeqRef.current) return;
-        setOpenIssues(iss);
-        setPendingSigs(sigs);
-      };
-      const finishAttention = () => {
-        if (requestSeq !== attentionRequestSeqRef.current) return;
-        attentionLoadedOnceRef.current = true;
-        if (showLoading) setAttentionLoading(false);
-      };
-
-      if (isNativePlatform) {
-        try {
-          const [localIssues, localSigs] = await Promise.all([
-            assetWorkflowRunService.listOpenIssues(attentionUserId),
-            assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
-          ]);
-          applyAttention(localIssues, localSigs);
-        } catch {
-          // Keep the current attention widgets if local cache probing fails.
-        }
-        if (shouldSkipBlockingFetch()) {
-          finishAttention();
-          return;
-        }
-        try {
-          const [iss, sigs] = await Promise.all([
-            assetWorkflowRunService.listOpenIssues(attentionUserId),
-            assetWorkflowRunService.listPendingSignatures(attentionUserId),
-          ]);
-          applyAttention(iss, sigs);
-        } catch {
-          // Keep local attention widgets on timeout or server errors.
-        } finally {
-          finishAttention();
-        }
-        return;
-      }
-
-      try {
-        const [iss, sigs] = await Promise.all([
-          assetWorkflowRunService.listOpenIssues(attentionUserId),
-          assetWorkflowRunService.listPendingSignatures(attentionUserId),
-        ]);
-        applyAttention(iss, sigs);
-        if (!isNativePlatform && user.id) {
-          try {
-            sessionStorage.setItem(
-              `${DASHBOARD_ATTENTION_SESSION_PREFIX}${user.id}`,
-              JSON.stringify({ issues: iss, sigs }),
-            );
-          } catch {
-            // Ignore storage quota errors.
-          }
-        }
-      } catch {
-        // Keep session-cached attention widgets on timeout or server errors.
-      } finally {
-        finishAttention();
-      }
-    })();
-
-    attentionInFlightRef.current = promise.finally(() => {
-      attentionInFlightRef.current = null;
-      if (attentionQueuedRef.current) {
-        attentionQueuedRef.current = false;
-        void loadAttention({ silent: true });
-      }
-    });
-
-    return attentionInFlightRef.current;
-  }, [isManager, isNativePlatform, user.id]);
-
-  // Silent attention refresh on repo:issues:updated — must NOT call loadAttention()
-  // (that re-triggers IssueRepository background fetch → repo:issues:updated loop).
-  // Web has no IndexedDB sig snapshot; use the pending-signatures API directly there.
-  const refreshAttentionFromIssueCache = useCallback(async () => {
-    const attentionUserId = isManager ? undefined : user.id;
-    try {
-      const [issues, sigs] = await Promise.all([
-        isNativePlatform
-          ? IssueRepository.getLocalSnapshot()
-          : assetWorkflowRunService.listOpenIssues(attentionUserId),
-        isNativePlatform
-          ? assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId)
-          : assetWorkflowRunService.listPendingSignatures(attentionUserId),
-      ]);
-      setOpenIssues(issues);
-      setPendingSigs(sigs);
-    } catch {
-      // Keep current widgets if the local snapshot read fails.
-    }
-  }, [isManager, isNativePlatform, user.id]);
-
   // ── Native cache hydration: show last-known data instantly on mount ──
   useEffect(() => {
     if (!isNativePlatform) return;
-    const cOpenIssues = dcGet<OpenIssueRecord[]>(DASHBOARD_CACHE_KEYS.openIssues);
-    const cPendingSigs = dcGet<PendingSignatureRecord[]>(DASHBOARD_CACHE_KEYS.pendingSigs);
     const cOpenAssets = dcGet<OpenAssetItem[]>(DASHBOARD_CACHE_KEYS.openAssets);
     const cSummary = dcGet<ProjectAssetSummaryItem[]>(DASHBOARD_CACHE_KEYS.projectAssetSummary);
     const cWorkload = dcGet<TechnicianWorkloadSummaryItem[]>(DASHBOARD_CACHE_KEYS.workload);
     const cOffices = dcGet<Office[]>(DASHBOARD_CACHE_KEYS.globalOffices);
     const cCountries = dcGet<string[]>(DASHBOARD_CACHE_KEYS.availableCountries);
-    if (cOpenIssues) setOpenIssues(cOpenIssues);
-    if (cPendingSigs) setPendingSigs(cPendingSigs);
     if (cOpenAssets) setOpenAssets(cOpenAssets);
     if (cSummary) setProjectAssetSummary(cSummary);
     if (cWorkload) setWorkload(cWorkload);
     if (cOffices) setGlobalOffices(cOffices);
     if (cCountries) setAvailableCountries(cCountries);
     // Mark cache as hydrated so loading spinners don't override cached data
-    if (cOpenIssues || cPendingSigs || cOpenAssets || cSummary || cWorkload || cOffices || cCountries) {
+    if (cOpenAssets || cSummary || cWorkload || cOffices || cCountries) {
       setCacheHydrated(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (isNativePlatform || !user.id) return;
-    try {
-      const raw = sessionStorage.getItem(`${DASHBOARD_ATTENTION_SESSION_PREFIX}${user.id}`);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as { issues?: OpenIssueRecord[]; sigs?: PendingSignatureRecord[] };
-      if (parsed.issues) setOpenIssues(parsed.issues);
-      if (parsed.sigs) setPendingSigs(parsed.sigs);
-    } catch {
-      // Ignore corrupt session cache.
-    }
-  }, [isNativePlatform, user.id]);
 
   // Web: the observer above loads analytics early when the grid is scrolled near, but the
   // grid sits well below the fold, so on its own it would never fire for a user who does
@@ -707,13 +595,6 @@ const Dashboard = () => {
     }
     prevManagerAttentionScopeRef.current = isManager;
   }, [dashboardBootPhase, isManager, loadAttention]);
-
-  // ── Native cache: persist state to cache whenever it changes ──
-  useEffect(() => {
-    if (!isNativePlatform) return;
-    dcPut(DASHBOARD_CACHE_KEYS.openIssues, openIssues);
-    dcPut(DASHBOARD_CACHE_KEYS.pendingSigs, pendingSigs);
-  }, [isNativePlatform, openIssues, pendingSigs]);
 
   // When the background project refresh completes, apply the authoritative list directly to
   // Redux state — avoids a second API round-trip while still evicting any ghost projects.
