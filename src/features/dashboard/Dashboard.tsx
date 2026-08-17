@@ -76,6 +76,11 @@ import DashboardEvidenceHealthGrid from "./DashboardEvidenceHealthGrid";
 import DashboardWorkloadPanel, { type ScopedWorkloadItem, type WorkloadProjectBreakdown } from "./DashboardWorkloadPanel";
 import DashboardProjectStatusGrid, { type DashboardProjectScope } from "./DashboardProjectStatusGrid";
 import DashboardManagerMobileHome from "./DashboardManagerMobileHome";
+import DashboardAdminInspectionWorkspace from "./DashboardAdminInspectionWorkspace";
+import DashboardAdminInstallWorkspace, { type AdminInstallFilter } from "./DashboardAdminInstallWorkspace";
+import DashboardInspectionInboxSection from "./DashboardInspectionInboxSection";
+import DashboardMyInspectionJobsToday from "./DashboardMyInspectionJobsToday";
+import DashboardMyInspectionJobHistory from "./DashboardMyInspectionJobHistory";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -156,8 +161,6 @@ type InspectionRunSignal = {
   assignedUserId?: string;
   status: string;
 };
-
-type AdminInstallFilter = "all" | "in-progress" | "unassigned";
 
 const Dashboard = () => {
   const navigate   = useNavigate();
@@ -3102,129 +3105,21 @@ const Dashboard = () => {
   }, [dashboardProjects]);
 
   const MyInspectionJobsToday = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-        <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Jobs Today</Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-        Sorted by activity {"\u2014"} tap to open quick actions
-      </Typography>
-      {myInspectionAssets.length === 0 && !workspaceLoading ? (
-        <Typography variant="caption" color="text.disabled">No inspection jobs assigned to you.</Typography>
-      ) : (
-        <>
-          <Grid container spacing={1.5}>
-            {myInspectionAssets.slice(0, 6).map((a) => {
-              const cardAction = getMyJobsCardAction(a);
-              return (
-                <Grid item xs={12} sm={6} md={4} key={a.id}>
-                  <Paper elevation={0} onClick={() => { void handleMyJobsAssetTap(a, cardAction); }}
-                    sx={{
-                      p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
-                      cursor: "pointer", transition: "all 0.15s",
-                      "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
-                    }}>
-                    <Stack spacing={0.75}>
-                      <Stack direction="row" alignItems="center" spacing={1}>
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Stack direction="row" alignItems="baseline" spacing={0.75} sx={{ minWidth: 0 }}>
-                            <Typography variant="caption" fontWeight={600} noWrap display="block">
-                              {a.assetTag || a.assetName}
-                            </Typography>
-                            {a.totalSteps > 0 && (
-                              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem", flexShrink: 0 }}>
-                                {formatMyJobsStepCompletionLabel(a.completedSteps, a.totalSteps)}
-                              </Typography>
-                            )}
-                          </Stack>
-                          <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                            {a.jobNumber}
-                          </Typography>
-                        </Box>
-                        <Chip label={cardAction.chipLabel} size="small" color={cardAction.chipColor} variant="outlined"
-                          sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
-                      </Stack>
-                      {cardAction.widgets.length > 0 && (
-                        <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
-                          {cardAction.widgets.map((w, wi) => (
-                            <Chip key={`${w.kind}-${wi}`} size="small" variant="outlined" color={w.color}
-                              icon={w.kind === "missing-photo" ? <PhotoCameraOutlined sx={{ fontSize: 12 }} /> : <ErrorOutlineOutlined sx={{ fontSize: 12 }} />}
-                              label={w.kind === "missing-photo" ? (w.count > 0 ? String(w.count) : "\u2013") : "Issue"}
-                              sx={{ height: 16, fontSize: "0.55rem", "& .MuiChip-icon": { fontSize: 12, ml: 0.25 } }} />
-                          ))}
-                        </Stack>
-                      )}
-                      <Button size="small" variant="outlined" color={cardAction.buttonColor}
-                        startIcon={runnerLoading === a.id ? <CircularProgress size={12} color="inherit" /> : undefined}
-                        disabled={runnerLoading === a.id}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          void handleMyJobsAssetTap(a, cardAction);
-                        }}
-                        sx={{ alignSelf: "flex-start", height: 22, fontSize: "0.68rem", py: 0 }}>
-                        {cardAction.buttonLabel}
-                      </Button>
-                    </Stack>
-                  </Paper>
-                </Grid>
-              );
-            })}
-          </Grid>
-          {myInspectionAssets.length > 6 && (
-            <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-              +{myInspectionAssets.length - 6} more {"\u2014"}{" "}
-              <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
-                onClick={() => navigate("/installations/assets?workflowType=Inspection")}>
-                view all
-              </Box>
-            </Typography>
-          )}
-        </>
-      )}
-    </Box>
+    <DashboardMyInspectionJobsToday
+      assets={myInspectionAssets}
+      workspaceLoading={workspaceLoading}
+      runnerLoadingAssetId={runnerLoading}
+      getCardAction={getMyJobsCardAction}
+      onAssetTap={(asset, cardAction) => void handleMyJobsAssetTap(asset, cardAction)}
+      onViewAll={() => navigate("/installations/assets?workflowType=Inspection")}
+    />
   );
 
   const MyInspectionJobHistory = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInspectionHistory.length > 0 ? "success.main" : "text.disabled" }} />
-        <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-          Job History
-        </Typography>
-        <Chip label={myInspectionHistory.length} size="small" color={myInspectionHistory.length > 0 ? "success" : "default"} variant="outlined"
-          sx={{ height: 20, fontSize: "0.7rem" }} />
-      </Stack>
-      {myInspectionHistory.length === 0 ? (
-        <Typography variant="caption" color="text.secondary">No inspection history yet</Typography>
-      ) : (
-        <Stack spacing={0.75}>
-          {myInspectionHistory.slice(0, 5).map((asset) => (
-            <Paper key={asset.id} elevation={0}
-              onClick={() => navigate("/installations/assets?workflowType=Inspection")}
-              sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" } }}>
-              <Stack direction="row" spacing={1} alignItems="center">
-                <Box sx={{ flex: 1, minWidth: 0 }}>
-                  <Typography variant="caption" fontWeight={600} noWrap display="block">
-                    {asset.assetTag || asset.assetName || asset.id}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                    {asset.jobNumber}{" · "}{asset.historyStatus === "Closed"
-                      ? `Closed ${fmtDate(asset.latestActivityAt ?? asset.completedAt)}`
-                      : asset.completedAt
-                        ? `Field work complete ${fmtDate(asset.completedAt)}`
-                        : `Updated ${fmtDate(asset.latestActivityAt)}`}
-                  </Typography>
-                </Box>
-                <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
-                  sx={{ height: 18, fontSize: "0.62rem" }} />
-              </Stack>
-            </Paper>
-          ))}
-        </Stack>
-      )}
-    </Box>
+    <DashboardMyInspectionJobHistory
+      history={myInspectionHistory}
+      onNavigateToInspectionAssets={() => navigate("/installations/assets?workflowType=Inspection")}
+    />
   );
 
   async function handleGenerateTechReport(w: TechnicianWorkloadSummaryItem) {
@@ -3361,254 +3256,32 @@ const Dashboard = () => {
   );
 
   const AdminInspectionWorkspace = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-        <AssessmentOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Inspections</Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-        Inspection projects and open inspection assets across the current dashboard scope.
-      </Typography>
-
-      {inspectionScopeProjects.length === 0 ? (
-        <Typography variant="caption" color="text.disabled">No inspection projects in this scope.</Typography>
-      ) : (
-        <Grid container spacing={1.5}>
-          {inspectionScopeProjects.slice(0, 8).map((project) => {
-            const projectAssets = inspectionScopeAssets.filter((asset) => asset.projectId === project.id);
-            const activeAssets = projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
-            return (
-              <Grid item xs={12} sm={6} md={4} key={project.id}>
-                <Paper elevation={0}
-                  onClick={() => navigate(`/projects/${project.id}`)}
-                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                    transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                  <Stack spacing={0.75}>
-                    <Typography variant="caption" fontWeight={700} noWrap display="block">
-                      {project.jobNumber}
-                    </Typography>
-                    <Typography variant="caption" color="text.secondary" noWrap display="block">
-                      {project.customerName || "No customer"} - {project.status}
-                    </Typography>
-                    <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap display="block">
-                      PM: {project.projectManager?.trim() || "No PM assigned"}
-                    </Typography>
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                      <Chip label={`${projectAssets.length} open assets`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.62rem" }} />
-                      {activeAssets > 0 && <Chip label={`${activeAssets} in progress`} size="small" color="primary" variant="outlined" sx={{ height: 18, fontSize: "0.62rem" }} />}
-                    </Stack>
-                  </Stack>
-                </Paper>
-              </Grid>
-            );
-          })}
-        </Grid>
-      )}
-    </Box>
+    <DashboardAdminInspectionWorkspace
+      inspectionScopeProjects={inspectionScopeProjects}
+      inspectionScopeAssets={inspectionScopeAssets}
+      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+    />
   );
 
   const AdminInstallWorkspace = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-        <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Installs</Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-        Open installation assets across the current dashboard scope with PM ownership.
-      </Typography>
-      <Grid container spacing={1.5} sx={{ mb: 2 }}>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0}
-            onClick={() => setAdminInstallProjectsOpen(true)}
-            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-              transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-            <Typography variant="caption" color="text.secondary">Projects</Typography>
-            <Typography variant="h5" fontWeight={700}>{installProjectsWithOpenAssets.length}</Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              {totalInstallAssetCount} total assets
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0}
-            onClick={() => setAdminInstallFilter("all")}
-            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-              transition: "all 0.15s",
-              borderColor: adminInstallFilter === "all" ? "primary.main" : "var(--stroke)",
-              background: adminInstallFilter === "all" ? "rgba(45,212,191,0.08)" : undefined,
-              "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-            <Typography variant="caption" color="text.secondary">Open Assets</Typography>
-            <Typography variant="h5" fontWeight={700}>{totalInstallAssetCount}</Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Showing all live installs
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0}
-            onClick={() => setAdminInstallFilter("in-progress")}
-            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-              transition: "all 0.15s",
-              borderColor: adminInstallFilter === "in-progress" ? "primary.main" : "var(--stroke)",
-              background: adminInstallFilter === "in-progress" ? "rgba(45,212,191,0.08)" : undefined,
-              "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-            <Typography variant="caption" color="text.secondary">In Progress</Typography>
-            <Typography variant="h5" fontWeight={700}>{installScopeAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length}</Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Click to filter the list
-            </Typography>
-          </Paper>
-        </Grid>
-        <Grid item xs={6} md={3}>
-          <Paper elevation={0}
-            onClick={() => setAdminInstallFilter("unassigned")}
-            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-              transition: "all 0.15s",
-              borderColor: adminInstallFilter === "unassigned" ? "warning.main" : "var(--stroke)",
-              background: adminInstallFilter === "unassigned" ? "rgba(237,108,2,0.08)" : undefined,
-              "&:hover": { borderColor: "warning.main", background: "rgba(237,108,2,0.04)" } }}>
-            <Typography variant="caption" color="text.secondary">Unassigned</Typography>
-            <Typography variant="h5" fontWeight={700}>{installScopeAssets.filter((asset) => !asset.assignedUserId).length}</Typography>
-            <Typography variant="caption" color="text.secondary" display="block">
-              Click to filter the list
-            </Typography>
-          </Paper>
-        </Grid>
-      </Grid>
-
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-        <Typography variant="caption" color="text.secondary">
-          {adminInstallFilter === "all"
-            ? "Showing all open install assets"
-            : adminInstallFilter === "in-progress"
-              ? "Showing in-progress install assets"
-              : "Showing unassigned install assets"}
-        </Typography>
-        {adminInstallFilter !== "all" && (
-          <Button size="small" variant="text" onClick={() => setAdminInstallFilter("all")} sx={{ minWidth: 0, px: 0.5 }}>
-            Clear filter
-          </Button>
-        )}
-      </Stack>
-
-      {filteredAdminInstallAssets.length === 0 ? (
-        <Typography variant="caption" color="text.disabled">No installation assets in this scope.</Typography>
-      ) : (
-        <Grid container spacing={1.5}>
-          {filteredAdminInstallAssets.slice(0, 8).map((asset) => (
-            <Grid item xs={12} sm={6} md={4} key={asset.id}>
-              <Paper elevation={0}
-                onClick={() => navigate("/installations/assets")}
-                sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                  transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                <Stack spacing={0.75}>
-                  <Typography variant="caption" fontWeight={700} noWrap display="block">
-                    {asset.assetTag || asset.assetName || asset.id}
-                  </Typography>
-                  <Typography variant="caption" color="text.secondary" noWrap display="block">
-                    {asset.jobNumber} - {dashboardStatusChip(asset).label}
-                  </Typography>
-                  <Typography variant="caption" color={projectPmLabel(asset.projectId) === "No PM assigned" ? "warning.main" : "text.secondary"} noWrap display="block">
-                    PM: {projectPmLabel(asset.projectId)}
-                  </Typography>
-                  <Chip
-                    label={asset.assignedUserId ? "Assigned" : "Unassigned"}
-                    size="small"
-                    color={asset.assignedUserId ? "default" : "warning"}
-                    variant="outlined"
-                    sx={{ alignSelf: "flex-start", height: 18, fontSize: "0.62rem" }}
-                  />
-                </Stack>
-              </Paper>
-            </Grid>
-          ))}
-        </Grid>
-      )}
-      {filteredAdminInstallAssets.length > 8 && (
-        <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-          +{filteredAdminInstallAssets.length - 8} more assets - <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }} onClick={() => navigate("/installations/assets")}>view all</Box>
-        </Typography>
-      )}
-
-      <Dialog open={adminInstallProjectsOpen} onClose={() => setAdminInstallProjectsOpen(false)} fullWidth maxWidth="md">
-        <DialogTitle>Install Projects</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              Open install projects in the current dashboard scope. Filter by PM name or project number.
-            </Typography>
-            <Grid container spacing={1.5}>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  size="small"
-                  fullWidth
-                  label="Filter by PM"
-                  value={adminInstallPmFilter}
-                  onChange={(e) => setAdminInstallPmFilter(e.target.value)}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  size="small"
-                  fullWidth
-                  label="Filter by Project Number"
-                  value={adminInstallProjectFilter}
-                  onChange={(e) => setAdminInstallProjectFilter(e.target.value)}
-                />
-              </Grid>
-            </Grid>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Chip label={`${filteredAdminInstallProjects.length} open projects`} size="small" color="info" variant="outlined" />
-              <Chip label={`${totalInstallAssetCount} total assets`} size="small" variant="outlined" />
-              {(adminInstallPmFilter || adminInstallProjectFilter) && (
-                <Button
-                  size="small"
-                  variant="text"
-                  onClick={() => {
-                    setAdminInstallPmFilter("");
-                    setAdminInstallProjectFilter("");
-                  }}
-                >
-                  Clear filters
-                </Button>
-              )}
-            </Stack>
-            {filteredAdminInstallProjects.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">No install projects match the current filters.</Typography>
-            ) : (
-              <Stack spacing={1}>
-                {filteredAdminInstallProjects.map((project) => {
-                  const projectAssets = installScopeAssets.filter((asset) => asset.projectId === project.id);
-                  return (
-                    <Paper key={project.id} elevation={0}
-                      onClick={() => {
-                        setAdminInstallProjectsOpen(false);
-                        navigate(`/projects/${project.id}`);
-                      }}
-                      sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                        transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                      <Stack spacing={0.75}>
-                        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-                          <Typography variant="subtitle2" fontWeight={700}>{project.jobNumber}</Typography>
-                          <Chip label={project.status} size="small" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
-                          <Chip label={`${projectAssets.length} open assets`} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
-                        </Stack>
-                        <Typography variant="caption" color="text.secondary" noWrap display="block">
-                          {project.customerName || "No customer"}
-                        </Typography>
-                        <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap display="block">
-                          PM: {project.projectManager?.trim() || "No PM assigned"}
-                        </Typography>
-                      </Stack>
-                    </Paper>
-                  );
-                })}
-              </Stack>
-            )}
-          </Stack>
-        </DialogContent>
-      </Dialog>
-    </Box>
+    <DashboardAdminInstallWorkspace
+      installProjectsWithOpenAssets={installProjectsWithOpenAssets}
+      totalInstallAssetCount={totalInstallAssetCount}
+      installScopeAssets={installScopeAssets}
+      adminInstallFilter={adminInstallFilter}
+      onAdminInstallFilterChange={setAdminInstallFilter}
+      filteredAdminInstallAssets={filteredAdminInstallAssets}
+      filteredAdminInstallProjects={filteredAdminInstallProjects}
+      adminInstallProjectsOpen={adminInstallProjectsOpen}
+      onAdminInstallProjectsOpenChange={setAdminInstallProjectsOpen}
+      adminInstallPmFilter={adminInstallPmFilter}
+      onAdminInstallPmFilterChange={setAdminInstallPmFilter}
+      adminInstallProjectFilter={adminInstallProjectFilter}
+      onAdminInstallProjectFilterChange={setAdminInstallProjectFilter}
+      projectPmLabel={projectPmLabel}
+      onNavigateToInstallations={() => navigate("/installations/assets")}
+      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+    />
   );
 
   const EvidenceHealthGrid = (
@@ -3644,45 +3317,12 @@ const Dashboard = () => {
   );
 
   const InspectionInboxSection = showInspectionInbox ? (
-    <Box className="glass-card" sx={{ p: 2 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-        <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
-        <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-          Inspection Inbox
-        </Typography>
-      </Stack>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.25 }}>
-        Open inspection runs and JSON imports across projects in your current dashboard scope.
-      </Typography>
-      <Stack direction="row" spacing={2} flexWrap="wrap">
-        {inspectionRunsDue > 0 && (
-          <Chip
-            label={inspectionRunsDue + (inspectionRunsDue === 1 ? " run" : " runs") + " due / in progress"}
-            size="small"
-            color="info"
-            variant="outlined"
-            onClick={() => navigate("/installations/assets?workflowType=Inspection")}
-            sx={{ cursor: "pointer" }}
-          />
-        )}
-        {inspectionImportsWaiting > 0 && (
-          <Chip
-            label={inspectionImportsWaiting + (inspectionImportsWaiting === 1 ? " import" : " imports") + " need assignment"}
-            size="small"
-            color="warning"
-            variant="outlined"
-          />
-        )}
-        {inspectionImportsFailed > 0 && (
-          <Chip
-            label={inspectionImportsFailed + (inspectionImportsFailed === 1 ? " import" : " imports") + " failed"}
-            size="small"
-            color="error"
-            variant="outlined"
-          />
-        )}
-      </Stack>
-    </Box>
+    <DashboardInspectionInboxSection
+      inspectionRunsDue={inspectionRunsDue}
+      inspectionImportsWaiting={inspectionImportsWaiting}
+      inspectionImportsFailed={inspectionImportsFailed}
+      onNavigateToInspectionAssets={() => navigate("/installations/assets?workflowType=Inspection")}
+    />
   ) : null;
 
   const managerMobileProjectsTab = (
