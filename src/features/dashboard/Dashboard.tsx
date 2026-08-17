@@ -87,6 +87,14 @@ import DashboardAutoAssignFlagsSection from "./DashboardAutoAssignFlagsSection";
 import DashboardPhotoUpdateNotificationsSection from "./DashboardPhotoUpdateNotificationsSection";
 import DashboardMissingMediaFlagsSection from "./DashboardMissingMediaFlagsSection";
 import DashboardManagerMobileProjectsList from "./DashboardManagerMobileProjectsList";
+import DashboardWorkspaceHeader from "./DashboardWorkspaceHeader";
+import DashboardTabBar from "./DashboardTabBar";
+import DashboardManagerDesktopView from "./DashboardManagerDesktopView";
+import DashboardFieldTechnicianInstallView from "./DashboardFieldTechnicianInstallView";
+import DashboardSupervisorInstallView from "./DashboardSupervisorInstallView";
+import DashboardEngineerInstallView from "./DashboardEngineerInstallView";
+import DashboardViewerView from "./DashboardViewerView";
+import DashboardPmInstallWorkspace from "./DashboardPmInstallWorkspace";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -124,6 +132,8 @@ import {
   isIssueAsset,
   isInspectionWorkflowType,
   isNotStartedAsset,
+  type DashboardTabSignal,
+  type PmDashboardTab,
   isOpenInspectionStatus,
   isPausedAsset,
   isPendingAsset,
@@ -160,12 +170,6 @@ const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery
 const DASHBOARD_RUN_STATE_RECOVERY_KEY = "dashboard:pending-run-state-recovery";
 const DASHBOARD_PROJECT_REQUEST_KEY = buildProjectRequestKey();
 
-type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
-
-type DashboardTabSignal = {
-  count: number;
-  tone: "primary" | "warning" | "error" | "info" | "success";
-};
 type InspectionRunSignal = {
   id: string;
   projectId: string;
@@ -2926,22 +2930,6 @@ const Dashboard = () => {
     </Stack>
   ), []);
 
-  const getDashboardTabSx = useCallback(() => {
-    return {
-      minHeight: 36,
-      py: 0.5,
-      px: 0.5,
-      mr: 0.75,
-      fontSize: "0.8rem",
-      borderRadius: 1.25,
-      minWidth: "fit-content",
-      transition: "all 0.2s ease",
-      "&.Mui-selected": {
-        color: "primary.main",
-      },
-    };
-  }, []);
-
   const handleDashboardTabChange = useCallback((nextTab: PmDashboardTab) => {
     fieldTabCorrected.current = true;
     setPmDashboardTab(nextTab);
@@ -3437,107 +3425,40 @@ const Dashboard = () => {
 
       {showNativeManagerHome && ManagerMobileHome}
 
-      {/* PERSONAL WORKSPACE STRIP - all except Viewer */}
       {!isViewer && !showNativeManagerHome && (
-        <Box className="glass-card" sx={{ p: 2.5 }}>
-          {isManager && !viewingOwnDashboard && viewedDashboardUser && (
-            <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1.5, p: 1, borderRadius: 1, background: "rgba(2,136,209,0.1)", border: "1px solid rgba(2,136,209,0.3)" }}>
-              <SwitchAccountOutlined sx={{ fontSize: 16, color: "info.main", flexShrink: 0 }} />
-              <Typography variant="caption" sx={{ flex: 1, color: "info.main" }}>
-                Viewing {viewedDashboardUser.fullName} ({viewedDashboardUser.role}) dashboard - read only
-              </Typography>
-              <IconButton size="small" onClick={() => setSelectedDashboardId(user.id)}>
-                <CloseOutlined fontSize="small" />
-              </IconButton>
-            </Box>
-          )}
-          <Stack direction="row" alignItems="center" spacing={1.5}>
-            <PersonOutlined sx={{ color: showAdminOverviewStrip ? "info.main" : viewingOwnDashboard ? "primary.main" : "info.main", fontSize: 20 }} />
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", lineHeight: 1.2 }}>
-                {showAdminOverviewStrip ? "Admin Oversight" : viewingOwnDashboard ? user.fullName : viewedDashboardUser?.fullName ?? user.fullName}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {showAdminOverviewStrip
-                  ? "Active projects and assets in the current dashboard scope"
-                  : viewingOwnDashboard ? user.role : viewedDashboardUser?.role ?? ""}
-              </Typography>
-            </Box>
-            {isManager && (dashboardUsers.length > 0 || selectedDashboardId !== user.id) && (
-              <FormControl size="small" sx={{ minWidth: 180 }}>
-                <InputLabel shrink>View as</InputLabel>
-                <Select
-                  label="View as"
-                  value={selectedDashboardId}
-                  onChange={(e) => setSelectedDashboardId(e.target.value)}
-                >
-                  {isAdmin && <MenuItem value={ALL_DASHBOARDS_VALUE}><em>All Dashboards</em></MenuItem>}
-                  <MenuItem value={user.id}><em>My Dashboard</em></MenuItem>
-                  {dashboardUsers.map((u) => (
-                    <MenuItem key={u.id} value={u.id}>{u.fullName} ({u.role})</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            )}
-            <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap", gap: 0.5 }}>
-              {pmDashboardTab !== "my-inspections" && (
-                <>
-              <Chip icon={<WorkOutlineOutlined sx={{ fontSize: 13 }} />}
-                label={`${overviewActiveCount} active`} size="small"
-                color={overviewActiveCount > 0 ? "primary" : "default"} variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-              <Tooltip title="Workflow run is currently paused" arrow>
-                <Chip label={`${overviewPausedCount} paused`} size="small"
-                  color={overviewPausedCount > 0 ? "warning" : "default"} variant="outlined"
-                  sx={{ height: 22, fontSize: "0.7rem", cursor: "help" }} />
-              </Tooltip>
-              <Tooltip title="No workflow run has been started yet" arrow>
-                <Chip label={`${overviewQueuedCount} queued`} size="small"
-                  color="default" variant="outlined" sx={{ height: 22, fontSize: "0.7rem", cursor: "help" }} />
-              </Tooltip>
-              {overviewPendingCount > 0 && (
-                <Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
-                  <Chip label={`${overviewPendingCount} pending`} size="small"
-                    color="info" variant="outlined" sx={{ height: 22, fontSize: "0.7rem", cursor: "help" }} />
-                </Tooltip>
-              )}
-              {overviewBlockingCount > 0 && (
-                <Chip icon={<ErrorOutlineOutlined sx={{ fontSize: 13 }} />}
-                  label={`${overviewBlockingCount} blocking`} size="small"
-                  color="error" variant="outlined" sx={{ height: 22, fontSize: "0.7rem" }} />
-              )}
-                </>
-              )}
-            </Stack>
-          </Stack>
-        </Box>
+        <DashboardWorkspaceHeader
+          showAdminOverviewStrip={showAdminOverviewStrip}
+          viewingOwnDashboard={viewingOwnDashboard}
+          userFullName={user.fullName ?? ""}
+          userRole={user.role ?? ""}
+          viewedDashboardUser={viewedDashboardUser ? { id: viewedDashboardUser.id, fullName: viewedDashboardUser.fullName ?? "", role: viewedDashboardUser.role ?? "" } : null}
+          isManager={isManager}
+          isAdmin={isAdmin}
+          dashboardUsers={dashboardUsers.map((dashboardUser) => ({ id: dashboardUser.id, fullName: dashboardUser.fullName ?? "", role: dashboardUser.role ?? "" }))}
+          selectedDashboardId={selectedDashboardId}
+          allDashboardsValue={ALL_DASHBOARDS_VALUE}
+          userId={user.id}
+          pmDashboardTab={pmDashboardTab}
+          overviewActiveCount={overviewActiveCount}
+          overviewPausedCount={overviewPausedCount}
+          overviewQueuedCount={overviewQueuedCount}
+          overviewPendingCount={overviewPendingCount}
+          overviewBlockingCount={overviewBlockingCount}
+          onSelectedDashboardIdChange={setSelectedDashboardId}
+        />
       )}
-      {/* UNIVERSAL TAB BAR (all non-viewer users) */}
       {showTabBar && (
-        <Box className="glass-card" sx={{ p: 1.5 }}>
-          <Tabs value={pmDashboardTab} onChange={(_, v: PmDashboardTab) => handleDashboardTabChange(v)}
-            sx={{ minHeight: 36 }}>
-            {showPmProjectsTab && (
-              <Tab
-                value="pm-projects"
-                label={renderDashboardTabLabel(isAdmin ? "Projects" : "My PM Projects", projectTabSignal)}
-                sx={getDashboardTabSx()}
-              />
-            )}
-            {hasInspectionsTab && (
-              <Tab
-                value="my-inspections"
-                label={renderDashboardTabLabel(isAdmin ? "Inspections" : "My Inspections", inspectionTabSignal)}
-                sx={getDashboardTabSx()}
-              />
-            )}
-            <Tab
-              value="my-installs"
-              label={renderDashboardTabLabel(isAdmin ? "Installs" : "My Installs", installTabSignal)}
-              sx={getDashboardTabSx()}
-            />
-          </Tabs>
-        </Box>
+        <DashboardTabBar
+          pmDashboardTab={pmDashboardTab}
+          showPmProjectsTab={showPmProjectsTab}
+          hasInspectionsTab={hasInspectionsTab}
+          isAdmin={isAdmin}
+          projectTabSignal={projectTabSignal}
+          inspectionTabSignal={inspectionTabSignal}
+          installTabSignal={installTabSignal}
+          renderTabLabel={renderDashboardTabLabel}
+          onTabChange={handleDashboardTabChange}
+        />
       )}
 
       {/* My Inspections tab content - non-manager users */}
@@ -3547,746 +3468,133 @@ const Dashboard = () => {
       {showTabBar && !isManager && pmDashboardTab === "my-inspections" && InspectionInboxSection}
 
 
-      {/* FIELD USER VIEW */}
       {canActAsFieldTechnician && pmDashboardTab === "my-installs" && (
-        <>
-          {inspectionRunsDue > 0 && (
-            <Box className="glass-card" sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <AssignmentLateOutlined sx={{ fontSize: 18, color: "info.main" }} />
-                <Stack direction="row" spacing={0.75} alignItems="center" sx={{ minWidth: 0 }}>
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>
-                    Inspection Work
-                  </Typography>
-                  <Chip
-                    label={inspectionRunsDue}
-                    size="small"
-                    color="info"
-                    variant="filled"
-                    sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
-                  />
-                </Stack>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                Internal inspections assigned to you and still open
-              </Typography>
-              <Button
-                size="small"
-                variant="outlined"
-                color="info"
-                onClick={() => navigate("/installations/assets?workflowType=Inspection")}
-              >
-                Open inspections
-              </Button>
-            </Box>
-          )}
-
-          {/* My Jobs Today */}
-          <Box className="glass-card" sx={{ p: 2.5 }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-              <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Jobs Today</Typography>
-            </Stack>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-              Sorted by activity {"\u2014"} tap to open quick actions
-            </Typography>
-            {myInstallAssets.length === 0 ? (
-              <Typography variant="caption" color="text.disabled">No field jobs assigned to you.</Typography>
-            ) : (
-              <>
-                <Grid container spacing={1.5}>
-                  {myInstallAssets.slice(0, 6).map((a) => {
-                    const cardAction = getMyJobsCardAction(a);
-                    return (
-                      <Grid item xs={12} sm={6} md={4} key={a.id}>
-                        <Paper elevation={0} onClick={() => { void handleMyJobsAssetTap(a, cardAction); }}
-                          sx={{
-                            p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5,
-                            cursor: "pointer", transition: "all 0.15s",
-                            "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
-                          }}>
-                          <Stack spacing={0.75}>
-                            <Stack direction="row" alignItems="center" spacing={1}>
-                              <Box sx={{ flex: 1, minWidth: 0 }}>
-                                <Stack direction="row" alignItems="baseline" spacing={0.75} sx={{ minWidth: 0 }}>
-                                  <Typography variant="caption" fontWeight={600} noWrap display="block">
-                                    {a.assetTag || a.assetName}
-                                  </Typography>
-                                  {a.totalSteps > 0 && (
-                                    <Typography
-                                      variant="caption"
-                                      color="text.secondary"
-                                      noWrap
-                                      sx={{ fontSize: "0.62rem", flexShrink: 0 }}
-                                    >
-                                      {formatMyJobsStepCompletionLabel(a.completedSteps, a.totalSteps)}
-                                    </Typography>
-                                  )}
-                                </Stack>
-                                <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                                  {a.jobNumber}
-                                </Typography>
-                              </Box>
-                              <Chip
-                                label={cardAction.chipLabel}
-                                size="small"
-                                color={cardAction.chipColor}
-                                variant="outlined"
-                                sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }}
-                              />
-                            </Stack>
-                            {cardAction.widgets.length > 0 && (
-                              <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
-                                {cardAction.widgets.map((w, wi) => (
-                                  <Chip
-                                    key={`${w.kind}-${wi}`}
-                                    size="small"
-                                    variant="outlined"
-                                    color={w.color}
-                                    icon={w.kind === "missing-photo"
-                                      ? <PhotoCameraOutlined sx={{ fontSize: 12 }} />
-                                      : <ErrorOutlineOutlined sx={{ fontSize: 12 }} />}
-                                    label={w.kind === "missing-photo"
-                                      ? (w.count > 0 ? String(w.count) : "\u2013")
-                                      : "Issue"}
-                                    sx={{ height: 16, fontSize: "0.55rem", "& .MuiChip-icon": { fontSize: 12, ml: 0.25 } }}
-                                  />
-                                ))}
-                              </Stack>
-                            )}
-                            <Button size="small" variant="outlined"
-                              color={cardAction.buttonColor}
-                              // Immediate feedback on the button that was actually
-                              // pressed. Offline (or on a slow link) resolving an
-                              // action can take a moment with no visible change,
-                              // which reads as "the app ignored me" and invites
-                              // repeat taps. runnerLoading is per-asset, so only
-                              // this card's button reacts.
-                              startIcon={runnerLoading === a.id ? <CircularProgress size={12} color="inherit" /> : undefined}
-                              disabled={runnerLoading === a.id}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                void handleMyJobsAssetTap(a, cardAction);
-                              }}
-                              sx={{
-                                alignSelf: "flex-start",
-                                height: 22,
-                                fontSize: "0.68rem",
-                                py: 0,
-                                maxWidth: isNativePlatform ? "100%" : undefined,
-                                whiteSpace: "nowrap",
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                              }}>
-                              {cardAction.buttonLabel}
-                            </Button>
-                          </Stack>
-                        </Paper>
-                      </Grid>
-                    );
-                  })}
-                </Grid>
-                {myInstallAssets.length > 6 && (
-                  <Typography variant="caption" color="text.disabled" sx={{ mt: 1, display: "block" }}>
-                    +{myInstallAssets.length - 6} more {"\u2014"}{" "}
-                    <Box component="span" sx={{ cursor: "pointer", color: "primary.main" }}
-                      onClick={() => navigate("/installations/assets")}>
-                      view all
-                    </Box>
-                  </Typography>
-                )}
-              </>
-            )}
-          </Box>
-
-          {/* Photo reminders from PM */}
-          {photoReminders.length > 0 && (
-            <Stack spacing={0.5}>
-              {photoReminders.map((r) => (
-                <Alert
-                  key={r.id}
-                  severity="info"
-                  onClose={() => {
-                    const updated = photoReminders.filter((x) => x.id !== r.id);
-                    localStorage.setItem("installer_photo_reminders", JSON.stringify(updated));
-                    setPhotoReminders(updated);
-                  }}
-                >
-                  <Typography variant="caption" fontWeight={600}>
-                    {r.sentByName} requested photos for: {r.assetTag} {"\u2014"} {r.workflowName}
-                  </Typography>
-                </Alert>
-              ))}
-            </Stack>
-          )}
-
-          <DashboardMissingMediaFlagsSection
-            variant="installer"
-            flags={missingMediaFlags}
-            onFlagsChange={setMissingMediaFlags}
-            technicianUserId={user.id}
-            onUploadPhotos={(flag) => {
-              setPhotoUploadMode("installer");
-              setPhotoUploadTarget(flag);
-            }}
-          />
-
-          {/* Needs Attention - Installer view */}
-          <Box className="glass-card" sx={{ p: 2.5 }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-              <WarningAmberOutlined sx={{ color: myInstallAttentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
-              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
-              <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 64, ml: 1 }}>
-                {attentionLoading ? (
-                  <CircularProgress size={14} />
-                ) : myInstallAttentionCount === 0 ? (
-                  <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-                ) : null}
-              </Box>
-              <Box sx={{ flex: 1 }} />
-              <Button size="small" variant="text" component={Link} to="/issues"
-                endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
-                Issues Board
-              </Button>
-            </Stack>
-
-            <Grid container spacing={2}>
-
-              {/* My Blocking Issues */}
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{
-                  p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-                  border: "1px solid", transition: "all 0.2s",
-                  borderColor: myInstallBlocking.length > 0 ? "error.main" : "rgba(255,255,255,0.08)",
-                  background:  myInstallBlocking.length > 0
-                    ? "linear-gradient(180deg, rgba(64,15,17,0.78) 0%, rgba(33,13,14,0.56) 100%)"
-                    : "rgba(255,255,255,0.03)",
-                }}>
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                    <ErrorOutlineOutlined sx={{ fontSize: 18, color: myInstallBlocking.length > 0 ? "error.main" : "text.disabled" }} />
-                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Blocking Issues</Typography>
-                    {resolvingDashboardIssueId && (
-                      <Chip
-                        label="Updating"
-                        size="small"
-                        color="error"
-                        variant="outlined"
-                        sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
-                      />
-                    )}
-                  </Stack>
-                  <Typography variant="h5" fontWeight={700} color={myInstallBlocking.length > 0 ? "error.main" : "text.secondary"}>
-                    {myInstallBlocking.length}
-                  </Typography>
-                  {myInstallBlocking.length > 0 ? (
-                    <AttentionItemList
-                      items={myInstallBlocking}
-                      maxCollapsed={3}
-                      getKey={(iss) => iss.issueId}
-                      renderItem={(iss) => (
-                        <DashboardAttentionItemRow
-                          label={assetAttentionLabel(iss)}
-                          sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
-                          actionLabel="Resolve now"
-                          onClick={() => openIssueRepair(iss)}
-                        />
-                      )}
-                    />
-                  ) : (
-                    <Typography variant="caption" color="success.main">
-                      {resolvingDashboardIssueId ? "Refreshing blocking issues..." : "No blocking issues"}
-                    </Typography>
-                  )}
-                </Box>
-              </Grid>
-
-              {/* My Pending Signatures */}
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{
-                  p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-                  border: "1px solid", transition: "all 0.2s",
-                  borderColor: myInstallPendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
-                  background:  myInstallPendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
-                }}>
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                    <PendingActionsOutlined sx={{ fontSize: 18, color: myInstallPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Pending Signatures</Typography>
-                  </Stack>
-                  <Typography variant="h5" fontWeight={700} color={myInstallPendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
-                    {myInstallPendingSigs.length}
-                  </Typography>
-                  {myInstallPendingSigs.length > 0 ? (
-                    <AttentionItemList
-                      items={myInstallPendingSigs}
-                      maxCollapsed={3}
-                      getKey={(s) => s.runId}
-                      renderItem={(s) => (
-                        <DashboardAttentionItemRow
-                          label={assetAttentionLabel(s)}
-                          sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
-                          actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
-                          {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
-                            ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
-                            : {})}
-                          onClick={() => { void openSignatureRepair(s); }}
-                        />
-                      )}
-                    />
-                  ) : (
-                    <Typography variant="caption" color="success.main">All signatures collected</Typography>
-                  )}
-                </Box>
-              </Grid>
-
-              {/* My High Observations */}
-              <Grid item xs={12} sm={6} md={4}>
-                <Box sx={{
-                  p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-                  border: "1px solid", transition: "all 0.2s",
-                  borderColor: myInstallHighObservations.length > 0 ? "warning.dark" : "rgba(255,255,255,0.08)",
-                  background:  myInstallHighObservations.length > 0 ? "rgba(249,168,37,0.07)" : "rgba(255,255,255,0.03)",
-                }}>
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                    <ReportOutlined sx={{ fontSize: 18, color: myInstallHighObservations.length > 0 ? "warning.main" : "text.disabled" }} />
-                    <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Observations & Scope</Typography>
-                  </Stack>
-                  <Typography variant="h5" fontWeight={700} color={myInstallHighObservations.length > 0 ? "warning.main" : "text.secondary"}>
-                    {myInstallHighObservations.length}
-                  </Typography>
-                  {myInstallHighObservations.length > 0 ? (
-                    <AttentionItemList
-                      items={myInstallHighObservations}
-                      maxCollapsed={3}
-                      getKey={(iss) => iss.issueId}
-                      renderItem={(iss) => (
-                        <DashboardAttentionItemRow
-                          label={assetAttentionLabel(iss)}
-                          sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
-                          actionLabel="Review"
-                          onClick={() => openIssueRepair(iss)}
-                        />
-                      )}
-                    />
-                  ) : (
-                    <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
-                  )}
-                </Box>
-              </Grid>
-
-            </Grid>
-          </Box>
-
-          <Box className="glass-card" sx={{ p: 2.5 }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInstallHistory.length > 0 ? "success.main" : "text.disabled" }} />
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                Job History
-              </Typography>
-              {myInstallHistory.length > 0 && !isNativePlatform && (
-                <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
-                  Print All
-                </Button>
-              )}
-              <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
-                sx={{ height: 20, fontSize: "0.7rem" }} />
-            </Stack>
-            <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-              Finished, completed, closed, cancelled, or deleted installation work that was assigned to you.
-            </Typography>
-            {myInstallHistory.length === 0 ? (
-              <Typography variant="caption" color="text.secondary">No install history yet</Typography>
-            ) : (
-              <Stack spacing={0.75}>
-                {myInstallHistory.slice(0, 6).map((asset) => (
-                  <DashboardInstallHistoryCard
-                    key={asset.id}
-                    asset={asset}
-                    loading={historyDialogLoading === asset.id}
-                    onClick={() => { void openHistoryReport(asset); }}
-                  />
-                ))}
-              </Stack>
-            )}
-          </Box>
-        </>
+        <DashboardFieldTechnicianInstallView
+          inspectionRunsDue={inspectionRunsDue}
+          myInstallAssets={myInstallAssets}
+          isNativePlatform={isNativePlatform}
+          runnerLoadingAssetId={runnerLoading}
+          photoReminders={photoReminders}
+          missingMediaFlags={missingMediaFlags}
+          technicianUserId={user.id}
+          attentionLoading={attentionLoading}
+          myInstallAttentionCount={myInstallAttentionCount}
+          myInstallBlocking={myInstallBlocking}
+          myInstallPendingSigs={myInstallPendingSigs}
+          myInstallHighObservations={myInstallHighObservations}
+          resolvingDashboardIssueId={resolvingDashboardIssueId}
+          myInstallHistory={myInstallHistory}
+          historyDialogLoading={historyDialogLoading}
+          getMyJobsCardAction={getMyJobsCardAction}
+          assetAttentionLabel={assetAttentionLabel}
+          onOpenInspections={() => navigate("/installations/assets?workflowType=Inspection")}
+          onAssetTap={(asset, cardAction) => { void handleMyJobsAssetTap(asset, cardAction); }}
+          onViewAllAssets={() => navigate("/installations/assets")}
+          onPhotoRemindersChange={setPhotoReminders}
+          onMissingMediaFlagsChange={setMissingMediaFlags}
+          onUploadPhotos={(flag) => {
+            setPhotoUploadMode("installer");
+            setPhotoUploadTarget(flag);
+          }}
+          onOpenIssueRepair={openIssueRepair}
+          onOpenSignatureRepair={openSignatureRepair}
+          onOpenHistory={(asset) => { void openHistoryReport(asset); }}
+        />
       )}
 
-      {/* SUPERVISOR VIEW */}
       {isSupervisor && pmDashboardTab === "my-installs" && (
-        <>
-          {/* Needs Attention - team issues */}
-          {NeedsAttentionSection}
-
-          {/* Field Activity: Workload panel */}
-          {WorkloadPanel}
-
-          {/* Unassigned + Not Started */}
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                  <WarningAmberOutlined sx={{ fontSize: 18, color: unassignedAssets.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Unassigned Assets</Typography>
-                  <Chip label={unassignedAssets.length} size="small"
-                    color={unassignedAssets.length > 0 ? "warning" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                  Active jobs with no technician assigned
-                </Typography>
-                {unassignedAssets.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">All assets are assigned</Typography>
-                ) : (
-                  <Stack spacing={0.25}>
-                    {unassignedAssets.slice(0, 5).map((a) => (
-                      <DashboardAttentionItemRow key={a.id}
-                        label={a.assetTag || a.assetName || a.id}
-                        sub={a.jobNumber}
-                        onClick={() => navigate("/installations/assets")} />
-                    ))}
-                    {unassignedAssets.length > 5 && (
-                      <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                        +{unassignedAssets.length - 5} more
-                      </Typography>
-                    )}
-                  </Stack>
-                )}
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                  <AssignmentLateOutlined sx={{ fontSize: 18, color: notStartedAssets.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Not Started</Typography>
-                  <Chip label={notStartedAssets.length} size="small"
-                    color={notStartedAssets.length > 0 ? "warning" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                  Assigned but not yet begun
-                </Typography>
-                {notStartedAssets.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">All assigned assets are in progress</Typography>
-                ) : (
-                  <Stack spacing={0.25}>
-                    {notStartedAssets.slice(0, 5).map((a) => (
-                      <DashboardAttentionItemRow key={a.id}
-                        label={a.assetTag || a.assetName || a.id}
-                        sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" - ")}
-                        onClick={() => navigate("/installations/assets")} />
-                    ))}
-                    {notStartedAssets.length > 5 && (
-                      <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                        +{notStartedAssets.length - 5} more
-                      </Typography>
-                    )}
-                  </Stack>
-                )}
-              </Box>
-            </Grid>
-          </Grid>
-
-          <Box className="glass-card" sx={{ p: 2.5 }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInstallHistory.length > 0 ? "success.main" : "text.disabled" }} />
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                Install History
-              </Typography>
-              {myInstallHistory.length > 0 && !isNativePlatform && (
-                <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
-                  Print All
-                </Button>
-              )}
-              <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
-                sx={{ height: 20, fontSize: "0.7rem" }} />
-            </Stack>
-            {myInstallHistory.length === 0 ? (
-              <Typography variant="caption" color="text.secondary">No install history yet</Typography>
-            ) : (
-              <Stack spacing={0.75}>
-                {myInstallHistory.slice(0, 6).map((asset) => (
-                  <DashboardInstallHistoryCard
-                    key={asset.id}
-                    asset={asset}
-                    loading={historyDialogLoading === asset.id}
-                    onClick={() => { void openHistoryReport(asset); }}
-                  />
-                ))}
-              </Stack>
-            )}
-          </Box>
-        </>
+        <DashboardSupervisorInstallView
+          needsAttentionSection={NeedsAttentionSection}
+          workloadPanel={WorkloadPanel}
+          unassignedAssets={unassignedAssets}
+          notStartedAssets={notStartedAssets}
+          installHistory={myInstallHistory}
+          historyLoadingAssetId={historyDialogLoading}
+          isNativePlatform={isNativePlatform}
+          onNavigateToAssets={() => navigate("/installations/assets")}
+          onOpenHistory={(asset) => { void openHistoryReport(asset); }}
+        />
       )}
 
-      {/* ENGINEER VIEW */}
       {isEngineer && pmDashboardTab === "my-installs" && (
-        <>
-          {/* Needs Attention - scoped */}
-          {NeedsAttentionSection}
-
-          {/* Quality Focus: Sign-offs + Draft Configs */}
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={6}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1.5 }}>
-                  <PendingActionsOutlined sx={{ fontSize: 18, color: myInstallPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Sign-offs Waiting on Me</Typography>
-                  <Chip label={myInstallPendingSigs.length} size="small"
-                    color={myInstallPendingSigs.length > 0 ? "warning" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                {myInstallPendingSigs.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">No pending sign-offs</Typography>
-                ) : (
-                  <AttentionItemList
-                    items={myInstallPendingSigs}
-                    maxCollapsed={5}
-                    getKey={(s) => s.runId}
-                    renderItem={(s) => (
-                      <DashboardAttentionItemRow
-                        label={assetAttentionLabel(s)}
-                        sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
-                        actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
-                        {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
-                          ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
-                          : {})}
-                        onClick={() => { void openSignatureRepair(s); }}
-                      />
-                    )}
-                  />
-                )}
-              </Box>
-            </Grid>
-            <Grid item xs={12} md={6}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                  <FactCheckOutlined sx={{ fontSize: 18, color: draftConfigs.length > 0 ? "warning.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Workflow Configs in Draft</Typography>
-                  <Chip label={draftConfigs.length} size="small"
-                    color={draftConfigs.length > 0 ? "warning" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                  Not yet published {"\u2014"} review and publish
-                </Typography>
-                {draftConfigs.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">No draft configs</Typography>
-                ) : (
-                  <Stack spacing={0.25}>
-                    {draftConfigs.slice(0, 5).map((cfg) => (
-                      <DashboardAttentionItemRow key={cfg.id}
-                        label={cfg.name}
-                        sub={cfg.updatedAt ? `Updated ${fmtDate(cfg.updatedAt)}` : undefined}
-                        onClick={() => navigate("/work-instructions")} />
-                    ))}
-                    {draftConfigs.length > 5 && (
-                      <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>
-                        +{draftConfigs.length - 5} more
-                      </Typography>
-                    )}
-                  </Stack>
-                )}
-              </Box>
-            </Grid>
-          </Grid>
-        </>
+        <DashboardEngineerInstallView
+          needsAttentionSection={NeedsAttentionSection}
+          pendingSignatures={myInstallPendingSigs}
+          draftConfigs={draftConfigs}
+          assetAttentionLabel={assetAttentionLabel}
+          onOpenSignatureRepair={openSignatureRepair}
+          onNavigateToWorkInstructions={() => navigate("/work-instructions")}
+        />
       )}
 
-      {/* PROJECT MANAGER / ADMIN VIEW */}
       {isManager && !showNativeManagerHome && (
-        <>
-          {pmDashboardTab === "pm-projects" && ProjectStatusGrid}
-
-          {/* Needs Attention - company-wide */}
-          {pmDashboardTab === "pm-projects" && NeedsAttentionSection}
-
-          {/* Inspection workspace */}
-          {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionJobsToday}
-          {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionAttentionSection}
-          {pmDashboardTab === "my-inspections" && !isAdmin && MyInspectionJobHistory}
-          {pmDashboardTab === "my-inspections" && !isAdmin && InspectionInboxSection}
-          {pmDashboardTab === "my-inspections" && isAdmin && AdminInspectionWorkspace}
-
-          {pmDashboardTab === "pm-projects" && (
-            <DashboardPendingApprovalsSection
-              projects={pendingApprovals}
-              onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
-            />
+        <DashboardManagerDesktopView
+          pmDashboardTab={pmDashboardTab}
+          projectStatusGrid={ProjectStatusGrid}
+          needsAttentionSection={NeedsAttentionSection}
+          inspectionTabContent={(
+            <>
+              {!isAdmin && MyInspectionJobsToday}
+              {!isAdmin && MyInspectionAttentionSection}
+              {!isAdmin && MyInspectionJobHistory}
+              {!isAdmin && InspectionInboxSection}
+              {isAdmin && AdminInspectionWorkspace}
+            </>
           )}
-
-          {/* Inspection signals */}
-          {pmDashboardTab === "pm-projects" && InspectionInboxSection}
-
-          {pmDashboardTab === "pm-projects" && (
-            <DashboardAutoAssignFlagsSection
-              flags={autoAssignFlags}
-              onFlagsChange={setAutoAssignFlags}
+          pmProjectsTabContent={(
+            <>
+              <DashboardPendingApprovalsSection
+                projects={pendingApprovals}
+                onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+              />
+              {InspectionInboxSection}
+              <DashboardAutoAssignFlagsSection
+                flags={autoAssignFlags}
+                onFlagsChange={setAutoAssignFlags}
+                onNavigateToAssets={() => navigate("/installations/assets")}
+                assignedByLabel="to"
+              />
+              <DashboardPhotoUpdateNotificationsSection
+                notifications={photoUpdateNotifications}
+                onNotificationsChange={setPhotoUpdateNotifications}
+              />
+              <DashboardMissingMediaFlagsSection
+                variant="pm"
+                flags={missingMediaFlags}
+                onFlagsChange={setMissingMediaFlags}
+                onOpenRepair={openMissingMediaRepair}
+                reminderSentId={reminderSentId}
+                onReminderSent={(flagId) => {
+                  setReminderSentId(flagId);
+                  setTimeout(() => setReminderSentId(null), 2000);
+                }}
+                sentByName={user.fullName ?? "PM"}
+              />
+              {RegionalSnapshotSection}
+              {EvidenceHealthGrid}
+              {WorkloadPanel}
+            </>
+          )}
+          installTabContent={isAdmin ? AdminInstallWorkspace : (
+            <DashboardPmInstallWorkspace
+              myInstallAssets={myInstallAssets}
+              myInstallHistory={myInstallHistory}
+              historyLoadingAssetId={historyDialogLoading}
+              isNativePlatform={isNativePlatform}
               onNavigateToAssets={() => navigate("/installations/assets")}
-              assignedByLabel="to"
+              onOpenHistory={(asset) => { void openHistoryReport(asset); }}
             />
           )}
-
-          {pmDashboardTab === "pm-projects" && (
-            <DashboardPhotoUpdateNotificationsSection
-              notifications={photoUpdateNotifications}
-              onNotificationsChange={setPhotoUpdateNotifications}
-            />
-          )}
-
-          {pmDashboardTab === "pm-projects" && (
-            <DashboardMissingMediaFlagsSection
-              variant="pm"
-              flags={missingMediaFlags}
-              onFlagsChange={setMissingMediaFlags}
-              onOpenRepair={openMissingMediaRepair}
-              reminderSentId={reminderSentId}
-              onReminderSent={(flagId) => {
-                setReminderSentId(flagId);
-                setTimeout(() => setReminderSentId(null), 2000);
-              }}
-              sentByName={user.fullName ?? "PM"}
-            />
-          )}
-
-          {/* Regional Snapshot */}
-          {pmDashboardTab === "pm-projects" && RegionalSnapshotSection}
-
-          {/* Evidence + Health */}
-          {pmDashboardTab === "pm-projects" && EvidenceHealthGrid}
-
-          {/* Workload */}
-          {pmDashboardTab === "pm-projects" && WorkloadPanel}
-
-          {/* Install workspace */}
-          {pmDashboardTab === "my-installs" && (isAdmin ? AdminInstallWorkspace : (
-            <Stack spacing={2}>
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                  <WorkOutlineOutlined sx={{ color: "primary.main", fontSize: 20 }} />
-                  <Typography variant="h6" sx={{ fontFamily: "Sora" }}>My Installs</Typography>
-                </Stack>
-                <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 2 }}>
-                  Installation assets currently assigned to you for field execution.
-                </Typography>
-                {myInstallAssets.length === 0 ? (
-                  <Typography variant="caption" color="text.disabled">No installation assets currently assigned to you for field execution.</Typography>
-                ) : (
-                  <>
-                    <Grid container spacing={1.5}>
-                      {myInstallAssets.slice(0, 6).map((a) => (
-                        <Grid item xs={12} sm={6} md={4} key={a.id}>
-                          <Paper elevation={0} onClick={() => navigate("/installations/assets")}
-                            sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                              transition: "all 0.15s", "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                            <Stack spacing={0.75}>
-                              <Typography variant="caption" fontWeight={600} noWrap display="block">
-                                {a.assetTag || a.assetName}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-                                {a.jobNumber}
-                              </Typography>
-                              <Chip label={dashboardStatusChip(a).label}
-                                size="small" variant="outlined"
-                                color={dashboardStatusChip(a).color}
-                                sx={{ alignSelf: "flex-start", height: 16, fontSize: "0.58rem" }} />
-                            </Stack>
-                          </Paper>
-                        </Grid>
-                      ))}
-                    </Grid>
-                    {myInstallAssets.length > 6 && (
-                      <Button size="small" variant="text" sx={{ mt: 1 }}
-                        onClick={() => navigate("/installations/assets")}>
-                        View all {myInstallAssets.length} assets
-                      </Button>
-                    )}
-                  </>
-                )}
-              </Box>
-
-              <Box className="glass-card" sx={{ p: 2.5 }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                  <CheckCircleOutlineOutlined sx={{ fontSize: 18, color: myInstallHistory.length > 0 ? "success.main" : "text.disabled" }} />
-                  <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                    Install History
-                  </Typography>
-                  {myInstallHistory.length > 0 && !isNativePlatform && (
-                    <Button size="small" variant="outlined" startIcon={<PrintOutlined fontSize="small" />} onClick={() => window.print()}>
-                      Print All
-                    </Button>
-                  )}
-                  <Chip label={myInstallHistory.length} size="small" color={myInstallHistory.length > 0 ? "success" : "default"} variant="outlined"
-                    sx={{ height: 20, fontSize: "0.7rem" }} />
-                </Stack>
-                {myInstallHistory.length === 0 ? (
-                  <Typography variant="caption" color="text.secondary">No install history yet</Typography>
-                ) : (
-                  <Stack spacing={0.75}>
-                    {myInstallHistory.slice(0, 6).map((asset) => (
-                  <DashboardInstallHistoryCard
-                    key={asset.id}
-                    asset={asset}
-                    loading={historyDialogLoading === asset.id}
-                    onClick={() => { void openHistoryReport(asset); }}
-                  />
-                ))}
-                  </Stack>
-                )}
-              </Box>
-            </Stack>
-          ))}
-        </>
+        />
       )}
 
-      {/* VIEWER VIEW */}
       {isViewer && (
-        <>
-          {/* Needs Attention - read-only */}
-          {NeedsAttentionSection}
-
-          {/* Regional Snapshot - read only */}
-          {RegionalSnapshotSection}
-
-          {/* Project Status */}
-          <Grid container spacing={2}>
-            <Grid item xs={12} md={4}>
-              <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
-                <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-                  <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-                  <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem" }}>Project Status</Typography>
-                </Stack>
-                <Stack spacing={1.25}>
-                  {statusGroups.map(([status, count]) => (
-                    <Stack key={status} direction="row" alignItems="center" spacing={1.5}>
-                      <Chip label={status} size="small"
-                        color={projectStatusChipColor(status)}
-                        variant="outlined" sx={{ fontSize: "0.68rem", height: 20, minWidth: 100 }} />
-                      <Box sx={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <Box sx={{
-                          height: "100%", borderRadius: 3,
-                          width: `${Math.round((count / projectCount) * 100)}%`,
-                          background: status === "Completed" ? "#2e7d32" : status === "In Progress" ? "#1976d2" :
-                            status === "Pending Approval" ? "#ed6c02" : status === "Cancelled" ? "#d32f2f" : "#555",
-                        }} />
-                      </Box>
-                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 24, textAlign: "right" }}>{count}</Typography>
-                    </Stack>
-                  ))}
-                  {statusGroups.length === 0 && (
-                    <Typography variant="caption" color="text.disabled">No projects loaded.</Typography>
-                  )}
-                </Stack>
-                <Divider sx={{ my: 2 }} />
-                <Stack direction="row" spacing={1}>
-                  <CheckCircleOutlineOutlined sx={{ fontSize: 14, color: "success.main", mt: 0.25 }} />
-                  <Typography variant="caption" color="text.secondary">
-                    Dashboard totals include active, open, in-progress, pending, and overdue projects only.
-                  </Typography>
-                </Stack>
-              </Box>
-            </Grid>
-          </Grid>
-        </>
+        <DashboardViewerView
+          statusGroups={statusGroups}
+          projectCount={projectCount}
+          needsAttentionSection={NeedsAttentionSection}
+          regionalSnapshotSection={RegionalSnapshotSection}
+        />
       )}
 
       <Suspense fallback={null}>

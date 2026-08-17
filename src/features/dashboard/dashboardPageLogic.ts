@@ -285,6 +285,29 @@ export function workflowModeChipColor(workflowMode?: string | null): "success" |
   return "success";
 }
 
+export type PmDashboardTab = "pm-projects" | "my-inspections" | "my-installs";
+
+export type DashboardTabSignal = {
+  count: number;
+  tone: "primary" | "warning" | "error" | "info" | "success";
+};
+
+export function getDashboardTabSx() {
+  return {
+    minHeight: 36,
+    py: 0.5,
+    px: 0.5,
+    mr: 0.75,
+    fontSize: "0.8rem",
+    borderRadius: 1.25,
+    minWidth: "fit-content" as const,
+    transition: "all 0.2s ease",
+    "&.Mui-selected": {
+      color: "primary.main",
+    },
+  };
+}
+
 export type AutoAssignFlag = {
   id: string;
   assetId: string;
