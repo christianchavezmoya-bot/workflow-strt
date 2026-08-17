@@ -77,7 +77,9 @@ src/modules/bom-project/services/workbookParser.ts
 src/features/installations/AssetDocumentsDialog.tsx
 ```
 
-Three options, and this needs a decision rather than a default:
+Three options, and this needs a decision rather than a default — **resolved in
+[`S2_PRODUCT_DECISIONS.md`](./S2_PRODUCT_DECISIONS.md) §2: accept contained risk until S9; migrate
+the parse path then.**
 
 1. **Move to the SheetJS vendor distribution.** Same library, same API, patched — but it is installed
    from the vendor CDN rather than npm, which changes the install story and CI
@@ -182,7 +184,7 @@ Grouped so that each stage is independently shippable and revertible, easiest an
 |---|---|---|---|
 | **M1 Security patches** | `jspdf` → 4.2.1 (critical), `npm audit fix` for the transitive highs | None | CI + a PDF export spot-check |
 | **M2 axios** | 1.13 → 1.19 | None expected | Full e2e + **manual offline phone pass** — this is the sync path |
-| **M3 xlsx decision** | Choose vendor dist / `exceljs` / accept | None if vendor dist | Import and export round-trip on real workbooks |
+| **M3 xlsx decision** | ~~Choose~~ **S2: accept until S9**, then `exceljs` on parse path | None now | Import and export round-trip on real workbooks in S9 PR |
 | **M4 .NET 10** | Runtime, EF Core, Npgsql, Dockerfile, CI | None | `dotnet test`, migration chain on both providers, staging standup |
 | **M5 Dev-only majors** | ESLint 10, `@vitejs/plugin-react` 6, jest-dom 7, TypeScript 7 | None | CI green |
 | **M6 Build tooling** | Vite 8 | Low | Bundle budgets + web-perf timings before/after |

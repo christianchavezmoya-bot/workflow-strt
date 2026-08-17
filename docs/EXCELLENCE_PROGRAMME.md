@@ -87,7 +87,7 @@ Named now so they are not discovered mid-migration:
 | `zod` 4 changes default validation message wording | 2 | S9 | Pin messages explicitly rather than accepting new defaults |
 | Error text users see, once one error contract exists | 2 | S5 | Likely an improvement — but assess and sign off rather than assume |
 | Refresh timing after hook-dependency fixes — more or fewer spinners | 2 | S8 | Compare before/after; treat extra network calls as a regression |
-| The disabled workflow-builder picker, if re-enabled | **3** | S2 | New UI appears. Full divergence note required |
+| The disabled workflow-builder picker, if re-enabled | **3** | S2 | **Decided: stay retired.** Delete dead code in S8 instead — see [`S2_PRODUCT_DECISIONS.md`](./S2_PRODUCT_DECISIONS.md) |
 | Deleting `SitesManagement.tsx` / `CustomersPortal.tsx` — unreferenced but whole screens | **3** | S1 | Confirm they were never reachable, not merely unrouted today |
 
 ---
@@ -136,6 +136,8 @@ Verified against `dist/`.
 
 ### S2 — Decisions that need a human
 **Blocks parts of S1 and S9.** Sources: bug sweep.
+
+**Status: complete** — verdicts in [`S2_PRODUCT_DECISIONS.md`](./S2_PRODUCT_DECISIONS.md).
 
 Three questions only the product owner can answer:
 
@@ -360,4 +362,4 @@ programme starts.
 
 | Date | Stage | Change | Class | What was lost | Compensation | Approved by |
 |---|---|---|---|---|---|---|
-| — | — | — | — | — | — | — |
+| 2026-08-17 | S2 | Workflow-builder “From features” input picker stays **off** | — | Old bulk-add-input UI (superseded by step-type auto-populate) | None — replacement already shipped | S2 register |
