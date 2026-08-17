@@ -11,7 +11,7 @@ Stage **S3** of [`EXCELLENCE_PROGRAMME.md`](./EXCELLENCE_PROGRAMME.md): characte
 | 2 | Two-tier permission model | **Done (PR 1 + PR 2)** | `src/utils/rolePermissionsResolve.test.ts`, `src/hooks/usePermissions.test.tsx` |
 | 3 | Offline queue temp-ID → server-ID remap | **Done (PR 1)** | `src/services/syncQueue.replaceReferences.test.ts` |
 | 4 | Backend controller tests (workflow endpoints beyond complete) | **Done (PR 2)** | `server/Commtrac.Api.Tests/AssetWorkflowRunProgressTests.cs` |
-| 5 | Characterisation tests for `AssetInstallationPage.tsx` | Pending | Before first S8 extraction |
+| 5 | Characterisation tests for `AssetInstallationPage.tsx` | **Done (PR 3)** | `src/features/installations/assetInstallationPageLogic.test.ts` |
 | 6 | Characterisation tests for `Dashboard.tsx` | Pending | Before first S8 extraction |
 
 ## What PR 1 pins
@@ -62,6 +62,22 @@ Shared fixtures: `server/Commtrac.Api.Tests/WorkflowRunTestHelpers.cs`
 - Saved role config merges with admin fallback (settings OR-merge)
 - User identity change clears role-config cache and re-fetches
 
+## What PR 3 pins
+
+### AssetInstallationPage pure logic (client)
+
+Extracted to `src/features/installations/assetInstallationPageLogic.ts` (Class 0 — behaviour unchanged):
+
+- `resolveConfigWorkflowTypeId` — FK first, then configType name match
+- `workflowTypeMismatchMessage` — inspection vs installation pairing warnings
+- `projectHasInspection` — INSPECTION_ONLY and MIXED modes
+- `computeHealth` / `assetHasConfiguredWorkflow` — tab health counts
+- `tabDotColor` — issue > complete > in-progress priority
+- `nextDraftConfigNumber` — draft config auto-numbering
+- `loadColumnConfig` — localStorage column order merge + force-visible columns
+- `timeAgo` — sync timestamp labels
+- `operationsStickyPrefixSx` — sticky column styles (native vs web)
+
 ## Verification command
 
 ```bash
@@ -71,5 +87,4 @@ dotnet test server/Commtrac.Api.Tests/Commtrac.Api.Tests.csproj
 
 ## Next S3 PRs
 
-1. **God-file characterisation** — one PR per file, snapshot/key interaction tests only
-   (`AssetInstallationPage.tsx`, then `Dashboard.tsx`)
+1. **Dashboard characterisation** — extract and test pure logic from `Dashboard.tsx` (including shared `resolveConfigWorkflowTypeId` dedup)
