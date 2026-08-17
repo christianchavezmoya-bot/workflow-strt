@@ -84,6 +84,9 @@ import DashboardMyInspectionJobHistory from "./DashboardMyInspectionJobHistory";
 import DashboardInstallHistoryCard from "./DashboardInstallHistoryCard";
 import DashboardPendingApprovalsSection from "./DashboardPendingApprovalsSection";
 import DashboardAutoAssignFlagsSection from "./DashboardAutoAssignFlagsSection";
+import DashboardPhotoUpdateNotificationsSection from "./DashboardPhotoUpdateNotificationsSection";
+import DashboardMissingMediaFlagsSection from "./DashboardMissingMediaFlagsSection";
+import DashboardManagerMobileProjectsList from "./DashboardManagerMobileProjectsList";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -119,6 +122,7 @@ import {
   isDashboardVisibleProjectStatus,
   isInProgressAsset,
   isIssueAsset,
+  isInspectionWorkflowType,
   isNotStartedAsset,
   isOpenInspectionStatus,
   isPausedAsset,
@@ -140,6 +144,9 @@ const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner")
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
 const AssetDocumentsDialog = lazy(() => import("../installations/AssetDocumentsDialog"));
 const DashboardWorkloadReportDialogs = lazy(() => import("./DashboardWorkloadReportDialogs"));
+const DashboardQuickActionDialog = lazy(() => import("./DashboardQuickActionDialog"));
+const DashboardAutoAssignConfirmDialog = lazy(() => import("./DashboardAutoAssignConfirmDialog"));
+const DashboardAssignWorkflowDialog = lazy(() => import("./DashboardAssignWorkflowDialog"));
 
 type NativeMyJobsCardContext = {
   asset: ProjectAsset;
@@ -2648,12 +2655,6 @@ const Dashboard = () => {
     }
   }
 
-  function isInspectionWorkflowType(workflowTypeId?: string): boolean {
-    if (!workflowTypeId) return false;
-    const typeName = String(workflowTypeId).toLowerCase();
-    return typeName.includes("inspection") || typeName === "insp";
-  }
-
   // Load workflow configs scoped to this asset's product when the assign
   // dialog opens — mirrors AssetInstallationPage.openAssignDialog(). The
   // Workflow Type is no longer a user choice: the project already fixes it,
@@ -3315,75 +3316,15 @@ const Dashboard = () => {
         onNavigateToAssets={() => navigate("/installations/assets")}
       />
 
-      <Box className="glass-card" sx={{ p: 2 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: canViewAllProjects ? 1 : 1.5 }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Projects</Typography>
-          <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
-        </Stack>
-        {canViewAllProjects && (
-          <Stack direction="row" spacing={0.75} sx={{ mb: 1.5 }}>
-            <Chip label="My Projects" clickable size="small"
-              color={dashboardProjectScope === "mine" ? "primary" : "default"}
-              variant={dashboardProjectScope === "mine" ? "filled" : "outlined"}
-              onClick={() => setDashboardProjectScope("mine")}
-              sx={{ height: 26, fontSize: "0.72rem" }} />
-            <Chip label="All Projects" clickable size="small"
-              color={dashboardProjectScope === "all" ? "primary" : "default"}
-              variant={dashboardProjectScope === "all" ? "filled" : "outlined"}
-              onClick={() => setDashboardProjectScope("all")}
-              sx={{ height: 26, fontSize: "0.72rem" }} />
-          </Stack>
-        )}
-        {dashboardProjects.length === 0
-          ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
-          : <Stack spacing={1}>
-              {dashboardProjects.slice(0, 6).map((project) => {
-                const { issueCount, totalAssets, complete, completionPct } = getProjectCompletionMetrics(project);
-
-                return (
-                  <Paper key={project.id} elevation={0} onClick={() => navigate(projectAssetsPath(project))}
-                    sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                          "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                      <Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1 }}>
-                        {project.jobNumber}
-                      </Typography>
-                      <Chip
-                        label={workflowModeLabel(project.workflowMode)}
-                        color={workflowModeChipColor(project.workflowMode)}
-                        size="small"
-                        variant="outlined"
-                        sx={{ height: 22, fontSize: 11 }}
-                      />
-                    </Stack>
-                    <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ mb: 1 }}>
-                      {project.customerName || "No customer"} · {project.status}
-                    </Typography>
-                    <Stack direction="row" spacing={1} alignItems="center">
-                      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                        {totalAssets} assets
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                        {complete} done
-                      </Typography>
-                      <Box sx={{ flex: 1, minWidth: 80 }}>
-                        <LinearProgress
-                          variant="determinate"
-                          value={completionPct}
-                          color={issueCount > 0 ? "error" : "success"}
-                          sx={{ height: 6, borderRadius: 1 }}
-                        />
-                      </Box>
-                      <Typography variant="caption" color="text.secondary" sx={{ minWidth: 34, textAlign: "right", flexShrink: 0 }}>
-                        {completionPct}%
-                      </Typography>
-                    </Stack>
-                  </Paper>
-                );
-              })}
-            </Stack>
-        }
-      </Box>
+      <DashboardManagerMobileProjectsList
+        projects={dashboardProjects}
+        canViewAllProjects={canViewAllProjects}
+        dashboardProjectScope={dashboardProjectScope}
+        onDashboardProjectScopeChange={setDashboardProjectScope}
+        onNavigateToProjects={() => navigate("/projects")}
+        onNavigateToProjectAssets={(project) => navigate(projectAssetsPath(project))}
+        getProjectCompletionMetrics={getProjectCompletionMetrics}
+      />
 
       {InspectionInboxSection}
       {EvidenceHealthGrid}
@@ -3779,52 +3720,16 @@ const Dashboard = () => {
             </Stack>
           )}
 
-          {/* My runs missing media */}
-          {missingMediaFlags.filter(f => f.technicianUserId === user.id).length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                  Runs Missing Media
-                </Typography>
-                <Chip label={missingMediaFlags.filter(f => f.technicianUserId === user.id).length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Your completed runs with missing photo or video evidence {"\u2014"} tap to upload missing media
-              </Typography>
-              <Stack spacing={0.5}>
-                {missingMediaFlags.filter(f => f.technicianUserId === user.id).map((f) => (
-                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} - {fmtDate(f.completedAt)}
-                      </Typography>
-                      {"totalExpected" in f && (
-                        <Typography variant="caption" color="warning.main" display="block">
-                          {(f as MissingMediaFlag).totalCaptured} of {(f as MissingMediaFlag).totalExpected} media steps done
-                        </Typography>
-                      )}
-                    </Box>
-                    <Button size="small" variant="outlined" color="warning" sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                      onClick={() => { setPhotoUploadMode("installer"); setPhotoUploadTarget(f as MissingMediaFlag); }}>
-                      Add Missing Photos
-                    </Button>
-                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = missingMediaFlags.filter((x) => x.id !== f.id);
-                        localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
-                        setMissingMediaFlags(updated);
-                      }}>
-                      x
-                    </Button>
-                  </Stack>
-                ))}
-              </Stack>
-            </Box>
-          )}
+          <DashboardMissingMediaFlagsSection
+            variant="installer"
+            flags={missingMediaFlags}
+            onFlagsChange={setMissingMediaFlags}
+            technicianUserId={user.id}
+            onUploadPhotos={(flag) => {
+              setPhotoUploadMode("installer");
+              setPhotoUploadTarget(flag);
+            }}
+          />
 
           {/* Needs Attention - Installer view */}
           <Box className="glass-card" sx={{ p: 2.5 }}>
@@ -4221,147 +4126,26 @@ const Dashboard = () => {
             />
           )}
 
-          {/* Installer media updates - PM notifications when installers upload missing media */}
-          {pmDashboardTab === "pm-projects" && photoUpdateNotifications.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <PhotoCameraOutlined sx={{ fontSize: 18, color: "info.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                  Installer Media Updates
-                </Typography>
-                <Chip label={photoUpdateNotifications.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-                <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
-                  onClick={() => {
-                    localStorage.removeItem("pm_photo_update_notifications");
-                    setPhotoUpdateNotifications([]);
-                  }}>
-                  Dismiss all
-                </Button>
-              </Stack>
-              <Stack spacing={0.5} mt={1}>
-                {photoUpdateNotifications.map((n) => (
-                  <Stack key={n.id} direction="row" alignItems="center" spacing={1}>
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {n.installerName} updated media for {n.assetTag}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {n.workflowName} - {fmtDate(n.updatedAt)}
-                      </Typography>
-                      <Typography variant="caption" display="block" color={n.wasComplete ? "success.main" : "warning.main"}>
-                        {n.wasComplete ? "All media added" : `${n.stillMissing} step${n.stillMissing !== 1 ? "s" : ""} still missing`}
-                      </Typography>
-                    </Box>
-                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = photoUpdateNotifications.filter((x) => x.id !== n.id);
-                        localStorage.setItem("pm_photo_update_notifications", JSON.stringify(updated));
-                        setPhotoUpdateNotifications(updated);
-                      }}>
-                      x
-                    </Button>
-                  </Stack>
-                ))}
-              </Stack>
-            </Box>
+          {pmDashboardTab === "pm-projects" && (
+            <DashboardPhotoUpdateNotificationsSection
+              notifications={photoUpdateNotifications}
+              onNotificationsChange={setPhotoUpdateNotifications}
+            />
           )}
 
-          {/* Missing media flags - PM sees all runs without required media */}
-          {pmDashboardTab === "pm-projects" && missingMediaFlags.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(237,108,2,0.07)" }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <PhotoCameraOutlined sx={{ fontSize: 18, color: "warning.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                  Runs Missing Media
-                </Typography>
-                <Chip label={missingMediaFlags.length} size="small" color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-                <Button size="small" variant="text" color="warning" sx={{ fontSize: "0.72rem" }}
-                  onClick={() => {
-                    localStorage.removeItem("pm_missing_media_flags");
-                    setMissingMediaFlags([]);
-                  }}>
-                  Dismiss all
-                </Button>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Workflow runs completed without all required photos or videos captured
-              </Typography>
-              <Stack spacing={0.75}>
-                {missingMediaFlags.map((f) => (
-                  <Stack key={f.id} direction="row" alignItems="flex-start" spacing={1}>
-                    <Box sx={{ flex: 1 }}>
-                      <Typography variant="body2" fontWeight={600} sx={{ lineHeight: 1.3 }}>
-                        {f.jobNumber ? `${f.jobNumber}: ` : ""}{f.assetTag}
-                      </Typography>
-                      <Typography variant="caption" color="text.secondary">
-                        {f.workflowName} - {fmtDate(f.completedAt)}
-                      </Typography>
-                      {"totalExpected" in f && (
-                        <>
-                          <Typography variant="caption" color="warning.main" display="block">
-                            {(f as MissingMediaFlag).totalCaptured}/{(f as MissingMediaFlag).totalExpected} media steps captured
-                          </Typography>
-                          {(f as MissingMediaFlag).missingSteps?.slice(0, 3).map((ms) => (
-                            <Typography key={`${ms.stepId}-${ms.inputId}`} variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              - {ms.stepTitle} - {ms.inputLabel}: {ms.captured} captured
-                            </Typography>
-                          ))}
-                          {((f as MissingMediaFlag).missingSteps?.length ?? 0) > 3 && (
-                            <Typography variant="caption" color="text.disabled" display="block" sx={{ pl: 1 }}>
-                              +{((f as MissingMediaFlag).missingSteps?.length ?? 0) - 3} more...
-                            </Typography>
-                          )}
-                        </>
-                      )}
-                    </Box>
-                    <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        color="info"
-                        sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                        onClick={() => openMissingMediaRepair(f)}
-                      >
-                        Open Repair
-                      </Button>
-                      <Button
-                        size="small"
-                        variant="text"
-                        color="warning"
-                        sx={{ fontSize: "0.7rem", whiteSpace: "nowrap" }}
-                        disabled={reminderSentId === f.id}
-                        onClick={() => {
-                          const reminder = {
-                            id: randomId(),
-                            runId: f.runId,
-                            assetTag: f.assetTag,
-                            jobNumber: f.jobNumber,
-                            workflowName: f.workflowName,
-                            sentAt: new Date().toISOString(),
-                            sentByName: user.fullName ?? "PM",
-                          };
-                          const existing = JSON.parse(localStorage.getItem("installer_photo_reminders") ?? "[]");
-                          localStorage.setItem("installer_photo_reminders", JSON.stringify([...existing, reminder]));
-                          window.dispatchEvent(new Event("installer-photo-reminders-changed"));
-                          setReminderSentId(f.id);
-                          setTimeout(() => setReminderSentId(null), 2000);
-                        }}
-                      >
-                        {reminderSentId === f.id ? "Sent" : "Notify Field User"}
-                      </Button>
-                      <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                        onClick={() => {
-                          const updated = missingMediaFlags.filter((x) => x.id !== f.id);
-                          localStorage.setItem("pm_missing_media_flags", JSON.stringify(updated));
-                          setMissingMediaFlags(updated);
-                        }}>
-                        x
-                      </Button>
-                    </Stack>
-                  </Stack>
-                ))}
-              </Stack>
-            </Box>
+          {pmDashboardTab === "pm-projects" && (
+            <DashboardMissingMediaFlagsSection
+              variant="pm"
+              flags={missingMediaFlags}
+              onFlagsChange={setMissingMediaFlags}
+              onOpenRepair={openMissingMediaRepair}
+              reminderSentId={reminderSentId}
+              onReminderSent={(flagId) => {
+                setReminderSentId(flagId);
+                setTimeout(() => setReminderSentId(null), 2000);
+              }}
+              sentByName={user.fullName ?? "PM"}
+            />
           )}
 
           {/* Regional Snapshot */}
@@ -4569,337 +4353,81 @@ const Dashboard = () => {
         onComplete={() => { void loadAttention(); }}
       />
 
-      {/* Quick Action Dialog for "My Jobs Today" */}
-      <Dialog open={quickActionOpen} onClose={closeQuickActionDialog} maxWidth="sm" fullWidth>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <WorkOutlineOutlined sx={{ color: "primary.main" }} />
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="subtitle1" fontWeight={700}>
-                {quickActionAsset?.assetTag || quickActionAsset?.assetName || "Asset"}
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {quickActionAsset?.jobNumber}
-              </Typography>
-            </Box>
-            <Chip
-              label={quickActionAsset ? dashboardStatusChip(quickActionAsset).label : ""}
-              size="small"
-              color={quickActionAsset ? dashboardStatusChip(quickActionAsset).color : "default"}
-              variant="outlined"
-            />
-          </Stack>
-        </DialogTitle>
-        <DialogContent dividers>
-          {quickActionLoading ? (
-            <Box sx={{ display: "flex", justifyContent: "center", py: 3 }}>
-              <CircularProgress size={24} />
-            </Box>
-          ) : (
-            <Stack spacing={2}>
-              {/* Asset details */}
-              {quickActionAsset && (
-                <Box>
-                  {quickActionAsset.totalSteps > 0 && (
-                    <Typography variant="caption" color="text.secondary" display="block">
-                      Progress: {formatStepCompletionPercent(quickActionAsset.completedSteps, quickActionAsset.totalSteps)}
-                      {quickActionAsset.missingItems > 0 && ` \u2022 ${quickActionAsset.missingItems} missing`}
-                    </Typography>
-                  )}
-                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mt: 1 }}>
-                    {quickActionAttention.blockingIssues.length > 0 && (
-                      <Chip size="small" color="error" variant="outlined" label={`${quickActionAttention.blockingIssues.length} blocking`} />
-                    )}
-                    {quickActionAttention.highObservations.length > 0 && (
-                      <Chip size="small" color="warning" variant="outlined" label={`${quickActionAttention.highObservations.length} obs / scope`} />
-                    )}
-                    {quickActionAttention.missingMedia && (
-                      <Chip size="small" color="warning" variant="outlined" label="Missing photos" />
-                    )}
-                    {quickActionAttention.pendingSignature && (
-                      <Chip size="small" color="warning" variant="outlined" label="Pending signature" />
-                    )}
-                  </Stack>
-                </Box>
-              )}
-
-              {/* Quick Actions */}
-              <Divider sx={{ my: 1.5 }} />
-              <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-                Quick Actions
-              </Typography>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={docsLoading ? <CircularProgress size={14} /> : <FolderOutlined fontSize="small" />}
-                  onClick={() => {
-                    if (quickActionAsset) {
-                      setDocsDialogAsset(quickActionAsset);
-                      setDocsDialogOpen(true);
-                      closeQuickActionDialog();
-                    }
-                  }}
-                  disabled={docsLoading}
-                >
-                  Documents ({docsCount})
-                </Button>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<EditOutlined fontSize="small" />}
-                  onClick={() => {
-                    closeQuickActionDialog();
-                    navigate("/installations/assets");
-                  }}
-                >
-                  Edit Asset
-                </Button>
-                {quickActionPrimaryAction && (
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color={quickActionPrimaryAction.color}
-                    startIcon={
-                      quickActionPrimaryAction.label === "Resolve Blocking Issue" || quickActionPrimaryAction.label === "Resolve Issue" ? <WarningAmberOutlined fontSize="small" /> :
-                      quickActionPrimaryAction.label === "Add Missing Photos" || quickActionPrimaryAction.label === "Add Photos" ? <PhotoCameraOutlined fontSize="small" /> :
-                      quickActionPrimaryAction.label === "Complete Sign-off" ? <PendingActionsOutlined fontSize="small" /> :
-                      quickActionPrimaryAction.label === "Review High Observation" ? <ReportOutlined fontSize="small" /> :
-                      <PlayArrowOutlined fontSize="small" />
-                    }
-                    onClick={quickActionPrimaryAction.onClick}
-                  >
-                    {quickActionPrimaryAction.label}
-                  </Button>
-                )}
-              </Stack>
-
-              {(quickActionAttention.blockingIssues.length > 0 ||
-                quickActionAttention.highObservations.length > 0 ||
-                quickActionAttention.missingMedia ||
-                quickActionAttention.pendingSignature) && (
-                <Alert severity={quickActionAttention.blockingIssues.length > 0 ? "error" : "warning"} sx={{ mt: 0.5 }}>
-                  {quickActionAttention.blockingIssues.length > 0
-                    ? "This asset has an open blocking issue. Resolve it before expecting the workflow to complete normally."
-                    : quickActionAttention.missingMedia
-                      ? "This asset has missing workflow photos. The primary action takes the user directly to photo recovery."
-                      : quickActionAttention.pendingSignature
-                        ? "This asset is waiting for sign-off. Keep signature recovery as a first-class action."
-                        : "This asset has high-severity observations that still need review."}
-                </Alert>
-              )}
-
-              {/* Workflow assignments */}
-              {quickActionAssignments.length === 0 && quickActionRuns.length === 0 && !productWorkflow ? (
-                quickActionAsset && assetLikelyHasWorkflow(
-                  quickActionAsset,
-                  nativeMyJobsCardContext[quickActionAsset.id]?.asset,
-                ) && isOfflineConfigMissingContext() ? (
-                  <Stack spacing={1.5}>
-                    <Alert severity="warning">
-                      {OFFLINE_CONFIG_MISSING_MESSAGE}
-                    </Alert>
-                    <Button
-                      variant="outlined"
-                      onClick={() => retryOfflineDownload()}
-                    >
-                      Retry download when online
-                    </Button>
-                  </Stack>
-                ) : (
-                <Stack spacing={1.5}>
-                  <Alert severity="info">
-                    No workflow assigned to this asset yet.
-                  </Alert>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={<PlayArrowOutlined />}
-                    onClick={() => void openAssignDialogFromDashboard()}
-                  >
-                    Assign Workflow
-                  </Button>
-                </Stack>
-                )
-              ) : quickActionAssignments.length === 0 && quickActionRuns.length === 0 && productWorkflow ? (
-                // Product-linked workflow (no explicit assignment)
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-                    Linked Workflow (from product)
-                  </Typography>
-                  <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Box sx={{ flex: 1 }}>
-                        <Typography variant="body2" fontWeight={600}>
-                          {productWorkflow.configName}
-                        </Typography>
-                        <Typography variant="caption" color="text.secondary">
-                          {isInspectionWorkflowType(productWorkflow.workflowTypeId) ? "Inspection" : "Installation"} workflow
-                        </Typography>
-                      </Box>
-                      <Button
-                        size="small"
-                        variant="contained"
-                        color="success"
-                        startIcon={runnerLoading === quickActionAsset?.id ? <CircularProgress size={14} /> : <PlayArrowOutlined />}
-                        disabled={runnerLoading === quickActionAsset?.id}
-                        onClick={() => {
-                          if (quickActionAsset && productWorkflow) {
-                            launchProductWorkflowFromDashboard(quickActionAsset, productWorkflow);
-                          }
-                        }}
-                      >
-                        Start Run
-                      </Button>
-                    </Stack>
-                  </Paper>
-                </Box>
-              ) : quickActionAssignments.length === 0 && quickActionRuns.length > 0 ? (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-                    Previous Workflow Runs
-                  </Typography>
-                  <Alert severity="info" sx={{ mb: 1.5 }}>
-                    This asset has previous workflow runs but no current assignment. Assign a new workflow to start fresh.
-                  </Alert>
-                  <Stack spacing={1}>
-                    {quickActionRuns.slice(0, 3).map((run) => (
-                      <Paper key={run.id} elevation={0} sx={{ p: 1.25, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-                        <Stack direction="row" alignItems="center" spacing={1}>
-                          <Box sx={{ flex: 1 }}>
-                            <Typography variant="caption" fontWeight={600}>
-                              Run #{run.runNumber ?? 1}
-                            </Typography>
-                            <Typography variant="caption" color="text.secondary" display="block">
-                              {run.status} · {run.completedAt ? `Completed ${new Date(run.completedAt).toLocaleDateString()}` : run.startedAt ? `Started ${new Date(run.startedAt).toLocaleDateString()}` : "In progress"}
-                            </Typography>
-                          </Box>
-                          <Chip
-                            label={run.status}
-                            size="small"
-                            color={run.status === "Complete" ? "success" : run.status === "Issue" ? "error" : "primary"}
-                            variant="outlined"
-                            sx={{ height: 18, fontSize: "0.65rem" }}
-                          />
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                  <Button
-                    variant="contained"
-                    color="primary"
-                    startIcon={<PlayArrowOutlined />}
-                    onClick={() => void openAssignDialogFromDashboard()}
-                    sx={{ mt: 1.5 }}
-                  >
-                    Assign New Workflow
-                  </Button>
-                </Box>
-              ) : (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600} display="block" sx={{ mb: 1 }}>
-                    Assigned Workflows
-                  </Typography>
-                  <Stack spacing={1}>
-                    {quickActionAssignments.map((asgn) => {
-                      const isActive = quickActionRuns.some((r) => r.workflowConfigId === asgn.workflowConfigId && !r.isLocked);
-                      const isInspection = isInspectionWorkflowType(asgn.workflowTypeId);
-                      return (
-                        <Paper key={asgn.id} elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5 }}>
-                          <Stack direction="row" alignItems="center" spacing={1}>
-                            <Box sx={{ flex: 1 }}>
-                              <Typography variant="body2" fontWeight={600}>
-                                {asgn.workflowConfigName || asgn.workflowConfigId}
-                              </Typography>
-                              <Typography variant="caption" color="text.secondary">
-                                {isInspection ? "Inspection" : "Installation"} workflow
-                              </Typography>
-                            </Box>
-                            <Stack direction="row" spacing={0.5}>
-                              {isInspection && (
-                                <Button
-                                  size="small"
-                                  variant="outlined"
-                                  color="info"
-                                  onClick={() => {
-                                    if (quickActionAsset) {
-                                      setImportDialogAsset({
-                                        id: quickActionAsset.id,
-                                        assetTag: quickActionAsset.assetTag,
-                                        assetName: quickActionAsset.assetName,
-                                        projectId: quickActionAsset.projectId,
-                                      });
-                                      setImportDialogOpen(true);
-                                      closeQuickActionDialog();
-                                    }
-                                  }}
-                                >
-                                  Upload JSON
-                                </Button>
-                              )}
-                              <Button
-                                size="small"
-                                variant="contained"
-                                color={isActive ? "primary" : "success"}
-                                startIcon={runnerLoading === quickActionAsset?.id ? <CircularProgress size={14} /> : <PlayArrowOutlined />}
-                                disabled={runnerLoading === quickActionAsset?.id}
-                                onClick={() => checkAssignmentThenStartFromDashboard(quickActionAsset!, asgn)}
-                              >
-                                {isActive ? "Resume Run" : "Start Run"}
-                              </Button>
-                            </Stack>
-                          </Stack>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                </Box>
-              )}
-            </Stack>
-          )}
-        </DialogContent>
-        <DialogActions sx={{ px: 2.5, py: 1.5 }}>
-          <Button
-            variant="outlined"
-            startIcon={<OpenInNewOutlined />}
-            onClick={() => {
+      <Suspense fallback={null}>
+        <DashboardQuickActionDialog
+          open={quickActionOpen}
+          loading={quickActionLoading}
+          asset={quickActionAsset}
+          attention={quickActionAttention}
+          assignments={quickActionAssignments}
+          runs={quickActionRuns}
+          productWorkflow={productWorkflow}
+          primaryAction={quickActionPrimaryAction}
+          docsLoading={docsLoading}
+          docsCount={docsCount}
+          runnerLoadingAssetId={runnerLoading}
+          offlineConfigMissingBlock={
+            !!(quickActionAsset
+              && assetLikelyHasWorkflow(quickActionAsset, nativeMyJobsCardContext[quickActionAsset.id]?.asset)
+              && isOfflineConfigMissingContext())
+          }
+          offlineConfigMissingMessage={OFFLINE_CONFIG_MISSING_MESSAGE}
+          onClose={closeQuickActionDialog}
+          onNavigateToAssets={() => {
+            closeQuickActionDialog();
+            navigate("/installations/assets");
+          }}
+          onOpenDocuments={() => {
+            if (quickActionAsset) {
+              setDocsDialogAsset(quickActionAsset);
+              setDocsDialogOpen(true);
               closeQuickActionDialog();
-              navigate("/installations/assets");
-            }}
-          >
-            Go to Project Assets
-          </Button>
-          <Button onClick={closeQuickActionDialog}>Close</Button>
-        </DialogActions>
-      </Dialog>
+            }
+          }}
+          onEditAsset={() => {
+            closeQuickActionDialog();
+            navigate("/installations/assets");
+          }}
+          onRetryOfflineDownload={() => { void retryOfflineDownload(); }}
+          onOpenAssignDialog={() => { void openAssignDialogFromDashboard(); }}
+          onLaunchProductWorkflow={(workflow) => {
+            if (quickActionAsset) {
+              launchProductWorkflowFromDashboard(quickActionAsset, workflow);
+            }
+          }}
+          onStartAssignment={(assignment) => {
+            if (quickActionAsset) {
+              checkAssignmentThenStartFromDashboard(quickActionAsset, assignment);
+            }
+          }}
+          onOpenInspectionImport={() => {
+            if (quickActionAsset) {
+              setImportDialogAsset({
+                id: quickActionAsset.id,
+                assetTag: quickActionAsset.assetTag,
+                assetName: quickActionAsset.assetName,
+                projectId: quickActionAsset.projectId,
+              });
+              setImportDialogOpen(true);
+              closeQuickActionDialog();
+            }
+          }}
+          assetLikelyHasWorkflowFn={assetLikelyHasWorkflow}
+          nativeAssetContext={quickActionAsset ? nativeMyJobsCardContext[quickActionAsset.id]?.asset : undefined}
+        />
+      </Suspense>
 
-      {/* Auto-assign confirmation dialog */}
-      <Dialog open={!!autoAssignConfirm} onClose={() => setAutoAssignConfirm(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          {autoAssignConfirm?.reason === "unassigned" ? "Unassigned Asset" : "Asset Assigned to Another User"}
-        </DialogTitle>
-        <DialogContent>
-          <Typography variant="body2">
-            {autoAssignConfirm?.reason === "unassigned" ? (
-              <>
-                <strong>{autoAssignConfirm?.asset.assetTag || autoAssignConfirm?.asset.assetName}</strong> has no installer assigned.
-                Starting this workflow will assign it to <strong>you ({user.fullName})</strong>.
-              </>
-            ) : (
-              <>
-                <strong>{autoAssignConfirm?.asset.assetTag || autoAssignConfirm?.asset.assetName}</strong> is currently assigned to <strong>{autoAssignConfirm?.otherName}</strong>.
-                Starting this workflow will reassign it to <strong>you ({user.fullName})</strong>.
-              </>
-            )}
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAutoAssignConfirm(null)}>Cancel</Button>
-          <Button variant="contained" onClick={confirmAutoAssignAndStartFromDashboard}>
-            Continue
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <Suspense fallback={null}>
+        <DashboardAutoAssignConfirmDialog
+          open={!!autoAssignConfirm}
+          asset={autoAssignConfirm?.asset ?? null}
+          reason={autoAssignConfirm?.reason ?? "unassigned"}
+          otherName={autoAssignConfirm?.otherName}
+          userFullName={user.fullName ?? undefined}
+          onClose={() => setAutoAssignConfirm(null)}
+          onConfirm={confirmAutoAssignAndStartFromDashboard}
+        />
+      </Suspense>
 
       {/* Inspection Import Dialog */}
       {importDialogAsset && (
@@ -4931,58 +4459,20 @@ const Dashboard = () => {
         </Dialog>
       )}
 
-      {/* Assign Workflow Dialog */}
-      <Dialog open={assignDialogOpen} onClose={() => !assignSaving && setAssignDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <PlayArrowOutlined fontSize="small" />
-            <span>Assign Workflow - {quickActionAsset?.assetTag || quickActionAsset?.assetName}</span>
-          </Stack>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ pt: 1 }}>
-            <Typography variant="caption" color="text.secondary">
-              Workflow Type: <strong>{workflowModeLabel(quickActionAsset?.workflowMode)}</strong> (set by the project)
-            </Typography>
-            <FormControl size="small" fullWidth required>
-              <InputLabel shrink>Workflow Config (Published) *</InputLabel>
-              <Select
-                label="Workflow Config (Published) *"
-                value={assignForm.workflowConfigId}
-                onChange={(e) => {
-                  const cfg = workflowConfigs.find((c) => c.id === e.target.value);
-                  setAssignForm({
-                    workflowConfigId: e.target.value,
-                    workflowTypeId: cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) : "",
-                  });
-                }}
-              >
-                {workflowConfigs.length === 0 && (
-                  <MenuItem value="" disabled>No published configs available for this product</MenuItem>
-                )}
-                {workflowConfigs.map((c) => (
-                  <MenuItem key={c.id} value={c.id}>
-                    {c.name}
-                    {c.configType ? ` - ${c.configType}` : ""}
-                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>v{c.version}</Typography>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAssignDialogOpen(false)} disabled={assignSaving}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={saveAssignmentFromDashboard}
-            disabled={!assignForm.workflowConfigId || assignSaving}
-            startIcon={assignSaving ? <CircularProgress size={16} /> : undefined}
-          >
-            {assignSaving ? "Saving..." : "Assign"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <Suspense fallback={null}>
+        <DashboardAssignWorkflowDialog
+          open={assignDialogOpen}
+          saving={assignSaving}
+          assetLabel={quickActionAsset?.assetTag || quickActionAsset?.assetName}
+          workflowMode={quickActionAsset?.workflowMode}
+          workflowConfigs={workflowConfigs}
+          workflowTypes={workflowTypes}
+          assignForm={assignForm}
+          onAssignFormChange={setAssignForm}
+          onClose={() => setAssignDialogOpen(false)}
+          onSave={() => { void saveAssignmentFromDashboard(); }}
+        />
+      </Suspense>
 
       {/* WorkOrderRunner - Run workflow popup */}
       {runnerOpen && runnerWorkflow && runnerAsset && (
