@@ -84,7 +84,6 @@ import DashboardMyInspectionJobHistory from "./DashboardMyInspectionJobHistory";
 import DashboardInstallHistoryCard from "./DashboardInstallHistoryCard";
 import DashboardPendingApprovalsSection from "./DashboardPendingApprovalsSection";
 import DashboardAutoAssignFlagsSection from "./DashboardAutoAssignFlagsSection";
-import DashboardWorkloadReportDialogs from "./DashboardWorkloadReportDialogs";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -140,6 +139,7 @@ import {
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
 const AssetDocumentsDialog = lazy(() => import("../installations/AssetDocumentsDialog"));
+const DashboardWorkloadReportDialogs = lazy(() => import("./DashboardWorkloadReportDialogs"));
 
 type NativeMyJobsCardContext = {
   asset: ProjectAsset;
@@ -4505,18 +4505,20 @@ const Dashboard = () => {
         </>
       )}
 
-      <DashboardWorkloadReportDialogs
-        reportTarget={workloadReportTarget}
-        allReportsOpen={workloadReportAllOpen}
-        scopedWorkload={scopedWorkload}
-        openAssets={openAssets}
-        projectById={projectById}
-        reportingTechId={reportingTechId}
-        isNativePlatform={isNativePlatform}
-        onCloseTarget={() => setWorkloadReportTarget(null)}
-        onCloseAll={() => setWorkloadReportAllOpen(false)}
-        onGenerateTechReport={(target) => { void handleGenerateTechReport(target); }}
-      />
+      <Suspense fallback={null}>
+        <DashboardWorkloadReportDialogs
+          reportTarget={workloadReportTarget}
+          allReportsOpen={workloadReportAllOpen}
+          scopedWorkload={scopedWorkload}
+          openAssets={openAssets}
+          projectById={projectById}
+          reportingTechId={reportingTechId}
+          isNativePlatform={isNativePlatform}
+          onCloseTarget={() => setWorkloadReportTarget(null)}
+          onCloseAll={() => setWorkloadReportAllOpen(false)}
+          onGenerateTechReport={(target) => { void handleGenerateTechReport(target); }}
+        />
+      </Suspense>
 
       {/* Photo upload dialog - installer adds missing photos to a completed run */}
       {photoUploadTarget && (
