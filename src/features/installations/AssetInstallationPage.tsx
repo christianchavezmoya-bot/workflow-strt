@@ -2,7 +2,6 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, star
 import {
   AddOutlined,
   ArrowDropDown,
-  ArchiveOutlined,
   ArticleOutlined,
   AssignmentOutlined,
   CheckBoxOutlineBlankOutlined,
@@ -16,7 +15,6 @@ import {
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
-  FileDownloadOutlined,
   FileUploadOutlined,
   FolderOutlined,
   GridOnOutlined,
@@ -25,7 +23,6 @@ import {
   InfoOutlined,
   PhotoCameraOutlined,
   PlayArrowOutlined,
-  PrintOutlined,
   RefreshOutlined,
   ReportProblemOutlined,
   RestoreOutlined,
@@ -49,7 +46,6 @@ import {
   FormControl,
   FormControlLabel,
   FormGroup,
-  FormLabel,
   IconButton,
   InputAdornment,
   InputLabel,
@@ -63,12 +59,9 @@ import {
   MenuItem,
   Paper,
   Popover,
-  Radio,
-  RadioGroup,
   Select,
   Skeleton,
   Stack,
-  Switch,
   Table,
   TableBody,
   TableCell,
@@ -84,7 +77,7 @@ import {
   Typography,
 } from "@mui/material";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ALL_PRINT_COLUMNS, type GroupByKey, type PrintRow } from "../../utils/assetListReportColumns";
+import { type GroupByKey, type PrintRow } from "../../utils/assetListReportColumns";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -110,7 +103,6 @@ import type { WorkflowReportExportContext } from "../../utils/workflowReportExpo
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
-import PdfBlobPreview from "../../components/reports/PdfBlobPreview";
 import ProjectJobSelect from "../../components/ProjectJobSelect";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
@@ -190,6 +182,17 @@ import AssetInstallationBulkWarnDialog from "./AssetInstallationBulkWarnDialog";
 import AssetInstallationBulkWorkflowAssignDialog from "./AssetInstallationBulkWorkflowAssignDialog";
 import AssetInstallationCsvImportDialog from "./AssetInstallationCsvImportDialog";
 import AssetInstallationWorkflowAssignDialog from "./AssetInstallationWorkflowAssignDialog";
+import AssetInstallationBulkToolbar from "./AssetInstallationBulkToolbar";
+import AssetInstallationTableToolbar from "./AssetInstallationTableToolbar";
+import AssetInstallationExportDialog from "./AssetInstallationExportDialog";
+import AssetInstallationPrintDialog from "./AssetInstallationPrintDialog";
+import AssetInstallationReportExportDialog from "./AssetInstallationReportExportDialog";
+import AssetInstallationAssetSearchDialog from "./AssetInstallationAssetSearchDialog";
+import AssetInstallationArchiveConfirmDialog from "./AssetInstallationArchiveConfirmDialog";
+import AssetInstallationBulkArchiveConfirmDialog from "./AssetInstallationBulkArchiveConfirmDialog";
+import AssetInstallationPurgeConfirmDialog from "./AssetInstallationPurgeConfirmDialog";
+import AssetInstallationWorkflowMismatchDialog from "./AssetInstallationWorkflowMismatchDialog";
+import AssetInstallationAutoAssignConfirmDialog from "./AssetInstallationAutoAssignConfirmDialog";
 import {
   buildBulkDocsWarnRows,
   buildBulkTechWarnRows,
@@ -2186,6 +2189,98 @@ const AssetInstallationPage = () => {
     setAssetExportIncludeBusinessLogo(true);
     setAssetExportIncludeCustomerLogo(Boolean(assetExportSingleProject?.customerId));
     setAssetExportDialogOpen(true);
+  }
+
+  function handleBulkAssignWorkflowClick() {
+    const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+    const withWf = findAssetsNeedingBulkAssignWarning(sel, assignmentsMap);
+    if (withWf.length === 0) {
+      openBulkAssignDialog();
+      return;
+    }
+    showBulkWarning({
+      title: "Some assets already have workflow assignments",
+      body: "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are in progress, complete, or closed may behave unexpectedly with additional assignments.",
+      rows: buildBulkAssignWarnRows(withWf, assignmentsMap),
+      onProceed: openBulkAssignDialog,
+    });
+  }
+
+  function handleBulkAssignUserClick() {
+    const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+    const withTech = findAssetsWithAssignedUser(sel);
+    if (withTech.length === 0) {
+      openBulkTechDialog();
+      return;
+    }
+    showBulkWarning({
+      title: "Some assets already have a user assigned",
+      body: "These assets already have a user assigned. Proceeding will replace their current assignment.",
+      rows: buildBulkTechWarnRows(withTech, userMap),
+      onProceed: openBulkTechDialog,
+    });
+  }
+
+  function handleBulkUploadDocumentsClick() {
+    const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
+    const affected = buildBulkDocsWarnRows(sel, docsCountMap);
+    if (affected.length === 0) {
+      openBulkDocsDialog();
+      return;
+    }
+    showBulkWarning({
+      title: "Some assets already have documents",
+      body: "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted - the new document will be added alongside them.",
+      rows: affected,
+      onProceed: openBulkDocsDialog,
+    });
+  }
+
+  async function buildPrintReportMeta() {
+    const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
+    return {
+      productName: activeProduct?.name ?? "",
+      filterSummary: printScope === "selection"
+        ? `${printRows.length} selected assets`
+        : printScope === "custom"
+        ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" | ")
+        : "All visible assets",
+      exportDate: new Date().toLocaleDateString(),
+      logoBase64,
+    };
+  }
+
+  async function handlePrintDownload() {
+    setPrintGenerating(true);
+    try {
+      const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
+      await generateAssetListReport({
+        rows: printRows,
+        columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
+        groupBy: printGroupBy,
+        meta: await buildPrintReportMeta(),
+        mode: "download",
+        filename: `assets-${activeProduct?.name ?? "report"}-${new Date().toISOString().slice(0, 10)}.pdf`,
+      });
+    } finally {
+      setPrintGenerating(false);
+    }
+  }
+
+  async function handlePrintAction() {
+    setPrintGenerating(true);
+    try {
+      const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
+      await generateAssetListReport({
+        rows: printRows,
+        columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
+        groupBy: printGroupBy,
+        meta: await buildPrintReportMeta(),
+        mode: "print",
+      });
+    } finally {
+      setPrintGenerating(false);
+    }
   }
 
   // ------------------------------------------------------------------
@@ -4333,276 +4428,55 @@ ${words.slice(midpoint).join(" ")}`;
         />
       )}
 
-      {/* Bulk actions toolbar — visible when ≥1 asset is selected */}
-      {selectedAssetIds.size > 0 && (
-        <Paper className="glass-card" sx={{ px: 2, py: 1, display: "flex", alignItems: "center", gap: 1.5, flexWrap: "wrap" }}>
-          <Typography variant="body2" fontWeight={600}>
-            {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""} selected
-          </Typography>
+      <AssetInstallationBulkToolbar
+        selectedCount={selectedAssetIds.size}
+        archiveMode={archiveMode}
+        showBulkWorkflowReports={showBulkWorkflowReports}
+        onAssignWorkflow={handleBulkAssignWorkflowClick}
+        onAssignUser={handleBulkAssignUserClick}
+        onUploadDocuments={handleBulkUploadDocumentsClick}
+        onViewReports={() => setBulkWorkflowReportsOpen(true)}
+        onArchiveSelected={() => setBulkDeleteOpen(true)}
+        onClearSelection={() => setSelectedAssetIds(new Set())}
+      />
 
-          {/* Assign workflow */}
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              const withWf = findAssetsNeedingBulkAssignWarning(sel, assignmentsMap);
-              if (withWf.length === 0) {
-                openBulkAssignDialog();
-                return;
-              }
-              showBulkWarning({
-                title: "Some assets already have workflow assignments",
-                body: "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are in progress, complete, or closed may behave unexpectedly with additional assignments.",
-                rows: buildBulkAssignWarnRows(withWf, assignmentsMap),
-                onProceed: openBulkAssignDialog,
-              });
-            }}
-          >
-            Assign workflow
-          </Button>
+      <AssetInstallationTableToolbar
+        showAdvancedAssetActions={showAdvancedAssetActions}
+        archiveMode={archiveMode}
+        selectedCount={selectedAssetIds.size}
+        displayAssetCount={displayAssets.length}
+        showBulkWorkflowReports={showBulkWorkflowReports}
+        selectedProjectHasInspection={selectedProjectHasInspection}
+        selectedProject={selectedProject}
+        onToggleArchiveMode={() => setArchiveMode((v) => !v)}
+        onOpenPrintDialog={(scope) => {
+          setPrintScope(scope);
+          setPrintOpen(true);
+        }}
+        onOpenBulkReports={() => setBulkWorkflowReportsOpen(true)}
+        onOpenExportDialog={openAssetExportDialog}
+        onNavigateInspectionInbox={() => navigate(`/projects/${selectedProject!.id}/inspections/inbox`)}
+      />
 
-          {/* Assign user */}
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              const withTech = findAssetsWithAssignedUser(sel);
-              if (withTech.length === 0) {
-                openBulkTechDialog();
-                return;
-              }
-              showBulkWarning({
-                title: "Some assets already have a user assigned",
-                body: "These assets already have a user assigned. Proceeding will replace their current assignment.",
-                rows: buildBulkTechWarnRows(withTech, userMap),
-                onProceed: openBulkTechDialog,
-              });
-            }}
-          >
-            Assign user
-          </Button>
-
-          {/* Upload documents */}
-          <Button
-            size="small"
-            variant="outlined"
-            onClick={() => {
-              const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              const affected = buildBulkDocsWarnRows(sel, docsCountMap);
-              if (affected.length === 0) {
-                openBulkDocsDialog();
-                return;
-              }
-              showBulkWarning({
-                title: "Some assets already have documents",
-                body: "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted - the new document will be added alongside them.",
-                rows: affected,
-                onProceed: openBulkDocsDialog,
-              });
-            }}
-          >
-            Upload documents
-          </Button>
-
-          {showBulkWorkflowReports && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<ArticleOutlined fontSize="small" />}
-              onClick={() => setBulkWorkflowReportsOpen(true)}
-            >
-              View / Print Reports
-            </Button>
-          )}
-
-          {!archiveMode && (
-            <Button
-              size="small"
-              variant="outlined"
-              color="error"
-              onClick={() => setBulkDeleteOpen(true)}
-            >
-              Archive selected
-            </Button>
-          )}
-
-          <Button size="small" color="inherit" onClick={() => setSelectedAssetIds(new Set())}>
-            Clear
-          </Button>
-        </Paper>
-      )}
-
-      {/* Table toolbar */}
-      {(showAdvancedAssetActions || (selectedProjectHasInspection && selectedProject && !archiveMode) || archiveMode) && (
-        <Box sx={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 1 }}>
-          {showAdvancedAssetActions && (
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Tooltip title={archiveMode ? "Exit archive view" : "Show completed assets archive"}>
-                <Button
-                  size="small"
-                  variant={archiveMode ? "contained" : "outlined"}
-                  color={archiveMode ? "success" : "inherit"}
-                  startIcon={<ArchiveOutlined fontSize="small" />}
-                  onClick={() => setArchiveMode((v) => !v)}
-                  sx={{ fontSize: 12 }}
-                >
-                  {archiveMode ? "Archive View - Exit" : "Archive"}
-                </Button>
-              </Tooltip>
-              <Tooltip title="Print / Save PDF">
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<PrintOutlined fontSize="small" />}
-                  onClick={() => {
-                    setPrintScope(selectedAssetIds.size > 0 ? "selection" : "visible");
-                    setPrintOpen(true);
-                  }}
-                  sx={{ fontSize: 12 }}
-                >
-                  Print / PDF
-                </Button>
-              </Tooltip>
-              {showBulkWorkflowReports && (
-                <Tooltip title={selectedAssetIds.size === 0 ? "Select one or more assets first" : "Preview and download workflow installation reports for selected assets"}>
-                  <span>
-                    <Button
-                      size="small"
-                      variant="outlined"
-                      startIcon={<ArticleOutlined fontSize="small" />}
-                      disabled={selectedAssetIds.size === 0}
-                      onClick={() => setBulkWorkflowReportsOpen(true)}
-                      sx={{ fontSize: 12 }}
-                    >
-                      View / Print Reports
-                    </Button>
-                  </span>
-                </Tooltip>
-              )}
-              <Tooltip title="Export the current filtered asset view">
-                <span>
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    startIcon={<FileDownloadOutlined fontSize="small" />}
-                    onClick={openAssetExportDialog}
-                    disabled={displayAssets.length === 0}
-                    sx={{ fontSize: 12 }}
-                  >
-                    Export
-                  </Button>
-                </span>
-              </Tooltip>
-            </Stack>
-          )}
-          <Stack direction="row" spacing={1} alignItems="center">
-            {selectedProjectHasInspection && selectedProject && !archiveMode && (
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={() => navigate(`/projects/${selectedProject.id}/inspections/inbox`)}
-                sx={{ fontSize: 12 }}
-              >
-                Inspection Inbox
-              </Button>
-            )}
-          </Stack>
-          {archiveMode && (
-            <Typography variant="caption" color="text.secondary">
-              Showing archived assets from the server
-            </Typography>
-          )}
-        </Box>
-      )}
-
-      {/* Fix 7 — Stale cache warning (mobile only) */}
-      <Dialog open={assetExportDialogOpen} onClose={() => !assetExportRunning && setAssetExportDialogOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>Export Assets</DialogTitle>
-        <DialogContent dividers>
-          <Stack spacing={2}>
-            <Alert severity="info">
-              Export uses the current filtered operations view: {displayAssets.length} row(s)
-            </Alert>
-
-            <Stack direction={{ xs: "column", md: "row" }} spacing={3}>
-              <FormControl sx={{ minWidth: 220 }}>
-                <FormLabel>Format</FormLabel>
-                <RadioGroup value={assetExportFormat} onChange={(event) => setAssetExportFormat(event.target.value as "pdf" | "json" | "excel") }>
-                  <FormControlLabel value="pdf" control={<Radio />} label="PDF" />
-                  <FormControlLabel value="excel" control={<Radio />} label="Excel (.xlsx)" />
-                  <FormControlLabel value="json" control={<Radio />} label="JSON" />
-                </RadioGroup>
-              </FormControl>
-
-              <FormControl sx={{ minWidth: 260 }}>
-                <FormLabel>Report options</FormLabel>
-                <FormGroup>
-                  <FormControlLabel
-                    control={<Checkbox checked={assetExportIncludeProjectMeta} onChange={(event) => setAssetExportIncludeProjectMeta(event.target.checked)} />}
-                    label="Include project/customer metadata"
-                  />
-                  <FormControlLabel
-                    control={<Checkbox checked={assetExportIncludeBusinessLogo} onChange={(event) => setAssetExportIncludeBusinessLogo(event.target.checked)} />}
-                    label="Include business logo"
-                  />
-                  <FormControlLabel
-                    control={<Checkbox checked={assetExportIncludeCustomerLogo} onChange={(event) => setAssetExportIncludeCustomerLogo(event.target.checked)} disabled={!assetExportSingleProject?.customerId} />}
-                    label="Include customer logo"
-                  />
-                </FormGroup>
-                {!assetExportSingleProject?.customerId && (
-                  <Typography variant="caption" color="text.secondary">
-                    Customer logo is available only when the export resolves to one project/customer.
-                  </Typography>
-                )}
-                {assetExportFormat === "excel" && (
-                  <Typography variant="caption" color="text.secondary">
-                    Excel export uses a real `.xlsx` workbook with project metadata, adjusted column widths, and no logo images.
-                  </Typography>
-                )}
-              </FormControl>
-            </Stack>
-
-            <Box sx={{ border: "1px solid", borderColor: "divider", borderRadius: 1, p: 1.5 }}>
-              <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1} mb={1}>
-                <Typography variant="subtitle2">Columns</Typography>
-                <Stack direction="row" spacing={1}>
-                  <Button size="small" onClick={() => setAssetExportSelectedColumnIds(assetExportColumnOptions.map((column) => column.id))}>Select all</Button>
-                  <Button size="small" onClick={() => setAssetExportSelectedColumnIds([])}>Clear</Button>
-                </Stack>
-              </Stack>
-              <Box sx={{ maxHeight: 320, overflowY: "auto", pr: 1 }}>
-                <FormGroup>
-                  {assetExportColumnOptions.map((column) => (
-                    <FormControlLabel
-                      key={column.id}
-                      control={
-                        <Checkbox
-                          checked={assetExportSelectedColumnIds.includes(column.id)}
-                          onChange={(event) => {
-                            setAssetExportSelectedColumnIds((prev) => event.target.checked
-                              ? [...prev, column.id]
-                              : prev.filter((id) => id !== column.id));
-                          }}
-                        />
-                      }
-                      label={column.label}
-                    />
-                  ))}
-                </FormGroup>
-              </Box>
-            </Box>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAssetExportDialogOpen(false)} disabled={assetExportRunning}>Close</Button>
-          <Button variant="contained" onClick={() => void exportAssetDataset()} disabled={assetExportRunning || assetExportSelectedColumnIds.length === 0}>
-            {assetExportRunning ? "Exporting..." : `Export ${assetExportFormat.toUpperCase()}`}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationExportDialog
+        open={assetExportDialogOpen}
+        running={assetExportRunning}
+        rowCount={displayAssets.length}
+        format={assetExportFormat}
+        includeProjectMeta={assetExportIncludeProjectMeta}
+        includeBusinessLogo={assetExportIncludeBusinessLogo}
+        includeCustomerLogo={assetExportIncludeCustomerLogo}
+        customerLogoAvailable={Boolean(assetExportSingleProject?.customerId)}
+        columnOptions={assetExportColumnOptions}
+        selectedColumnIds={assetExportSelectedColumnIds}
+        onClose={() => setAssetExportDialogOpen(false)}
+        onExport={() => void exportAssetDataset()}
+        onFormatChange={setAssetExportFormat}
+        onIncludeProjectMetaChange={setAssetExportIncludeProjectMeta}
+        onIncludeBusinessLogoChange={setAssetExportIncludeBusinessLogo}
+        onIncludeCustomerLogoChange={setAssetExportIncludeCustomerLogo}
+        onSelectedColumnIdsChange={setAssetExportSelectedColumnIds}
+      />
 
       {isNativePlatform && cacheStale && (
         <Alert
@@ -4875,58 +4749,27 @@ ${words.slice(midpoint).join(" ")}`;
         })}
       </Menu>
 
-      {/* Archive confirmation */}
-      <Dialog open={Boolean(deleteAsset)} onClose={() => !deletingAsset && setDeleteAsset(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Archive Asset?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Archive asset <strong>{deleteAsset?.assetTag}</strong>? It will be removed from active lists for all users and can be restored later.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setDeleteAsset(null)} disabled={deletingAsset}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={confirmDeleteAsset} disabled={deletingAsset}
-            startIcon={deletingAsset ? <CircularProgress size={14} /> : undefined}>
-            {deletingAsset ? "Archiving..." : "Archive"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationArchiveConfirmDialog
+        asset={deleteAsset}
+        deleting={deletingAsset}
+        onClose={() => setDeleteAsset(null)}
+        onConfirm={confirmDeleteAsset}
+      />
 
-      {/* Bulk archive confirmation */}
-      <Dialog open={bulkDeleteOpen} onClose={() => !bulkDeleting && setBulkDeleteOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Archive {selectedAssetIds.size} Asset{selectedAssetIds.size !== 1 ? "s" : ""}?</DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" gutterBottom>
-            You are about to archive <strong>{selectedAssetIds.size}</strong> asset{selectedAssetIds.size !== 1 ? "s" : ""}. They will be removed from active lists for all users and can be restored later.
-          </Typography>
-          <Typography variant="caption" color="text.secondary">
-            Associated workflow runs, issues, and documents will be hidden with the asset.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setBulkDeleteOpen(false)} disabled={bulkDeleting}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={confirmBulkDelete} disabled={bulkDeleting}
-            startIcon={bulkDeleting ? <CircularProgress size={14} /> : undefined}>
-            {bulkDeleting ? "Archiving..." : `Archive ${selectedAssetIds.size}`}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationBulkArchiveConfirmDialog
+        open={bulkDeleteOpen}
+        selectedCount={selectedAssetIds.size}
+        deleting={bulkDeleting}
+        onClose={() => setBulkDeleteOpen(false)}
+        onConfirm={confirmBulkDelete}
+      />
 
-      <Dialog open={Boolean(purgeAsset)} onClose={() => !purgingAsset && setPurgeAsset(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Delete Asset Permanently?</DialogTitle>
-        <DialogContent>
-          <Typography>
-            Permanently delete asset <strong>{purgeAsset?.assetTag}</strong>? This cannot be undone.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setPurgeAsset(null)} disabled={purgingAsset}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={confirmPurgeAsset} disabled={purgingAsset}
-            startIcon={purgingAsset ? <CircularProgress size={14} /> : undefined}>
-            {purgingAsset ? "Deleting..." : "Delete permanently"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationPurgeConfirmDialog
+        asset={purgeAsset}
+        purging={purgingAsset}
+        onClose={() => setPurgeAsset(null)}
+        onConfirm={confirmPurgeAsset}
+      />
 
       {/* Add issue dialog */}
       <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }} maxWidth="xs" fullWidth>
@@ -4999,155 +4842,26 @@ ${words.slice(midpoint).join(" ")}`;
         onSave={() => { void saveAssignment(); }}
       />
 
-      {/* Asset search dialog */}
-      <Dialog
+      <AssetInstallationAssetSearchDialog
         open={assetSearchOpen}
+        query={assetSearchQuery}
+        activeFilter={search}
+        assets={assets}
+        users={users}
+        projects={projects}
+        captureIndexByAsset={captureIndexByAsset}
         onClose={() => setAssetSearchOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { borderRadius: 2 } }}
-      >
-        <DialogTitle sx={{ pb: 1 }}>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <SearchOutlined fontSize="small" />
-            <span>Search Assets</span>
-          </Stack>
-        </DialogTitle>
-        <DialogContent sx={{ pt: "8px !important" }}>
-          <TextField
-            autoFocus
-            fullWidth
-            size="small"
-            placeholder="Tag, serial, brand, feature, or field (min 2 chars)…"
-            value={assetSearchQuery}
-            onChange={(e) => setAssetSearchQuery(e.target.value)}
-            InputProps={{
-              startAdornment: (
-                <InputAdornment position="start">
-                  <SearchOutlined sx={{ fontSize: 18, color: "text.secondary" }} />
-                </InputAdornment>
-              ),
-            }}
-            sx={{ mb: 1.5 }}
-          />
-          {(() => {
-            const q = assetSearchQuery.trim().toLowerCase();
-            if (q.length < 2) {
-              return (
-                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
-                  Type at least 2 characters to search
-                </Typography>
-              );
-            }
-            type Ranked = {
-              asset: ProjectAsset;
-              score: number;
-              matchLabel?: string;
-            };
-            const ranked: Ranked[] = [];
-            for (const a of assets) {
-              if (a.isDeleted) continue;
-              const installerName = a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName ?? "";
-              const tagHit = matchesWordStart(a.assetTag, q);
-              const serialHit = matchesWordStart(a.serialNumber, q);
-              const nameHit = matchesWordStart(a.assetName, q);
-              const brandHit = matchesWordStart(a.manufacturer, q) || matchesWordStart(a.assetModel, q);
-              const installerHit = matchesWordStart(installerName, q);
-              const locationHit = matchesWordStart(a.location, q);
-              const captureMatch = findCaptureMatch(captureIndexByAsset[a.id]?.hits, q, matchesWordStart);
-
-              if (!tagHit && !serialHit && !nameHit && !brandHit && !installerHit && !locationHit && !captureMatch) {
-                continue;
-              }
-
-              // Brand / identity beats accidental field-label noise (word-start already
-              // stops "cat"→"location"; score still ranks CAT brand above value hits).
-              let score = 0;
-              let matchLabel: string | undefined;
-              if (tagHit) { score += 100; matchLabel = "Asset tag"; }
-              else if (brandHit) { score += 90; matchLabel = a.manufacturer ? `Brand: ${a.manufacturer}` : `Model: ${a.assetModel}`; }
-              else if (serialHit) { score += 80; matchLabel = `S/N: ${a.serialNumber}`; }
-              else if (nameHit) { score += 70; matchLabel = a.assetName; }
-              else if (installerHit) { score += 50; matchLabel = `Installer: ${installerName}`; }
-              else if (locationHit) { score += 40; matchLabel = `Location: ${a.location}`; }
-              else if (captureMatch) {
-                score += captureMatch.kind === "value" ? 35 : captureMatch.kind === "feature" ? 25 : 15;
-                matchLabel = captureMatch.label;
-              }
-              ranked.push({ asset: a, score, matchLabel });
-            }
-            ranked.sort((a, b) => b.score - a.score || a.asset.assetTag.localeCompare(b.asset.assetTag));
-            const results = ranked.slice(0, 50);
-            if (results.length === 0) {
-              return (
-                <Typography variant="body2" color="text.secondary" sx={{ py: 2, textAlign: "center" }}>
-                  No assets match "{assetSearchQuery}"
-                </Typography>
-              );
-            }
-            return (
-              <List dense disablePadding sx={{ maxHeight: 360, overflowY: "auto" }}>
-                {results.map(({ asset: a, matchLabel }) => {
-                  const proj = projects.find((p) => p.id === a.projectId);
-                  const installer = a.installedBy ?? users.find((u) => u.id === a.assignedUserId)?.fullName;
-                  const statusColor: Record<string, "default" | "primary" | "success" | "error"> = {
-                    NotStarted: "default",
-                    InProgress: "primary",
-                    Complete: "success",
-                    Issue: "error",
-                  };
-                  return (
-                    <ListItem key={a.id} disablePadding divider>
-                      <ListItemButton
-                        onClick={() => {
-                          setSearch(a.assetTag);
-                          if (a.projectId) setSelectedProjectId(a.projectId);
-                          setAssetSearchOpen(false);
-                        }}
-                        sx={{ py: 1, gap: 1 }}
-                      >
-                        <ListItemText
-                          primary={
-                            <Stack direction="row" spacing={1} alignItems="center">
-                              <Typography variant="body2" fontWeight={600}>{a.assetTag}</Typography>
-                              {a.serialNumber && (
-                                <Typography variant="caption" color="text.secondary">S/N: {a.serialNumber}</Typography>
-                              )}
-                              <Chip size="small" label={a.status} color={statusColor[a.status] ?? "default"} sx={{ height: 18, fontSize: 10 }} />
-                            </Stack>
-                          }
-                          secondary={
-                            <Stack spacing={0.25}>
-                              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                                {proj && <Typography variant="caption" color="text.secondary">{proj.jobNumber}</Typography>}
-                                {installer && <Typography variant="caption" color="text.secondary">· {installer}</Typography>}
-                              </Stack>
-                              {matchLabel && (
-                                <Typography variant="caption" color="primary.main" sx={{ display: "block" }}>
-                                  {matchLabel}
-                                </Typography>
-                              )}
-                            </Stack>
-                          }
-                        />
-                      </ListItemButton>
-                    </ListItem>
-                  );
-                })}
-              </List>
-            );
-          })()}
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2 }}>
-          {search && (
-            <Button size="small" color="inherit" onClick={() => { setSearch(""); setAssetSearchOpen(false); }}>
-              Clear filter
-            </Button>
-          )}
-          <Box sx={{ flex: 1 }} />
-          <Button size="small" onClick={() => setAssetSearchOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+        onQueryChange={setAssetSearchQuery}
+        onSelectAsset={(asset) => {
+          setSearch(asset.assetTag);
+          if (asset.projectId) setSelectedProjectId(asset.projectId);
+          setAssetSearchOpen(false);
+        }}
+        onClearFilter={() => {
+          setSearch("");
+          setAssetSearchOpen(false);
+        }}
+      />
 
       <AssetInstallationCsvImportDialog
         open={csvImportOpen}
@@ -5158,70 +4872,18 @@ ${words.slice(midpoint).join(" ")}`;
         onImport={() => { void handleImportCsv(); }}
       />
 
-      <Dialog
+      <AssetInstallationReportExportDialog
         open={reportExportOpen}
+        asset={reportExportAsset}
+        previewLoading={reportPreviewLoading}
+        previewError={reportPreviewError}
+        previewBlob={reportPreviewBlob}
+        generatingAssetId={reportGenerating}
         onClose={closeReportExportDialog}
-        maxWidth="lg"
-        fullWidth
-        PaperProps={{ sx: { height: "92vh" } }}
-      >
-        <DialogTitle>View/Export Report</DialogTitle>
-        <DialogContent sx={{ p: 0, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-          <Box sx={{ px: 3, py: 1.5, borderBottom: "1px solid", borderColor: "divider", bgcolor: "background.paper" }}>
-            <Typography variant="body2" fontWeight={600}>
-              {reportExportAsset ? `${reportExportAsset.assetTag}${reportExportAsset.assetName ? ` - ${reportExportAsset.assetName}` : ""}` : "Report preview"}
-            </Typography>
-          </Box>
-          <Box sx={{ flex: 1, minHeight: 0, bgcolor: "#525659" }}>
-            {reportPreviewLoading ? (
-              <Stack alignItems="center" justifyContent="center" spacing={2} sx={{ height: "100%", color: "common.white" }}>
-                <CircularProgress color="inherit" />
-                <Typography variant="body2">Loading PDF preview...</Typography>
-              </Stack>
-            ) : reportPreviewError ? (
-              <Box sx={{ p: 2 }}>
-                <Alert severity="error">{reportPreviewError}</Alert>
-              </Box>
-            ) : reportPreviewBlob ? (
-              <PdfBlobPreview
-                blob={reportPreviewBlob}
-                scrollHint="Scroll to view all pages"
-              />
-            ) : (
-              <Stack alignItems="center" justifyContent="center" sx={{ height: "100%", color: "common.white" }}>
-                <Typography variant="body2">No preview available.</Typography>
-              </Stack>
-            )}
-          </Box>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 1.5, borderTop: "1px solid", borderColor: "divider", justifyContent: "space-between", flexWrap: "nowrap" }}>
-          <Button onClick={closeReportExportDialog}>Close</Button>
-          <Stack direction="row" spacing={1} sx={{ flexShrink: 0 }}>
-            <Button
-              variant="outlined"
-              startIcon={reportGenerating === reportExportAsset?.id ? <CircularProgress size={14} /> : <FileDownloadOutlined fontSize="small" />}
-              disabled={!reportExportAsset || reportPreviewLoading || reportGenerating === reportExportAsset?.id}
-              onClick={() => void handleAssetReportExport("pdf")}
-            >
-              Export PDF
-            </Button>
-            <Button
-              variant="outlined"
-              disabled={!reportExportAsset || reportPreviewLoading || reportGenerating === reportExportAsset?.id}
-              onClick={() => void handleAssetReportExport("json")}
-            >
-              Export JSON
-            </Button>
-            <Button
-              variant="contained"
-              disabled={!reportExportAsset || reportPreviewLoading || reportGenerating === reportExportAsset?.id}
-              onClick={() => void handleAssetReportExport("docx")}
-            >
-              Export Word
-            </Button>
-          </Stack>
-        </DialogActions>
-      </Dialog>
+        onExportPdf={() => void handleAssetReportExport("pdf")}
+        onExportJson={() => void handleAssetReportExport("json")}
+        onExportDocx={() => void handleAssetReportExport("docx")}
+      />
 
       <BulkWorkflowReportDialog
         open={bulkWorkflowReportsOpen}
@@ -5361,57 +5023,22 @@ ${words.slice(midpoint).join(" ")}`;
         </MenuItem>
       </Menu>
 
-      {/* Workflow type / config mismatch warning */}
-      <Dialog open={!!wfMismatchConfirm} onClose={() => setWfMismatchConfirm(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>Workflow type mismatch</DialogTitle>
-        <DialogContent>
-          <Alert severity="warning" sx={{ mb: 1.5 }}>{wfMismatchConfirm?.message}</Alert>
-          <Typography variant="body2">
-            You can still start the workflow, but check that this is intentional.
-          </Typography>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setWfMismatchConfirm(null)}>Cancel</Button>
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={() => {
-              const confirm = wfMismatchConfirm;
-              setWfMismatchConfirm(null);
-              if (confirm) void _doStartAssignmentRun(confirm.asset, confirm.assignment);
-            }}
-          >
-            Start anyway
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationWorkflowMismatchDialog
+        message={wfMismatchConfirm?.message}
+        onClose={() => setWfMismatchConfirm(null)}
+        onConfirm={() => {
+          const confirm = wfMismatchConfirm;
+          setWfMismatchConfirm(null);
+          if (confirm) void _doStartAssignmentRun(confirm.asset, confirm.assignment);
+        }}
+      />
 
-      {/* Work order runner */}
-      {/* â"€â"€ Auto-assign warning dialog â"€â"€ */}
-      <Dialog open={!!autoAssignConfirm} onClose={() => setAutoAssignConfirm(null)} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          {autoAssignConfirm?.reason === "unassigned" ? "Unassigned asset" : "Asset assigned to someone else"}
-        </DialogTitle>
-        <DialogContent>
-          {autoAssignConfirm?.reason === "unassigned" ? (
-            <Typography variant="body2">
-              <strong>{autoAssignConfirm.asset.assetTag || autoAssignConfirm.asset.assetName}</strong> has no installer assigned.
-              Starting this workflow will assign it to <strong>you ({currentUser.fullName})</strong> and notify the Project Manager.
-            </Typography>
-          ) : (
-            <Typography variant="body2">
-              <strong>{autoAssignConfirm?.asset.assetTag || autoAssignConfirm?.asset.assetName}</strong> is currently assigned to <strong>{autoAssignConfirm?.otherName}</strong>.
-              Starting this workflow will reassign it to <strong>you ({currentUser.fullName})</strong> and notify the Project Manager.
-            </Typography>
-          )}
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAutoAssignConfirm(null)}>Cancel</Button>
-          <Button variant="contained" color="warning" onClick={confirmAutoAssignAndStart}>
-            Assign to me &amp; Start
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationAutoAssignConfirmDialog
+        confirm={autoAssignConfirm}
+        currentUserName={currentUser.fullName}
+        onClose={() => setAutoAssignConfirm(null)}
+        onConfirm={confirmAutoAssignAndStart}
+      />
 
       {runnerOpen && runnerWorkflow && runnerAsset && runnerProduct && (
         <Suspense fallback={null}>
@@ -5562,233 +5189,31 @@ ${words.slice(midpoint).join(" ")}`;
         }}
       />
 
-      {/* â"€â"€ Print / PDF dialog â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
-      <Dialog
+      <AssetInstallationPrintDialog
         open={printOpen}
+        generating={printGenerating}
+        scope={printScope}
+        selectedCount={selectedAssetIds.size}
+        visibleCount={visibleAssets.length}
+        printRows={printRows}
+        printColumns={printColumns}
+        printGroupBy={printGroupBy}
+        printTechId={printTechId}
+        printModel={printModel}
+        printStatuses={printStatuses}
+        printPendingSig={printPendingSig}
+        users={users}
         onClose={() => setPrintOpen(false)}
-        maxWidth="md"
-        fullWidth
-        PaperProps={{ className: "glass-card", sx: { bgcolor: "var(--panel)", border: "1px solid var(--stroke)" } }}
-      >
-        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
-          <PrintOutlined fontSize="small" />
-          Print / Save PDF
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={3} sx={{ pt: 1 }}>
-
-            {/* â"€â"€ Scope â"€â"€ */}
-            <Box>
-              <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Scope</FormLabel>
-              <RadioGroup
-                row
-                value={printScope}
-                onChange={(e) => setPrintScope(e.target.value as typeof printScope)}
-              >
-                <FormControlLabel
-                  value="selection"
-                  control={<Radio size="small" />}
-                  label={`Current selection (${selectedAssetIds.size})`}
-                  disabled={selectedAssetIds.size === 0}
-                />
-                <FormControlLabel value="visible" control={<Radio size="small" />} label={`All visible (${visibleAssets.length})`} />
-                <FormControlLabel value="custom"  control={<Radio size="small" />} label="Custom filter" />
-              </RadioGroup>
-            </Box>
-
-            {/* â"€â"€ Custom filters â"€â"€ */}
-            {printScope === "custom" && (
-              <Box sx={{ pl: 2, borderLeft: "3px solid var(--stroke)" }}>
-                <Typography variant="subtitle2" sx={{ mb: 1.5 }}>Custom filters</Typography>
-                <Stack spacing={2}>
-                  <Stack direction={{ xs: "column", sm: "row" }} spacing={2}>
-                    <FormControl size="small" sx={{ minWidth: 200 }}>
-                      <InputLabel shrink>User</InputLabel>
-                      <Select label="User" value={printTechId} onChange={(e) => setPrintTechId(e.target.value)}>
-                        <MenuItem value="">(All users)</MenuItem>
-                        {users.filter((u) => u.isActive).map((u) => (
-                          <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
-                        ))}
-                      </Select>
-                    </FormControl>
-                    <TextField
-                      size="small"
-                      label="Asset model contains"
-                      value={printModel}
-                      onChange={(e) => setPrintModel(e.target.value)}
-                      sx={{ minWidth: 200 }}
-                    />
-                  </Stack>
-
-                  <Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Statuses to include</Typography>
-                    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                      {(["NotStarted", "InProgress", "Paused", "Pending", "Complete", "Closed", "Issue"] as const).map((s) => {
-                        const labels: Record<string, string> = {
-                          NotStarted: "Not Started", InProgress: "In Progress", Paused: "Paused", Pending: "Pending", Complete: "Complete", Closed: "Closed", Issue: "Issue", Cancelled: "Cancelled",
-                        };
-                        const checked = printStatuses.includes(s);
-                        return (
-                          <FormControlLabel
-                            key={s}
-                            control={
-                              <Checkbox
-                                size="small"
-                                checked={checked}
-                                onChange={() =>
-                                  setPrintStatuses((prev) =>
-                                    checked ? prev.filter((x) => x !== s) : [...prev, s]
-                                  )
-                                }
-                              />
-                            }
-                            label={labels[s]}
-                          />
-                        );
-                      })}
-                    </Stack>
-                  </Box>
-
-                  <FormControlLabel
-                    control={
-                      <Switch
-                        size="small"
-                        checked={printPendingSig}
-                        onChange={(e) => setPrintPendingSig(e.target.checked)}
-                      />
-                    }
-                    label="Pending customer signature only"
-                  />
-                </Stack>
-              </Box>
-            )}
-
-            {/* â"€â"€ Column picker â"€â"€ */}
-            <Box>
-              <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Columns to include</FormLabel>
-              <FormGroup row>
-                {ALL_PRINT_COLUMNS.filter((c) => !c.id.startsWith("_")).map((col) => {
-                  const checked = printColumns.includes(col.id);
-                  const isAlways = col.id === "assetTag";
-                  return (
-                    <FormControlLabel
-                      key={col.id}
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={checked || isAlways}
-                          disabled={isAlways}
-                          onChange={() =>
-                            setPrintColumns((prev) =>
-                              checked ? prev.filter((x) => x !== col.id) : [...prev, col.id]
-                            )
-                          }
-                        />
-                      }
-                      label={col.label}
-                      sx={{ mr: 2, mb: 0.5 }}
-                    />
-                  );
-                })}
-              </FormGroup>
-            </Box>
-
-            {/* â"€â"€ Group by â"€â"€ */}
-            <Box>
-              <FormLabel component="legend" sx={{ fontWeight: 700, mb: 1, fontSize: 13 }}>Group by</FormLabel>
-              <ToggleButtonGroup
-                size="small"
-                exclusive
-                value={printGroupBy}
-                onChange={(_, v) => { if (v) setPrintGroupBy(v as GroupByKey); }}
-              >
-                <ToggleButton value="none">None</ToggleButton>
-                <ToggleButton value="technician">Technician</ToggleButton>
-                <ToggleButton value="status">Status</ToggleButton>
-                <ToggleButton value="project">Project</ToggleButton>
-              </ToggleButtonGroup>
-            </Box>
-
-            {/* â"€â"€ Preview count â"€â"€ */}
-            <Alert
-              severity={printRows.length === 0 ? "warning" : "info"}
-              sx={{ py: 0.5 }}
-            >
-              {printRows.length === 0
-                ? "No assets match the current filters."
-                : `${printRows.length} asset${printRows.length !== 1 ? "s" : ""} will be included | ${printColumns.length} column${printColumns.length !== 1 ? "s" : ""} | grouped by ${printGroupBy}`}
-            </Alert>
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, pb: 2, gap: 1 }}>
-          <Button variant="outlined" onClick={() => setPrintOpen(false)}>Cancel</Button>
-          <Button
-            variant="outlined"
-            startIcon={<FileDownloadOutlined fontSize="small" />}
-            disabled={printRows.length === 0 || printGenerating}
-            onClick={async () => {
-              setPrintGenerating(true);
-              try {
-                const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
-                const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
-                await generateAssetListReport({
-                  rows: printRows,
-                  columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
-                  groupBy: printGroupBy,
-                  meta: {
-                    productName: activeProduct?.name ?? "",
-                    filterSummary: printScope === "selection"
-                      ? `${printRows.length} selected assets`
-                      : printScope === "custom"
-                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" | ")
-                      : "All visible assets",
-                    exportDate: new Date().toLocaleDateString(),
-                    logoBase64,
-                  },
-                  mode: "download",
-                  filename: `assets-${activeProduct?.name ?? "report"}-${new Date().toISOString().slice(0, 10)}.pdf`,
-                });
-              } finally {
-                setPrintGenerating(false);
-              }
-            }}
-          >
-            {printGenerating ? "Generating..." : "Download PDF"}
-          </Button>
-          <Button
-            variant="contained"
-            startIcon={<PrintOutlined fontSize="small" />}
-            disabled={printRows.length === 0 || printGenerating}
-            onClick={async () => {
-              setPrintGenerating(true);
-              try {
-                const logoBase64 = await brandSettingsService.get().then((s) => s?.logoBase64 ?? null).catch(() => null);
-                const { generateAssetListReport } = await import("../../utils/generateAssetListReport");
-                await generateAssetListReport({
-                  rows: printRows,
-                  columns: printColumns.includes("assetTag") ? printColumns : ["assetTag", ...printColumns],
-                  groupBy: printGroupBy,
-                  meta: {
-                    productName: activeProduct?.name ?? "",
-                    filterSummary: printScope === "selection"
-                      ? `${printRows.length} selected assets`
-                      : printScope === "custom"
-                      ? [printTechId ? `Tech: ${userMap.get(printTechId)?.fullName}` : "", printModel ? `Model: ${printModel}` : "", printPendingSig ? "Pending Sig" : ""].filter(Boolean).join(" | ")
-                      : "All visible assets",
-                    exportDate: new Date().toLocaleDateString(),
-                    logoBase64,
-                  },
-                  mode: "print",
-                });
-              } finally {
-                setPrintGenerating(false);
-              }
-            }}
-          >
-            {printGenerating ? "Generating..." : "Print"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+        onScopeChange={setPrintScope}
+        onPrintTechIdChange={setPrintTechId}
+        onPrintModelChange={setPrintModel}
+        onPrintStatusesChange={setPrintStatuses}
+        onPrintPendingSigChange={setPrintPendingSig}
+        onPrintColumnsChange={setPrintColumns}
+        onPrintGroupByChange={setPrintGroupBy}
+        onDownload={() => void handlePrintDownload()}
+        onPrint={() => void handlePrintAction()}
+      />
 
       <AssetInstallationBulkDocsUploadDialog
         open={bulkDocsOpen}
