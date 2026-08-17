@@ -31,19 +31,15 @@ function currentRoute(): string {
   return `${window.location.pathname}${window.location.hash}`.slice(0, 300);
 }
 
-/**
- * Diagnostics are best-effort: a crash may have left the app in a state where building the
- * bundle also throws, and losing the whole report to that would be worse than losing detail.
- */
-async function safeDiagnosticsJson(): Promise<string | undefined> {
-  try {
-    return JSON.stringify(await buildSyncSupportBundle());
-  } catch {
-    return undefined;
-  }
-}
-
 export async function buildFaultReportPayload(draft: FaultReportDraft): Promise<FaultReportPayload> {
+  const diagnosticsJson = await (async () => {
+    try {
+      return JSON.stringify(await buildSyncSupportBundle({ faultDraft: draft }));
+    } catch {
+      return undefined;
+    }
+  })();
+
   return {
     kind: draft.kind,
     severity: draft.severity,
@@ -58,7 +54,7 @@ export async function buildFaultReportPayload(draft: FaultReportDraft): Promise<
     errorStack: draft.error?.stack?.slice(0, MAX_STACK_CHARS),
     traceId: draft.traceId,
     breadcrumbsJson: JSON.stringify(getBreadcrumbs()),
-    diagnosticsJson: await safeDiagnosticsJson(),
+    diagnosticsJson,
     wasOffline: isOffline(),
     occurredAtUtc: draft.occurredAt ?? new Date().toISOString(),
     clientReferenceCode: draft.referenceCode ?? generateFaultReferenceCode(),
