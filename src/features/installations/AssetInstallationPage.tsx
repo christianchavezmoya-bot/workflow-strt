@@ -163,6 +163,7 @@ import AssetInstallationMobileCardStack, {
 import AssetInstallationOperationsTable from "./AssetInstallationOperationsTable";
 import AssetInstallationTimeTrackingPanel from "./AssetInstallationTimeTrackingPanel";
 import AssetInstallationWorkflowAssignmentsPanel from "./AssetInstallationWorkflowAssignmentsPanel";
+import { createAssetInstallationWorkflowPresentation } from "./assetInstallationWorkflowPresentation";
 import { createOperationsAssetRowRenderer } from "./assetInstallationOperationsAssetRows";
 import { createOperationsColumnCellRenderer } from "./assetInstallationOperationsColumnCell";
 import { getOperationsColumnText, resolveOperationsConfigName, resolveOperationsConfigType } from "./assetInstallationOperationsTableLogic";
@@ -234,23 +235,6 @@ type AssetExportColumnOption = {
   noteLabel?: string;
   valueFor: (asset: ProjectAsset) => string;
 };
-
-type AssetAttentionSummary = {
-  paused: boolean;
-  blockingIssueCount: number;
-  highObservationCount: number;
-  openIssueCount: number;
-  missingMediaCount: number;
-  needsMissingMediaRepair: boolean;
-  awaitingInstallerSig: boolean;
-  awaitingCustomerSig: boolean;
-  latestRun: AssetWorkflowRun | null;
-  latestLockedRun: AssetWorkflowRun | null;
-};
-
-type AssetPrimaryAction =
-  | { label: string; tooltip: string; color: "success" | "warning" | "error" | "info" | "inherit"; icon: React.ReactElement; onClick: () => void; variant?: "contained" | "outlined" | "text" }
-  | null;
 
 // ------------------------------------------------------------------
 // Report generator (type only â€" the async function lives inside the component)
@@ -335,6 +319,9 @@ const AssetInstallationPage = () => {
     }
   });
   const serverWasOfflineRef = useRef(false); // tracks offline→online transition for api-server-reachable
+  const getPrimaryActionRef = useRef<ReturnType<typeof createAssetInstallationWorkflowPresentation>["getPrimaryAction"]>(
+    () => null,
+  );
   const assetsRefreshTimerRef = useRef<number | null>(null);
   const assetsRefreshWhenVisibleRef = useRef(false);
 
@@ -2950,7 +2937,7 @@ const AssetInstallationPage = () => {
   }
 
   function getAssetActionLabel(asset: ProjectAsset, projectWorkflowMode?: string | null): string {
-    return getPrimaryAction(asset, projectWorkflowMode)?.label ?? "No workflow";
+    return getPrimaryActionRef.current(asset, projectWorkflowMode)?.label ?? "No workflow";
   }
 
   function getOperationsExportCellText(
@@ -3682,317 +3669,54 @@ ${words.slice(midpoint).join(" ")}`;
     );
   }
 
-  function getSortedRuns(assetId: string): AssetWorkflowRun[] {
-    return [...(runsMap[assetId] ?? [])].sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-  }
+  const workflowPresentation = useMemo(
+    () =>
+      createAssetInstallationWorkflowPresentation({
+        runsMap,
+        pausedProgress,
+        assignmentsMap,
+        runnerLoading,
+        activeFeatures,
+        projectMap,
+        users,
+        resolveAssetDisplayState,
+        computeAssetHealth,
+        checkAssignmentThenStart,
+        openBlockingIssue,
+        startAssetFromBestWorkflowSource,
+        openSignatureFlow,
+        openRunHistory,
+        setImportDialogAsset,
+        setPhotoUploadTarget,
+        setProgressPopoverAnchor,
+        setProgressPopoverAssetId,
+      }),
+    [
+      runsMap,
+      pausedProgress,
+      assignmentsMap,
+      runnerLoading,
+      activeFeatures,
+      projectMap,
+      users,
+      resolveAssetDisplayState,
+      checkAssignmentThenStart,
+      openBlockingIssue,
+      startAssetFromBestWorkflowSource,
+      openSignatureFlow,
+      openRunHistory,
+    ],
+  );
 
-  function getAssetAttentionSummary(asset: ProjectAsset): AssetAttentionSummary {
-    const sortedRuns = getSortedRuns(asset.id);
-    const latestRun = sortedRuns[0] ?? null;
-    const latestLockedRun = sortedRuns.find((run) => run.isLocked) ?? null;
-    const latestRunMissingMediaCount = latestRun ? countMissingWorkflowItems(latestRun) : 0;
-    const needsMissingMediaRepair = Boolean(
-      latestRun
-      && runHasCompletedAllSteps(latestRun)
-      && latestRunMissingMediaCount > 0
-    );
-    const paused = Boolean(pausedProgress[asset.id])
-      || latestRun?.status === "Paused"
-      || asset.workflowSummary?.evidenceStatus === "Paused";
+  const {
+    getPrimaryAction,
+    actionButton,
+    captureTableStatusChip,
+    featureCompletenessChip,
+    openMissingMediaDialog,
+  } = workflowPresentation;
 
-    let assetIssues: AssetIssue[] = [];
-    try { assetIssues = JSON.parse(asset.issuesJson || "[]"); } catch {}
-    const runIssues = sortedRuns.flatMap((run) => {
-      try { return JSON.parse(run.issuesJson || "[]") as RunIssue[]; } catch { return []; }
-    });
-    const openIssues = [...assetIssues, ...runIssues].filter((issue) => !issue.resolved);
-    const blockingIssueCount = openIssues.filter((issue) => issue.isBlocking).length;
-    const highObservationCount = openIssues.filter((issue) => !issue.isBlocking && issue.issueType === "observation" && issue.severity === "high").length;
-
-    return {
-      paused,
-      blockingIssueCount,
-      highObservationCount,
-      openIssueCount: openIssues.length,
-      missingMediaCount: latestRunMissingMediaCount,
-      needsMissingMediaRepair,
-      awaitingInstallerSig: Boolean(latestLockedRun?.isLocked && latestLockedRun.signatureStatus === "PendingInstaller"),
-      awaitingCustomerSig: Boolean(
-        latestLockedRun?.isLocked
-        && latestLockedRun.signatureStatus === "PendingCustomer"
-        && !latestLockedRun.customerSignedAt
-      ),
-      latestRun,
-      latestLockedRun,
-    };
-  }
-
-  function getWorkflowNameForRun(run: AssetWorkflowRun | null, asset: ProjectAsset): string {
-    if (!run) return asset.assetTag || asset.assetName || "Workflow";
-    try {
-      const snapshot = JSON.parse(run.workflowSnapshotJson ?? "{}");
-      if (typeof snapshot?.name === "string" && snapshot.name.trim()) return snapshot.name;
-    } catch { /* ignore */ }
-    const assignment = (assignmentsMap[asset.id] ?? []).find((item) => item.workflowConfigId === run.workflowConfigId);
-    return assignment?.workflowConfigName || asset.assetTag || asset.assetName || "Workflow";
-  }
-
-  function openMissingMediaDialog(asset: ProjectAsset, run: AssetWorkflowRun | null) {
-    if (!run) return;
-    setPhotoUploadTarget({
-      id: `asset-${asset.id}-${run.id}`,
-      runId: run.id,
-      assetId: asset.id,
-      assetTag: asset.assetTag || asset.assetName || asset.id,
-      jobNumber: projectMap.get(asset.projectId)?.jobNumber ?? "",
-      workflowName: getWorkflowNameForRun(run, asset),
-      technicianUserId: asset.assignedUserId ?? "",
-      technicianName: users.find((user) => user.id === asset.assignedUserId)?.fullName ?? "",
-      completedAt: run.completedAt ?? run.updatedAt ?? run.startedAt,
-      missingSteps: [],
-      totalExpected: 0,
-      totalCaptured: 0,
-    });
-  }
-
-  function getPrimaryAction(asset: ProjectAsset, projectWorkflowMode?: string | null): AssetPrimaryAction {
-    // PHASE 2: the DECISION (which action) now comes from the shared
-    // getWorkflowDisplayState so the Assets page, Dashboard and Run History
-    // dialog can converge on one implementation. This adapter maps the shared
-    // function's action.kind back to the local onClick/icon/variant (which
-    // close over component state and must stay here). getAssetAttentionSummary
-    // is retained as the source for the `hasRunnableWorkflowSource` /
-    // inspection inputs and is NOT removed until all three surfaces are on the
-    // shared function (staged deletion, Phase 5).
-    const loading = runnerLoading === asset.id;
-    const assignments = assignmentsMap[asset.id];
-    const summary = getAssetAttentionSummary(asset);
-    const inspectionEnabled = projectHasInspection(projectWorkflowMode);
-    const hasRunnableWorkflowSource = assignments !== undefined
-      ? (assignments.length > 0 || !!asset.productConfigId || !!asset.workflowTemplateId)
-      : (!!asset.productConfigId || !!asset.workflowTemplateId || !!asset.workflowSummary?.hasWorkflow);
-    const openImportDialog = () => setImportDialogAsset(asset);
-
-    const runs = getSortedRuns(asset.id);
-    const ds = resolveAssetDisplayState(asset, projectWorkflowMode);
-
-    if (!ds.action || ds.action.kind === "none") return null;
-
-    const playIcon = loading ? <CircularProgress size={12} /> : <PlayArrowOutlined />;
-    // Map action.kind → local handler + icon + variant. Labels/tooltips/colors
-    // come straight from the shared function.
-    const base = { label: ds.action.label, tooltip: ds.action.tooltip, color: ds.action.color };
-    switch (ds.action.kind) {
-      case "upload-json":
-        return { ...base, icon: <FileUploadOutlined />, onClick: openImportDialog, variant: "outlined" };
-      case "start":
-        return { ...base, icon: playIcon, onClick: () => checkAssignmentThenStart(asset), variant: "outlined" };
-      case "resume":
-        return { ...base, icon: playIcon, onClick: () => checkAssignmentThenStart(asset), variant: "outlined" };
-      case "continue":
-        return { ...base, icon: playIcon, onClick: () => checkAssignmentThenStart(asset), variant: "outlined" };
-      case "add-missing-photos":
-        return { ...base, icon: <PhotoCameraOutlined />, onClick: () => openMissingMediaDialog(asset, summary.latestRun), variant: "outlined" };
-      case "resolve-blocking":
-        return { ...base, icon: <ReportProblemOutlined />, onClick: () => summary.latestRun ? openBlockingIssue(asset) : void startAssetFromBestWorkflowSource(asset), variant: "outlined" };
-      case "installer-sign":
-      case "customer-sign":
-        return {
-          ...base,
-          icon: <DrawOutlined />,
-          onClick: () => { void openSignatureFlow(asset, summary.latestRun); },
-          variant: "outlined",
-        };
-      case "run-details":
-        return { ...base, icon: <HistoryOutlined />, onClick: () => openRunHistory(asset), variant: "text" };
-      case "no-workflow":
-        return null;
-      default:
-        return null;
-    }
-  }
-
-  function actionButton(asset: ProjectAsset, projectWorkflowMode?: string | null) {
-    const primaryAction = getPrimaryAction(asset, projectWorkflowMode);
-    const progress = pausedProgress[asset.id];
-    const progressBadge = progress ? (
-      <Tooltip title="Click to see completed steps">
-        <Chip
-          size="small"
-          label={`${progress.done}/${progress.total} steps`}
-          variant="outlined"
-          color="warning"
-          clickable
-          sx={{ fontSize: 10, height: 20 }}
-          onClick={(e) => {
-            e.stopPropagation();
-            setProgressPopoverAnchor(e.currentTarget);
-            setProgressPopoverAssetId(asset.id);
-          }}
-        />
-      </Tooltip>
-    ) : null;
-    if (!primaryAction) return <Typography variant="caption" sx={{ color: "#5a6b7a" }}>No workflow</Typography>;
-    return (
-      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-        {progressBadge}
-        <Tooltip title={primaryAction.tooltip}>
-          <Button
-            size="small"
-            variant={primaryAction.variant ?? "outlined"}
-            color={primaryAction.color}
-            startIcon={primaryAction.icon}
-            onClick={primaryAction.onClick}
-          >
-            {primaryAction.label}
-          </Button>
-        </Tooltip>
-      </Stack>
-    );
-  }
-
-  // ------------------------------------------------------------------
-  // Feature values display (expandable row)
-  // ------------------------------------------------------------------
-
-  function captureTableStatusChip(asset: ProjectAsset, projectWorkflowMode?: string | null) {
-    const status = asset.status as ProjectAssetStatus;
-    const baseColor = STATUS_COLORS[status] ?? "default";
-    const runs = runsMap[asset.id] ?? [];
-    const issueHealth = computeAssetHealth(asset, runs);
-    const rowDisplayState = resolveAssetDisplayState(asset, projectWorkflowMode);
-    const chipColor =
-      status === "Cancelled" ? "error"
-      : issueHealth === "red" ? "error"
-      : issueHealth === "amber" ? "warning"
-      : issueHealth === "green" ? "success"
-      : baseColor;
-
-    return (
-      <Chip
-        size="small"
-        label={rowDisplayState.status.label}
-        color={chipColor}
-        icon={
-          asset.status === "InProgress" ? <HourglassEmptyOutlined sx={{ fontSize: "0.9rem !important" }} />
-          : (asset.status === "Complete" || asset.status === "Closed") ? <CheckCircleOutlined sx={{ fontSize: "0.9rem !important" }} />
-          : asset.status === "Issue" ? <ErrorOutlined sx={{ fontSize: "0.9rem !important" }} />
-          : undefined
-        }
-      />
-    );
-  }
-
-  function featureCompletenessChip(asset: ProjectAsset) {
-    let fv: Record<string, string> = {};
-    try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
-    const inventoryFeatures = activeFeatures.filter((feat) => feat.isInventory);
-    const workflowInventoryTotal = asset.workflowSummary?.totalInventoryFeatures ?? 0;
-    const workflowInventoryCompleted = asset.workflowSummary?.completedInventoryFeatures ?? 0;
-    const fallbackFilled = inventoryFeatures.filter((feat) => {
-      const raw = fv[feat.id];
-      if (!raw) return false;
-      if (feat.valueType === "component") {
-        try { return Object.values(JSON.parse(raw) as Record<string, string>).some(Boolean); } catch {}
-        return false;
-      }
-      return true;
-    }).length;
-
-    const total = workflowInventoryTotal > 0 ? workflowInventoryTotal : inventoryFeatures.length;
-    const filled = workflowInventoryTotal > 0 ? Math.min(workflowInventoryCompleted, workflowInventoryTotal) : fallbackFilled;
-
-    const latestRun = [...(runsMap[asset.id] ?? [])]
-      .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
-    const paused = Boolean(pausedProgress[asset.id]);
-
-    let evidenceLabel = "Pending";
-    let evidenceTitle = "Workflow pending";
-    let evidenceColor: "warning" | "success" | "error" | "primary" = "warning";
-
-    if (paused || latestRun?.status === "Paused" || asset.workflowSummary?.evidenceStatus === "Paused") {
-      evidenceLabel = "Paused";
-      evidenceTitle = "Workflow paused";
-    } else if (asset.status === "InProgress" || latestRun?.status === "InProgress") {
-      evidenceLabel = "Running";
-      evidenceTitle = "Workflow running";
-      evidenceColor = "primary";
-    } else if (asset.workflowSummary?.hasWorkflow) {
-      if (asset.workflowSummary.evidenceStatus === "Running") {
-        evidenceLabel = "Running";
-        evidenceTitle = "Workflow running";
-        evidenceColor = "primary";
-      } else if (asset.workflowSummary.evidenceStatus === "Complete") {
-        evidenceLabel = "Done";
-        evidenceTitle = "Evidence complete";
-        evidenceColor = "success";
-      } else if (asset.workflowSummary.evidenceStatus === "MissingData") {
-        evidenceLabel = "Missing";
-        evidenceTitle = "Missing data";
-        evidenceColor = "error";
-      }
-    } else if (latestRun) {
-      if (!latestRun.isLocked) {
-        evidenceLabel = "Running";
-        evidenceTitle = "Workflow running";
-        evidenceColor = "primary";
-      } else {
-        const missingCount = countMissingWorkflowItems(latestRun);
-        if (missingCount > 0) {
-          evidenceLabel = "Missing";
-          evidenceTitle = "Missing data";
-          evidenceColor = "error";
-        } else {
-          evidenceLabel = "Done";
-          evidenceTitle = "Evidence complete";
-          evidenceColor = "success";
-        }
-      }
-    }
-
-    const inventoryColor = total > 0 && filled === total ? "success" : filled > 0 ? "warning" : "default";
-    const inventoryVariant = total > 0 ? "filled" : "outlined";
-
-    // Feature widgets (Phase 2): issue/observation/missing-media indicators from
-    // the shared display state. Stacked; resolved ones render dimmed so the
-    // record stays visible (R1). Colors: yellow(camera/medium), grey(low),
-    // red(blocking), orange(high-observation).
-    const dsWidgets = resolveAssetDisplayState(asset, undefined).feature.widgets;
-
-    const widgetColorHex: Record<string, string> = {
-      yellow: "#d79b24", grey: "#8a9ba8", red: "#d32f2f", orange: "#e8833a",
-    };
-
-    return (
-      <Tooltip title={`${total === 0 ? "No inventory features selected on this workflow." : `Inventory features ${filled}/${total}.`} ${evidenceTitle}.`}>
-        <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap" alignItems="center">
-          <Chip size="small" label={`${filled}/${total} inv`}
-            color={inventoryColor as "success" | "warning" | "default"}
-            variant={inventoryVariant} />
-          <Chip size="small" label={evidenceLabel} color={evidenceColor} variant="outlined" />
-          {dsWidgets.map((w) => {
-            const totalCount = w.openCount + w.resolvedCount;
-            const allResolved = w.openCount === 0 && w.resolvedCount > 0;
-            const Icon = w.icon === "camera" ? PhotoCameraOutlined : ReportProblemOutlined;
-            const hex = widgetColorHex[w.color] ?? "#8a9ba8";
-            const title = w.kind === "missing-photo" ? `${totalCount} missing photo${totalCount !== 1 ? "s" : ""}`
-              : w.kind === "issue-high-blocking" ? `${w.openCount} open / ${w.resolvedCount} resolved blocking issue(s)`
-              : w.kind === "high-observation" ? `${w.openCount} open / ${w.resolvedCount} resolved high observation(s)`
-              : w.kind === "issue-medium" ? `${w.openCount} open / ${w.resolvedCount} resolved medium issue(s)`
-              : `${w.openCount} open / ${w.resolvedCount} resolved low issue(s)`;
-            return (
-              <Tooltip key={w.kind} title={title}>
-                <Box sx={{ display: "inline-flex", alignItems: "center", gap: 0.25, opacity: allResolved ? 0.4 : 1 }}>
-                  <Icon sx={{ fontSize: 15, color: hex }} />
-                  {totalCount > 1 && <Typography component="span" sx={{ fontSize: 10, fontWeight: 700, color: hex }}>{totalCount}</Typography>}
-                </Box>
-              </Tooltip>
-            );
-          })}
-        </Stack>
-      </Tooltip>
-    );
-  }
+  getPrimaryActionRef.current = getPrimaryAction;
 
   function renderFeatureExpandedRow(asset: ProjectAsset) {
     return (

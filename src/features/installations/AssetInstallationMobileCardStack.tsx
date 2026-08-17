@@ -25,17 +25,7 @@ import type { User } from "../../types/user";
 import type { WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { STATUS_LABELS } from "./assetStatusDisplay";
-
-export type MobileCardPrimaryAction =
-  | {
-      label: string;
-      tooltip: string;
-      color: "success" | "warning" | "error" | "info" | "inherit";
-      icon: React.ReactElement;
-      onClick: () => void;
-      variant?: "contained" | "outlined" | "text";
-    }
-  | null;
+import type { AssetPrimaryAction } from "./assetInstallationWorkflowPresentation";
 
 export type AssetInstallationMobileCardStackProps = {
   assets: ProjectAsset[];
@@ -47,7 +37,7 @@ export type AssetInstallationMobileCardStackProps = {
   onExpandToggle: (assetId: string, expanding: boolean) => void;
   computeAssetHealth: (asset: ProjectAsset, runs?: AssetWorkflowRun[]) => "green" | "amber" | "red" | null;
   resolveAssetDisplayState: (asset: ProjectAsset, projectWorkflowMode?: string | null) => WorkflowDisplayState;
-  getPrimaryAction: (asset: ProjectAsset, projectWorkflowMode?: string | null) => MobileCardPrimaryAction;
+  getPrimaryAction: (asset: ProjectAsset, projectWorkflowMode?: string | null) => AssetPrimaryAction;
   issuesBadge: (asset: ProjectAsset) => ReactNode;
   onOpenStatusMenu: (anchor: HTMLElement, asset: ProjectAsset) => void;
   renderFeatureExpandedRow: (asset: ProjectAsset) => ReactNode;
