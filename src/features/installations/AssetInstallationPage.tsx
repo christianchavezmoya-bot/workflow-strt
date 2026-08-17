@@ -2,30 +2,22 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, star
 import {
   AddOutlined,
   ArrowDropDown,
-  ArticleOutlined,
   AssignmentOutlined,
   CheckBoxOutlineBlankOutlined,
   CheckBoxOutlined,
   CheckCircleOutlined,
   CloseOutlined,
-  DeleteForeverOutlined,
-  DeleteOutline,
   DrawOutlined,
-  EditOutlined,
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
   FileUploadOutlined,
-  FolderOutlined,
   GridOnOutlined,
-  HistoryOutlined,
   HourglassEmptyOutlined,
   InfoOutlined,
   PhotoCameraOutlined,
-  PlayArrowOutlined,
   RefreshOutlined,
   ReportProblemOutlined,
-  RestoreOutlined,
   SearchOutlined,
   ViewColumnOutlined,
 } from "@mui/icons-material";
@@ -53,7 +45,6 @@ import {
   List,
   ListItem,
   ListItemButton,
-  ListItemIcon,
   ListItemText,
   Menu,
   MenuItem,
@@ -164,7 +155,7 @@ import {
   OPERATIONS_TAG_STICKY_LEFT,
   shouldVirtualizeOperationsTable,
 } from "./operationsTableLayout";
-import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
+import { STATUS_LABELS } from "./assetStatusDisplay";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
@@ -194,6 +185,10 @@ import AssetInstallationPurgeConfirmDialog from "./AssetInstallationPurgeConfirm
 import AssetInstallationWorkflowMismatchDialog from "./AssetInstallationWorkflowMismatchDialog";
 import AssetInstallationAutoAssignConfirmDialog from "./AssetInstallationAutoAssignConfirmDialog";
 import AssetInstallationAddIssueDialog from "./AssetInstallationAddIssueDialog";
+import {
+  AssetInstallationAssignmentContextMenu,
+  AssetInstallationRowActionsMenu,
+} from "./AssetInstallationRowActionsMenu";
 import {
   buildBulkDocsWarnRows,
   buildBulkTechWarnRows,
@@ -4618,75 +4613,37 @@ ${words.slice(midpoint).join(" ")}`;
         />
       )}
 
-      {/* Status action popover */}
-      <Popover
-        open={Boolean(statusMenuAnchor)}
+      <AssetInstallationRowActionsMenu
         anchorEl={statusMenuAnchor}
-        onClose={() => { setStatusMenuAnchor(null); setStatusMenuAsset(null); }}
-        anchorOrigin={{ vertical: "bottom", horizontal: "right" }}
-        transformOrigin={{ vertical: "top", horizontal: "right" }}
-        PaperProps={{ sx: { borderRadius: 2, minWidth: 220, p: 1.5 } }}
-      >
-        {statusMenuAsset && (() => {
-          const a = statusMenuAsset;
-          const proj = projectMap.get(a.projectId);
-          const docsCount = docsCountMap[a.id] ?? 0;
-          return (
-            <Stack spacing={1}>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography variant="body2" fontWeight={700} sx={{ flex: 1 }}>{a.assetTag}</Typography>
-                <Chip size="small" label={STATUS_LABELS[a.status as ProjectAssetStatus]} color={STATUS_COLORS[a.status as ProjectAssetStatus]} sx={{ fontSize: "0.7rem" }} />
-              </Stack>
-              <Divider />
-              {(canRunAssetWorkflow || a.status === "Complete" || a.status === "Closed" || a.status === "Cancelled") && (
-                <Box>{actionButton(a, proj?.workflowMode)}</Box>
-              )}
-              {canManageAssetDocuments && (
-                <Button size="small" fullWidth variant="outlined" startIcon={<FolderOutlined fontSize="small" />}
-                  onClick={() => { setDocsAsset(a); setDocsOpen(true); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  Documents ({docsCount}/3)
-                </Button>
-              )}
-              {canViewInstallationAssets && (
-                <Button size="small" fullWidth variant="outlined"
-                  startIcon={reportGenerating === a.id ? <CircularProgress size={14} /> : <ArticleOutlined fontSize="small" />}
-                  disabled={reportGenerating === a.id}
-                  onClick={() => { openReportExportDialog(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  View/Export Report
-                </Button>
-              )}
-              {canEditInstallationAssets && canEditAssetFromWebTable(a) && !archiveMode && (
-                <Button size="small" fullWidth variant="outlined" startIcon={<EditOutlined fontSize="small" />}
-                  onClick={() => { openEditAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  Edit Asset
-                </Button>
-              )}
-              {canDeleteInstallationAssets && canEditAssetFromWebTable(a) && !archiveMode && showAdvancedAssetActions && (
-                <Button size="small" fullWidth variant="outlined" color="error" startIcon={<DeleteOutline fontSize="small" />}
-                  onClick={() => { setDeleteAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  Archive
-                </Button>
-              )}
-              {canDeleteInstallationAssets && canEditAssetFromWebTable(a) && archiveMode && (
-                <Button size="small" fullWidth variant="outlined"
-                  startIcon={<RestoreOutlined fontSize="small" />}
-                  disabled={deletingAsset}
-                  onClick={() => { confirmRestoreAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  Restore
-                </Button>
-              )}
-              {canDeleteInstallationAssets && canEditAssetFromWebTable(a) && archiveMode && (
-                <Button size="small" fullWidth variant="outlined" color="error"
-                  startIcon={<DeleteForeverOutlined fontSize="small" />}
-                  disabled={purgingAsset}
-                  onClick={() => { setPurgeAsset(a); setStatusMenuAnchor(null); setStatusMenuAsset(null); }}>
-                  Delete Permanently
-                </Button>
-              )}
-            </Stack>
-          );
-        })()}
-      </Popover>
+        asset={statusMenuAsset}
+        docsCount={statusMenuAsset ? (docsCountMap[statusMenuAsset.id] ?? 0) : 0}
+        archiveMode={archiveMode}
+        showAdvancedAssetActions={showAdvancedAssetActions}
+        reportGeneratingAssetId={reportGenerating}
+        deletingAsset={deletingAsset}
+        purgingAsset={purgingAsset}
+        canRunAssetWorkflow={canRunAssetWorkflow}
+        canManageAssetDocuments={canManageAssetDocuments}
+        canViewInstallationAssets={canViewInstallationAssets}
+        canEditInstallationAssets={canEditInstallationAssets}
+        canDeleteInstallationAssets={canDeleteInstallationAssets}
+        canEditAsset={canEditAssetFromWebTable}
+        projectWorkflowMode={statusMenuAsset ? projectMap.get(statusMenuAsset.projectId)?.workflowMode : undefined}
+        renderWorkflowAction={actionButton}
+        onClose={() => {
+          setStatusMenuAnchor(null);
+          setStatusMenuAsset(null);
+        }}
+        onOpenDocuments={(asset) => {
+          setDocsAsset(asset);
+          setDocsOpen(true);
+        }}
+        onOpenReport={openReportExportDialog}
+        onEditAsset={openEditAsset}
+        onArchiveAsset={setDeleteAsset}
+        onRestoreAsset={confirmRestoreAsset}
+        onPurgeAsset={setPurgeAsset}
+      />
 
       {/* Add asset dialog — isolated so typing doesn't re-render the operations table */}
       <AssetAddDialog
@@ -4954,40 +4911,16 @@ ${words.slice(midpoint).join(" ")}`;
         })()}
       </Popover>
 
-      {/* Right-click context menu on assignment run button */}
-      <Menu
+      <AssetInstallationAssignmentContextMenu
         anchorEl={contextMenuAnchor}
-        open={Boolean(contextMenuAnchor)}
+        asset={contextMenuAsset}
+        assignment={contextMenuAssignment}
         onClose={() => setContextMenuAnchor(null)}
-        anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
-      >
-        <MenuItem
-          onClick={() => {
-            setContextMenuAnchor(null);
-            if (contextMenuAsset && contextMenuAssignment) {
-              handleStartAssignmentRun(contextMenuAsset, contextMenuAssignment);
-            }
-          }}
-        >
-          <ListItemIcon><PlayArrowOutlined fontSize="small" /></ListItemIcon>
-          <ListItemText>Re-run workflow</ListItemText>
-        </MenuItem>
-        <MenuItem
-          onClick={() => {
-            setContextMenuAnchor(null);
-            if (contextMenuAsset && contextMenuAssignment) {
-              void openRunHistory(
-                contextMenuAsset,
-                contextMenuAssignment.workflowConfigId,
-                contextMenuAssignment.workflowConfigName,
-              );
-            }
-          }}
-        >
-          <ListItemIcon><HistoryOutlined fontSize="small" /></ListItemIcon>
-          <ListItemText>View run history</ListItemText>
-        </MenuItem>
-      </Menu>
+        onRerunWorkflow={handleStartAssignmentRun}
+        onViewRunHistory={(asset, assignment) => {
+          void openRunHistory(asset, assignment.workflowConfigId, assignment.workflowConfigName);
+        }}
+      />
 
       <AssetInstallationWorkflowMismatchDialog
         message={wfMismatchConfirm?.message}
