@@ -14,6 +14,37 @@ function normalizeApiBaseUrl(raw: string): string {
     : `${withoutTrailingSlash}/api`;
 }
 
+function tryParseUrl(raw: string): URL | null {
+  try {
+    return new URL(raw);
+  } catch {
+    return null;
+  }
+}
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+}
+
+function isPrivateLanHost(hostname: string): boolean {
+  return /^10\./.test(hostname)
+    || /^192\.168\./.test(hostname)
+    || /^172\.(1[6-9]|2\d|3[01])\./.test(hostname);
+}
+
+function rehostBrowserApiBase(baked: string, hostname: string): string {
+  const parsed = tryParseUrl(baked);
+  if (!parsed || isLoopbackHost(hostname)) return baked;
+
+  const shouldRehost = isLoopbackHost(parsed.hostname)
+    || (isPrivateLanHost(parsed.hostname) && parsed.hostname !== hostname);
+
+  if (!shouldRehost) return baked;
+
+  parsed.hostname = hostname;
+  return normalizeApiBaseUrl(parsed.toString());
+}
+
 export function getStoredApiBaseUrl(): string | null {
   try {
     const raw = localStorage.getItem(API_BASE_STORAGE_KEY);
@@ -28,7 +59,9 @@ export function getStoredApiBaseUrl(): string | null {
 export function getDefaultApiBaseUrl(): string {
   const hostname = window.location.hostname;
   const protocol = window.location.protocol;
+  const port = window.location.port;
   const localBrowserDefault = `${protocol}//${hostname}:4000/api`;
+  const dockerStagingBrowserDefault = `${protocol}//${hostname}:8080/api`;
   const baked = import.meta.env.VITE_API_BASE
     ? normalizeApiBaseUrl(import.meta.env.VITE_API_BASE)
     : "";
@@ -39,6 +72,18 @@ export function getDefaultApiBaseUrl(): string {
       return baked;
     }
     return localBrowserDefault;
+  }
+
+  if (!isMobileNativePlatform() && port === "5174") {
+    // Docker staging serves the web app on :5174 and the sibling API on :8080.
+    // Always prefer the live sibling API instead of any device-build value baked into the bundle.
+    return baked && /:8080\/api$/i.test(baked)
+      ? rehostBrowserApiBase(baked, hostname)
+      : dockerStagingBrowserDefault;
+  }
+
+  if (!isMobileNativePlatform() && baked) {
+    return rehostBrowserApiBase(baked, hostname);
   }
 
   if (baked) {
