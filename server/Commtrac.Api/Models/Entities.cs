@@ -1547,6 +1547,7 @@ public class FaultReportEntity
 
     public DateTime OccurredAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime LastUpdatedAtUtc { get; set; } = DateTime.UtcNow;
 
     /// <summary>Triage notes added by an admin.</summary>
     public string? Notes { get; set; }
@@ -1555,5 +1556,49 @@ public class FaultReportEntity
 
     [MaxLength(100)]
     public string? ResolvedByUserId { get; set; }
+
+    [MaxLength(100)]
+    public string? LastUpdatedByUserId { get; set; }
 }
 
+public class FaultReportHistoryEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [MaxLength(100)]
+    public string FaultReportId { get; set; } = string.Empty;
+
+    /// <summary>Created | Updated.</summary>
+    [MaxLength(20)]
+    public string EventType { get; set; } = "Created";
+
+    [MaxLength(20)]
+    public string? PreviousStatus { get; set; }
+
+    [MaxLength(20)]
+    public string NewStatus { get; set; } = "New";
+
+    [MaxLength(4)]
+    public string? PreviousSeverity { get; set; }
+
+    [MaxLength(4)]
+    public string NewSeverity { get; set; } = "S2";
+
+    public string? PreviousNotes { get; set; }
+    public string? NewNotes { get; set; }
+
+    [MaxLength(500)]
+    public string Summary { get; set; } = string.Empty;
+
+    [MaxLength(100)]
+    public string? ActorUserId { get; set; }
+
+    [MaxLength(200)]
+    public string? ActorUserEmail { get; set; }
+
+    [MaxLength(50)]
+    public string? ActorUserRole { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}

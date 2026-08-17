@@ -365,13 +365,39 @@ public static class PostgresSchemaEnsurer
                 "WasOffline"       INTEGER NOT NULL DEFAULT 0,
                 "OccurredAtUtc"    TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
                 "CreatedAtUtc"     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                "LastUpdatedAtUtc" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
                 "Notes"            TEXT,
                 "ResolvedAtUtc"    TEXT,
-                "ResolvedByUserId" TEXT
+                "ResolvedByUserId" TEXT,
+                "LastUpdatedByUserId" TEXT
             );
+            ALTER TABLE "FaultReports" ADD COLUMN IF NOT EXISTS "LastUpdatedAtUtc" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00';
+            ALTER TABLE "FaultReports" ADD COLUMN IF NOT EXISTS "LastUpdatedByUserId" TEXT;
+            UPDATE "FaultReports"
+            SET "LastUpdatedAtUtc" = COALESCE(NULLIF("LastUpdatedAtUtc", '0001-01-01T00:00:00'), "ResolvedAtUtc", "CreatedAtUtc")
+            WHERE "LastUpdatedAtUtc" IS NULL OR "LastUpdatedAtUtc" = '0001-01-01T00:00:00';
             CREATE INDEX IF NOT EXISTS "IX_FaultReports_CreatedAtUtc" ON "FaultReports" ("CreatedAtUtc");
+            CREATE INDEX IF NOT EXISTS "IX_FaultReports_LastUpdatedAtUtc" ON "FaultReports" ("LastUpdatedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_FaultReports_Status" ON "FaultReports" ("Status");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_FaultReports_ReferenceCode" ON "FaultReports" ("ReferenceCode");
+            CREATE TABLE IF NOT EXISTS "FaultReportHistory" (
+                "Id"               TEXT PRIMARY KEY NOT NULL,
+                "FaultReportId"    TEXT NOT NULL DEFAULT '',
+                "EventType"        TEXT NOT NULL DEFAULT 'Created',
+                "PreviousStatus"   TEXT,
+                "NewStatus"        TEXT NOT NULL DEFAULT 'New',
+                "PreviousSeverity" TEXT,
+                "NewSeverity"      TEXT NOT NULL DEFAULT 'S2',
+                "PreviousNotes"    TEXT,
+                "NewNotes"         TEXT,
+                "Summary"          TEXT NOT NULL DEFAULT '',
+                "ActorUserId"      TEXT,
+                "ActorUserEmail"   TEXT,
+                "ActorUserRole"    TEXT,
+                "CreatedAtUtc"     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+            );
+            CREATE INDEX IF NOT EXISTS "IX_FaultReportHistory_FaultReportId_CreatedAtUtc"
+                ON "FaultReportHistory" ("FaultReportId", "CreatedAtUtc");
             """);
     }
 

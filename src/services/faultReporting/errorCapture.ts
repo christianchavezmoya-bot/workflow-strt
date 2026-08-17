@@ -17,6 +17,12 @@ const seen = new Map<string, number>();
 let autoReports = 0;
 let installed = false;
 
+function isExpectedAbort(err: Error, kind?: "crash" | "unhandled-rejection"): boolean {
+  if (kind !== "unhandled-rejection") return false;
+  if (!/AbortError/i.test(err.name)) return false;
+  return !err.message || /AbortError|aborted|cancelled|canceled/i.test(err.message);
+}
+
 function shouldReport(signature: string): boolean {
   if (autoReports >= MAX_AUTO_REPORTS_PER_SESSION) return false;
 
@@ -35,6 +41,7 @@ export async function captureFault(
   options: { kind?: "crash" | "unhandled-rejection"; title?: string; referenceCode?: string } = {}
 ): Promise<string | null> {
   const err = error instanceof Error ? error : new Error(String(error));
+  if (isExpectedAbort(err, options.kind)) return null;
   const signature = `${err.name}:${err.message}`;
   if (!shouldReport(signature)) return null;
 

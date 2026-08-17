@@ -587,6 +587,7 @@ const Dashboard = () => {
   const dashboardRefreshQueuedRef = useRef(false);
   const attentionInFlightRef = useRef<Promise<void> | null>(null);
   const attentionQueuedRef = useRef(false);
+  const attentionLoadedOnceRef = useRef(false);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
@@ -773,7 +774,7 @@ const Dashboard = () => {
 
   const attentionRequestSeqRef = useRef(0);
 
-  const loadAttention = useCallback((): Promise<void> => {
+  const loadAttention = useCallback((options?: { silent?: boolean }): Promise<void> => {
     if (attentionInFlightRef.current) {
       attentionQueuedRef.current = true;
       return attentionInFlightRef.current;
@@ -781,7 +782,8 @@ const Dashboard = () => {
 
     const requestSeq = ++attentionRequestSeqRef.current;
     const promise = (async () => {
-      setAttentionLoading(true);
+      const showLoading = !(options?.silent && attentionLoadedOnceRef.current);
+      if (showLoading) setAttentionLoading(true);
       const attentionUserId = isManager ? undefined : user.id;
       const applyAttention = (iss: OpenIssueRecord[], sigs: PendingSignatureRecord[]) => {
         if (requestSeq !== attentionRequestSeqRef.current) return;
@@ -790,7 +792,8 @@ const Dashboard = () => {
       };
       const finishAttention = () => {
         if (requestSeq !== attentionRequestSeqRef.current) return;
-        setAttentionLoading(false);
+        attentionLoadedOnceRef.current = true;
+        if (showLoading) setAttentionLoading(false);
       };
 
       if (isNativePlatform) {
@@ -848,7 +851,7 @@ const Dashboard = () => {
       attentionInFlightRef.current = null;
       if (attentionQueuedRef.current) {
         attentionQueuedRef.current = false;
-        void loadAttention();
+        void loadAttention({ silent: true });
       }
     });
 
@@ -1237,7 +1240,7 @@ const Dashboard = () => {
             .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
             .then((data) => { applyDashboardWorkspace(data); })
             .catch(() => { /* keep last-good workspace on a failed manual refresh - never blank it */ }),
-          loadAttention(),
+          loadAttention({ silent: true }),
         ]);
         setAnalyticsRefreshTick((t) => t + 1);
       } finally {

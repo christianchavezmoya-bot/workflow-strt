@@ -1799,13 +1799,31 @@ public record FaultReportDto(
     bool WasOffline,
     DateTime OccurredAtUtc,
     DateTime CreatedAtUtc,
+    DateTime LastUpdatedAtUtc,
     string? Notes,
     DateTime? ResolvedAtUtc
+);
+
+public record FaultReportHistoryDto(
+    string Id,
+    string EventType,
+    string? PreviousStatus,
+    string NewStatus,
+    string? PreviousSeverity,
+    string NewSeverity,
+    string? PreviousNotes,
+    string? NewNotes,
+    string Summary,
+    string? ActorUserId,
+    string? ActorUserEmail,
+    string? ActorUserRole,
+    DateTime CreatedAtUtc
 );
 
 /// <summary>List rows omit stack, breadcrumbs and diagnostics — fetch one report for those.</summary>
 public record FaultReportDetailDto(
     FaultReportDto Report,
+    List<FaultReportHistoryDto> History,
     string? ErrorStack,
     string? BreadcrumbsJson,
     string? DiagnosticsJson

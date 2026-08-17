@@ -24,12 +24,30 @@ export interface FaultReportRow {
   wasOffline: boolean;
   occurredAtUtc: string;
   createdAtUtc: string;
+  lastUpdatedAtUtc: string;
   notes?: string | null;
   resolvedAtUtc?: string | null;
 }
 
+export interface FaultReportHistoryRow {
+  id: string;
+  eventType: string;
+  previousStatus?: string | null;
+  newStatus: string;
+  previousSeverity?: string | null;
+  newSeverity: string;
+  previousNotes?: string | null;
+  newNotes?: string | null;
+  summary: string;
+  actorUserId?: string | null;
+  actorUserEmail?: string | null;
+  actorUserRole?: string | null;
+  createdAtUtc: string;
+}
+
 export interface FaultReportDetail {
   report: FaultReportRow;
+  history: FaultReportHistoryRow[];
   errorStack?: string | null;
   breadcrumbsJson?: string | null;
   diagnosticsJson?: string | null;
@@ -43,10 +61,25 @@ export interface FaultReportSummary {
   lastSevenDays: number;
 }
 
+function normalizeRow(row: FaultReportRow): FaultReportRow {
+  return {
+    ...row,
+    lastUpdatedAtUtc: row.lastUpdatedAtUtc ?? row.resolvedAtUtc ?? row.createdAtUtc ?? row.occurredAtUtc,
+  };
+}
+
+function normalizeDetail(detail: FaultReportDetail): FaultReportDetail {
+  return {
+    ...detail,
+    report: normalizeRow(detail.report),
+    history: Array.isArray(detail.history) ? detail.history : [],
+  };
+}
+
 export const faultReportAdminService = {
   async list(params: { status?: string; severity?: string; platform?: string; take?: number } = {}) {
     const { data } = await api.get<FaultReportRow[]>("/fault-reports", { params });
-    return data;
+    return data.map(normalizeRow);
   },
 
   async summary() {
@@ -56,19 +89,19 @@ export const faultReportAdminService = {
 
   async get(id: string) {
     const { data } = await api.get<FaultReportDetail>(`/fault-reports/${id}`);
-    return data;
+    return normalizeDetail(data);
   },
 
   async getByReference(reference: string) {
     const { data } = await api.get<FaultReportDetail>(
       `/fault-reports/by-reference/${encodeURIComponent(reference)}`
     );
-    return data;
+    return normalizeDetail(data);
   },
 
   async update(id: string, patch: { status?: string; severity?: string; notes?: string }) {
     const { data } = await api.patch<FaultReportRow>(`/fault-reports/${id}`, patch);
-    return data;
+    return normalizeRow(data);
   },
 
   async remove(id: string) {

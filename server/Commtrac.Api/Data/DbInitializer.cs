@@ -63,6 +63,7 @@ public static class DbInitializer
             EnsureSoftDeleteColumns(db);
             EnsureNotificationSettingsResendFrom(db);
             EnsurePushDeviceTokensTable(db);
+            EnsureFaultReportHistorySchema(db);
         }
         else if (db.Database.IsNpgsql())
         {
@@ -288,6 +289,59 @@ public static class DbInitializer
             cmd.ExecuteNonQuery();
 
             cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_PushDeviceTokens_UserId ON PushDeviceTokens (UserId)";
+            cmd.ExecuteNonQuery();
+        }
+        finally
+        {
+            conn.Close();
+        }
+    }
+
+    private static void EnsureFaultReportHistorySchema(AppDbContext db)
+    {
+        var conn = db.Database.GetDbConnection();
+        conn.Open();
+        try
+        {
+            if (TableExists(conn, "FaultReports"))
+            {
+                AddColumnIfMissing(conn, "FaultReports", "LastUpdatedAtUtc", "TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'");
+                AddColumnIfMissing(conn, "FaultReports", "LastUpdatedByUserId", "TEXT NULL");
+
+                using var repair = conn.CreateCommand();
+                repair.CommandText = """
+                    UPDATE FaultReports
+                    SET LastUpdatedAtUtc = COALESCE(NULLIF(LastUpdatedAtUtc, '0001-01-01T00:00:00'), ResolvedAtUtc, CreatedAtUtc)
+                    WHERE LastUpdatedAtUtc IS NULL OR LastUpdatedAtUtc = '0001-01-01T00:00:00'
+                    """;
+                repair.ExecuteNonQuery();
+
+                using var updatedIndex = conn.CreateCommand();
+                updatedIndex.CommandText = "CREATE INDEX IF NOT EXISTS IX_FaultReports_LastUpdatedAtUtc ON FaultReports (LastUpdatedAtUtc)";
+                updatedIndex.ExecuteNonQuery();
+            }
+
+            using var cmd = conn.CreateCommand();
+            cmd.CommandText = @"
+                CREATE TABLE IF NOT EXISTS FaultReportHistory (
+                    Id               TEXT PRIMARY KEY NOT NULL,
+                    FaultReportId    TEXT NOT NULL DEFAULT '',
+                    EventType        TEXT NOT NULL DEFAULT 'Created',
+                    PreviousStatus   TEXT,
+                    NewStatus        TEXT NOT NULL DEFAULT 'New',
+                    PreviousSeverity TEXT,
+                    NewSeverity      TEXT NOT NULL DEFAULT 'S2',
+                    PreviousNotes    TEXT,
+                    NewNotes         TEXT,
+                    Summary          TEXT NOT NULL DEFAULT '',
+                    ActorUserId      TEXT,
+                    ActorUserEmail   TEXT,
+                    ActorUserRole    TEXT,
+                    CreatedAtUtc     TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+                )";
+            cmd.ExecuteNonQuery();
+
+            cmd.CommandText = "CREATE INDEX IF NOT EXISTS IX_FaultReportHistory_FaultReportId_CreatedAtUtc ON FaultReportHistory (FaultReportId, CreatedAtUtc)";
             cmd.ExecuteNonQuery();
         }
         finally
