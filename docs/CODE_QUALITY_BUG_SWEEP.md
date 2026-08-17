@@ -21,7 +21,7 @@ The findings feed phases 6 and 7 of the
 | Lint warnings | 244 | Deliberate backlog, mostly `no-console` and unused vars |
 | `react-hooks/exhaustive-deps` warnings | **44** | Concentrated in the two god files |
 | Unreferenced files | **17** (~1,988 lines) | Assessment found 7; a wider sweep found 10 more |
-| Layering violations (direct axios) | **4** service-layer + 2 UI | Assessment listed 3 + 2 |
+| Layering violations (direct axios) | **0** | Assessment reported 5; all are `isAxiosError` type guards |
 | Duplicated helper definitions | 1 pair | Identical today, divergence risk |
 | Backend error response shapes | **3** | `message` (88), `error` (31), `status` (1) |
 | Backend global exception handlers | **0** | |
@@ -146,27 +146,54 @@ Also still at the repo root:
 0003-fix-offline-refresh-display-on-signature-sync-and-ru.patch
 ```
 
-## 5. One more layering violation than reported
+## 5. The axios "layering violations" do not exist
 
-The assessment listed three services importing axios directly. There are four, plus the two UI files
-already named:
+**This corrects the assessment, and it is the most important correction in this document.**
 
+`CODE_QUALITY_ASSESSMENT.md` reports that three services "import axios directly, bypassing token
+refresh and offline handling", and that two UI components break the no-direct-axios rule. The
+remediation plan turned that into a Phase 2 item labelled *"a real bug fix, not cosmetics"*.
+
+It is not a bug fix. **There is nothing to fix.**
+
+Six files import `axios` outside `api.ts`. Every one of them uses it for exactly one thing:
+
+```ts
+if (axios.isAxiosError(error)) { … }
 ```
-src/services/projectService.ts
-src/services/projectAssetService.ts
-src/services/assetWorkflowAssignmentService.ts
-src/features/timeAnalytics/hooks/useTimeAnalyticsData.ts   ← not previously listed
-src/features/auth/ResetPassword.tsx
-src/components/ui/MobileDocumentPreviewDialog.tsx
+
+`isAxiosError` is a type guard. It issues no request. Counting actual HTTP calls:
+
+| File | `api.*` calls | raw `axios.*` calls |
+|---|---:|---:|
+| `projectService.ts` | 10 | **0** |
+| `projectAssetService.ts` | 24 | **0** |
+| `assetWorkflowAssignmentService.ts` | 4 | **0** |
+| `ResetPassword.tsx` | — | **0** |
+| `MobileDocumentPreviewDialog.tsx` | — | **0** |
+| `useTimeAnalyticsData.ts` | injected instance | **0** (type-only import) |
+
+Across the entire `src/` tree there is **not one** `axios.get` / `.post` / `.put` / `.patch` /
+`.delete` / `.request` / `.create` outside `api.ts`:
+
+```bash
+grep -rnE '\baxios\.(get|post|put|patch|delete|request|create)\(' src/ | grep -v 'src/services/api.ts'
+# → no matches
 ```
 
-The Time Analytics case is **not** a defect. It imports `type { AxiosInstance }` and receives the
-client by injection at the module boundary — which is the pattern the assessment held it up as an
-exemplar for. It appears in a naive grep and should be explicitly excluded from any future scan,
-not "fixed".
+So the rule the architecture doc states — *all HTTP goes through `api.ts`* — is **fully upheld**.
+Token refresh, the stale-while-revalidate GET cache, the IndexedDB fallback and the 401 redirect all
+apply to every request in the app.
 
-The other three are real. They bypass silent token refresh and the offline path in `api.ts`, so on
-native those calls do not participate in offline-first behaviour at all.
+Why this matters more than the finding it replaces: acting on the original wording would have meant
+rewriting error handling in three working services that participate correctly in the offline-first
+path, to fix a problem that does not exist. On native, changing how those calls are made risks the
+cache and queue behaviour field users depend on. **This is a concrete example of why a finding
+should be reproduced before it is scheduled.**
+
+The genuine layering observation that survives is milder and unchanged: roughly 16 feature files
+import `api` directly rather than going through a domain service, and `RecoveryCenter.tsx` inlines
+about 15 endpoints. That is a consistency issue, not a correctness one.
 
 ## 6. A duplicated helper that has not diverged yet
 

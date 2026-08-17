@@ -81,10 +81,17 @@ The safety net is largely built, which makes this far more tractable than the fi
   before a code change, and it is the one finding in the sweep that may be user-visible
 - Fix the remaining **9 lint errors**, then make `npm run lint` a blocking CI gate. The fixes are
   trivial (`prefer-const`, two useless regex escapes, one unused expression); the gate is the point
-- Route `projectService.ts`, `projectAssetService.ts` and `assetWorkflowAssignmentService.ts`
-  through `api.ts`. **This is a real bug fix, not cosmetics** — those three currently bypass token
-  refresh and offline handling. Do *not* "fix" `useTimeAnalyticsData.ts`: its axios import is a
-  type-only injection at the module boundary, which is the pattern to copy
+- ~~Route `projectService.ts`, `projectAssetService.ts` and `assetWorkflowAssignmentService.ts`
+  through `api.ts`~~ — **withdrawn.** The assessment reported these as bypassing token refresh and
+  offline handling. They do not. All six files that import axios use it only for the
+  `axios.isAxiosError()` type guard; there is not one raw HTTP call outside `api.ts` anywhere in
+  `src/`. See the
+  [bug sweep](./CODE_QUALITY_BUG_SWEEP.md#5-the-axios-layering-violations-do-not-exist). **Do not
+  "fix" these files** — changing how three working services issue requests would put the native
+  cache and offline queue at risk to solve nothing
+- Correct the architecture doc on the *surviving* layering point: ~16 feature files import `api`
+  directly instead of going through a domain service, and `RecoveryCenter.tsx` inlines ~15
+  endpoints. Consistency, not correctness — apply the convention to new and touched code
 - De-duplicate `resolveConfigWorkflowTypeId`, defined identically in both `Dashboard.tsx` and
   `AssetInstallationPage.tsx`. No live bug today — the two copies match — but workflow-type
   resolution decides which workflow applies to an asset, and nothing stops one copy being fixed alone
@@ -207,6 +214,91 @@ Knowing what *not* to do is part of the plan.
 | Splitting the remaining 17 files over 1,000 lines | Phases 4 and 7 cover the six that genuinely hurt. Below roughly 1,500 lines a single-purpose screen is navigable, and the churn costs more than it returns |
 | Chasing a coverage percentage | A number invites tests written to move the number. Phases 3, 6 and 7 name the logic worth protecting instead |
 | Rewriting the backend into a layered architecture | Phase 5 and 8 make controllers survivable and errors predictable. Full CQRS-style restructuring of 54 controllers is not proportionate to the problem |
+
+---
+
+## Not breaking what works
+
+The app is in daily use and behaving correctly on web, phone-online and phone-offline. **Every phase
+here is a refactor, not a feature.** The success condition is that a user notices nothing at all.
+
+Stated as a rule for anyone working the plan:
+
+> Any user-visible change in behaviour, layout or speed produced by this programme is a **defect**,
+> not an improvement — including changes someone thinks are better. Ship those separately, as
+> product work, so they can be judged on their own.
+
+### What already enforces this
+
+The safety net is better than the file sizes suggest, and most of it predates this plan:
+
+| Guardrail | What it catches |
+|---|---|
+| 7 CI checks per PR | typecheck, backend build, unit tests, lint, docs/hygiene, 4 Playwright suites |
+| `check:bundle-budget` | route chunks exceeding gzip ceilings (`AssetInstallationPage` 95 KB, `Dashboard` 40 KB) |
+| `test:e2e:web-perf` | login and asset-content timings against a strict budget in CI |
+| `offline-open-perf.spec.ts` | offline open staying within its ≤1 s contract |
+| `test:e2e:full` + `smoke` | login, navigation, work-instructions builder paths |
+| Pre-push hook | typecheck, backend build, docs and hygiene gates before anything leaves the machine |
+| TypeScript strict | a large share of extraction mistakes, at compile time |
+
+The two budget gates matter most here: a split that accidentally pulls a heavy dependency into a
+route chunk, or a hook change that adds a network round trip to first paint, **fails CI rather than
+reaching a user**.
+
+### Where the net has holes
+
+Honest about what will not be caught automatically:
+
+- **No component tests.** `src/components` has 60 source files and 0 tests. Phase 3 characterisation
+  tests close this only for the two god files
+- **No automated native coverage.** Playwright runs Chromium. Nothing exercises Capacitor, the
+  biometric lock, IndexedDB fallback, or the sync queue on a real device. Phone verification stays
+  manual
+- **No offline e2e beyond the open-perf contract.** The queue, conflict resolution and temp-ID remap
+  have no end-to-end test
+- **Perf budgets are ceilings, not baselines.** A change that makes the dashboard 30% slower while
+  staying under budget passes
+
+That gap list is exactly why Phase 3 comes before Phase 4, and why the phases below are ordered by
+how much of them the net can see.
+
+### Risk to user experience, by phase
+
+| Phase | UX risk | Speed effect | Notes |
+|---|---|---|---|
+| 1 Hygiene | **None** | **None** | Deleting unreferenced files changes no bundle — Vite already tree-shakes them. Expect better readability, not a faster app |
+| 2 Correctness | **Very low** | None | Now that the axios item is withdrawn, what remains is lint fixes and a de-duplicated helper. The one open question is the disabled feature, which is a product decision |
+| 3 Tests | **None** | **None** | Adds no runtime code |
+| 8 Error contract | **Low, if staged** | None | Error *bodies* change. Frontend and backend must move together, old shapes kept readable during transition, or users see raw error text |
+| 4 / 7 Splits | **Medium** | Could go either way | New component boundaries change render scope. Usually neutral-to-faster; a badly drawn boundary can add re-renders. Bundle budgets catch the chunk-size half, not the render half |
+| 6 Hook deps | **Highest** | Could regress | Changing a dependency array changes *when effects fire*. A wrong fix can add network calls, refetch loops, or the re-render loops the original author worked around |
+
+### Working rules that follow from that table
+
+1. **One extraction or one hook fix per PR.** Never batch. A behaviour regression must be
+   attributable to a single change and revertible on its own
+2. **Characterise before you touch.** Pin current behaviour in a test — including quirks that look
+   like bugs — then change the code. A quirk someone relies on is a feature
+3. **Manual phone pass before merging anything in phases 4, 6 and 7.** Automation does not cover
+   native. The device prompts in `AGENT_RETEST_INDEX.md` exist for this
+4. **Treat a perf budget pass as necessary, not sufficient.** For the god-file work, record the
+   `web-perf` numbers before and after and compare them, rather than only checking the gate is green
+5. **If a phase cannot be verified, stop and add the test first.** That is the whole premise of the
+   ordering
+
+### What a user should notice afterwards
+
+Nothing — with three intended exceptions:
+
+- **Fewer spurious re-renders** on the dashboard and installation page once the hook-dependency work
+  is done, which may show as less flicker rather than as raw speed
+- **Clearer error messages** after Phase 8, because a single contract lets the frontend say what went
+  wrong instead of falling back to generic text
+- **Faster route transitions** *if* Phase 4 and 7 splits let Vite chunk the big screens more finely.
+  This is a possible benefit, not a promise, and it is not a reason to do the work
+
+Everything else — same screens, same flows, same offline behaviour, same speed.
 
 ---
 
