@@ -8,9 +8,9 @@ Stage **S3** of [`EXCELLENCE_PROGRAMME.md`](./EXCELLENCE_PROGRAMME.md): characte
 | # | Area | Status | Tests |
 |---|---|---|---|
 | 1 | Workflow completion + blocking-issue **422** | **Done (PR 1)** | `server/Commtrac.Api.Tests/AssetWorkflowRunCompleteTests.cs` |
-| 2 | Two-tier permission model | **Done (PR 1)** | `src/utils/rolePermissionsResolve.test.ts` |
+| 2 | Two-tier permission model | **Done (PR 1 + PR 2)** | `src/utils/rolePermissionsResolve.test.ts`, `src/hooks/usePermissions.test.tsx` |
 | 3 | Offline queue temp-ID → server-ID remap | **Done (PR 1)** | `src/services/syncQueue.replaceReferences.test.ts` |
-| 4 | Backend controller tests (workflow endpoints beyond complete) | Pending | — |
+| 4 | Backend controller tests (workflow endpoints beyond complete) | **Done (PR 2)** | `server/Commtrac.Api.Tests/AssetWorkflowRunProgressTests.cs` |
 | 5 | Characterisation tests for `AssetInstallationPage.tsx` | Pending | Before first S8 extraction |
 | 6 | Characterisation tests for `Dashboard.tsx` | Pending | Before first S8 extraction |
 
@@ -39,6 +39,29 @@ Pure helpers extracted to `src/utils/rolePermissionsResolve.ts` (used by `usePer
 - `replaceEntityReferences` — broader match (entityId, url substring, serverEntityId)
 - `replaceEntityId` — exact entityId match only
 
+## What PR 2 pins
+
+### Workflow progress save (server)
+
+- `PUT /api/asset-workflow-runs/{id}` persists `stepResultsJson`
+- Open issues in the payload set linked asset status to **Issue**
+- Resolving the last open issue on an active run clears asset status back to **InProgress**
+- Locked runs reject progress save with **400**
+
+### Issue patch (server)
+
+- `PATCH /api/asset-workflow-runs/{id}/issues` sets asset **Issue** when open issues remain
+- Closing the last open issue on an **active** run clears asset **Issue** (regression guard for Bug 1)
+- On a **locked** run, resolving all issues reflects signature status (e.g. **Signed** → **Closed**)
+
+Shared fixtures: `server/Commtrac.Api.Tests/WorkflowRunTestHelpers.cs`
+
+### Permissions hook (client)
+
+- `permissionsReady` stays false until role-config API settles and user id is non-empty
+- Saved role config merges with admin fallback (settings OR-merge)
+- User identity change clears role-config cache and re-fetches
+
 ## Verification command
 
 ```bash
@@ -48,6 +71,5 @@ dotnet test server/Commtrac.Api.Tests/Commtrac.Api.Tests.csproj
 
 ## Next S3 PRs
 
-1. **Workflow progress save** — step results persist, issue patch, asset status side effects
-2. **`usePermissions` hook integration** — mock role-config API + `permissionsReady` gate
-3. **God-file characterisation** — one PR per file, snapshot/key interaction tests only
+1. **God-file characterisation** — one PR per file, snapshot/key interaction tests only
+   (`AssetInstallationPage.tsx`, then `Dashboard.tsx`)
