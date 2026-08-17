@@ -155,8 +155,14 @@ import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platf
 import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
 import { peekWebSessionCache, webCacheKey } from "../../services/webFreshCache";
 import type { PaginatedResult } from "../../types/paginatedList";
-import OperationsVirtualizedTableBody from "./OperationsVirtualizedTableBody";
-import { OPERATIONS_VIRTUALIZE_MIN_ROWS } from "./operationsTableLayout";
+import AssetInstallationFeatureExpandedRow from "./AssetInstallationFeatureExpandedRow";
+import AssetInstallationOperationsTable from "./AssetInstallationOperationsTable";
+import { getOperationsColumnText, resolveOperationsConfigName, resolveOperationsConfigType } from "./assetInstallationOperationsTableLogic";
+import {
+  OPERATIONS_CHECKBOX_W,
+  OPERATIONS_TAG_STICKY_LEFT,
+  shouldVirtualizeOperationsTable,
+} from "./operationsTableLayout";
 import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
@@ -211,10 +217,6 @@ const PhotoUploadDialog = lazy(() => import("../dashboard/PhotoUploadDialog"));
 const AssetDocumentsDialog = lazy(() => import("./AssetDocumentsDialog"));
 
 // Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
-
-const OPERATIONS_CHECKBOX_W = 28;
-const OPERATIONS_EXPAND_W = 36;
-const OPERATIONS_TAG_STICKY_LEFT = OPERATIONS_CHECKBOX_W + OPERATIONS_EXPAND_W;
 
 type AssetExportColumnOption = {
   id: string;
@@ -2017,8 +2019,10 @@ const AssetInstallationPage = () => {
     });
   }, [displayStateByAssetId, runsMap, pausedProgress, assignmentsMap]);
 
-  const virtualizeOperationsTable =
-    paginatedWebProject && displayAssets.length >= OPERATIONS_VIRTUALIZE_MIN_ROWS;
+  const virtualizeOperationsTable = shouldVirtualizeOperationsTable(
+    paginatedWebProject,
+    displayAssets.length,
+  );
 
   const mobileAssets = useMemo(() => {
     if (!isNativePlatform || mobileScope === "all") return displayAssets;
@@ -2948,38 +2952,16 @@ const AssetInstallationPage = () => {
     proj: ReturnType<typeof projectMap.get>,
     tech: ReturnType<typeof userMap.get>,
   ): string {
-    switch (colId) {
-      case "assetName":
-        return asset.assetName || "-";
-      case "serialNumber":
-        return asset.serialNumber || "-";
-      case "assetModel":
-        return asset.assetModel || "-";
-      case "manufacturer":
-        return asset.manufacturer || "-";
-      case "configType":
-        return cfg?.configType || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined) || "-";
-      case "configName":
-        return cfg?.name || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.name : undefined) || "-";
-      case "project":
-        return proj ? proj.jobNumber : asset.projectId.slice(0, 8);
-      case "siteName":
-        return proj?.siteName || "-";
-      case "location":
-        return asset.location || "-";
-      case "dateCreated":
-        return formatAssetTableDate(asset.createdAt, officeZone);
-      case "dateClosed":
-        return formatAssetTableDate(resolveAssetClosedAt(asset, runsMap[asset.id]), officeZone);
-      case "assignedTech":
-        return tech?.fullName || "-";
-      case "features":
-        return getCaptureStatusSummary(asset);
-      case "status":
-        return getOperationsStatusLabel(asset, proj?.workflowMode);
-      default:
-        return "-";
-    }
+    return getOperationsColumnText(colId, asset, {
+      officeZone,
+      runs: runsMap[asset.id],
+      project: proj ?? undefined,
+      tech: tech ?? undefined,
+      cfg,
+      wfConfigById: wfConfigMap,
+      featuresSummary: getCaptureStatusSummary(asset),
+      statusLabel: getOperationsStatusLabel(asset, proj?.workflowMode),
+    });
   }
 
   async function buildAssetExportPackage() {
@@ -4179,89 +4161,11 @@ ${words.slice(midpoint).join(" ")}`;
   }
 
   function renderFeatureExpandedRow(asset: ProjectAsset) {
-    let fv: Record<string, string> = {};
-    try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
-    const inventoryFeatures = activeFeatures.filter((feat) => feat.isInventory);
-
-    if (inventoryFeatures.length === 0) {
-      const entries = Object.entries(fv);
-      if (!entries.length) {
-        return <Typography variant="caption" color="text.secondary">No inventory feature data recorded.</Typography>;
-      }
-      return (
-        <Stack spacing={0.5}>
-          {entries.map(([k, v]) => (
-            <Stack key={k} direction="row" spacing={2}>
-              <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{k.slice(0, 20)}</Typography>
-              <Typography variant="caption">{v}</Typography>
-            </Stack>
-          ))}
-        </Stack>
-      );
-    }
-
     return (
-      <Table size="small" sx={{ maxWidth: 680, minWidth: 650 }}>
-        <TableHead>
-          <TableRow sx={{ bgcolor: "rgba(255,255,255,0.06)" }}>
-            <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, width: "35%", color: "text.primary" }}>Feature</TableCell>
-            <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, color: "text.primary" }}>Value</TableCell>
-            <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, width: 60, color: "text.primary" }}>Status</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {inventoryFeatures.flatMap((feat) => {
-            const raw = fv[feat.id];
-            const isComponent = feat.valueType === "component" && (feat.subProperties ?? []).length > 0;
-            let displayVal = "-";
-            let filled = !!raw;
-
-            if (raw && isComponent) {
-              try {
-                const sub: Record<string, string> = JSON.parse(raw);
-                const parts = (feat.subProperties ?? []).map((sp) => sub[sp.id] ? `${sp.name}: ${sub[sp.id]}` : null).filter(Boolean);
-                displayVal = parts.length ? `${parts.length} sub-field${parts.length !== 1 ? "s" : ""} filled` : "-";
-                filled = parts.length > 0;
-              } catch { filled = false; }
-            } else if (raw) {
-              displayVal = raw;
-            }
-
-            const parentRow = (
-              <TableRow key={feat.id}>
-                <TableCell sx={{ fontSize: 13, fontWeight: 600, py: 0.75, color: "text.primary" }}>{feat.name}</TableCell>
-                <TableCell sx={{ fontSize: 13, py: 0.75, color: filled ? "text.primary" : "text.secondary", fontStyle: filled ? "normal" : "italic" }}>
-                  {isComponent ? displayVal : (filled ? displayVal : "Not filled")}
-                </TableCell>
-                <TableCell sx={{ py: 0.75 }}>
-                  <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: filled ? "success.main" : "grey.300" }} />
-                </TableCell>
-              </TableRow>
-            );
-
-            const subRows = isComponent && raw
-              ? (() => {
-                  try {
-                    const sub: Record<string, string> = JSON.parse(raw);
-                    return (feat.subProperties ?? []).map((sp) => (
-                      <TableRow key={`${feat.id}-${sp.id}`} sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
-                        <TableCell sx={{ fontSize: 12, pl: 3.5, color: "text.secondary", py: 0.5 }}>
-                          {"->"} {sp.name}
-                        </TableCell>
-                        <TableCell sx={{ fontSize: 12, py: 0.5 }}>{sub[sp.id] || "-"}</TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: sub[sp.id] ? "success.main" : "grey.300" }} />
-                        </TableCell>
-                      </TableRow>
-                    ));
-                  } catch { return []; }
-                })()
-              : [];
-
-            return [parentRow, ...subRows];
-          })}
-        </TableBody>
-      </Table>
+      <AssetInstallationFeatureExpandedRow
+        featureValuesJson={asset.featureValuesJson}
+        inventoryFeatures={activeFeatures.filter((feat) => feat.isInventory)}
+      />
     );
   }
 
@@ -4332,16 +4236,18 @@ ${words.slice(midpoint).join(" ")}`;
         return <Typography variant="body2" color="text.secondary">{asset.assetModel || "-"}</Typography>;
       case "manufacturer":
         return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "-"}</Typography>;
-      case "configType": {
-        const cfgType = cfg?.configType
-          || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined);
-        return <Typography variant="body2" color="text.secondary">{cfgType || "-"}</Typography>;
-      }
-      case "configName": {
-        const cfgName = cfg?.name
-          || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.name : undefined);
-        return <Typography variant="body2" color="text.secondary">{cfgName || "-"}</Typography>;
-      }
+      case "configType":
+        return (
+          <Typography variant="body2" color="text.secondary">
+            {resolveOperationsConfigType(asset, cfg, wfConfigMap)}
+          </Typography>
+        );
+      case "configName":
+        return (
+          <Typography variant="body2" color="text.secondary">
+            {resolveOperationsConfigName(asset, cfg, wfConfigMap)}
+          </Typography>
+        );
       case "project":
         return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
       case "siteName":
@@ -5860,98 +5766,24 @@ ${words.slice(midpoint).join(" ")}`;
           })}
         </Stack>
       ) : (
-        <Paper className="glass-card" sx={{ overflow: "hidden" }}>
-          <Box
-            ref={virtualizeOperationsTable ? operationsScrollRef : undefined}
-            sx={{
-              overflowX: "auto",
-              ...(virtualizeOperationsTable
-                ? { maxHeight: "min(70vh, calc(100vh - 280px))", overflowY: "auto" }
-                : {}),
-            }}
-          >
-            <Table size="small" stickyHeader={virtualizeOperationsTable} sx={{ minWidth: 900 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: 28, px: 0.5, ...operationsStickyPrefixSx(0, 4) }}>
-                    <Checkbox
-                      size="small"
-                      indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < displayAssets.length}
-                      checked={displayAssets.length > 0 && selectedAssetIds.size === displayAssets.length}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedAssetIds(new Set(displayAssets.map((a) => a.id)));
-                        else setSelectedAssetIds(new Set());
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell sx={{ width: 36, px: 1, ...operationsStickyPrefixSx(OPERATIONS_CHECKBOX_W, 4) }} />
-                  <TableCell sx={operationsStickyPrefixSx(OPERATIONS_TAG_STICKY_LEFT, 4)}>
-                    <Stack direction="row" alignItems="center" spacing={0.25}>
-                      <Typography variant="caption" fontWeight={700}>Asset Tag</Typography>
-                      <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: "assetTag" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  {visibleColumns.map((col) => (
-                    <TableCell key={col.id}>
-                      <Stack direction="row" alignItems="center" spacing={0.25}>
-                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
-                        {col.id === "features" ? (
-                          <Tooltip
-                            title={
-                              <Stack spacing={0.5}>
-                                <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>Feature Colors</Typography>
-                                <Typography variant="caption">Amber: Pending or Paused</Typography>
-                                <Typography variant="caption">Blue: Running</Typography>
-                                <Typography variant="caption">Green: Complete</Typography>
-                                <Typography variant="caption">Red: Missing data</Typography>
-                              </Stack>
-                            }
-                          >
-                            <InfoOutlined sx={{ fontSize: 14, color: "text.disabled", cursor: "help" }} />
-                          </Tooltip>
-                        ) : (
-                          <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: col.id })}>
-                            <ArrowDropDown fontSize="small" />
-                          </IconButton>
-                        )}
-                      </Stack>
-                    </TableCell>
-                  ))}
-                  <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
-                </TableRow>
-              </TableHead>
-              {virtualizeOperationsTable ? (
-                <OperationsVirtualizedTableBody
-                  scrollRef={operationsScrollRef}
-                  rowCount={displayAssets.length * 2}
-                  colSpan={3 + visibleColumns.length}
-                  renderRow={(index) => {
-                    const asset = displayAssets[Math.floor(index / 2)];
-                    if (!asset) return null;
-                    const rows = renderOperationsAssetRows(asset);
-                    return rows[index % 2];
-                  }}
-                />
-              ) : (
-                <TableBody>
-                  {displayAssets.flatMap((asset) => renderOperationsAssetRows(asset))}
-                </TableBody>
-              )}
-            </Table>
-          </Box>
-          {paginatedWebProject && projectAssetTotal > 0 && (
-            <TablePagination
-              component="div"
-              count={projectAssetTotal}
-              page={Math.max(0, projectAssetPage - 1)}
-              onPageChange={(_, nextPage) => setProjectAssetPage(nextPage + 1)}
-              rowsPerPage={PROJECT_ASSET_PAGE_SIZE}
-              rowsPerPageOptions={[PROJECT_ASSET_PAGE_SIZE]}
-            />
-          )}
-        </Paper>
+        <AssetInstallationOperationsTable
+          virtualize={virtualizeOperationsTable}
+          scrollRef={operationsScrollRef}
+          displayAssets={displayAssets}
+          visibleColumns={visibleColumns}
+          selectedAssetIds={selectedAssetIds}
+          onToggleSelectAll={(selectAll) => {
+            if (selectAll) setSelectedAssetIds(new Set(displayAssets.map((a) => a.id)));
+            else setSelectedAssetIds(new Set());
+          }}
+          onOpenColumnMenu={(anchorEl, columnKey) => setAutoMenu({ anchorEl, key: columnKey })}
+          renderAssetRows={renderOperationsAssetRows}
+          paginatedWebProject={paginatedWebProject}
+          projectAssetTotal={projectAssetTotal}
+          projectAssetPage={projectAssetPage}
+          pageSize={PROJECT_ASSET_PAGE_SIZE}
+          onPageChange={setProjectAssetPage}
+        />
       )}
 
       {/* Status action popover */}
