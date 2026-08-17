@@ -170,13 +170,18 @@ import {
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import AssetInstallationBulkTechAssignDialog from "./AssetInstallationBulkTechAssignDialog";
+import AssetInstallationBulkWarnDialog from "./AssetInstallationBulkWarnDialog";
 import AssetInstallationBulkWorkflowAssignDialog from "./AssetInstallationBulkWorkflowAssignDialog";
 import AssetInstallationCsvImportDialog from "./AssetInstallationCsvImportDialog";
 import AssetInstallationWorkflowAssignDialog from "./AssetInstallationWorkflowAssignDialog";
+import { buildBulkTechWarnRows, findAssetsWithAssignedUser } from "./assetInstallationBulkActions";
+import { useAssetInstallationBulkTechAssign } from "./useAssetInstallationBulkTechAssign";
 import { useAssetInstallationBulkWorkflowAssign } from "./useAssetInstallationBulkWorkflowAssign";
 import { useAssetInstallationColumnConfig } from "./useAssetInstallationColumnConfig";
 import { mergeImportedAssets, useAssetInstallationCsvImport } from "./useAssetInstallationCsvImport";
 import { useAssetInstallationWorkflowAssign } from "./useAssetInstallationWorkflowAssign";
+import { useBulkActionWarning } from "./useBulkActionWarning";
 import {
   buildBulkAssignWarnRows,
   dedupeLatestPublishedWorkflowConfigs,
@@ -526,9 +531,24 @@ const AssetInstallationPage = () => {
 
   // Bulk selection
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
-  const [bulkTechOpen, setBulkTechOpen] = useState(false);
-  const [bulkTechId, setBulkTechId] = useState("");
-  const [bulkTechSaving, setBulkTechSaving] = useState(false);
+  const {
+    bulkWarnOpen,
+    bulkWarnTitle,
+    bulkWarnBody,
+    bulkWarnRows,
+    showBulkWarning,
+    closeBulkWarning,
+    proceedBulkWarning,
+  } = useBulkActionWarning();
+  const {
+    bulkTechOpen,
+    bulkTechId,
+    bulkTechSaving,
+    openBulkTechDialog,
+    closeBulkTechDialog,
+    selectBulkTechUser,
+    applyBulkTechAssign,
+  } = useAssetInstallationBulkTechAssign();
   // Bulk documents
   const [bulkDocsOpen, setBulkDocsOpen] = useState(false);
   const [bulkDocsFile, setBulkDocsFile] = useState<File | null>(null);
@@ -560,13 +580,6 @@ const AssetInstallationPage = () => {
   ]);
   const [printGroupBy, setPrintGroupBy]   = useState<GroupByKey>("none");
   const [printGenerating, setPrintGenerating] = useState(false);
-
-  // Override warning â€" fires before any bulk action when existing data would be affected
-  const [bulkWarnOpen, setBulkWarnOpen] = useState(false);
-  const [bulkWarnTitle, setBulkWarnTitle] = useState("");
-  const [bulkWarnBody, setBulkWarnBody] = useState("");
-  const [bulkWarnRows, setBulkWarnRows] = useState<{ assetTag: string; current: string }[]>([]);
-  const bulkWarnProceedRef = useRef<(() => void) | null>(null);
 
   // PDF report
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
@@ -5228,13 +5241,12 @@ ${words.slice(midpoint).join(" ")}`;
                 openBulkAssignDialog();
                 return;
               }
-              setBulkWarnTitle("Some assets already have workflow assignments");
-              setBulkWarnBody(
-                "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are in progress, complete, or closed may behave unexpectedly with additional assignments."
-              );
-              setBulkWarnRows(buildBulkAssignWarnRows(withWf, assignmentsMap));
-              bulkWarnProceedRef.current = () => openBulkAssignDialog();
-              setBulkWarnOpen(true);
+              showBulkWarning({
+                title: "Some assets already have workflow assignments",
+                body: "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are in progress, complete, or closed may behave unexpectedly with additional assignments.",
+                rows: buildBulkAssignWarnRows(withWf, assignmentsMap),
+                onProceed: openBulkAssignDialog,
+              });
             }}
           >
             Assign workflow
@@ -5245,20 +5257,18 @@ ${words.slice(midpoint).join(" ")}`;
             size="small"
             variant="outlined"
             onClick={() => {
-              setBulkTechId("");
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              const withTech = sel.filter((a) => !!a.assignedUserId);
-              if (withTech.length === 0) { setBulkTechOpen(true); return; }
-              setBulkWarnTitle("Some assets already have a user assigned");
-              setBulkWarnBody(
-                "These assets already have a user assigned. Proceeding will replace their current assignment."
-              );
-              setBulkWarnRows(withTech.map((a) => ({
-                assetTag: a.assetTag,
-                current: userMap.get(a.assignedUserId!)?.fullName ?? "Unknown",
-              })));
-              bulkWarnProceedRef.current = () => setBulkTechOpen(true);
-              setBulkWarnOpen(true);
+              const withTech = findAssetsWithAssignedUser(sel);
+              if (withTech.length === 0) {
+                openBulkTechDialog();
+                return;
+              }
+              showBulkWarning({
+                title: "Some assets already have a user assigned",
+                body: "These assets already have a user assigned. Proceeding will replace their current assignment.",
+                rows: buildBulkTechWarnRows(withTech, userMap),
+                onProceed: openBulkTechDialog,
+              });
             }}
           >
             Assign user
@@ -5278,13 +5288,12 @@ ${words.slice(midpoint).join(" ")}`;
                 ...withDocs.map((a) => ({ assetTag: a.assetTag, current: `${docsCountMap[a.id]}/3 docs (existing kept)` })),
               ];
               if (affected.length === 0) { setBulkDocsOpen(true); return; }
-              setBulkWarnTitle("Some assets already have documents");
-              setBulkWarnBody(
-                "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted - the new document will be added alongside them."
-              );
-              setBulkWarnRows(affected);
-              bulkWarnProceedRef.current = () => setBulkDocsOpen(true);
-              setBulkWarnOpen(true);
+              showBulkWarning({
+                title: "Some assets already have documents",
+                body: "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted - the new document will be added alongside them.",
+                rows: affected,
+                onProceed: () => setBulkDocsOpen(true),
+              });
             }}
           >
             Upload documents
@@ -6711,106 +6720,30 @@ ${words.slice(midpoint).join(" ")}`;
           />
         ) : null;
       })()}
-      {/* Override warning dialog â€" appears before any destructive bulk action */}
-      <Dialog
+      <AssetInstallationBulkWarnDialog
         open={bulkWarnOpen}
-        onClose={() => setBulkWarnOpen(false)}
-        maxWidth="sm"
-        fullWidth
-        PaperProps={{ sx: { border: "1px solid", borderColor: "warning.main" } }}
-      >
-        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, color: "warning.main" }}>
-          <ReportProblemOutlined fontSize="small" />
-          {bulkWarnTitle}
-        </DialogTitle>
-        <DialogContent>
-          <Typography variant="body2" sx={{ mb: 2 }}>{bulkWarnBody}</Typography>
-          <Box
-            sx={{
-              maxHeight: 220,
-              overflowY: "auto",
-              borderRadius: 1,
-              border: "1px solid var(--stroke)",
-              bgcolor: "rgba(0,0,0,0.04)",
-            }}
-          >
-            <Table size="small" sx={{ minWidth: 650 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ fontWeight: 700, py: 0.5 }}>Asset Tag</TableCell>
-                  <TableCell sx={{ fontWeight: 700, py: 0.5 }}>Current state</TableCell>
-                </TableRow>
-              </TableHead>
-              <TableBody>
-                {bulkWarnRows.map((row) => (
-                  <TableRow key={row.assetTag}>
-                    <TableCell sx={{ py: 0.5 }}>{row.assetTag}</TableCell>
-                    <TableCell sx={{ py: 0.5, color: "text.secondary" }}>{row.current}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </Box>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setBulkWarnOpen(false)}>
-            Cancel
-          </Button>
-          <Button
-            variant="contained"
-            color="warning"
-            onClick={() => {
-              setBulkWarnOpen(false);
-              bulkWarnProceedRef.current?.();
-            }}
-          >
-            Understood - continue
-          </Button>
-        </DialogActions>
-      </Dialog>
+        title={bulkWarnTitle}
+        body={bulkWarnBody}
+        rows={bulkWarnRows}
+        onClose={closeBulkWarning}
+        onProceed={proceedBulkWarning}
+      />
 
-      {/* Bulk: Assign user dialog */}
-      <Dialog open={bulkTechOpen} onClose={() => setBulkTechOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Assign user to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
-        <DialogContent>
-          <FormControl fullWidth sx={{ mt: 1 }}>
-            <InputLabel shrink>User</InputLabel>
-            <Select label="User" value={bulkTechId} onChange={(e) => setBulkTechId(e.target.value)}>
-              <MenuItem value="">(Unassign)</MenuItem>
-              {users.filter((u) => u.isActive).map((u) => (
-                <MenuItem key={u.id} value={u.id}>{u.fullName}</MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setBulkTechOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            disabled={bulkTechSaving}
-            onClick={async () => {
-              setBulkTechSaving(true);
-              try {
-                const selectedAssets = [...selectedAssetIds]
-                  .map((assetId) => assets.find((a) => a.id === assetId))
-                  .filter((a): a is ProjectAsset => Boolean(a));
-                await Promise.all(
-                  [...selectedAssetIds].map((assetId) =>
-                    projectAssetService.update(assetId, { assignedUserId: bulkTechId || null } as Parameters<typeof projectAssetService.update>[1])
-                  )
-                );
-                refreshAssets();
-                setSelectedAssetIds(new Set());
-                setBulkTechOpen(false);
-              } finally {
-                setBulkTechSaving(false);
-              }
-            }}
-          >
-            {bulkTechSaving ? "Saving..." : "Apply"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationBulkTechAssignDialog
+        open={bulkTechOpen}
+        saving={bulkTechSaving}
+        assetCount={selectedAssetIds.size}
+        users={users}
+        selectedUserId={bulkTechId}
+        onClose={closeBulkTechDialog}
+        onUserChange={selectBulkTechUser}
+        onApply={() => {
+          void applyBulkTechAssign([...selectedAssetIds], () => {
+            refreshAssets();
+            setSelectedAssetIds(new Set());
+          });
+        }}
+      />
 
       <AssetInstallationBulkWorkflowAssignDialog
         open={bulkWfOpen}
