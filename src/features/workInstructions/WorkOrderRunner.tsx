@@ -2,14 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
-  CheckCircleOutlined,
   CloudOffOutlined,
   CommentOutlined,
   DeleteOutlineOutlined,
   DrawOutlined,
   EditOutlined,
   EmailOutlined,
-  LockOutlined,
   PauseOutlined,
   PhotoCameraOutlined,
   PlayArrowOutlined,
@@ -25,7 +23,6 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
-  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -63,14 +60,13 @@ import QRUploadButton from "../../components/QRUploadButton";
 import WorkflowDateCapture from "../../components/ui/WorkflowDateCapture";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
-import RunTimeline from "../../components/ui/RunTimeline";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useAuth } from "../../hooks/useAuth";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
-import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
+import { measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
@@ -78,6 +74,19 @@ import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
 import { formatInstant } from "../../utils/datetime";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
+import WorkOrderRunnerBomStage from "./WorkOrderRunnerBomStage";
+import WorkOrderRunnerConsumablesStage, { type UnlistedConsumable } from "./WorkOrderRunnerConsumablesStage";
+import WorkOrderRunnerCustomerSignStage from "./WorkOrderRunnerCustomerSignStage";
+import WorkOrderRunnerInstallerSignStage from "./WorkOrderRunnerInstallerSignStage";
+import WorkOrderRunnerSetupStage from "./WorkOrderRunnerSetupStage";
+import WorkOrderRunnerSummaryStage from "./WorkOrderRunnerSummaryStage";
+import {
+  formatDuration,
+  parseRunTimeEntries,
+  renderAssetIdentifier,
+  runnerBodyStackSx,
+  runnerDialogContentSx,
+} from "./workOrderRunnerUi";
 
 // Types
 
@@ -93,14 +102,6 @@ interface StepCapture {
   values: Record<string, string>;
   completedAt: string;
   iterationIndex?: number;
-}
-
-interface RunTimeEntry {
-  id: string;
-  category: "productive" | "downtime";
-  startedAtUtc: string;
-  endedAtUtc?: string | null;
-  reason?: string | null;
 }
 
 interface WorkOrderRunnerProps {
@@ -155,94 +156,6 @@ type PendingStepAction =
   | { type: "review"; stepId: string | null; iterationIndex?: number };
 
 type MissingCaptureTarget = MissingWorkflowItem & { stepId: string; iterationIndex?: number };
-
-interface UnlistedConsumable {
-  id: string;
-  description: string;
-  qty: number;
-  unit: string;
-}
-
-const runnerDialogContentSx = {
-  overflowX: "hidden",
-  overflowY: isMobileNativePlatform() ? "auto" : undefined,
-  overscrollBehavior: isMobileNativePlatform() ? "contain" : undefined,
-  flex: isMobileNativePlatform() ? 1 : undefined,
-  minHeight: isMobileNativePlatform() ? 0 : undefined,
-  px: isMobileNativePlatform() ? 1.5 : 3,
-} as const;
-
-const runnerBodyStackSx = {
-  mt: 1,
-  maxWidth: "100%",
-  minWidth: 0,
-} as const;
-
-function parseRunTimeEntries(json: string): RunTimeEntry[] {
-  try {
-    const raw = JSON.parse(json) as Record<string, unknown>[];
-    if (!Array.isArray(raw)) return [];
-    // Normalize both camelCase (new) and PascalCase (legacy DB records)
-    return raw.map((e) => ({
-      id: String(e.id ?? e.Id ?? ""),
-      category: String(e.category ?? e.Category ?? "productive") as "productive" | "downtime",
-      startedAtUtc: String(e.startedAtUtc ?? e.StartedAtUtc ?? ""),
-      endedAtUtc: (e.endedAtUtc ?? e.EndedAtUtc ?? null) as string | null,
-      reason: (e.reason ?? e.Reason ?? null) as string | null,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function formatDuration(totalSeconds: number): string {
-  const safe = Math.max(0, totalSeconds || 0);
-  const h = Math.floor(safe / 3600);
-  const m = Math.floor((safe % 3600) / 60);
-  const s = safe % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  return `${m}m ${s}s`;
-}
-
-function countStoredMediaItems(value: string): number {
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function formatSummaryInputValue(input: StepInput, value: string): string {
-  if (input.type === "checkbox") return value === "true" ? "Yes" : "No";
-  if (input.type === "photo") {
-    const count = countStoredMediaItems(value);
-    return `${count} photo${count === 1 ? "" : "s"} attached`;
-  }
-  if (input.type === "video") {
-    const count = countStoredMediaItems(value);
-    return `${count} video${count === 1 ? "" : "s"} attached`;
-  }
-  if (input.type === "signature") return "Signature captured";
-  if (input.type === "component") {
-    try {
-      const parsed = JSON.parse(value) as Record<string, string>;
-      return `${Object.values(parsed ?? {}).filter(Boolean).length} field${Object.values(parsed ?? {}).filter(Boolean).length === 1 ? "" : "s"} completed`;
-    } catch {
-      return "Component data captured";
-    }
-  }
-  return value;
-}
-
-function renderAssetIdentifier(assetTag?: string) {
-  if (!assetTag?.trim()) return null;
-  return (
-    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-      Asset ID: {assetTag}
-    </Typography>
-  );
-}
 
 export default function WorkOrderRunner({
   open,
@@ -1762,64 +1675,6 @@ export default function WorkOrderRunner({
   }
 
   // ---------------------------------------------------------------
-  // Stage: setup
-  // ---------------------------------------------------------------
-  function renderSetup() {
-    const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
-    return (
-      <>
-        <DialogTitle>
-          Run workflow
-          {renderAssetIdentifier(assetTag)}
-        </DialogTitle>
-        <DialogContent sx={runnerDialogContentSx}>
-          <Stack spacing={2.5} sx={runnerBodyStackSx}>
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">Workflow</Typography>
-              <Typography variant="subtitle2">{workflow.name}</Typography>
-            </Stack>
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">Product</Typography>
-              <Typography variant="subtitle2">{productName}</Typography>
-            </Stack>
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">{stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"}</Typography>
-            </Stack>
-            {prefillValues && !resumingRun && Object.keys(prefillValues).length > 0 && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                Values from the previous run have been pre-loaded. Review and update
-                each step before completing.
-              </Alert>
-            )}
-            {resumingRun && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                Continuing a previous run. Your progress will be restored.
-              </Alert>
-            )}
-            {blockingIssues.length > 0 && (
-              <Alert severity="error" sx={{ fontSize: 12 }}>
-                {blockingIssues.length} unresolved blocking issue{blockingIssues.length === 1 ? "" : "s"} must be resolved before completing.
-              </Alert>
-            )}
-            {startError && <Alert severity="error" sx={{ fontSize: 12 }}>{startError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={startRun}
-            disabled={stepsSorted.length === 0 || startingRun}
-            startIcon={startingRun ? <CircularProgress size={14} /> : undefined}
-          >
-            {startingRun ? "Loading..." : resumingRun ? "Continue ->" : "Start ->"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // ---------------------------------------------------------------
   // Stage: running
   // ---------------------------------------------------------------
   function renderRunning() {
@@ -2639,52 +2494,10 @@ export default function WorkOrderRunner({
     );
   }
 
-  // ---------------------------------------------------------------
-  // Stage: summary
-  // ---------------------------------------------------------------
-  function renderSummary() {
-    if (isPreviewWalkthrough) {
-      return (
-        <>
-          <DialogTitle>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <CheckCircleOutlined color="success" />
-              <Typography variant="subtitle1" fontWeight={600}>Workflow preview complete</Typography>
-            </Stack>
-          </DialogTitle>
-          <DialogContent dividers sx={{ overflowX: "hidden" }}>
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Stack spacing={1.25}>
-                  <Typography variant="h6" fontWeight={700}>
-                    Previewed all workflow steps
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    This was a preview walkthrough only. No run was created, no asset data was loaded, and no validation was enforced.
-                  </Typography>
-                  <Chip
-                    size="small"
-                    color="success"
-                    variant="outlined"
-                    label={`${stepsSorted.length} step${stepsSorted.length === 1 ? "" : "s"} previewed`}
-                    sx={{ alignSelf: "flex-start" }}
-                  />
-                </Stack>
-              </Paper>
-            </Stack>
-          </DialogContent>
-          <DialogActions sx={{ justifyContent: "space-between" }}>
-            <Button onClick={() => setStage("running")} variant="outlined" size="small">
-              Back to steps
-            </Button>
-            <Button onClick={onClose} variant="contained" size="small">
-              Close preview
-            </Button>
-          </DialogActions>
-        </>
-      );
-    }
+  const issueForDetail = issueDetailId ? issues.find((i) => i.id === issueDetailId) ?? null : null;
 
+  const summaryStage = (() => {
+    if (stage !== "summary") return null;
     const stepsData = buildStepsData();
     const summaryStepResultsJson = JSON.stringify(stepsData);
     const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
@@ -2692,957 +2505,23 @@ export default function WorkOrderRunner({
     const qtyModificationCount = Object.keys(qtyModifications).length;
     const payloadEstimate = measurePayload({ stepResultsJson: summaryStepResultsJson });
     const showLargePayloadWarning = payloadEstimate.payloadBytes > API_LARGE_PAYLOAD_WARNING_BYTES;
-
     const missingCaptureTargets = getMissingCaptureTargets(stepsData);
     const missingCaptureCount = missingCaptureTargets.length;
     const hasMissingCaptures = missingCaptureCount > 0;
     const primaryBlockingIssue = blockingIssues[0] ?? null;
-
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <CheckCircleOutlined color="success" />
-            <Typography variant="subtitle1" fontWeight={600}>Workflow complete</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-        </DialogTitle>
-        <DialogContent dividers sx={{ overflowX: "hidden" }}>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Stack spacing={1.5}>
-                <Typography variant="h6" fontWeight={700}>
-                  Great job - all workflow steps are complete
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"} completed.
-                </Typography>
-                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                  <Chip size="small" color="success" variant="outlined" label={`${stepsSorted.length} steps completed`} />
-                  <Chip
-                    size="small"
-                    color={hasMissingCaptures ? "warning" : "success"}
-                    variant="outlined"
-                    label={hasMissingCaptures ? `${missingCaptureCount} missing capture${missingCaptureCount === 1 ? "" : "s"}` : "No missing captures"}
-                  />
-                  <Chip
-                    size="small"
-                    color={hasBlockingIssues ? "error" : issues.length > 0 ? "warning" : "default"}
-                    variant="outlined"
-                    label={
-                      hasBlockingIssues
-                        ? `${blockingIssues.length} blocking issue${blockingIssues.length === 1 ? "" : "s"}`
-                        : `${issues.length} issue${issues.length === 1 ? "" : "s"} flagged`
-                    }
-                  />
-                  {qtyModificationCount > 0 && (
-                    <Chip size="small" color="warning" variant="outlined" label={`${qtyModificationCount} qty change${qtyModificationCount === 1 ? "" : "s"}`} />
-                  )}
-                </Stack>
-                {isRealRun && (
-                  <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                    <Chip size="small" color="success" variant="outlined" label={`Productive ${formatDuration(productiveSecondsLive)}`} />
-                    <Chip size="small" color={downtimeSecondsLive > 0 ? "warning" : "default"} variant="outlined" label={`Downtime ${formatDuration(downtimeSecondsLive)}`} />
-                  </Stack>
-                )}
-                {activeRun?.timeTrackingJson && (
-                  <Box sx={{ mt: 0.5 }}>
-                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} timeZoneId={resolvedTimeZone} />
-                  </Box>
-                )}
-              </Stack>
-            </Paper>
-
-            {hasMissingCaptures && (
-              <Alert severity="warning" icon={<PhotoCameraOutlined />}>
-                {missingCaptureCount} capture{missingCaptureCount === 1 ? "" : "s"} still missing. Add the missing photos before locking the run.
-              </Alert>
-            )}
-
-            {showLargePayloadWarning && (
-              <Alert severity="info" icon={<SyncOutlined />}>
-                This run is carrying about {formatPayloadSize(payloadEstimate.payloadBytes)} of step-result data. Large photo payloads can take longer to sync on the phone.
-              </Alert>
-            )}
-
-            {issues.length > 0 && (
-              <Stack spacing={1}>
-                <Divider />
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => setShowSummaryIssues((open) => !open)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  {showSummaryIssues ? "Hide issues" : `Show issues (${issues.length})`}
-                </Button>
-                <Collapse in={showSummaryIssues}>
-                  <Stack spacing={1} sx={{ mt: 1 }}>
-                    {issues.map((issue) => (
-                      <Paper key={issue.id} variant="outlined" sx={{ p: 1.25, borderColor: issue.isBlocking ? "error.main" : undefined }}>
-                        {editingIssueId === issue.id ? (
-                          <Stack spacing={0.75}>
-                            <TextField size="small" fullWidth multiline rows={2} label="Description"
-                              value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
-                            <FormControl size="small" sx={{ maxWidth: 220 }}>
-                              <InputLabel shrink>Severity</InputLabel>
-                              <Select label="Severity" value={editIssueSeverity}
-                                onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
-                                <MenuItem value="low">Low - observation only</MenuItem>
-                                <MenuItem value="medium">Medium - attention needed</MenuItem>
-                                <MenuItem value="high">High - blocks completion</MenuItem>
-                              </Select>
-                            </FormControl>
-                            <Stack direction="row" spacing={0.75}>
-                              <Button size="small" variant="contained" color="primary" disabled={!editIssueDesc.trim()} onClick={saveEditIssue}>Save</Button>
-                              <Button size="small" onClick={() => setEditingIssueId(null)}>Cancel</Button>
-                            </Stack>
-                          </Stack>
-                        ) : (
-                          <Stack spacing={0.5}>
-                            <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
-                              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                                {issue.resolved
-                                  ? <Chip size="small" label="Resolved" color="success" sx={{ flexShrink: 0 }} />
-                                  : <Chip size="small"
-                                      label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
-                                      color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "default"}
-                                      sx={{ flexShrink: 0 }} />
-                                }
-                                {issue.issueType !== "scope-deviation" && (
-                                  <Chip size="small" label={issue.severity} variant="outlined" sx={{ flexShrink: 0 }} />
-                                )}
-                                {issue.issueType === "scope-deviation" && (issue.extraHours != null || issue.costImpact) && (
-                                  <Chip size="small" variant="outlined" color="warning"
-                                    label={[issue.extraHours != null ? `+${issue.extraHours}h` : null, issue.costImpact].filter(Boolean).join(" - ")}
-                                    sx={{ flexShrink: 0 }} />
-                                )}
-                                {issue.stepTitle && <Chip size="small" label={issue.stepTitle} variant="outlined" sx={{ flexShrink: 0 }} />}
-                              </Stack>
-                              <Stack direction="row" spacing={0}>
-                                <Tooltip title="Add comments or close issue">
-                                  <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
-                                    <CommentOutlined sx={{ fontSize: 14 }} />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                                <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                              </Stack>
-                            </Stack>
-                            <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
-                            <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                              {issue.createdBy ? `${issue.createdBy} - ` : ""}{formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: false })}
-                            </Typography>
-                          </Stack>
-                        )}
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Collapse>
-              </Stack>
-            )}
-
-            {qtyModificationCount > 0 && (
-              <Stack spacing={1}>
-                <Divider />
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="warning"
-                  onClick={() => setShowSummaryQtyMods((open) => !open)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  {showSummaryQtyMods ? "Hide qty changes" : `Show qty changes (${qtyModificationCount})`}
-                </Button>
-                <Collapse in={showSummaryQtyMods}>
-                  <Stack spacing={1} sx={{ mt: 1 }}>
-                    {Object.values(qtyModifications).map((mod) => (
-                      <Paper key={mod.stepId} variant="outlined" sx={{ p: 1.25, borderColor: "warning.main" }}>
-                        <Stack spacing={0.25}>
-                          <Stack direction="row" spacing={0.75} alignItems="center">
-                            <Chip size="small" color="warning" label="Qty Modified" />
-                            <Typography variant="caption" fontWeight={600}>{mod.featureName}</Typography>
-                          </Stack>
-                          <Typography variant="caption">
-                            Expected: <strong>{mod.expectedQty}</strong>{" -> "}Installed: <strong>{mod.actualQty}</strong>
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">Reason: {mod.reason}</Typography>
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Collapse>
-              </Stack>
-            )}
-
-            {hasBlockingIssues && !blockingError && (
-              <Alert severity="error" sx={{ fontSize: 12 }}>
-                {blockingIssues.length} blocking issue{blockingIssues.length === 1 ? "" : "s"} must be closed before locking this run.
-                {activeRunId
-                  ? " Click the comment icon on each blocking issue to add notes and close it."
-                  : " (Preview mode: not enforced)"}
-              </Alert>
-            )}
-
-            {stepsData.length > 0 && (
-              <Stack spacing={1.5}>
-                <Divider />
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => setShowSummaryCapturedData((open) => !open)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  {showSummaryCapturedData ? "Hide captured data" : "Show captured data"}
-                </Button>
-                <Collapse in={showSummaryCapturedData}>
-                  <Stack spacing={1} sx={{ mt: 1 }}>
-                    {stepsData.map((sc, index) => {
-                      const step = stepsSorted.find((s) => s.id === sc.stepId);
-                      if (!step) return null;
-                      return (
-                        <Paper key={`${sc.stepId}-${index}`} variant="outlined" sx={{ p: 1.5 }}>
-                          <Typography variant="caption" fontWeight={600} display="block" mb={0.75}>
-                            {String(step.order).padStart(2, "0")} - {step.title || "(Untitled step)"}
-                          </Typography>
-                          <Stack spacing={0.5}>
-                            {(step.inputs ?? []).map((inp) => {
-                              const val = sc.values[inp.id];
-                              if (!val) return null;
-                              return (
-                                <Stack key={inp.id} direction="row" spacing={1} alignItems="flex-start">
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{inp.label}:</Typography>
-                                  <Typography variant="caption" sx={{ wordBreak: "break-word" }}>{formatSummaryInputValue(inp, val)}</Typography>
-                                </Stack>
-                              );
-                            })}
-                            {(step.captureFields ?? []).map((field) => {
-                              const val = sc.values[field.id];
-                              if (!val) return null;
-                              return (
-                                <Stack key={field.id} direction="row" spacing={1} alignItems="flex-start">
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{field.label}:</Typography>
-                                  <Typography variant="caption" sx={{ wordBreak: "break-word" }}>{val}</Typography>
-                                </Stack>
-                              );
-                            })}
-                          </Stack>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                </Collapse>
-              </Stack>
-            )}
-
-            {blockingError && <Alert severity="error" sx={{ fontSize: 12 }}>{blockingError}</Alert>}
-            {saveError && <Alert severity="error" sx={{ fontSize: 12 }}>{saveError}</Alert>}
-            {!saved && activeRunId && (
-              <Alert severity="warning" sx={{ fontSize: 12 }}>
-                Review recorded time and captured fields before locking. Use <strong>Adjust time</strong> or <strong>Back to steps</strong> if anything needs correction. After you sign as installer, you will not be able to edit time or field captures (Project Managers and Admins may still correct data until customer sign-off).
-              </Alert>
-            )}
-            {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                Review recorded time and captured fields, then continue to installer sign-off.
-              </Alert>
-            )}
-            {saved && !signoffReviewMode && (
-              <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
-                Run locked and saved successfully.
-              </Alert>
-            )}
-            {saved && signoffReviewMode && activeRun?.signatureStatus !== "PendingInstaller" && (
-              <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
-                Run locked and saved successfully.
-              </Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{
-          flexDirection: isMobileNativePlatform() ? "column" : "row",
-          alignItems: isMobileNativePlatform() ? "stretch" : "center",
-          justifyContent: "space-between",
-          gap: isMobileNativePlatform() ? 0.75 : 0,
-          px: isMobileNativePlatform() ? 1.5 : 2,
-          py: isMobileNativePlatform() ? 1 : 1,
-          position: "sticky",
-          bottom: 0,
-          zIndex: 1,
-          bgcolor: "background.paper",
-          borderTop: "1px solid",
-          borderColor: "divider",
-        }}>
-          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Button size={isMobileNativePlatform() ? "small" : "medium"} onClick={requestDiscardRun} disabled={saving || discarding}>
-              {saved ? "Close" : "Discard"}
-            </Button>
-            {!saved && runEditPerms.data && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setStage("running")}
-              >
-                {isMobileNativePlatform() ? "Back" : "Back to steps"}
-              </Button>
-            )}
-            {!saved && runEditPerms.time && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setTimeEditorOpen(true)}
-              >
-                Adjust time
-              </Button>
-            )}
-            {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" && runEditPerms.time && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setTimeEditorOpen(true)}
-              >
-                Adjust time
-              </Button>
-            )}
-          </Stack>
-          {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" ? (
-            <Button
-              variant="contained"
-              size={isMobileNativePlatform() ? "small" : "medium"}
-              onClick={() => {
-                setInstName(currentUserName ?? "");
-                setInstConsent(false);
-                setStage("installer-sign");
-              }}
-            >
-              Continue to sign-off
-            </Button>
-          ) : !saved && (
-            <>
-              {(primaryBlockingIssue || hasMissingCaptures) && (
-                <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
-                  {primaryBlockingIssue && (
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      size="small"
-                      disabled={saving}
-                      startIcon={<ReportProblemOutlined sx={{ fontSize: 16 }} />}
-                      sx={{ minWidth: 0, flex: isMobileNativePlatform() ? "1 1 auto" : undefined, fontSize: "0.75rem", px: 1 }}
-                      onClick={() => {
-                        setShowSummaryIssues(true);
-                        setIssueDetailId(primaryBlockingIssue.id);
-                      }}
-                    >
-                      {isMobileNativePlatform()
-                        ? (blockingIssues.length === 1 ? "Resolve Issue" : "Resolve Issues")
-                        : (blockingIssues.length === 1 ? "Resolve Blocking Issue" : "Resolve Blocking Issues")}
-                    </Button>
-                  )}
-                  {hasMissingCaptures && (
-                    <Button
-                      variant="outlined"
-                      color="warning"
-                      size="small"
-                      disabled={saving}
-                      startIcon={<PhotoCameraOutlined sx={{ fontSize: 16 }} />}
-                      sx={{ minWidth: 0, flex: isMobileNativePlatform() ? "1 1 auto" : undefined, fontSize: "0.75rem", px: 1 }}
-                      onClick={() => jumpToWorkflowStep(missingCaptureTargets[0]?.stepId ?? null, missingCaptureTargets[0]?.iterationIndex)}
-                    >
-                      {isMobileNativePlatform() ? "Add Photos" : "Add Missing Photos"}
-                    </Button>
-                  )}
-                </Stack>
-              )}
-              <Stack
-                direction="row"
-                spacing={0.75}
-                justifyContent={isMobileNativePlatform() ? "stretch" : "flex-end"}
-                sx={{ width: "100%" }}
-              >
-                {(hasBlockingIssues || hasMissingCaptures) && Boolean(activeRunId) && (
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    size={isMobileNativePlatform() ? "small" : "medium"}
-                    disabled={saving}
-                    startIcon={saving ? <CircularProgress size={14} /> : undefined}
-                    sx={{ flex: isMobileNativePlatform() ? 1 : undefined, minWidth: 0, fontSize: isMobileNativePlatform() ? "0.75rem" : undefined }}
-                    onClick={async () => {
-                      setSaving(true);
-                      try {
-                        await flushAutosave(undefined, undefined, "InProgress");
-                        onClose();
-                      } catch { setSaveError("Failed to save progress."); }
-                      finally { setSaving(false); }
-                    }}
-                  >
-                    Save & close
-                  </Button>
-                )}
-                <Button
-                  variant="contained"
-                  size={isMobileNativePlatform() ? "small" : "medium"}
-                  sx={{ flex: isMobileNativePlatform() ? 1 : undefined, minWidth: 0, fontSize: isMobileNativePlatform() ? "0.75rem" : undefined }}
-                  onClick={() => {
-                  const allBomItems = workflow.bomItems ?? [];
-                  const inventoryItems = allBomItems.filter(i => i.isInventory);
-                  const bomConsumableItems = allBomItems.filter(i => !i.isInventory);
-                  // Include lib consumable features not already covered by a BOM item
-                  const bomDescriptions = new Set(bomConsumableItems.map(i => i.description.toLowerCase()));
-                  const extraConsumables = libConsumableFeatures.filter(
-                    f => !bomDescriptions.has(f.name.toLowerCase())
-                  );
-                  const hasConsumables = bomConsumableItems.length > 0 || extraConsumables.length > 0;
-
-                  if (activeRunId) {
-                    // Build bomActual: BOM inventory + BOM consumables + library consumable features
-                    const bomEntries: BomActualItem[] = allBomItems.map((item) => ({
-                      bomItemId: item.id,
-                      description: item.description,
-                      isInventory: item.isInventory,
-                      expectedQty: item.expectedQty,
-                      actualQty: item.expectedQty,
-                      unitOfMeasure: item.unitOfMeasure,
-                      isNA: false,
-                      unitCaptures: item.isInventory
-                        ? Array.from({ length: item.expectedQty }, () =>
-                            Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
-                        : undefined,
-                    }));
-                    const libEntries: BomActualItem[] = extraConsumables.map((f) => ({
-                      bomItemId: `lib-${f.id}`,
-                      description: f.name,
-                      isInventory: false,
-                      expectedQty: 1,
-                      actualQty: 1,
-                      unitOfMeasure: "ea",
-                      isNA: false,
-                    }));
-                    setBomActual([...bomEntries, ...libEntries]);
-                    setUnlistedConsumables([]);
-                    if (inventoryItems.length > 0) {
-                      setStage("bom");
-                    } else if (hasConsumables) {
-                      setStage("consumables");
-                    } else {
-                      handleSave();
-                    }
-                  } else {
-                    handleSave();
-                  }
-                }}
-                disabled={saving || (Boolean(activeRunId) && (hasBlockingIssues || hasMissingCaptures))}
-                startIcon={saving ? <CircularProgress size={14} /> : undefined}
-              >
-                {saving ? "Saving..." : activeRunId ? "Lock run" : "Done (preview)"}
-              </Button>
-              </Stack>
-            </>
-          )}
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: BOM confirmation (inventory items only â€" serial number capture) â"€â"€
-  function renderBom() {
-    // Only show inventory items here; consumables handled in the next stage
-    const inventoryItems = (workflow.bomItems ?? []).filter(i => i.isInventory);
-    const hasConsumables = (workflow.bomItems ?? []).some(i => !i.isInventory) || libConsumableFeatures.length > 0;
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <CheckCircleOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Confirm Inventory Parts</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Enter serial numbers and quantities for tracked components.
-            {hasConsumables && " Consumables will be confirmed in the next step."}
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {inventoryItems.map((item) => {
-              const actual = bomActual.find((a) => a.bomItemId === item.id);
-              if (!actual) return null;
-              return (
-                <Paper key={item.id} variant="outlined" sx={{ p: 1.5 }}>
-                  <Stack spacing={1.5}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Chip label="Inventory" size="small" color="primary" variant="outlined" />
-                      <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
-                      {item.partNumber && (
-                        <Typography variant="caption" color="text.secondary">- {item.partNumber}</Typography>
-                      )}
-                    </Stack>
-                    <Stack direction="row" spacing={1.5} alignItems="center">
-                      <TextField
-                        label="Actual qty"
-                        size="small"
-                        type="number"
-                        sx={{ width: 100 }}
-                        value={actual.actualQty}
-                        onChange={(e) => {
-                          const qty = Math.max(0, Number(e.target.value) || 0);
-                          setBomActual((prev) => prev.map((a) => a.bomItemId !== item.id ? a : {
-                            ...a, actualQty: qty,
-                            unitCaptures: Array.from({ length: qty }, (_, i) =>
-                              a.unitCaptures?.[i] ?? Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""]))),
-                          }));
-                        }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        of {item.expectedQty} {item.unitOfMeasure} expected
-                      </Typography>
-                    </Stack>
-                    {(actual.unitCaptures ?? []).map((fields, unitIdx) => (
-                      <Stack key={unitIdx} spacing={0.75} sx={{ pl: 1, borderLeft: "2px solid", borderColor: "divider" }}>
-                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                          Unit {unitIdx + 1}
-                        </Typography>
-                        {(item.captureFields ?? ["Serial No"]).map((fieldName) => (
-                          <Stack key={fieldName} direction="row" spacing={1} alignItems="center">
-                            {fieldName.toLowerCase().includes("serial") && (
-                              <Tooltip title="Scan barcode / QR">
-                                <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
-                              </Tooltip>
-                            )}
-                            <TextField
-                              label={fieldName}
-                              size="small"
-                              fullWidth
-                              placeholder={`Enter ${fieldName}`}
-                              InputLabelProps={{ shrink: true }}
-                              value={fields[fieldName] ?? ""}
-                              onChange={(e) => setBomActual((prev) => prev.map((a) => {
-                                if (a.bomItemId !== item.id) return a;
-                                const caps = [...(a.unitCaptures ?? [])];
-                                caps[unitIdx] = { ...caps[unitIdx], [fieldName]: e.target.value };
-                                return { ...a, unitCaptures: caps };
-                              }))}
-                            />
-                          </Stack>
-                        ))}
-                      </Stack>
-                    ))}
-                  </Stack>
-                </Paper>
-              );
-            })}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setStage("summary")} disabled={saving}>Back</Button>
-          <Button
-            variant="contained"
-            onClick={() => hasConsumables ? setStage("consumables") : handleSave()}
-            disabled={saving}
-            startIcon={saving ? <CircularProgress size={14} /> : undefined}
-          >
-            {saving ? "Saving..." : hasConsumables ? "Next: Consumables ->" : "Complete & sign"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: Consumables confirm / adjust â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  function renderConsumables() {
-    const consumableItems = (workflow.bomItems ?? []).filter(i => !i.isInventory);
-    const hasInventory = (workflow.bomItems ?? []).some(i => i.isInventory);
-    const allConfirmedAsPlanned = bomActual
-      .filter(a => !a.isInventory)
-      .every(a => !a.isNA && a.actualQty === a.expectedQty);
-
-    const hasDeviations = bomActual.some(a => !a.isInventory && (a.isNA || a.actualQty !== a.expectedQty))
-      || unlistedConsumables.length > 0;
-
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <CheckCircleOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Consumables Used</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Confirm what was used. Tap "Confirm all as planned" if nothing changed.
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5} sx={{ mt: 1 }}>
-            {/* One-tap confirm all */}
-            <Button
-              variant={allConfirmedAsPlanned && unlistedConsumables.length === 0 ? "contained" : "outlined"}
-              color="success"
-              size="small"
-              onClick={() => {
-                setBomActual(prev => prev.map(a =>
-                  a.isInventory ? a : { ...a, actualQty: a.expectedQty, isNA: false }
-                ));
-                setUnlistedConsumables([]);
-              }}
-            >
-              Confirm all as planned
-            </Button>
-
-            {/* Per-item rows */}
-            {consumableItems.map((item) => {
-              const actual = bomActual.find(a => a.bomItemId === item.id);
-              if (!actual) return null;
-              const isDifferent = actual.isNA || actual.actualQty !== actual.expectedQty;
-              return (
-                <Paper
-                  key={item.id}
-                  variant="outlined"
-                  sx={{ p: 1.5, borderColor: isDifferent ? "warning.main" : "divider" }}
-                >
-                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                    <Typography variant="body2" fontWeight={600} sx={{ flex: 1, minWidth: 120 }}>
-                      {item.description}
-                    </Typography>
-                    {item.partNumber && (
-                      <Typography variant="caption" color="text.secondary">{item.partNumber}</Typography>
-                    )}
-                    {/* N/A toggle */}
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={!!actual.isNA}
-                          onChange={(e) => setBomActual(prev => prev.map(a =>
-                            a.bomItemId !== item.id ? a : { ...a, isNA: e.target.checked, actualQty: e.target.checked ? 0 : a.expectedQty }
-                          ))}
-                        />
-                      }
-                      label={<Typography variant="caption">N/A</Typography>}
-                      sx={{ m: 0 }}
-                    />
-                    {/* Qty field â€" hidden when N/A */}
-                    {!actual.isNA && (
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <TextField
-                          size="small"
-                          type="number"
-                          label="Used"
-                          InputLabelProps={{ shrink: true }}
-                          sx={{ width: 80 }}
-                          value={actual.actualQty}
-                          onChange={(e) => {
-                            const qty = Math.max(0, Number(e.target.value) || 0);
-                            setBomActual(prev => prev.map(a =>
-                              a.bomItemId !== item.id ? a : { ...a, actualQty: qty }
-                            ));
-                          }}
-                        />
-                        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-                          / {item.expectedQty} {item.unitOfMeasure}
-                        </Typography>
-                      </Stack>
-                    )}
-                    {actual.isNA && (
-                      <Typography variant="caption" color="text.secondary" fontStyle="italic">Not used</Typography>
-                    )}
-                  </Stack>
-                </Paper>
-              );
-            })}
-
-            {/* Unlisted consumables */}
-            {unlistedConsumables.map((u) => (
-              <Paper key={u.id} variant="outlined" sx={{ p: 1.5, borderColor: "warning.main" }}>
-                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                  <Chip label="Unlisted" size="small" color="warning" variant="outlined" />
-                  <TextField
-                    size="small"
-                    label="Description"
-                    InputLabelProps={{ shrink: true }}
-                    value={u.description}
-                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, description: e.target.value }))}
-                    sx={{ flex: 1, minWidth: 140 }}
-                  />
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="Qty"
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ width: 70 }}
-                    value={u.qty}
-                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, qty: Math.max(0, Number(e.target.value) || 0) }))}
-                  />
-                  <TextField
-                    size="small"
-                    label="Unit"
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ width: 60 }}
-                    value={u.unit}
-                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, unit: e.target.value }))}
-                  />
-                  <IconButton size="small" onClick={() => setUnlistedConsumables(prev => prev.filter(x => x.id !== u.id))}>
-                    <DeleteOutlineOutlined fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </Paper>
-            ))}
-
-            {/* Add unlisted button */}
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => setUnlistedConsumables(prev => [
-                ...prev,
-                { id: randomId(), description: "", qty: 1, unit: "ea" }
-              ])}
-            >
-              + Add unlisted item
-            </Button>
-
-            {/* Deviation summary */}
-            {hasDeviations && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
-                Deviations noted - PM will be notified on completion.
-              </Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setStage(hasInventory ? "bom" : "summary")} disabled={saving}>Back</Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              // Merge unlisted consumables into bomActual and pass directly to handleSave
-              const unlistedActual: BomActualItem[] = unlistedConsumables
-                .filter(u => u.description.trim())
-                .map(u => ({
-                  bomItemId: `unlisted-${u.id}`,
-                  description: u.description,
-                  isInventory: false,
-                  isUnlisted: true,
-                  expectedQty: 0,
-                  actualQty: u.qty,
-                  unitOfMeasure: u.unit,
-                }));
-              const merged = [
-                ...bomActual.filter(a => !a.isUnlisted),
-                ...unlistedActual,
-              ];
-              handleSave(merged);
-            }}
-            disabled={saving}
-            startIcon={saving ? <CircularProgress size={14} /> : undefined}
-          >
-            {saving ? "Saving..." : "Complete & sign"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: installer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  function renderInstallerSign() {
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <DrawOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Field sign-off</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Step {stepsSorted.length + 1} of {stepsSorted.length + 2} - sign to confirm workflow completion
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField label="Your name *" size="small" fullWidth
-              value={instName} onChange={e => setInstName(e.target.value)} />
-            <Stack direction="row" spacing={1}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Outcome</Typography>
-                <Select size="small" fullWidth value={instOutcome}
-                  onChange={e => setInstOutcome(e.target.value as typeof instOutcome)}>
-                  <MenuItem value="Completed">Completed - work done as specified</MenuItem>
-                  <MenuItem value="Conditional">Conditional - completed with conditions</MenuItem>
-                </Select>
-              </Box>
-            </Stack>
-            <SignaturePad
-              label="Draw your signature below (optional)"
-              onChange={instPadOnChange.current}
-              height={140}
-            />
-            <TextField label="Notes (optional)" size="small" fullWidth multiline minRows={2}
-              value={instNotes} onChange={e => setInstNotes(e.target.value)} />
-            <Alert severity="info" sx={{ fontSize: 12 }}>
-              Signing confirms that all recorded time entries and captured field data are correct. After you sign, you will not be able to edit time or field captures. Project Managers and Admins may still make corrections until customer sign-off.
-            </Alert>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={instConsent}
-                  onChange={(e) => setInstConsent(e.target.checked)}
-                  size="small"
-                />
-              }
-              label={
-                <Typography variant="body2" sx={{ fontSize: 12 }}>
-                  I confirm all recorded time and captured field data are correct, and I understand I cannot edit them after signing.
-                </Typography>
-              }
-            />
-            {instError && <Alert severity="error" sx={{ fontSize: 12 }}>{instError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Skip & close</Button>
-          <Button variant="contained" onClick={handleInstallerSign}
-            disabled={instSaving || !instName.trim() || !instConsent}
-            startIcon={instSaving ? <CircularProgress size={14} /> : undefined}>
-            {instSaving ? "Signing..." : "Sign & continue"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: customer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  function renderCustomerSign() {
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <DrawOutlined color="success" />
-            <Typography variant="subtitle1" fontWeight={600}>Customer sign-off</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Step {stepsSorted.length + 2} of {stepsSorted.length + 2} - customer approval
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-
-            {/* Option buttons */}
-            {custMode === "options" && (
-              <Stack spacing={1.5}>
-                <Button fullWidth variant="outlined" size="large"
-                  startIcon={<DrawOutlined />}
-                  onClick={() => setCustMode("sign-now")}
-                  sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5 }}>
-                  <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2" fontWeight={600}>Sign here now</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Customer is present - hand them the device to sign
-                    </Typography>
-                  </Box>
-                </Button>
-                <Button fullWidth variant="outlined" size="large"
-                  startIcon={<EmailOutlined />}
-                  onClick={() => setCustMode("send-link")}
-                  sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5 }}>
-                  <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2" fontWeight={600}>Send signature link</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Email a secure link - run stays pending until customer signs
-                    </Typography>
-                  </Box>
-                </Button>
-                <Button fullWidth variant="text" size="large"
-                  onClick={handleWaiveCustomerSignature}
-                  sx={{ justifyContent: "flex-start", textTransform: "none", color: "text.secondary" }}>
-                  <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2">Skip - no customer signature required</Typography>
-                    <Typography variant="caption" color="text.disabled">
-                      Run completes without customer approval
-                    </Typography>
-                  </Box>
-                </Button>
-              </Stack>
-            )}
-
-            {/* Sign now */}
-            {custMode === "sign-now" && (
-              <Stack spacing={1.5}>
-                <Stack direction="row" spacing={1}>
-                  <TextField label="Customer name *" size="small" fullWidth
-                    value={custName} onChange={e => setCustName(e.target.value)} />
-                  <TextField label="Title / Role" size="small" fullWidth
-                    value={custTitle} onChange={e => setCustTitle(e.target.value)} />
-                </Stack>
-                <TextField label="Email (optional)" size="small" fullWidth
-                  value={custEmail} onChange={e => setCustEmail(e.target.value)} />
-                <Select size="small" fullWidth value={custOutcome}
-                  onChange={e => setCustOutcome(e.target.value as typeof custOutcome)}>
-                  <MenuItem value="Completed">Completed - work accepted</MenuItem>
-                  <MenuItem value="Conditional">Conditional - accepted with conditions</MenuItem>
-                  <MenuItem value="Declined">Declined - work not accepted</MenuItem>
-                </Select>
-                <SignaturePad
-                  label="Customer signature (optional)"
-                  onChange={custPadOnChange.current}
-                  height={140}
-                />
-                <TextField label="Notes (optional)" size="small" fullWidth multiline minRows={2}
-                  value={custNotes} onChange={e => setCustNotes(e.target.value)} />
-              </Stack>
-            )}
-
-            {/* Send link */}
-            {custMode === "send-link" && !linkSent && (
-              <Stack spacing={1.5}>
-                <Alert severity="info" sx={{ fontSize: 12 }}>
-                  The customer will receive a secure link to review and sign the completed workflow documentation.
-                </Alert>
-                <TextField label="Recipient email *" size="small" fullWidth
-                  value={linkEmail} onChange={e => setLinkEmail(e.target.value)} />
-                <TextField label="Recipient name" size="small" fullWidth
-                  value={linkName} onChange={e => setLinkName(e.target.value)} />
-                <TextField label="Link expires in (hours)" type="number" size="small" fullWidth
-                  value={linkHours} onChange={e => setLinkHours(Number(e.target.value))} />
-                <TextField label="Message to customer (optional)" size="small" fullWidth
-                  multiline minRows={3} value={linkMsg} onChange={e => setLinkMsg(e.target.value)} />
-              </Stack>
-            )}
-
-            {linkSent && (
-              <Alert severity="success" sx={{ fontSize: 12 }}>
-                Signature link sent to {linkEmail}. The run will update automatically when the customer signs.
-              </Alert>
-            )}
-
-            {custError && <Alert severity="error" sx={{ fontSize: 12 }}>{custError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          {custMode !== "options" && !linkSent && (
-            <Button onClick={() => { setCustMode("options"); setCustError(null); }}>Back</Button>
-          )}
-          <Button onClick={handleClose}>
-            {linkSent ? "Close" : "Close without signing"}
-          </Button>
-          {custMode === "sign-now" && (
-            <Button variant="contained" onClick={handleCustomerSignNow}
-              disabled={custSaving || !custName.trim()}
-              startIcon={custSaving ? <CircularProgress size={14} /> : undefined}>
-              {custSaving ? "Signing..." : "Confirm signature"}
-            </Button>
-          )}
-          {custMode === "send-link" && !linkSent && (
-            <Button variant="contained" onClick={handleSendLink}
-              disabled={linkSending || !linkEmail.trim()}
-              startIcon={linkSending ? <CircularProgress size={14} /> : <EmailOutlined />}>
-              {linkSending ? "Sending..." : "Send link"}
-            </Button>
-          )}
-        </DialogActions>
-      </>
-    );
-  }
-
-  const issueForDetail = issueDetailId ? issues.find((i) => i.id === issueDetailId) ?? null : null;
+    return {
+      stepsData,
+      blockingIssues,
+      hasBlockingIssues,
+      qtyModificationCount,
+      showLargePayloadWarning,
+      payloadBytes: payloadEstimate.payloadBytes,
+      missingCaptureTargets,
+      missingCaptureCount,
+      hasMissingCaptures,
+      primaryBlockingIssue,
+    };
+  })();
 
   return (
     <>
@@ -3667,13 +2546,235 @@ export default function WorkOrderRunner({
           },
         }}
       >
-        {stage === "setup"          && renderSetup()}
+        {stage === "setup" && (
+          <WorkOrderRunnerSetupStage
+            assetTag={assetTag}
+            workflow={workflow}
+            productName={productName}
+            stepsCount={stepsSorted.length}
+            prefillValues={prefillValues}
+            resumingRun={resumingRun}
+            issues={issues}
+            startError={startError}
+            startingRun={startingRun}
+            onClose={handleClose}
+            onStart={startRun}
+          />
+        )}
         {stage === "running"        && renderRunning()}
-        {stage === "summary"        && renderSummary()}
-        {stage === "bom"            && renderBom()}
-        {stage === "consumables"    && renderConsumables()}
-        {stage === "installer-sign" && renderInstallerSign()}
-        {stage === "customer-sign"  && renderCustomerSign()}
+        {summaryStage && (
+          <WorkOrderRunnerSummaryStage
+            isPreviewWalkthrough={isPreviewWalkthrough}
+            stepsCount={stepsSorted.length}
+            assetTag={assetTag}
+            stepsData={summaryStage.stepsData}
+            stepsSorted={stepsSorted}
+            issues={issues}
+            blockingIssues={summaryStage.blockingIssues}
+            hasBlockingIssues={summaryStage.hasBlockingIssues}
+            primaryBlockingIssue={summaryStage.primaryBlockingIssue}
+            qtyModifications={qtyModifications}
+            qtyModificationCount={summaryStage.qtyModificationCount}
+            showLargePayloadWarning={summaryStage.showLargePayloadWarning}
+            payloadBytes={summaryStage.payloadBytes}
+            missingCaptureTargets={summaryStage.missingCaptureTargets}
+            missingCaptureCount={summaryStage.missingCaptureCount}
+            hasMissingCaptures={summaryStage.hasMissingCaptures}
+            isRealRun={isRealRun}
+            productiveSecondsLive={productiveSecondsLive}
+            downtimeSecondsLive={downtimeSecondsLive}
+            timeTrackingJson={activeRun?.timeTrackingJson}
+            timeZoneId={resolvedTimeZone}
+            showSummaryIssues={showSummaryIssues}
+            onToggleSummaryIssues={() => setShowSummaryIssues((open) => !open)}
+            showSummaryQtyMods={showSummaryQtyMods}
+            onToggleSummaryQtyMods={() => setShowSummaryQtyMods((open) => !open)}
+            showSummaryCapturedData={showSummaryCapturedData}
+            onToggleSummaryCapturedData={() => setShowSummaryCapturedData((open) => !open)}
+            editingIssueId={editingIssueId}
+            editIssueDesc={editIssueDesc}
+            editIssueSeverity={editIssueSeverity}
+            onEditIssueDescChange={setEditIssueDesc}
+            onEditIssueSeverityChange={setEditIssueSeverity}
+            onStartEditIssue={startEditIssue}
+            onSaveEditIssue={saveEditIssue}
+            onCancelEditIssue={() => setEditingIssueId(null)}
+            onDeleteIssue={deleteIssue}
+            onOpenIssueDetail={setIssueDetailId}
+            blockingError={blockingError}
+            saveError={saveError}
+            saved={saved}
+            activeRunId={activeRunId}
+            signoffReviewMode={signoffReviewMode}
+            signatureStatus={activeRun?.signatureStatus}
+            runEditPerms={runEditPerms}
+            saving={saving}
+            discarding={discarding}
+            onClose={onClose}
+            onBackToRunning={() => setStage("running")}
+            onDiscardRequest={requestDiscardRun}
+            onOpenTimeEditor={() => setTimeEditorOpen(true)}
+            onContinueToInstallerSign={() => {
+              setInstName(currentUserName ?? "");
+              setInstConsent(false);
+              setStage("installer-sign");
+            }}
+            onResolveBlockingIssue={() => {
+              setShowSummaryIssues(true);
+              if (summaryStage.primaryBlockingIssue) {
+                setIssueDetailId(summaryStage.primaryBlockingIssue.id);
+              }
+            }}
+            onJumpToMissingCapture={() => jumpToWorkflowStep(
+              summaryStage.missingCaptureTargets[0]?.stepId ?? null,
+              summaryStage.missingCaptureTargets[0]?.iterationIndex,
+            )}
+            onSaveAndClose={async () => {
+              setSaving(true);
+              try {
+                await flushAutosave(undefined, undefined, "InProgress");
+                onClose();
+              } catch {
+                setSaveError("Failed to save progress.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+            onLockRun={() => {
+              const allBomItems = workflow.bomItems ?? [];
+              const inventoryItems = allBomItems.filter((i) => i.isInventory);
+              const bomConsumableItems = allBomItems.filter((i) => !i.isInventory);
+              const bomDescriptions = new Set(bomConsumableItems.map((i) => i.description.toLowerCase()));
+              const extraConsumables = libConsumableFeatures.filter(
+                (f) => !bomDescriptions.has(f.name.toLowerCase()),
+              );
+              const hasConsumables = bomConsumableItems.length > 0 || extraConsumables.length > 0;
+
+              if (activeRunId) {
+                const bomEntries: BomActualItem[] = allBomItems.map((item) => ({
+                  bomItemId: item.id,
+                  description: item.description,
+                  isInventory: item.isInventory,
+                  expectedQty: item.expectedQty,
+                  actualQty: item.expectedQty,
+                  unitOfMeasure: item.unitOfMeasure,
+                  isNA: false,
+                  unitCaptures: item.isInventory
+                    ? Array.from({ length: item.expectedQty }, () =>
+                        Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
+                    : undefined,
+                }));
+                const libEntries: BomActualItem[] = extraConsumables.map((f) => ({
+                  bomItemId: `lib-${f.id}`,
+                  description: f.name,
+                  isInventory: false,
+                  expectedQty: 1,
+                  actualQty: 1,
+                  unitOfMeasure: "ea",
+                  isNA: false,
+                }));
+                setBomActual([...bomEntries, ...libEntries]);
+                setUnlistedConsumables([]);
+                if (inventoryItems.length > 0) {
+                  setStage("bom");
+                } else if (hasConsumables) {
+                  setStage("consumables");
+                } else {
+                  handleSave();
+                }
+              } else {
+                handleSave();
+              }
+            }}
+            onPreviewClose={onClose}
+            onPreviewBack={() => setStage("running")}
+          />
+        )}
+        {stage === "bom" && (
+          <WorkOrderRunnerBomStage
+            assetTag={assetTag}
+            workflow={workflow}
+            libConsumableFeatures={libConsumableFeatures}
+            bomActual={bomActual}
+            setBomActual={setBomActual}
+            saving={saving}
+            onBack={() => setStage("summary")}
+            onContinue={() => {
+              const hasConsumables =
+                (workflow.bomItems ?? []).some((i) => !i.isInventory) || libConsumableFeatures.length > 0;
+              if (hasConsumables) setStage("consumables");
+              else void handleSave();
+            }}
+          />
+        )}
+        {stage === "consumables" && (
+          <WorkOrderRunnerConsumablesStage
+            assetTag={assetTag}
+            workflow={workflow}
+            bomActual={bomActual}
+            setBomActual={setBomActual}
+            unlistedConsumables={unlistedConsumables}
+            setUnlistedConsumables={setUnlistedConsumables}
+            saving={saving}
+            onBack={() => setStage((workflow.bomItems ?? []).some((i) => i.isInventory) ? "bom" : "summary")}
+            onComplete={(merged) => { void handleSave(merged); }}
+          />
+        )}
+        {stage === "installer-sign" && (
+          <WorkOrderRunnerInstallerSignStage
+            assetTag={assetTag}
+            stepsCount={stepsSorted.length}
+            instName={instName}
+            onInstNameChange={setInstName}
+            instOutcome={instOutcome}
+            onInstOutcomeChange={setInstOutcome}
+            instNotes={instNotes}
+            onInstNotesChange={setInstNotes}
+            instConsent={instConsent}
+            onInstConsentChange={setInstConsent}
+            instError={instError}
+            instSaving={instSaving}
+            instPadOnChange={instPadOnChange}
+            onClose={handleClose}
+            onSign={handleInstallerSign}
+          />
+        )}
+        {stage === "customer-sign" && (
+          <WorkOrderRunnerCustomerSignStage
+            assetTag={assetTag}
+            stepsCount={stepsSorted.length}
+            custMode={custMode}
+            onCustModeChange={setCustMode}
+            custName={custName}
+            onCustNameChange={setCustName}
+            custTitle={custTitle}
+            onCustTitleChange={setCustTitle}
+            custEmail={custEmail}
+            onCustEmailChange={setCustEmail}
+            custOutcome={custOutcome}
+            onCustOutcomeChange={setCustOutcome}
+            custNotes={custNotes}
+            onCustNotesChange={setCustNotes}
+            custPadOnChange={custPadOnChange}
+            linkSent={linkSent}
+            linkEmail={linkEmail}
+            onLinkEmailChange={setLinkEmail}
+            linkName={linkName}
+            onLinkNameChange={setLinkName}
+            linkHours={linkHours}
+            onLinkHoursChange={setLinkHours}
+            linkMsg={linkMsg}
+            onLinkMsgChange={setLinkMsg}
+            custError={custError}
+            onClearCustError={() => setCustError(null)}
+            custSaving={custSaving}
+            linkSending={linkSending}
+            onClose={handleClose}
+            onWaiveSignature={handleWaiveCustomerSignature}
+            onSignNow={handleCustomerSignNow}
+            onSendLink={handleSendLink}
+          />
+        )}
         {/* â"€â"€ Persistent offline / sync bar â"€â"€ */}
         {isRealRun && (!isOnline || pendingCount > 0 || syncing) && (
           <Box sx={{
