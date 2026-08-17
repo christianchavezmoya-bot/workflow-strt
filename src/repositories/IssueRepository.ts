@@ -10,10 +10,28 @@ function toRecord(i: OpenIssueRecord) {
   return { id: i.issueId, assetId: i.assetId, projectId: i.projectId, data: i };
 }
 
+function issueSnapshotKey(issue: OpenIssueRecord): string {
+  return JSON.stringify([
+    issue.issueId,
+    issue.assetId,
+    issue.projectId,
+    issue.description,
+    issue.issueType,
+    issue.severity,
+    issue.isBlocking,
+    issue.reportedAt,
+    issue.createdBy,
+    issue.stepTitle,
+    issue.runId,
+    issue.source,
+  ]);
+}
+
 function issuesListChanged(previous: OpenIssueRecord[], next: OpenIssueRecord[]): boolean {
   if (previous.length !== next.length) return true;
-  const prevIds = new Set(previous.map((issue) => issue.issueId));
-  return next.some((issue) => !prevIds.has(issue.issueId));
+  const previousKeys = [...previous].map(issueSnapshotKey).sort();
+  const nextKeys = [...next].map(issueSnapshotKey).sort();
+  return nextKeys.some((key, index) => key !== previousKeys[index]);
 }
 
 const DASHBOARD_ATTENTION_TIMEOUT_MS = 20_000;
