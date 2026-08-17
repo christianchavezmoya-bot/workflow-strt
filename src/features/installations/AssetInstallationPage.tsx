@@ -170,12 +170,19 @@ import {
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import AssetInstallationBulkWorkflowAssignDialog from "./AssetInstallationBulkWorkflowAssignDialog";
 import AssetInstallationCsvImportDialog from "./AssetInstallationCsvImportDialog";
 import AssetInstallationWorkflowAssignDialog from "./AssetInstallationWorkflowAssignDialog";
+import { useAssetInstallationBulkWorkflowAssign } from "./useAssetInstallationBulkWorkflowAssign";
 import { useAssetInstallationColumnConfig } from "./useAssetInstallationColumnConfig";
 import { mergeImportedAssets, useAssetInstallationCsvImport } from "./useAssetInstallationCsvImport";
 import { useAssetInstallationWorkflowAssign } from "./useAssetInstallationWorkflowAssign";
-import { resolveRequestedWorkflowTypeId } from "./assetInstallationWorkflowAssign";
+import {
+  buildBulkAssignWarnRows,
+  dedupeLatestPublishedWorkflowConfigs,
+  findAssetsNeedingBulkAssignWarning,
+  resolveRequestedWorkflowTypeId,
+} from "./assetInstallationWorkflowAssign";
 import {
   assetHasConfiguredWorkflow,
   computeHealth,
@@ -523,10 +530,6 @@ const AssetInstallationPage = () => {
   const [bulkTechOpen, setBulkTechOpen] = useState(false);
   const [bulkTechId, setBulkTechId] = useState("");
   const [bulkTechSaving, setBulkTechSaving] = useState(false);
-  const [bulkWfOpen, setBulkWfOpen] = useState(false);
-  const [bulkWfConfigId, setBulkWfConfigId] = useState("");
-  const [bulkWfTypeId, setBulkWfTypeId] = useState("");
-  const [bulkWfSaving, setBulkWfSaving] = useState(false);
   // Bulk documents
   const [bulkDocsOpen, setBulkDocsOpen] = useState(false);
   const [bulkDocsFile, setBulkDocsFile] = useState<File | null>(null);
@@ -1875,27 +1878,25 @@ const AssetInstallationPage = () => {
   const configMap = useMemo(() => new Map(configs.map((c) => [c.id, c])), [configs]);
   const wfConfigMap = useMemo(() => new Map(publishedWfConfigs.map((c) => [c.id, c])), [publishedWfConfigs]);
   // For dropdowns: deduplicate by name, keeping only the highest version of each workflow
-  const latestPublishedWfConfigs = useMemo(() => {
-    const map = new Map<string, WorkflowConfig>();
-    for (const wc of publishedWfConfigs) {
-      const existing = map.get(wc.name);
-      if (!existing || wc.version > existing.version) map.set(wc.name, wc);
-    }
-    return Array.from(map.values()).sort((a, b) =>
-      `${a.configType ?? ""}${a.name}`.localeCompare(`${b.configType ?? ""}${b.name}`)
-    );
-  }, [publishedWfConfigs]);
-  const selectedBulkWorkflowType = useMemo(
-    () => workflowTypes.find((type) => type.id === bulkWfTypeId) ?? null,
-    [workflowTypes, bulkWfTypeId],
+  const latestPublishedWfConfigs = useMemo(
+    () => dedupeLatestPublishedWorkflowConfigs(publishedWfConfigs),
+    [publishedWfConfigs],
   );
-  const filteredBulkWorkflowConfigs = useMemo(() => {
-    if (!selectedBulkWorkflowType) return latestPublishedWfConfigs;
-    return latestPublishedWfConfigs.filter((config) =>
-      config.workflowTypeId === selectedBulkWorkflowType.id ||
-      config.configType === selectedBulkWorkflowType.name
-    );
-  }, [latestPublishedWfConfigs, selectedBulkWorkflowType]);
+  const {
+    bulkWfOpen,
+    bulkWfForm,
+    bulkWfSaving,
+    filteredBulkWorkflowConfigs,
+    openBulkAssignDialog,
+    closeBulkAssignDialog,
+    selectBulkWorkflowType,
+    selectBulkWorkflowConfig,
+    applyBulkAssign,
+  } = useAssetInstallationBulkWorkflowAssign({
+    requestedWorkflowType,
+    workflowTypes,
+    latestPublishedConfigs: latestPublishedWfConfigs,
+  });
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
   const assetAccessors = useMemo(() => {
@@ -5222,24 +5223,18 @@ ${words.slice(midpoint).join(" ")}`;
             size="small"
             variant="outlined"
             onClick={() => {
-              setBulkWfConfigId("");
-              setBulkWfTypeId(resolveRequestedWorkflowTypeId(requestedWorkflowType, workflowTypes));
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              const withWf = sel.filter((a) =>
-                (assignmentsMap[a.id] && assignmentsMap[a.id].length > 0) ||
-                a.status === "InProgress" || a.status === "Complete" || a.status === "Closed"
-              );
-              if (withWf.length === 0) { setBulkWfOpen(true); return; }
+              const withWf = findAssetsNeedingBulkAssignWarning(sel, assignmentsMap);
+              if (withWf.length === 0) {
+                openBulkAssignDialog();
+                return;
+              }
               setBulkWarnTitle("Some assets already have workflow assignments");
               setBulkWarnBody(
                 "These assets already have one or more workflow assignments. Adding a new assignment will not remove existing ones. Assets that are in progress, complete, or closed may behave unexpectedly with additional assignments."
               );
-              setBulkWarnRows(withWf.map((a) => ({
-                assetTag: a.assetTag,
-                current: assignmentsMap[a.id]?.map((x) => x.workflowTypeName || x.workflowTypeId).join(", ")
-                  || a.status,
-              })));
-              bulkWarnProceedRef.current = () => setBulkWfOpen(true);
+              setBulkWarnRows(buildBulkAssignWarnRows(withWf, assignmentsMap));
+              bulkWarnProceedRef.current = () => openBulkAssignDialog();
               setBulkWarnOpen(true);
             }}
           >
@@ -6818,70 +6813,23 @@ ${words.slice(midpoint).join(" ")}`;
         </DialogActions>
       </Dialog>
 
-      {/* Bulk: Assign workflow dialog */}
-      <Dialog open={bulkWfOpen} onClose={() => setBulkWfOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Assign workflow to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <FormControl fullWidth>
-              <InputLabel shrink>Workflow type</InputLabel>
-              <Select
-                label="Workflow type"
-                value={bulkWfTypeId}
-                onChange={(e) => {
-                  setBulkWfTypeId(e.target.value);
-                  setBulkWfConfigId("");
-                }}
-              >
-                {workflowTypes.map((wt) => (
-                  <MenuItem key={wt.id} value={wt.id}>{wt.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            <FormControl fullWidth>
-              <InputLabel shrink>Workflow config</InputLabel>
-              <Select label="Workflow config" value={bulkWfConfigId} onChange={(e) => setBulkWfConfigId(e.target.value)}>
-                {filteredBulkWorkflowConfigs.map((wc) => (
-                  <MenuItem key={wc.id} value={wc.id}>{wc.name}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {(() => {
-              const selType = workflowTypes.find((t) => t.id === bulkWfTypeId);
-              const selCfg  = latestPublishedWfConfigs.find((c) => c.id === bulkWfConfigId);
-              const msg = bulkWfTypeId && bulkWfConfigId
-                ? workflowTypeMismatchMessage(selType?.name, selCfg?.configType)
-                : null;
-              return msg ? (
-                <Alert severity="warning" sx={{ fontSize: "0.8rem" }}>{msg}</Alert>
-              ) : null;
-            })()}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setBulkWfOpen(false)}>Cancel</Button>
-          <Button
-            variant="contained"
-            disabled={bulkWfSaving || !bulkWfTypeId || !bulkWfConfigId}
-            onClick={async () => {
-              setBulkWfSaving(true);
-              try {
-                await Promise.all(
-                  [...selectedAssetIds].map((assetId) =>
-                    assetWorkflowAssignmentService.create(assetId, bulkWfConfigId, bulkWfTypeId)
-                  )
-                );
-                setSelectedAssetIds(new Set());
-                setBulkWfOpen(false);
-              } finally {
-                setBulkWfSaving(false);
-              }
-            }}
-          >
-            {bulkWfSaving ? "Saving..." : "Apply"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationBulkWorkflowAssignDialog
+        open={bulkWfOpen}
+        saving={bulkWfSaving}
+        assetCount={selectedAssetIds.size}
+        workflowTypes={workflowTypes}
+        filteredConfigs={filteredBulkWorkflowConfigs}
+        latestPublishedConfigs={latestPublishedWfConfigs}
+        workflowTypeId={bulkWfForm.workflowTypeId}
+        workflowConfigId={bulkWfForm.workflowConfigId}
+        onClose={closeBulkAssignDialog}
+        onWorkflowTypeChange={selectBulkWorkflowType}
+        onWorkflowConfigChange={selectBulkWorkflowConfig}
+        onApply={() => {
+          void applyBulkAssign([...selectedAssetIds], () => setSelectedAssetIds(new Set()));
+        }}
+      />
+
       {/* â"€â"€ Print / PDF dialog â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€ */}
       <Dialog
         open={printOpen}
