@@ -28,11 +28,22 @@ export interface FaultReportRow {
   resolvedAtUtc?: string | null;
 }
 
+/** One event in the life of a report — a corrective action, or an automatic status change. */
+export interface FaultReportUpdate {
+  id: string;
+  action: string;
+  status: string;
+  authorName?: string | null;
+  systemGenerated: boolean;
+  createdAtUtc: string;
+}
+
 export interface FaultReportDetail {
   report: FaultReportRow;
   errorStack?: string | null;
   breadcrumbsJson?: string | null;
   diagnosticsJson?: string | null;
+  updates: FaultReportUpdate[];
 }
 
 export interface FaultReportSummary {
@@ -68,6 +79,12 @@ export const faultReportAdminService = {
 
   async update(id: string, patch: { status?: string; severity?: string; notes?: string }) {
     const { data } = await api.patch<FaultReportRow>(`/fault-reports/${id}`, patch);
+    return data;
+  },
+
+  /** Appends a corrective action. The report's own status moves to match. */
+  async addUpdate(id: string, body: { action: string; status?: string }) {
+    const { data } = await api.post<FaultReportUpdate>(`/fault-reports/${id}/updates`, body);
     return data;
   },
 

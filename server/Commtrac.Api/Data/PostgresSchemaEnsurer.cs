@@ -37,6 +37,7 @@ public static class PostgresSchemaEnsurer
             EnsureScheduledReportColumn(conn);
             EnsureSignatureTokenSignerRoleColumn(conn);
             EnsureFaultReportsTable(conn);
+            EnsureFaultReportUpdatesTable(conn);
             EnsureDecimalColumnTypes(conn);
         }
         finally
@@ -372,6 +373,26 @@ public static class PostgresSchemaEnsurer
             CREATE INDEX IF NOT EXISTS "IX_FaultReports_CreatedAtUtc" ON "FaultReports" ("CreatedAtUtc");
             CREATE INDEX IF NOT EXISTS "IX_FaultReports_Status" ON "FaultReports" ("Status");
             CREATE UNIQUE INDEX IF NOT EXISTS "IX_FaultReports_ReferenceCode" ON "FaultReports" ("ReferenceCode");
+            """);
+    }
+
+    private static void EnsureFaultReportUpdatesTable(DbConnection conn)
+    {
+        ExecuteNonQuery(conn, """
+            CREATE TABLE IF NOT EXISTS "FaultReportUpdates" (
+                "Id"              TEXT PRIMARY KEY NOT NULL,
+                "FaultReportId"   TEXT NOT NULL DEFAULT '',
+                "Action"          TEXT NOT NULL DEFAULT '',
+                "Status"          TEXT NOT NULL DEFAULT 'Investigating',
+                "AuthorUserId"    TEXT,
+                "AuthorName"      TEXT,
+                "SystemGenerated" INTEGER NOT NULL DEFAULT 0,
+                "CreatedAtUtc"    TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+            );
+            CREATE INDEX IF NOT EXISTS "IX_FaultReportUpdates_FaultReportId"
+                ON "FaultReportUpdates" ("FaultReportId");
+            CREATE INDEX IF NOT EXISTS "IX_FaultReportUpdates_CreatedAtUtc"
+                ON "FaultReportUpdates" ("CreatedAtUtc");
             """);
     }
 
