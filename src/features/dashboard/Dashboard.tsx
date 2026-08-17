@@ -46,8 +46,6 @@ import api from "../../services/api";
 import { assetDocumentLinkService } from "../../services/assetDocumentLinkService";
 import { generateTechnicianReport, type TechnicianReportData } from "../../utils/generateTechnicianReport";
 import {
-  dashboardWorkspaceHasRows,
-  mergeDashboardWorkspace,
   mergeDashboardWorkspaceItems,
   dedupeDashboardWorkspace,
 } from "../../utils/dashboardWorkspaceMerge";
@@ -149,6 +147,7 @@ import {
   type MyJobsCardAction,
   type MyJobsCardWidget,
 } from "./dashboardPageLogic";
+import { useDashboardWorkspace } from "./useDashboardWorkspace";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
@@ -164,7 +163,6 @@ type NativeMyJobsCardContext = {
 };
 
 const ALL_DASHBOARDS_VALUE = "__all__";
-const DASHBOARD_WORKSPACE_SESSION_PREFIX = "dashboard:web:workspace:";
 const DASHBOARD_ATTENTION_SESSION_PREFIX = "dashboard:web:attention:";
 const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery";
 const DASHBOARD_RUN_STATE_RECOVERY_KEY = "dashboard:pending-run-state-recovery";
@@ -343,28 +341,7 @@ const Dashboard = () => {
   const [dashboardProjectScope, setDashboardProjectScope] = useState<DashboardProjectScope>(
     isAdmin ? "all" : "mine"
   );
-  const [dashboardWorkspace, setDashboardWorkspace] = useState<DashboardWorkspace>({
-    currentInstalls: [],
-    currentInspections: [],
-    installHistory: [],
-    inspectionHistory: [],
-  });
-  const dashboardWorkspaceRef = useRef<DashboardWorkspace>({
-    currentInstalls: [],
-    currentInspections: [],
-    installHistory: [],
-    inspectionHistory: [],
-  });
-  const [workspaceLoading, setWorkspaceLoading] = useState(false);
-  const [cacheHydrated, setCacheHydrated] = useState(false);
-  const [dashboardBootPhase, setDashboardBootPhase] = useState<"workspace" | "full">("workspace");
-  const unlockDeferredDashboardBoot = useCallback(() => {
-    setDashboardBootPhase((current) => current === "full" ? current : "full");
-  }, []);
-
-  useEffect(() => {
-    dashboardWorkspaceRef.current = dashboardWorkspace;
-  }, [dashboardWorkspace]);
+  const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
 
   // Admin: view another user's dashboard
   // Derived from the Redux users catalog rather than a second GET /users. The
@@ -379,59 +356,26 @@ const Dashboard = () => {
       : []),
     [isManager, user.id, users],
   );
-  const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
-  const dashboardWorkspaceScopeId = isManager && selectedDashboardId !== ALL_DASHBOARDS_VALUE ? selectedDashboardId : undefined;
-  // Offline local reads have no JWT — scope to the logged-in user unless a manager
-  // is explicitly viewing all dashboards (org-wide cache is intentional there).
-  const effectiveDashboardWorkspaceUserId =
-    isManager && selectedDashboardId === ALL_DASHBOARDS_VALUE
-      ? undefined
-      : (dashboardWorkspaceScopeId ?? user.id);
-  const dashboardWorkspaceSessionKey = useMemo(
-    () => `${DASHBOARD_WORKSPACE_SESSION_PREFIX}${user.id || "anonymous"}:${dashboardWorkspaceScopeId ?? "self"}`,
-    [dashboardWorkspaceScopeId, user.id],
-  );
-  const readCachedDashboardWorkspace = useCallback((): DashboardWorkspace | null => {
-    if (isNativePlatform) {
-      return dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
-    }
-    if (!shouldUseDashboardWorkspaceSessionCache) return null;
-    if (!user.id) return null;
-    try {
-      const raw = window.sessionStorage.getItem(dashboardWorkspaceSessionKey);
-      return raw ? (JSON.parse(raw) as DashboardWorkspace) : null;
-    } catch {
-      return null;
-    }
-  }, [dashboardWorkspaceSessionKey, isNativePlatform, shouldUseDashboardWorkspaceSessionCache, user.id]);
-  const writeCachedDashboardWorkspace = useCallback((data: DashboardWorkspace) => {
-    if (isNativePlatform) {
-      dcPut(DASHBOARD_CACHE_KEYS.dashboardWorkspace, data);
-      return;
-    }
-    if (!shouldUseDashboardWorkspaceSessionCache) return;
-    if (!user.id) return;
-    try {
-      window.sessionStorage.setItem(dashboardWorkspaceSessionKey, JSON.stringify(data));
-    } catch {
-      // Ignore storage unavailability/quota errors.
-    }
-  }, [dashboardWorkspaceSessionKey, isNativePlatform, shouldUseDashboardWorkspaceSessionCache, user.id]);
-  const applyDashboardWorkspace = useCallback((
-    data: DashboardWorkspace,
-    options?: { persist?: boolean; stabilize?: boolean },
-  ) => {
-    const previous = dashboardWorkspaceRef.current;
-    const next = mergeDashboardWorkspace(previous, data, {
-      stabilize: options?.stabilize ?? true,
-    });
-    dashboardWorkspaceRef.current = next;
-    setDashboardWorkspace(next);
-    if (options?.persist === false) return;
-    // Never persist a workspace regression to empty when we already had rows.
-    if (dashboardWorkspaceHasRows(previous) && !dashboardWorkspaceHasRows(next)) return;
-    writeCachedDashboardWorkspace(next);
-  }, [writeCachedDashboardWorkspace]);
+
+  const {
+    dashboardWorkspace,
+    dashboardWorkspaceRef,
+    workspaceLoading,
+    setWorkspaceLoading,
+    cacheHydrated,
+    setCacheHydrated,
+    dashboardBootPhase,
+    applyDashboardWorkspace,
+    effectiveDashboardWorkspaceUserId,
+  } = useDashboardWorkspace({
+    isAuthenticated,
+    isNativePlatform,
+    isViewer,
+    isManager,
+    userId: user.id,
+    selectedDashboardId,
+    shouldUseDashboardWorkspaceSessionCache,
+  });
 
   const seedNativeDashboardSummariesFromLocal = useCallback(() => {
     if (!isNativePlatform) return;
@@ -458,19 +402,6 @@ const Dashboard = () => {
       })
       .catch(() => {});
   }, [isNativePlatform]);
-
-  const seedNativeDashboardWorkspaceFromLocal = useCallback(() => {
-    if (!isNativePlatform) return;
-
-    void projectAssetService.dashboardWorkspaceLocal(effectiveDashboardWorkspaceUserId)
-      .then((data) => {
-        if (!dashboardWorkspaceHasRows(data)) return;
-        applyDashboardWorkspace(data, { persist: false, stabilize: true });
-        setCacheHydrated(true);
-        setWorkspaceLoading(false);
-      })
-      .catch(() => {});
-  }, [applyDashboardWorkspace, dashboardWorkspaceHasRows, effectiveDashboardWorkspaceUserId, isNativePlatform]);
 
   const countryForOffice = useMemo(() => createCountryResolver(globalOffices), [globalOffices]);
   const officeIdsForRegion = useMemo(() => {
@@ -617,7 +548,6 @@ const Dashboard = () => {
     const cOpenAssets = dcGet<OpenAssetItem[]>(DASHBOARD_CACHE_KEYS.openAssets);
     const cSummary = dcGet<ProjectAssetSummaryItem[]>(DASHBOARD_CACHE_KEYS.projectAssetSummary);
     const cWorkload = dcGet<TechnicianWorkloadSummaryItem[]>(DASHBOARD_CACHE_KEYS.workload);
-    const cWorkspace = dcGet<DashboardWorkspace>(DASHBOARD_CACHE_KEYS.dashboardWorkspace);
     const cOffices = dcGet<Office[]>(DASHBOARD_CACHE_KEYS.globalOffices);
     const cCountries = dcGet<string[]>(DASHBOARD_CACHE_KEYS.availableCountries);
     if (cOpenIssues) setOpenIssues(cOpenIssues);
@@ -625,22 +555,13 @@ const Dashboard = () => {
     if (cOpenAssets) setOpenAssets(cOpenAssets);
     if (cSummary) setProjectAssetSummary(cSummary);
     if (cWorkload) setWorkload(cWorkload);
-    if (cWorkspace && dashboardWorkspaceHasRows(cWorkspace)) applyDashboardWorkspace(cWorkspace, { persist: false, stabilize: true });
     if (cOffices) setGlobalOffices(cOffices);
     if (cCountries) setAvailableCountries(cCountries);
     // Mark cache as hydrated so loading spinners don't override cached data
-    if (cOpenIssues || cPendingSigs || cOpenAssets || cSummary || cWorkload || cWorkspace || cOffices || cCountries) {
+    if (cOpenIssues || cPendingSigs || cOpenAssets || cSummary || cWorkload || cOffices || cCountries) {
       setCacheHydrated(true);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    if (isNativePlatform || !isAuthenticated || !user.id) return;
-    const cached = readCachedDashboardWorkspace();
-    if (!cached || !dashboardWorkspaceHasRows(cached)) return;
-    applyDashboardWorkspace(cached, { persist: false, stabilize: true });
-    setCacheHydrated(true);
-  }, [applyDashboardWorkspace, isAuthenticated, isNativePlatform, readCachedDashboardWorkspace, user.id]);
 
   useEffect(() => {
     if (isNativePlatform || !user.id) return;
@@ -806,148 +727,6 @@ const Dashboard = () => {
     window.addEventListener("repo:projects:updated", handleUpdated);
     return () => window.removeEventListener("repo:projects:updated", handleUpdated);
   }, [dispatch]);
-  useEffect(() => {
-    // Wait until auth has resolved so the dashboard does not write an empty
-    // installer workspace during the cold-start Viewer bootstrap window.
-    if (!isAuthenticated) return;
-
-    if (isViewer) {
-      setDashboardWorkspace({
-        currentInstalls: [],
-        currentInspections: [],
-        installHistory: [],
-        inspectionHistory: [],
-      });
-      unlockDeferredDashboardBoot();
-      return;
-    }
-
-    let cancelled = false;
-    setWorkspaceLoading(true);
-
-    const restoreCachedWorkspace = () => {
-      const cached = readCachedDashboardWorkspace();
-      if (!cached || !dashboardWorkspaceHasRows(cached)) return;
-      if (dashboardWorkspaceHasRows(dashboardWorkspaceRef.current)) return;
-      applyDashboardWorkspace(cached, { persist: false, stabilize: true });
-      setCacheHydrated(true);
-    };
-
-    // Native cold start while offline: load the durable workspace snapshot (IndexedDB)
-    // before entity-only rebuild. seedNativeDashboardWorkspaceFromLocal() reads generic
-    // asset entities and can show stale Paused rows after app kill while the last online
-    // dashboard-workspace fetch is still in offlineStore.
-    if (isNativePlatform && shouldSkipBlockingFetch()) {
-      void (async () => {
-        restoreCachedWorkspace();
-        try {
-          const data = await projectAssetService.dashboardWorkspaceOfflineFirst(
-            effectiveDashboardWorkspaceUserId,
-          );
-          if (cancelled) return;
-          if (dashboardWorkspaceHasRows(data)) {
-            applyDashboardWorkspace(data, { stabilize: true });
-            setCacheHydrated(true);
-          }
-        } catch {
-          // offlineFirst already falls back to dashboardWorkspaceLocal internally.
-        } finally {
-          if (!cancelled) {
-            setWorkspaceLoading(false);
-            unlockDeferredDashboardBoot();
-          }
-        }
-      })();
-
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    seedNativeDashboardWorkspaceFromLocal();
-
-    const fetchWorkspaceWithRetry = async (
-      options?: { light?: boolean; attempts?: number },
-    ): Promise<DashboardWorkspace> => {
-      // FIX 3a (offline): when the device is genuinely offline there is nothing
-      // to retry - the request can only time out. Fail immediately so the caller
-      // falls straight through to cached/local data instead of burning the API
-      // timeout (and, on web, three of them) before showing anything.
-      if (shouldSkipBlockingFetch()) throw new Error("dashboard-workspace-offline");
-
-      const maxAttempts = options?.attempts ?? 3;
-      let lastErr: unknown;
-      for (let attempt = 0; attempt < maxAttempts; attempt++) {
-        try {
-          return await projectAssetService.dashboardWorkspace(effectiveDashboardWorkspaceUserId, options);
-        } catch (err) {
-          lastErr = err;
-          if (cancelled) throw err;
-          // FIX 3b: don't sleep after the FINAL attempt. The old loop always
-          // slept, so a fully failed boot wasted an extra 1800ms doing nothing.
-          if (attempt === maxAttempts - 1) break;
-          await new Promise((resolve) => setTimeout(resolve, 600 * (attempt + 1)));
-        }
-      }
-      throw lastErr;
-    };
-
-    (async () => {
-      // Paint the cached workspace BEFORE awaiting the network. This call had
-      // drifted into the catch block (1cbaf56), making the cache a failure-only
-      // fallback: on a slow-but-successful fetch nothing rendered until the
-      // request returned. Restoring it here brings back stale-while-revalidate.
-      // No-ops when there is no cache or rows are already present, so it can
-      // never clobber fresher data; offline is unchanged.
-      restoreCachedWorkspace();
-
-      try {
-        // FIX 3c: first paint gets ONE fast attempt. If it fails we fall back to
-        // cache immediately (below) rather than making the user wait out the full
-        // retry budget; the follow-up fetch further down still retries properly
-        // and reconciles in the background.
-        const initialData = await fetchWorkspaceWithRetry({ light: true, attempts: 1 });
-        if (cancelled) return;
-        applyDashboardWorkspace(initialData, { stabilize: true });
-      } catch {
-        if (cancelled) return;
-        restoreCachedWorkspace();
-      } finally {
-        if (!cancelled) {
-          setWorkspaceLoading(false);
-          unlockDeferredDashboardBoot();
-        }
-      }
-
-      if (cancelled) return;
-      if (isNativePlatform) {
-        await new Promise((resolve) => setTimeout(resolve, 900));
-        if (cancelled) return;
-      }
-
-      try {
-        const fullData = await fetchWorkspaceWithRetry();
-        if (cancelled) return;
-        applyDashboardWorkspace(fullData);
-      } catch {
-        // Keep the lighter or cached workspace on screen if the full refresh fails.
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [
-    applyDashboardWorkspace,
-    dashboardWorkspaceHasRows,
-    effectiveDashboardWorkspaceUserId,
-    isAuthenticated,
-    isNativePlatform,
-    isViewer,
-    readCachedDashboardWorkspace,
-    seedNativeDashboardWorkspaceFromLocal,
-    unlockDeferredDashboardBoot,
-  ]);
 
   const refreshLiveDashboardDataNow = useCallback((): Promise<void> => {
     if (dashboardRefreshInFlightRef.current) {
