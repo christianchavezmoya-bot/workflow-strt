@@ -24,7 +24,6 @@ import {
   HourglassEmptyOutlined,
   InfoOutlined,
   PhotoCameraOutlined,
-  DragIndicatorOutlined,
   PlayArrowOutlined,
   PrintOutlined,
   RefreshOutlined,
@@ -170,13 +169,11 @@ import {
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
+import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import { useAssetInstallationColumnConfig } from "./useAssetInstallationColumnConfig";
 import {
-  ARCHIVE_COL_IDS,
   assetHasConfiguredWorkflow,
   computeHealth,
-  CONFIGURABLE_COLUMNS,
-  loadColumnConfig,
-  LS_COL_KEY,
   nextDraftConfigNumber,
   operationsStickyPrefixSx,
   projectHasInspection,
@@ -186,7 +183,6 @@ import {
   isInspectionConfigType,
   isInspectionWorkflowType,
   type AssetHealth,
-  type ColumnDef,
 } from "./assetInstallationPageLogic";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
@@ -407,14 +403,19 @@ const AssetInstallationPage = () => {
   const [contextMenuAsset, setContextMenuAsset] = useState<ProjectAsset | null>(null);
   const [contextMenuAssignment, setContextMenuAssignment] = useState<WorkflowAssignment | null>(null);
 
-  // Column settings
-  const [colConfig, setColConfig] = useState(loadColumnConfig);
-  const [colSettingsOpen, setColSettingsOpen] = useState(false);
-  const [settingsOrder, setSettingsOrder] = useState<string[]>([]);
-  const [settingsHidden, setSettingsHidden] = useState<string[]>([]);
-
   // Archive view
   const [archiveMode, setArchiveMode] = useState(false);
+
+  const {
+    colSettingsOpen,
+    setColSettingsOpen,
+    settingsOrder,
+    setSettingsOrder,
+    settingsHidden,
+    setSettingsHidden,
+    visibleColumns,
+    applyColumnSettings,
+  } = useAssetInstallationColumnConfig(archiveMode);
 
   // Issues
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
@@ -2062,18 +2063,6 @@ const AssetInstallationPage = () => {
     userMap, projectMap, runsMap, assignmentsMap,
   ]);
 
-  const visibleColumns = useMemo(() => {
-    if (archiveMode) {
-      return ARCHIVE_COL_IDS
-        .map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id))
-        .filter((c): c is ColumnDef => !!c);
-    }
-    const hiddenSet = new Set(colConfig.hidden);
-    return colConfig.order
-      .map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id))
-      .filter((c): c is ColumnDef => !!c && !hiddenSet.has(c.id));
-  }, [colConfig, archiveMode]);
-
   const assetExportMode = "operations" as const;
 
   const assetExportSingleProject = useMemo(() => {
@@ -2152,20 +2141,6 @@ const AssetInstallationPage = () => {
   function openAdd() {
     setAddOpen(true);
   }
-
-  function openColumnSettings() {
-    setSettingsOrder(colConfig.order);
-    setSettingsHidden(colConfig.hidden);
-    setColSettingsOpen(true);
-  }
-
-  function applyColumnSettings() {
-    const next = { order: settingsOrder, hidden: settingsHidden };
-    setColConfig(next);
-    try { localStorage.setItem(LS_COL_KEY, JSON.stringify(next)); } catch {}
-    setColSettingsOpen(false);
-  }
-
 
   // ------------------------------------------------------------------
   // Edit asset
@@ -6297,68 +6272,15 @@ ${words.slice(midpoint).join(" ")}`;
         </DialogActions>
       </Dialog>
 
-      {/* Column settings dialog */}
-      <Dialog open={colSettingsOpen} onClose={() => setColSettingsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Column Settings</DialogTitle>
-        <DialogContent>
-          <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1.5 }}>
-            Check to show a column. Drag rows to reorder - top of the list = leftmost in the table.
-          </Typography>
-          <Stack spacing={0.75}>
-            {settingsOrder.map((id, idx) => {
-              const col = CONFIGURABLE_COLUMNS.find((c) => c.id === id);
-              if (!col) return null;
-              const isHidden = settingsHidden.includes(id);
-              return (
-                <Stack
-                  key={id}
-                  direction="row"
-                  alignItems="center"
-                  spacing={0.5}
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData("text/plain", String(idx))}
-                  onDragOver={(e) => e.preventDefault()}
-                  onDrop={(e) => {
-                    const fromIdx = Number(e.dataTransfer.getData("text/plain"));
-                    if (fromIdx === idx) return;
-                    const next = [...settingsOrder];
-                    const [moved] = next.splice(fromIdx, 1);
-                    next.splice(idx, 0, moved);
-                    setSettingsOrder(next);
-                  }}
-                  sx={{
-                    px: 1, py: 0.5, borderRadius: 1,
-                    border: "1px solid",
-                    borderColor: "divider",
-                    bgcolor: isHidden ? "action.disabledBackground" : "action.hover",
-                    cursor: "grab",
-                    "&:active": { cursor: "grabbing" },
-                  }}
-                >
-                  <DragIndicatorOutlined fontSize="small" sx={{ color: "text.disabled", flexShrink: 0 }} />
-                  <Checkbox
-                    size="small"
-                    checked={!isHidden}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) =>
-                      setSettingsHidden((prev) =>
-                        e.target.checked ? prev.filter((h) => h !== id) : [...prev, id]
-                      )
-                    }
-                  />
-                  <Typography variant="body2" sx={{ flex: 1, opacity: isHidden ? 0.45 : 1, userSelect: "none" }}>
-                    {col.label}
-                  </Typography>
-                </Stack>
-              );
-            })}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setColSettingsOpen(false)}>Cancel</Button>
-          <Button variant="contained" onClick={applyColumnSettings}>Apply</Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationColumnSettingsDialog
+        open={colSettingsOpen}
+        order={settingsOrder}
+        hidden={settingsHidden}
+        onClose={() => setColSettingsOpen(false)}
+        onApply={applyColumnSettings}
+        onOrderChange={setSettingsOrder}
+        onHiddenChange={setSettingsHidden}
+      />
 
       {/* Assign workflow dialog */}
       <Dialog open={assignDialogOpen} onClose={() => !assignSaving && setAssignDialogOpen(false)} maxWidth="xs" fullWidth>

@@ -42,6 +42,47 @@ export const ARCHIVE_COL_IDS = [
   "status",
 ];
 
+export type ColumnConfig = {
+  order: string[];
+  hidden: string[];
+};
+
+export function resolveVisibleColumns(colConfig: ColumnConfig, archiveMode: boolean): ColumnDef[] {
+  if (archiveMode) {
+    return ARCHIVE_COL_IDS.map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id)).filter(
+      (c): c is ColumnDef => !!c,
+    );
+  }
+  const hiddenSet = new Set(colConfig.hidden);
+  return colConfig.order
+    .map((id) => CONFIGURABLE_COLUMNS.find((c) => c.id === id))
+    .filter((c): c is ColumnDef => !!c && !hiddenSet.has(c.id));
+}
+
+export function persistColumnConfig(config: ColumnConfig) {
+  try {
+    localStorage.setItem(LS_COL_KEY, JSON.stringify(config));
+  } catch {
+    /* localStorage unavailable — in-memory config still applies for this session */
+  }
+}
+
+export function reorderColumnIds(order: string[], fromIdx: number, toIdx: number): string[] {
+  if (fromIdx === toIdx || fromIdx < 0 || toIdx < 0 || fromIdx >= order.length || toIdx >= order.length) {
+    return order;
+  }
+  const next = [...order];
+  const [moved] = next.splice(fromIdx, 1);
+  next.splice(toIdx, 0, moved);
+  return next;
+}
+
+export function toggleColumnHidden(hidden: string[], columnId: string, visible: boolean): string[] {
+  if (visible) return hidden.filter((id) => id !== columnId);
+  if (hidden.includes(columnId)) return hidden;
+  return [...hidden, columnId];
+}
+
 export function operationsStickyPrefixSx(left: number, zIndex: number) {
   return isMobileNativePlatform()
     ? {}
@@ -54,7 +95,7 @@ export function operationsStickyPrefixSx(left: number, zIndex: number) {
       };
 }
 
-export function loadColumnConfig(): { order: string[]; hidden: string[] } {
+export function loadColumnConfig(): ColumnConfig {
   try {
     const raw = localStorage.getItem(LS_COL_KEY);
     if (raw) {

@@ -157,7 +157,7 @@ Three questions only the product owner can answer:
 ### S3 — Tests before structure
 **Class 0.** Source: remediation Phase 3.
 
-**Status: in progress** — see [`S3_TEST_FOUNDATION.md`](./S3_TEST_FOUNDATION.md) for coverage tracker.
+**Status: complete** — see [`S3_TEST_FOUNDATION.md`](./S3_TEST_FOUNDATION.md) for coverage tracker.
 
 The ordering rule of the whole programme: **characterise, then extract.** There is no coverage on the
 biggest files, so a refactor of them cannot currently be verified — you would trade a known-ugly
