@@ -15,12 +15,15 @@ import {
 } from "@mui/material";
 import {
   CheckCircleOutlined,
+  PrintOutlined,
 } from "@mui/icons-material";
 import type { AssetIssue } from "../../types/projectAsset";
 import type { RunIssue } from "../../types/assetWorkflowRun";
 import MediaCapture from "./MediaCapture";
-import IssueTimeline from "./IssueTimeline";
+import IssueHistoryStaircase from "./IssueHistoryStaircase";
 import { formatInstant } from "../../utils/datetime";
+import { buildIssueHistory, type IssueHistoryContext } from "../../utils/issueHistory";
+import { openIssueHistoryReport } from "../../utils/generateIssueHistoryReport";
 
 type AnyIssue = AssetIssue | RunIssue;
 
@@ -32,6 +35,8 @@ interface Props {
   readOnly?: boolean;
   hideComments?: boolean;
   hideResolutionMedia?: boolean;
+  /** Static context for the root row of the history and the printed report. */
+  historyContext?: IssueHistoryContext;
   onClose: () => void;
   onSave: (updated: AnyIssue) => void | Promise<void>;
 }
@@ -54,6 +59,7 @@ export default function IssueDetailDialog({
   timeZoneId,
   readOnly = false,
   hideResolutionMedia = false,
+  historyContext,
   onClose,
   onSave,
 }: Props) {
@@ -72,6 +78,9 @@ export default function IssueDetailDialog({
     setSavingResolution(false);
   }, [issue]);
 
+
+  // Rebuilt from the issue itself, so the staircase and the printed report never diverge.
+  const history = buildIssueHistory(issue, historyContext);
 
   async function handleCloseIssue() {
     const note = resolutionNote.trim();
@@ -245,13 +254,20 @@ export default function IssueDetailDialog({
           </Box>
         )}
 
-        {/* Activity timeline */}
+        {/* Fault history — staircase view */}
         <Box sx={{ px: 2.5, pb: 2.5 }}>
-          <IssueTimeline issue={issue} />
+          <IssueHistoryStaircase history={history} timeZoneId={timeZoneId} />
         </Box>
       </DialogContent>
 
       <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+        <Button
+          startIcon={<PrintOutlined />}
+          onClick={() => openIssueHistoryReport({ history, timeZoneId })}
+        >
+          Print / export
+        </Button>
+        <Box sx={{ flex: 1 }} />
         <Button onClick={onClose}>Close</Button>
       </DialogActions>
     </Dialog>

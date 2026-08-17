@@ -1,10 +1,21 @@
 export type ProjectAssetStatus = "NotStarted" | "InProgress" | "Paused" | "Pending" | "Complete" | "Closed" | "Issue" | "Cancelled";
 
+/**
+ * Lifecycle state recorded against a single fault update, so the history view can show how a
+ * fault progressed rather than only whether it is open or closed.
+ */
+export type IssueEventStatus = "Open" | "In Progress" | "Pending Verification" | "Closed";
+
 export interface IssueComment {
   id: string;
   text: string;
   author: string;
   createdAt: string;
+  /**
+   * Optional — entries recorded before this field existed have none, and the history builder
+   * falls back for those. New updates should always set it.
+   */
+  status?: IssueEventStatus;
 }
 
 export interface AssetIssue {

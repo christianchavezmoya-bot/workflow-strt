@@ -116,7 +116,8 @@ import ProjectJobSelect from "../../components/ProjectJobSelect";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
-import type { AssetIssue, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
+import type { AssetIssue, IssueEventStatus, ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
+import { ISSUE_EVENT_STATUSES, type IssueHistoryContext } from "../../utils/issueHistory";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
@@ -266,6 +267,17 @@ function timeAgo(date: Date): string {
 
 function projectHasInspection(workflowMode?: string | null) {
   return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
+}
+
+/** Static context for the root row of a fault history and its printed report. */
+function issueHistoryContextFor(asset: ProjectAsset | null | undefined): IssueHistoryContext | undefined {
+  if (!asset) return undefined;
+  const assetLabel = asset.assetName ? `${asset.assetTag} · ${asset.assetName}` : asset.assetTag;
+  return {
+    assetLabel,
+    projectLabel: asset.serialNumber ? `S/N ${asset.serialNumber}` : undefined,
+    location: asset.location || undefined,
+  };
 }
 
 function isInspectionConfigType(configType?: string | null): boolean {
@@ -575,6 +587,9 @@ const AssetInstallationPage = () => {
 
   // Inline issue fields in chevron panel â€" keyed by issueId
   const [inlineCommentTexts, setInlineCommentTexts] = useState<Record<string, string>>({});
+  // Status recorded against each update, so the fault history shows progression rather than
+  // just open/closed. Defaults to In Progress — the common case when someone logs work done.
+  const [inlineCommentStatus, setInlineCommentStatus] = useState<Record<string, IssueEventStatus>>({});
   const [inlineCorrectiveTexts, setInlineCorrectiveTexts] = useState<Record<string, string>>({});
   const [inlineSaving, setInlineSaving] = useState(false);
   const [inlineSaveError, setInlineSaveError] = useState<string | null>(null);
@@ -3917,6 +3932,7 @@ ${words.slice(midpoint).join(" ")}`;
     ) {
       const comments = issue.comments ?? [];
       const commentVal = inlineCommentTexts[issue.id] ?? "";
+      const commentStatus = inlineCommentStatus[issue.id] ?? "In Progress";
       const correctiveVal = inlineCorrectiveTexts[issue.id] ?? "";
       const reportMediaVal    = inlineReportMedia[issue.id]     ?? [];
       const resolutionMediaVal = inlineResolutionMedia[issue.id] ?? [];
@@ -3996,6 +4012,19 @@ ${words.slice(midpoint).join(" ")}`;
                     onChange={(e) => setInlineCommentTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
                     sx={{ fontSize: 11, mb: 0.5 }}
                   />
+                  <TextField
+                    select
+                    size="small"
+                    fullWidth
+                    label="Status after this update"
+                    value={commentStatus}
+                    onChange={(e) => setInlineCommentStatus(prev => ({ ...prev, [issue.id]: e.target.value as IssueEventStatus }))}
+                    sx={{ mb: 0.5 }}
+                  >
+                    {ISSUE_EVENT_STATUSES.filter(s => s !== "Closed").map(s => (
+                      <MenuItem key={s} value={s} sx={{ fontSize: 12 }}>{s}</MenuItem>
+                    ))}
+                  </TextField>
                   <Button
                     size="small"
                     variant="outlined"
@@ -4003,9 +4032,10 @@ ${words.slice(midpoint).join(" ")}`;
                     onClick={() => {
                       const text = commentVal.trim();
                       if (!text) return;
-                      const newComment = { id: randomId(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
+                      const newComment = { id: randomId(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString(), status: commentStatus };
                       onSaveComment({ ...issue, reportMedia: inlineReportMedia[issue.id]?.length ? inlineReportMedia[issue.id] : issue.reportMedia, comments: [...(issue.comments ?? []), newComment] });
                       setInlineCommentTexts(prev => ({ ...prev, [issue.id]: "" }));
+                      setInlineCommentStatus(prev => ({ ...prev, [issue.id]: "In Progress" }));
                     }}
                     sx={{ fontSize: 11 }}
                   >
@@ -7170,6 +7200,7 @@ ${words.slice(midpoint).join(" ")}`;
               issue={issue}
               currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
               timeZoneId={runnerProjectTimeZone}
+              historyContext={issueHistoryContextFor(issueDetailAsset)}
               onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); setIssueDetailRunId(null); }}
               onSave={(updated) => saveInlineRunIssue(issueDetailRunId, issueDetailAsset.id, updated as RunIssue)}
             />
@@ -7185,6 +7216,7 @@ ${words.slice(midpoint).join(" ")}`;
             issue={issue}
             currentUser={currentUser?.fullName ?? currentUser?.email ?? "User"}
             timeZoneId={officeZone}
+            historyContext={issueHistoryContextFor(issueDetailAsset)}
             onClose={() => { setIssueDetailIssueId(null); setIssueDetailAsset(null); setIssueDetailRunId(null); }}
             onSave={(updated) => handleIssueDetailSave(updated as AssetIssue)}
           />
