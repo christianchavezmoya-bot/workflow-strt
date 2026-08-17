@@ -78,6 +78,10 @@ import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
 import { formatInstant } from "../../utils/datetime";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
+import WorkOrderRunnerBomStage from "./WorkOrderRunnerBomStage";
+import WorkOrderRunnerConsumablesStage, { type UnlistedConsumable } from "./WorkOrderRunnerConsumablesStage";
+import WorkOrderRunnerSetupStage from "./WorkOrderRunnerSetupStage";
+import { renderAssetIdentifier, runnerBodyStackSx, runnerDialogContentSx } from "./workOrderRunnerUi";
 
 // Types
 
@@ -156,28 +160,6 @@ type PendingStepAction =
 
 type MissingCaptureTarget = MissingWorkflowItem & { stepId: string; iterationIndex?: number };
 
-interface UnlistedConsumable {
-  id: string;
-  description: string;
-  qty: number;
-  unit: string;
-}
-
-const runnerDialogContentSx = {
-  overflowX: "hidden",
-  overflowY: isMobileNativePlatform() ? "auto" : undefined,
-  overscrollBehavior: isMobileNativePlatform() ? "contain" : undefined,
-  flex: isMobileNativePlatform() ? 1 : undefined,
-  minHeight: isMobileNativePlatform() ? 0 : undefined,
-  px: isMobileNativePlatform() ? 1.5 : 3,
-} as const;
-
-const runnerBodyStackSx = {
-  mt: 1,
-  maxWidth: "100%",
-  minWidth: 0,
-} as const;
-
 function parseRunTimeEntries(json: string): RunTimeEntry[] {
   try {
     const raw = JSON.parse(json) as Record<string, unknown>[];
@@ -233,15 +215,6 @@ function formatSummaryInputValue(input: StepInput, value: string): string {
     }
   }
   return value;
-}
-
-function renderAssetIdentifier(assetTag?: string) {
-  if (!assetTag?.trim()) return null;
-  return (
-    <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: 0.5 }}>
-      Asset ID: {assetTag}
-    </Typography>
-  );
 }
 
 export default function WorkOrderRunner({
@@ -1762,64 +1735,6 @@ export default function WorkOrderRunner({
   }
 
   // ---------------------------------------------------------------
-  // Stage: setup
-  // ---------------------------------------------------------------
-  function renderSetup() {
-    const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
-    return (
-      <>
-        <DialogTitle>
-          Run workflow
-          {renderAssetIdentifier(assetTag)}
-        </DialogTitle>
-        <DialogContent sx={runnerDialogContentSx}>
-          <Stack spacing={2.5} sx={runnerBodyStackSx}>
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">Workflow</Typography>
-              <Typography variant="subtitle2">{workflow.name}</Typography>
-            </Stack>
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">Product</Typography>
-              <Typography variant="subtitle2">{productName}</Typography>
-            </Stack>
-            <Stack spacing={0.5}>
-              <Typography variant="body2" color="text.secondary">{stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"}</Typography>
-            </Stack>
-            {prefillValues && !resumingRun && Object.keys(prefillValues).length > 0 && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                Values from the previous run have been pre-loaded. Review and update
-                each step before completing.
-              </Alert>
-            )}
-            {resumingRun && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                Continuing a previous run. Your progress will be restored.
-              </Alert>
-            )}
-            {blockingIssues.length > 0 && (
-              <Alert severity="error" sx={{ fontSize: 12 }}>
-                {blockingIssues.length} unresolved blocking issue{blockingIssues.length === 1 ? "" : "s"} must be resolved before completing.
-              </Alert>
-            )}
-            {startError && <Alert severity="error" sx={{ fontSize: 12 }}>{startError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={startRun}
-            disabled={stepsSorted.length === 0 || startingRun}
-            startIcon={startingRun ? <CircularProgress size={14} /> : undefined}
-          >
-            {startingRun ? "Loading..." : resumingRun ? "Continue ->" : "Start ->"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // ---------------------------------------------------------------
   // Stage: running
   // ---------------------------------------------------------------
   function renderRunning() {
@@ -3145,303 +3060,7 @@ export default function WorkOrderRunner({
     );
   }
 
-  // â"€â"€ Stage: BOM confirmation (inventory items only â€" serial number capture) â"€â"€
-  function renderBom() {
-    // Only show inventory items here; consumables handled in the next stage
-    const inventoryItems = (workflow.bomItems ?? []).filter(i => i.isInventory);
-    const hasConsumables = (workflow.bomItems ?? []).some(i => !i.isInventory) || libConsumableFeatures.length > 0;
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <CheckCircleOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Confirm Inventory Parts</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Enter serial numbers and quantities for tracked components.
-            {hasConsumables && " Consumables will be confirmed in the next step."}
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {inventoryItems.map((item) => {
-              const actual = bomActual.find((a) => a.bomItemId === item.id);
-              if (!actual) return null;
-              return (
-                <Paper key={item.id} variant="outlined" sx={{ p: 1.5 }}>
-                  <Stack spacing={1.5}>
-                    <Stack direction="row" alignItems="center" spacing={1}>
-                      <Chip label="Inventory" size="small" color="primary" variant="outlined" />
-                      <Typography variant="body2" fontWeight={600}>{item.description}</Typography>
-                      {item.partNumber && (
-                        <Typography variant="caption" color="text.secondary">- {item.partNumber}</Typography>
-                      )}
-                    </Stack>
-                    <Stack direction="row" spacing={1.5} alignItems="center">
-                      <TextField
-                        label="Actual qty"
-                        size="small"
-                        type="number"
-                        sx={{ width: 100 }}
-                        value={actual.actualQty}
-                        onChange={(e) => {
-                          const qty = Math.max(0, Number(e.target.value) || 0);
-                          setBomActual((prev) => prev.map((a) => a.bomItemId !== item.id ? a : {
-                            ...a, actualQty: qty,
-                            unitCaptures: Array.from({ length: qty }, (_, i) =>
-                              a.unitCaptures?.[i] ?? Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""]))),
-                          }));
-                        }}
-                      />
-                      <Typography variant="caption" color="text.secondary">
-                        of {item.expectedQty} {item.unitOfMeasure} expected
-                      </Typography>
-                    </Stack>
-                    {(actual.unitCaptures ?? []).map((fields, unitIdx) => (
-                      <Stack key={unitIdx} spacing={0.75} sx={{ pl: 1, borderLeft: "2px solid", borderColor: "divider" }}>
-                        <Typography variant="caption" color="text.secondary" fontWeight={600}>
-                          Unit {unitIdx + 1}
-                        </Typography>
-                        {(item.captureFields ?? ["Serial No"]).map((fieldName) => (
-                          <Stack key={fieldName} direction="row" spacing={1} alignItems="center">
-                            {fieldName.toLowerCase().includes("serial") && (
-                              <Tooltip title="Scan barcode / QR">
-                                <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
-                              </Tooltip>
-                            )}
-                            <TextField
-                              label={fieldName}
-                              size="small"
-                              fullWidth
-                              placeholder={`Enter ${fieldName}`}
-                              InputLabelProps={{ shrink: true }}
-                              value={fields[fieldName] ?? ""}
-                              onChange={(e) => setBomActual((prev) => prev.map((a) => {
-                                if (a.bomItemId !== item.id) return a;
-                                const caps = [...(a.unitCaptures ?? [])];
-                                caps[unitIdx] = { ...caps[unitIdx], [fieldName]: e.target.value };
-                                return { ...a, unitCaptures: caps };
-                              }))}
-                            />
-                          </Stack>
-                        ))}
-                      </Stack>
-                    ))}
-                  </Stack>
-                </Paper>
-              );
-            })}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setStage("summary")} disabled={saving}>Back</Button>
-          <Button
-            variant="contained"
-            onClick={() => hasConsumables ? setStage("consumables") : handleSave()}
-            disabled={saving}
-            startIcon={saving ? <CircularProgress size={14} /> : undefined}
-          >
-            {saving ? "Saving..." : hasConsumables ? "Next: Consumables ->" : "Complete & sign"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: Consumables confirm / adjust â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  function renderConsumables() {
-    const consumableItems = (workflow.bomItems ?? []).filter(i => !i.isInventory);
-    const hasInventory = (workflow.bomItems ?? []).some(i => i.isInventory);
-    const allConfirmedAsPlanned = bomActual
-      .filter(a => !a.isInventory)
-      .every(a => !a.isNA && a.actualQty === a.expectedQty);
-
-    const hasDeviations = bomActual.some(a => !a.isInventory && (a.isNA || a.actualQty !== a.expectedQty))
-      || unlistedConsumables.length > 0;
-
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <CheckCircleOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Consumables Used</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Confirm what was used. Tap "Confirm all as planned" if nothing changed.
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={1.5} sx={{ mt: 1 }}>
-            {/* One-tap confirm all */}
-            <Button
-              variant={allConfirmedAsPlanned && unlistedConsumables.length === 0 ? "contained" : "outlined"}
-              color="success"
-              size="small"
-              onClick={() => {
-                setBomActual(prev => prev.map(a =>
-                  a.isInventory ? a : { ...a, actualQty: a.expectedQty, isNA: false }
-                ));
-                setUnlistedConsumables([]);
-              }}
-            >
-              Confirm all as planned
-            </Button>
-
-            {/* Per-item rows */}
-            {consumableItems.map((item) => {
-              const actual = bomActual.find(a => a.bomItemId === item.id);
-              if (!actual) return null;
-              const isDifferent = actual.isNA || actual.actualQty !== actual.expectedQty;
-              return (
-                <Paper
-                  key={item.id}
-                  variant="outlined"
-                  sx={{ p: 1.5, borderColor: isDifferent ? "warning.main" : "divider" }}
-                >
-                  <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap">
-                    <Typography variant="body2" fontWeight={600} sx={{ flex: 1, minWidth: 120 }}>
-                      {item.description}
-                    </Typography>
-                    {item.partNumber && (
-                      <Typography variant="caption" color="text.secondary">{item.partNumber}</Typography>
-                    )}
-                    {/* N/A toggle */}
-                    <FormControlLabel
-                      control={
-                        <Checkbox
-                          size="small"
-                          checked={!!actual.isNA}
-                          onChange={(e) => setBomActual(prev => prev.map(a =>
-                            a.bomItemId !== item.id ? a : { ...a, isNA: e.target.checked, actualQty: e.target.checked ? 0 : a.expectedQty }
-                          ))}
-                        />
-                      }
-                      label={<Typography variant="caption">N/A</Typography>}
-                      sx={{ m: 0 }}
-                    />
-                    {/* Qty field â€" hidden when N/A */}
-                    {!actual.isNA && (
-                      <Stack direction="row" spacing={0.5} alignItems="center">
-                        <TextField
-                          size="small"
-                          type="number"
-                          label="Used"
-                          InputLabelProps={{ shrink: true }}
-                          sx={{ width: 80 }}
-                          value={actual.actualQty}
-                          onChange={(e) => {
-                            const qty = Math.max(0, Number(e.target.value) || 0);
-                            setBomActual(prev => prev.map(a =>
-                              a.bomItemId !== item.id ? a : { ...a, actualQty: qty }
-                            ));
-                          }}
-                        />
-                        <Typography variant="caption" color="text.secondary" sx={{ whiteSpace: "nowrap" }}>
-                          / {item.expectedQty} {item.unitOfMeasure}
-                        </Typography>
-                      </Stack>
-                    )}
-                    {actual.isNA && (
-                      <Typography variant="caption" color="text.secondary" fontStyle="italic">Not used</Typography>
-                    )}
-                  </Stack>
-                </Paper>
-              );
-            })}
-
-            {/* Unlisted consumables */}
-            {unlistedConsumables.map((u) => (
-              <Paper key={u.id} variant="outlined" sx={{ p: 1.5, borderColor: "warning.main" }}>
-                <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap">
-                  <Chip label="Unlisted" size="small" color="warning" variant="outlined" />
-                  <TextField
-                    size="small"
-                    label="Description"
-                    InputLabelProps={{ shrink: true }}
-                    value={u.description}
-                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, description: e.target.value }))}
-                    sx={{ flex: 1, minWidth: 140 }}
-                  />
-                  <TextField
-                    size="small"
-                    type="number"
-                    label="Qty"
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ width: 70 }}
-                    value={u.qty}
-                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, qty: Math.max(0, Number(e.target.value) || 0) }))}
-                  />
-                  <TextField
-                    size="small"
-                    label="Unit"
-                    InputLabelProps={{ shrink: true }}
-                    sx={{ width: 60 }}
-                    value={u.unit}
-                    onChange={(e) => setUnlistedConsumables(prev => prev.map(x => x.id !== u.id ? x : { ...x, unit: e.target.value }))}
-                  />
-                  <IconButton size="small" onClick={() => setUnlistedConsumables(prev => prev.filter(x => x.id !== u.id))}>
-                    <DeleteOutlineOutlined fontSize="small" />
-                  </IconButton>
-                </Stack>
-              </Paper>
-            ))}
-
-            {/* Add unlisted button */}
-            <Button
-              size="small"
-              variant="text"
-              onClick={() => setUnlistedConsumables(prev => [
-                ...prev,
-                { id: randomId(), description: "", qty: 1, unit: "ea" }
-              ])}
-            >
-              + Add unlisted item
-            </Button>
-
-            {/* Deviation summary */}
-            {hasDeviations && (
-              <Alert severity="warning" sx={{ mt: 1 }}>
-                Deviations noted - PM will be notified on completion.
-              </Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setStage(hasInventory ? "bom" : "summary")} disabled={saving}>Back</Button>
-          <Button
-            variant="contained"
-            onClick={() => {
-              // Merge unlisted consumables into bomActual and pass directly to handleSave
-              const unlistedActual: BomActualItem[] = unlistedConsumables
-                .filter(u => u.description.trim())
-                .map(u => ({
-                  bomItemId: `unlisted-${u.id}`,
-                  description: u.description,
-                  isInventory: false,
-                  isUnlisted: true,
-                  expectedQty: 0,
-                  actualQty: u.qty,
-                  unitOfMeasure: u.unit,
-                }));
-              const merged = [
-                ...bomActual.filter(a => !a.isUnlisted),
-                ...unlistedActual,
-              ];
-              handleSave(merged);
-            }}
-            disabled={saving}
-            startIcon={saving ? <CircularProgress size={14} /> : undefined}
-          >
-            {saving ? "Saving..." : "Complete & sign"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: installer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+  // ── Stage: installer sign-off ────────────────────────────────────────────────
   function renderInstallerSign() {
     return (
       <>
@@ -3667,11 +3286,53 @@ export default function WorkOrderRunner({
           },
         }}
       >
-        {stage === "setup"          && renderSetup()}
+        {stage === "setup" && (
+          <WorkOrderRunnerSetupStage
+            assetTag={assetTag}
+            workflow={workflow}
+            productName={productName}
+            stepsCount={stepsSorted.length}
+            prefillValues={prefillValues}
+            resumingRun={resumingRun}
+            issues={issues}
+            startError={startError}
+            startingRun={startingRun}
+            onClose={handleClose}
+            onStart={startRun}
+          />
+        )}
         {stage === "running"        && renderRunning()}
         {stage === "summary"        && renderSummary()}
-        {stage === "bom"            && renderBom()}
-        {stage === "consumables"    && renderConsumables()}
+        {stage === "bom" && (
+          <WorkOrderRunnerBomStage
+            assetTag={assetTag}
+            workflow={workflow}
+            libConsumableFeatures={libConsumableFeatures}
+            bomActual={bomActual}
+            setBomActual={setBomActual}
+            saving={saving}
+            onBack={() => setStage("summary")}
+            onContinue={() => {
+              const hasConsumables =
+                (workflow.bomItems ?? []).some((i) => !i.isInventory) || libConsumableFeatures.length > 0;
+              if (hasConsumables) setStage("consumables");
+              else void handleSave();
+            }}
+          />
+        )}
+        {stage === "consumables" && (
+          <WorkOrderRunnerConsumablesStage
+            assetTag={assetTag}
+            workflow={workflow}
+            bomActual={bomActual}
+            setBomActual={setBomActual}
+            unlistedConsumables={unlistedConsumables}
+            setUnlistedConsumables={setUnlistedConsumables}
+            saving={saving}
+            onBack={() => setStage((workflow.bomItems ?? []).some((i) => i.isInventory) ? "bom" : "summary")}
+            onComplete={(merged) => { void handleSave(merged); }}
+          />
+        )}
         {stage === "installer-sign" && renderInstallerSign()}
         {stage === "customer-sign"  && renderCustomerSign()}
         {/* â"€â"€ Persistent offline / sync bar â"€â"€ */}
