@@ -15,6 +15,7 @@ namespace Commtrac.Api.Tests;
 /// `DbInitializer.EnsureSoftDeleteColumns`, which adds IsDeleted/DeletedAtUtc to
 /// those tables right after Migrate(). This test now guards that fix.
 /// </summary>
+[Collection(ApiTestCollection.Name)]
 public class AuthLoginTests : IClassFixture<ApiTestFactory>
 {
     private readonly ApiTestFactory _factory;

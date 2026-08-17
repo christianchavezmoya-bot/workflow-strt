@@ -9,6 +9,7 @@ namespace Commtrac.Api.Tests;
 /// Characterises workflow progress save and issue patch endpoints — step results
 /// persistence and asset status side effects. Pins server behaviour before S6 splits.
 /// </summary>
+[Collection(ApiTestCollection.Name)]
 public class AssetWorkflowRunProgressTests : IClassFixture<ApiTestFactory>
 {
     private readonly ApiTestFactory _factory;
