@@ -80,6 +80,8 @@ import { formatInstant } from "../../utils/datetime";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
 import WorkOrderRunnerBomStage from "./WorkOrderRunnerBomStage";
 import WorkOrderRunnerConsumablesStage, { type UnlistedConsumable } from "./WorkOrderRunnerConsumablesStage";
+import WorkOrderRunnerCustomerSignStage from "./WorkOrderRunnerCustomerSignStage";
+import WorkOrderRunnerInstallerSignStage from "./WorkOrderRunnerInstallerSignStage";
 import WorkOrderRunnerSetupStage from "./WorkOrderRunnerSetupStage";
 import { renderAssetIdentifier, runnerBodyStackSx, runnerDialogContentSx } from "./workOrderRunnerUi";
 
@@ -3060,207 +3062,6 @@ export default function WorkOrderRunner({
     );
   }
 
-  // ── Stage: installer sign-off ────────────────────────────────────────────────
-  function renderInstallerSign() {
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <DrawOutlined color="primary" />
-            <Typography variant="subtitle1" fontWeight={600}>Field sign-off</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Step {stepsSorted.length + 1} of {stepsSorted.length + 2} - sign to confirm workflow completion
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField label="Your name *" size="small" fullWidth
-              value={instName} onChange={e => setInstName(e.target.value)} />
-            <Stack direction="row" spacing={1}>
-              <Box sx={{ flex: 1 }}>
-                <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 0.5 }}>Outcome</Typography>
-                <Select size="small" fullWidth value={instOutcome}
-                  onChange={e => setInstOutcome(e.target.value as typeof instOutcome)}>
-                  <MenuItem value="Completed">Completed - work done as specified</MenuItem>
-                  <MenuItem value="Conditional">Conditional - completed with conditions</MenuItem>
-                </Select>
-              </Box>
-            </Stack>
-            <SignaturePad
-              label="Draw your signature below (optional)"
-              onChange={instPadOnChange.current}
-              height={140}
-            />
-            <TextField label="Notes (optional)" size="small" fullWidth multiline minRows={2}
-              value={instNotes} onChange={e => setInstNotes(e.target.value)} />
-            <Alert severity="info" sx={{ fontSize: 12 }}>
-              Signing confirms that all recorded time entries and captured field data are correct. After you sign, you will not be able to edit time or field captures. Project Managers and Admins may still make corrections until customer sign-off.
-            </Alert>
-            <FormControlLabel
-              control={
-                <Checkbox
-                  checked={instConsent}
-                  onChange={(e) => setInstConsent(e.target.checked)}
-                  size="small"
-                />
-              }
-              label={
-                <Typography variant="body2" sx={{ fontSize: 12 }}>
-                  I confirm all recorded time and captured field data are correct, and I understand I cannot edit them after signing.
-                </Typography>
-              }
-            />
-            {instError && <Alert severity="error" sx={{ fontSize: 12 }}>{instError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={handleClose}>Skip & close</Button>
-          <Button variant="contained" onClick={handleInstallerSign}
-            disabled={instSaving || !instName.trim() || !instConsent}
-            startIcon={instSaving ? <CircularProgress size={14} /> : undefined}>
-            {instSaving ? "Signing..." : "Sign & continue"}
-          </Button>
-        </DialogActions>
-      </>
-    );
-  }
-
-  // â"€â"€ Stage: customer sign-off â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
-  function renderCustomerSign() {
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <DrawOutlined color="success" />
-            <Typography variant="subtitle1" fontWeight={600}>Customer sign-off</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-          <Typography variant="caption" color="text.secondary">
-            Step {stepsSorted.length + 2} of {stepsSorted.length + 2} - customer approval
-          </Typography>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-
-            {/* Option buttons */}
-            {custMode === "options" && (
-              <Stack spacing={1.5}>
-                <Button fullWidth variant="outlined" size="large"
-                  startIcon={<DrawOutlined />}
-                  onClick={() => setCustMode("sign-now")}
-                  sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5 }}>
-                  <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2" fontWeight={600}>Sign here now</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Customer is present - hand them the device to sign
-                    </Typography>
-                  </Box>
-                </Button>
-                <Button fullWidth variant="outlined" size="large"
-                  startIcon={<EmailOutlined />}
-                  onClick={() => setCustMode("send-link")}
-                  sx={{ justifyContent: "flex-start", textTransform: "none", py: 1.5 }}>
-                  <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2" fontWeight={600}>Send signature link</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      Email a secure link - run stays pending until customer signs
-                    </Typography>
-                  </Box>
-                </Button>
-                <Button fullWidth variant="text" size="large"
-                  onClick={handleWaiveCustomerSignature}
-                  sx={{ justifyContent: "flex-start", textTransform: "none", color: "text.secondary" }}>
-                  <Box sx={{ textAlign: "left" }}>
-                    <Typography variant="body2">Skip - no customer signature required</Typography>
-                    <Typography variant="caption" color="text.disabled">
-                      Run completes without customer approval
-                    </Typography>
-                  </Box>
-                </Button>
-              </Stack>
-            )}
-
-            {/* Sign now */}
-            {custMode === "sign-now" && (
-              <Stack spacing={1.5}>
-                <Stack direction="row" spacing={1}>
-                  <TextField label="Customer name *" size="small" fullWidth
-                    value={custName} onChange={e => setCustName(e.target.value)} />
-                  <TextField label="Title / Role" size="small" fullWidth
-                    value={custTitle} onChange={e => setCustTitle(e.target.value)} />
-                </Stack>
-                <TextField label="Email (optional)" size="small" fullWidth
-                  value={custEmail} onChange={e => setCustEmail(e.target.value)} />
-                <Select size="small" fullWidth value={custOutcome}
-                  onChange={e => setCustOutcome(e.target.value as typeof custOutcome)}>
-                  <MenuItem value="Completed">Completed - work accepted</MenuItem>
-                  <MenuItem value="Conditional">Conditional - accepted with conditions</MenuItem>
-                  <MenuItem value="Declined">Declined - work not accepted</MenuItem>
-                </Select>
-                <SignaturePad
-                  label="Customer signature (optional)"
-                  onChange={custPadOnChange.current}
-                  height={140}
-                />
-                <TextField label="Notes (optional)" size="small" fullWidth multiline minRows={2}
-                  value={custNotes} onChange={e => setCustNotes(e.target.value)} />
-              </Stack>
-            )}
-
-            {/* Send link */}
-            {custMode === "send-link" && !linkSent && (
-              <Stack spacing={1.5}>
-                <Alert severity="info" sx={{ fontSize: 12 }}>
-                  The customer will receive a secure link to review and sign the completed workflow documentation.
-                </Alert>
-                <TextField label="Recipient email *" size="small" fullWidth
-                  value={linkEmail} onChange={e => setLinkEmail(e.target.value)} />
-                <TextField label="Recipient name" size="small" fullWidth
-                  value={linkName} onChange={e => setLinkName(e.target.value)} />
-                <TextField label="Link expires in (hours)" type="number" size="small" fullWidth
-                  value={linkHours} onChange={e => setLinkHours(Number(e.target.value))} />
-                <TextField label="Message to customer (optional)" size="small" fullWidth
-                  multiline minRows={3} value={linkMsg} onChange={e => setLinkMsg(e.target.value)} />
-              </Stack>
-            )}
-
-            {linkSent && (
-              <Alert severity="success" sx={{ fontSize: 12 }}>
-                Signature link sent to {linkEmail}. The run will update automatically when the customer signs.
-              </Alert>
-            )}
-
-            {custError && <Alert severity="error" sx={{ fontSize: 12 }}>{custError}</Alert>}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          {custMode !== "options" && !linkSent && (
-            <Button onClick={() => { setCustMode("options"); setCustError(null); }}>Back</Button>
-          )}
-          <Button onClick={handleClose}>
-            {linkSent ? "Close" : "Close without signing"}
-          </Button>
-          {custMode === "sign-now" && (
-            <Button variant="contained" onClick={handleCustomerSignNow}
-              disabled={custSaving || !custName.trim()}
-              startIcon={custSaving ? <CircularProgress size={14} /> : undefined}>
-              {custSaving ? "Signing..." : "Confirm signature"}
-            </Button>
-          )}
-          {custMode === "send-link" && !linkSent && (
-            <Button variant="contained" onClick={handleSendLink}
-              disabled={linkSending || !linkEmail.trim()}
-              startIcon={linkSending ? <CircularProgress size={14} /> : <EmailOutlined />}>
-              {linkSending ? "Sending..." : "Send link"}
-            </Button>
-          )}
-        </DialogActions>
-      </>
-    );
-  }
-
   const issueForDetail = issueDetailId ? issues.find((i) => i.id === issueDetailId) ?? null : null;
 
   return (
@@ -3333,8 +3134,61 @@ export default function WorkOrderRunner({
             onComplete={(merged) => { void handleSave(merged); }}
           />
         )}
-        {stage === "installer-sign" && renderInstallerSign()}
-        {stage === "customer-sign"  && renderCustomerSign()}
+        {stage === "installer-sign" && (
+          <WorkOrderRunnerInstallerSignStage
+            assetTag={assetTag}
+            stepsCount={stepsSorted.length}
+            instName={instName}
+            onInstNameChange={setInstName}
+            instOutcome={instOutcome}
+            onInstOutcomeChange={setInstOutcome}
+            instNotes={instNotes}
+            onInstNotesChange={setInstNotes}
+            instConsent={instConsent}
+            onInstConsentChange={setInstConsent}
+            instError={instError}
+            instSaving={instSaving}
+            instPadOnChange={instPadOnChange}
+            onClose={handleClose}
+            onSign={handleInstallerSign}
+          />
+        )}
+        {stage === "customer-sign" && (
+          <WorkOrderRunnerCustomerSignStage
+            assetTag={assetTag}
+            stepsCount={stepsSorted.length}
+            custMode={custMode}
+            onCustModeChange={setCustMode}
+            custName={custName}
+            onCustNameChange={setCustName}
+            custTitle={custTitle}
+            onCustTitleChange={setCustTitle}
+            custEmail={custEmail}
+            onCustEmailChange={setCustEmail}
+            custOutcome={custOutcome}
+            onCustOutcomeChange={setCustOutcome}
+            custNotes={custNotes}
+            onCustNotesChange={setCustNotes}
+            custPadOnChange={custPadOnChange}
+            linkSent={linkSent}
+            linkEmail={linkEmail}
+            onLinkEmailChange={setLinkEmail}
+            linkName={linkName}
+            onLinkNameChange={setLinkName}
+            linkHours={linkHours}
+            onLinkHoursChange={setLinkHours}
+            linkMsg={linkMsg}
+            onLinkMsgChange={setLinkMsg}
+            custError={custError}
+            onClearCustError={() => setCustError(null)}
+            custSaving={custSaving}
+            linkSending={linkSending}
+            onClose={handleClose}
+            onWaiveSignature={handleWaiveCustomerSignature}
+            onSignNow={handleCustomerSignNow}
+            onSendLink={handleSendLink}
+          />
+        )}
         {/* â"€â"€ Persistent offline / sync bar â"€â"€ */}
         {isRealRun && (!isOnline || pendingCount > 0 || syncing) && (
           <Box sx={{
