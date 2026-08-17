@@ -5,6 +5,7 @@
  * Events dispatched:
  *   "sse:assets:updated"   — detail: { productId?, projectId? }
  *   "sse:projects:updated" — detail: { projectId? }
+ *   "sse:fault-reports:updated" — detail: { id, referenceCode, status, severity, createdAtUtc }
  *
  * The hook is safe to mount at the app-shell level. It:
  *   - Does nothing if no auth token is present (not logged in)
@@ -140,6 +141,14 @@ export function useSseEvents() {
               }
             });
           }
+        } catch { /* malformed JSON — ignore */ }
+      });
+
+      es.addEventListener("fault-reports:updated", (e: MessageEvent) => {
+        try {
+          const detail = JSON.parse((e as MessageEvent).data as string) as Record<string, unknown>;
+          window.dispatchEvent(new Event("notifications:refresh"));
+          window.dispatchEvent(new CustomEvent("sse:fault-reports:updated", { detail }));
         } catch { /* malformed JSON — ignore */ }
       });
 
