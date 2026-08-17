@@ -1,12 +1,12 @@
 import {
-  Alert, Box, Button, Chip, CircularProgress, Collapse, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid,
+  Alert, Box, Button, Chip, CircularProgress, Dialog, DialogActions, DialogContent, DialogTitle, Divider, FormControl, Grid,
   IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
   AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CheckCircleOutlined, CloseOutlined,
-  EditOutlined, ErrorOutlineOutlined, ExpandLessOutlined, ExpandMoreOutlined,
+  EditOutlined, ErrorOutlineOutlined,
   FactCheckOutlined, FolderOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
-  PhotoCameraOutlined, PlayArrowOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingDownOutlined, TrendingFlatOutlined, TrendingUpOutlined,
+  PhotoCameraOutlined, PlayArrowOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingUpOutlined,
   WarningAmberOutlined, WorkOutlineOutlined,
 } from "@mui/icons-material";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -69,9 +69,11 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../../components/ui/WorkflowSignatureFlowHost";
 import AttentionItemList from "./AttentionItemList";
 import DashboardAttentionItemRow from "./DashboardAttentionItemRow";
-import DashboardGaugeCircle from "./DashboardGaugeCircle";
 import DashboardNeedsAttentionSection from "./DashboardNeedsAttentionSection";
 import DashboardInspectionAttentionSection from "./DashboardInspectionAttentionSection";
+import DashboardRegionalSnapshotSection from "./DashboardRegionalSnapshotSection";
+import DashboardEvidenceHealthGrid from "./DashboardEvidenceHealthGrid";
+import DashboardWorkloadPanel, { type ScopedWorkloadItem, type WorkloadProjectBreakdown } from "./DashboardWorkloadPanel";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -132,8 +134,6 @@ type NativeMyJobsCardContext = {
   runs: AssetWorkflowRun[];
 };
 
-const WINDOW_OPTIONS = [30, 60, 90, 180];
-
 const ALL_DASHBOARDS_VALUE = "__all__";
 const DASHBOARD_WORKSPACE_SESSION_PREFIX = "dashboard:web:workspace:";
 const DASHBOARD_ATTENTION_SESSION_PREFIX = "dashboard:web:attention:";
@@ -157,11 +157,6 @@ type InspectionRunSignal = {
 };
 
 type AdminInstallFilter = "all" | "in-progress" | "unassigned";
-
-type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStarted: number; inProgress: number; paused: number; total: number };
-type ScopedWorkloadItem = TechnicianWorkloadSummaryItem & {
-  projectBreakdown: WorkloadProjectBreakdown[];
-};
 
 const Dashboard = () => {
   const navigate   = useNavigate();
@@ -3334,41 +3329,18 @@ const Dashboard = () => {
   );
 
   const RegionalSnapshotSection = (
-    <Box className="glass-card" sx={{ p: 3 }}>
-      <Typography variant="h6" gutterBottom sx={{ fontFamily: "Sora" }}>
-        Regional snapshot ({activeOffice})
-      </Typography>
-      <Grid container spacing={2}>
-        {(activeOffice === "All" ? availableCountries : [activeOffice]).map((region) => {
-          const rp = projects.filter((p) => {
-            const c = countryForOffice(p.office);
-            return c === region || p.office === region;
-          });
-          const rIds = new Set(globalOffices.filter((o) => o.country === region).map((o) => o.id));
-          const rAssets = openAssets.filter((a) => {
-            if (a.officeId) return rIds.has(a.officeId);
-            const c = countryForOffice(a.office);
-            return c === region || a.office === region;
-          }).length;
-          return (
-            <Grid key={region} item xs={12} md={4}>
-              <Box onClick={() => { updateActiveOffice(region); navigate("/projects"); }}
-                sx={{
-                  p: 2, borderRadius: 2, border: "1px solid rgba(255,255,255,0.08)",
-                  background: "rgba(255,255,255,0.04)", cursor: "pointer", transition: "all 0.2s",
-                  "&:hover": { background: "rgba(45,212,191,0.1)", borderColor: "rgba(45,212,191,0.3)" },
-                }}>
-                <Typography variant="subtitle1" sx={{ fontFamily: "Sora" }}>{region}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {rp.length} projects - {rp.filter(p => p.status === "In Progress").length} in progress
-                </Typography>
-                <Typography variant="body2" color="text.secondary">{rAssets} active installations</Typography>
-              </Box>
-            </Grid>
-          );
-        })}
-      </Grid>
-    </Box>
+    <DashboardRegionalSnapshotSection
+      activeOffice={activeOffice}
+      availableCountries={availableCountries}
+      projects={projects}
+      globalOffices={globalOffices}
+      openAssets={openAssets}
+      countryForOffice={countryForOffice}
+      onSelectRegion={(region) => {
+        updateActiveOffice(region);
+        navigate("/projects");
+      }}
+    />
   );
 
   const ProjectStatusGrid = (
@@ -3798,356 +3770,35 @@ const Dashboard = () => {
   );
 
   const EvidenceHealthGrid = (
-    <Box ref={analyticsSectionCallbackRef}>
-    <Grid container spacing={2}>
-
-      {/* Phase 4: Evidence Completeness */}
-      <Grid item xs={12} md={6}>
-        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-            <FactCheckOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-            <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", flex: 1 }}>Evidence Completeness</Typography>
-            <Select size="small" value={evidenceWindow} onChange={(e) => setEvidenceWindow(Number(e.target.value))}
-              sx={{ fontSize: "0.75rem", height: 28 }}>
-              {WINDOW_OPTIONS.map((d) => <MenuItem key={d} value={d}>{d}d</MenuItem>)}
-            </Select>
-          </Stack>
-
-          {evidenceLoading ? <LinearProgress /> : evidenceData ? (
-            <Stack spacing={2}>
-              <Stack direction="row" spacing={3} alignItems="center">
-                <DashboardGaugeCircle value={evidenceData.overallScore} size={90} />
-                <Stack spacing={1} sx={{ flex: 1 }}>
-                  {[
-                    { label: "Signed",         pct: evidenceData.signedPct,           n: evidenceData.signed },
-                    { label: "Steps Complete", pct: evidenceData.allStepsCompletePct, n: evidenceData.allStepsComplete },
-                    { label: "Has Media",      pct: evidenceData.hasMediaPct,         n: evidenceData.hasMedia },
-                    { label: "No Open Issues", pct: evidenceData.noOpenIssuesPct,     n: evidenceData.noOpenIssues },
-                  ].map(({ label, pct, n }) => (
-                    <Stack key={label} direction="row" alignItems="center" spacing={1}>
-                      <Typography variant="caption" sx={{ minWidth: 100 }}>{label}</Typography>
-                      <Box sx={{ flex: 1, height: 5, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <Box sx={{ height: "100%", borderRadius: 3, width: `${pct}%`, background: pct >= 80 ? "#2e7d32" : pct >= 60 ? "#ed6c02" : "#d32f2f" }} />
-                      </Box>
-                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 36, textAlign: "right" }}>{pct}%</Typography>
-                      <Typography variant="caption" color="text.disabled" sx={{ minWidth: 28 }}>({n})</Typography>
-                    </Stack>
-                  ))}
-                </Stack>
-              </Stack>
-              {evidenceData.byProject.filter(p => p.score < 70).length > 0 && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>Projects below 70%</Typography>
-                  <Stack spacing={0.5} sx={{ mt: 0.5 }}>
-                    {evidenceData.byProject.filter(p => p.score < 70).slice(0, 4).map((p) => (
-                      <Stack key={p.projectId} direction="row" alignItems="center" spacing={1}
-                        onClick={() => navigate(`/projects/${p.projectId}`)}
-                        sx={{ cursor: "pointer", px: 1, py: 0.25, borderRadius: 1, "&:hover": { background: "rgba(255,255,255,0.05)" } }}>
-                        <Typography variant="caption" sx={{ flex: 1 }} noWrap>{p.jobNumber}</Typography>
-                        <Chip label={`${p.score}%`} size="small"
-                          color={p.score < 50 ? "error" : "warning"} variant="outlined"
-                          sx={{ height: 16, fontSize: "0.6rem" }} />
-                      </Stack>
-                    ))}
-                  </Stack>
-                </Box>
-              )}
-              <Typography variant="caption" color="text.disabled">{evidenceData.totalRuns} completed runs in last {evidenceWindow} days</Typography>
-            </Stack>
-          ) : (
-            <Typography variant="caption" color={evidenceError ? "error.main" : "text.disabled"}>
-              {evidenceError
-                ? "Couldn't load evidence completeness. Check your connection and retry."
-                : "No data available for selected window."}
-            </Typography>
-          )}
-        </Box>
-      </Grid>
-
-      {/* Phase 5: Workflow Health Score */}
-      <Grid item xs={12} md={6}>
-        <Box className="glass-card" sx={{ p: 2.5, height: "100%" }}>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-            <AssessmentOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-            <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", flex: 1 }}>Workflow Health</Typography>
-            <Select size="small" value={healthWindow} onChange={(e) => setHealthWindow(Number(e.target.value))}
-              sx={{ fontSize: "0.75rem", height: 28 }}>
-              {WINDOW_OPTIONS.map((d) => <MenuItem key={d} value={d}>{d}d</MenuItem>)}
-            </Select>
-          </Stack>
-
-          {healthLoading ? <LinearProgress /> : healthData ? (
-            <Stack spacing={2}>
-              <Stack direction="row" spacing={3} alignItems="center">
-                <Box sx={{ position: "relative" }}>
-                  <DashboardGaugeCircle value={healthData.overallScore} size={90}
-                    color={healthData.overallScore >= 80 ? "#2e7d32" : healthData.overallScore >= 60 ? "#ed6c02" : "#d32f2f"} />
-                  <Tooltip title={`vs previous ${healthWindow}d: ${healthData.scoreDelta > 0 ? "+" : ""}${healthData.scoreDelta}%`}>
-                    <Box sx={{ position: "absolute", bottom: -4, right: -4 }}>
-                      {healthData.scoreDelta > 0
-                        ? <TrendingUpOutlined sx={{ fontSize: 16, color: "success.main" }} />
-                        : healthData.scoreDelta < 0
-                        ? <TrendingDownOutlined sx={{ fontSize: 16, color: "error.main" }} />
-                        : <TrendingFlatOutlined sx={{ fontSize: 16, color: "text.disabled" }} />}
-                    </Box>
-                  </Tooltip>
-                </Box>
-                <Stack spacing={1} sx={{ flex: 1 }}>
-                  {[
-                    { label: "Completion",       pct: healthData.completionRate },
-                    { label: "1st-Run Success",  pct: healthData.firstRunSuccessRate },
-                    { label: "Step Pass Rate",   pct: healthData.stepPassRate },
-                    { label: "Clean Closure",    pct: healthData.cleanClosureRate },
-                  ].map(({ label, pct }) => (
-                    <Stack key={label} direction="row" alignItems="center" spacing={1}>
-                      <Typography variant="caption" sx={{ minWidth: 108 }}>{label}</Typography>
-                      <Box sx={{ flex: 1, height: 5, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <Box sx={{ height: "100%", borderRadius: 3, width: `${pct}%`, background: pct >= 80 ? "#2e7d32" : pct >= 60 ? "#ed6c02" : "#d32f2f" }} />
-                      </Box>
-                      <Typography variant="caption" fontWeight={700} sx={{ minWidth: 36, textAlign: "right" }}>{pct}%</Typography>
-                    </Stack>
-                  ))}
-                </Stack>
-              </Stack>
-              {healthData.byType.length > 0 && (
-                <Box>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>By workflow type</Typography>
-                  <Stack direction="row" flexWrap="wrap" gap={0.75} sx={{ mt: 0.75 }}>
-                    {healthData.byType.map((t) => (
-                      <Chip key={t.typeName}
-                        label={`${t.typeName}: ${t.score}%`} size="small"
-                        color={t.score >= 80 ? "success" : t.score >= 60 ? "warning" : "error"}
-                        variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />
-                    ))}
-                  </Stack>
-                </Box>
-              )}
-              <Typography variant="caption" color="text.disabled">{healthData.totalRuns} runs in last {healthWindow} days - prev score {healthData.previousScore}%</Typography>
-            </Stack>
-          ) : (
-            <Typography variant="caption" color={healthError ? "error.main" : "text.disabled"}>
-              {healthError
-                ? "Couldn't load workflow health. Check your connection and retry."
-                : "No data available for selected window."}
-            </Typography>
-          )}
-        </Box>
-      </Grid>
-    </Grid>
-    </Box>
+    <DashboardEvidenceHealthGrid
+      sectionRef={analyticsSectionCallbackRef}
+      evidenceWindow={evidenceWindow}
+      onEvidenceWindowChange={setEvidenceWindow}
+      evidenceLoading={evidenceLoading}
+      evidenceData={evidenceData}
+      evidenceError={evidenceError}
+      healthWindow={healthWindow}
+      onHealthWindowChange={setHealthWindow}
+      healthLoading={healthLoading}
+      healthData={healthData}
+      healthError={healthError}
+      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+    />
   );
 
   const WorkloadPanel = (
-    <Box className="glass-card" sx={{ p: 3 }}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 2 }}>
-        <Box>
-          <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload</Typography>
-          <Typography variant="caption" color="text.secondary">Click a card to expand · report icon for detail print/download</Typography>
-        </Box>
-        <Stack direction="row" spacing={1.5} alignItems="center">
-          <Tooltip title="Workflow run is currently active and in progress" arrow>
-            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
-              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "success.main" }} />
-              <Typography variant="caption" color="text.secondary">Active</Typography>
-            </Stack>
-          </Tooltip>
-          <Tooltip title="Workflow run is currently paused" arrow>
-            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
-              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "warning.main" }} />
-              <Typography variant="caption" color="text.secondary">Paused</Typography>
-            </Stack>
-          </Tooltip>
-          <Tooltip title="No workflow run has been started yet" arrow>
-            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
-              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "text.secondary" }} />
-              <Typography variant="caption" color="text.secondary">Queued</Typography>
-            </Stack>
-          </Tooltip>
-          <Tooltip title="Asset is assigned and acknowledged but the workflow hasn't started" arrow>
-            <Stack direction="row" spacing={0.5} alignItems="center" sx={{ cursor: "help" }}>
-              <Box sx={{ width: 10, height: 10, borderRadius: "50%", bgcolor: "info.main", opacity: 0.7 }} />
-              <Typography variant="caption" color="text.secondary">Pending</Typography>
-            </Stack>
-          </Tooltip>
-          {scopedWorkload.length > 0 && (
-            <Tooltip title="Print / download full workload report">
-              <IconButton size="small" onClick={() => setWorkloadReportAllOpen(true)} sx={{ color: "text.secondary" }}>
-                <PrintOutlined sx={{ fontSize: 18 }} />
-              </IconButton>
-            </Tooltip>
-          )}
-        </Stack>
-      </Stack>
-      {workloadLoading && !cacheHydrated ? <LinearProgress /> : scopedWorkload.length === 0 ? (
-        <Typography variant="body2" color="text.secondary">No open assets currently assigned to technicians in this scope.</Typography>
-      ) : (
-        <Stack spacing={1.5}>
-          {scopedWorkload.map((w) => {
-            const isExpanded = expandedWorkloadId === w.userId;
-            const inPct     = w.totalAssigned > 0 ? (w.inProgress / w.totalAssigned) * 100 : 0;
-            const pausedPct = w.totalAssigned > 0 ? (w.paused   / w.totalAssigned) * 100 : 0;
-            const notPct    = w.totalAssigned > 0 ? (w.notStarted / w.totalAssigned) * 100 : 0;
-            const stepPct   = w.totalSteps > 0 ? Math.min(100, (w.completedSteps / w.totalSteps) * 100) : 0;
-            const load      = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
-            const loadLabel = w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light";
-            const barColor  = w.hasIssues ? "warning.main" : "primary.main";
-            const startLabel = w.startedAt
-              ? new Date(w.startedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-              : null;
-            const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
-            return (
-              <Paper key={w.userId} elevation={0}
-                onClick={() => setExpandedWorkloadId(isExpanded ? null : w.userId)}
-                sx={{
-                  p: 1.5, border: "1px solid",
-                  borderColor: isExpanded ? "primary.main" : w.hasIssues ? "warning.dark" : "var(--stroke)",
-                  borderRadius: 1.5, cursor: "pointer", transition: "all 0.15s",
-                  background: isExpanded ? "rgba(45,212,191,0.04)" : undefined,
-                  "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" },
-                }}>
-                <Stack spacing={0.5}>
-                  {/* ── Summary row ── */}
-                  <Stack direction="row" alignItems="center" spacing={2}>
-                    <Box sx={{ flex: "0 0 160px", minWidth: 0 }}>
-                      <Stack direction="row" spacing={0.75} alignItems="center">
-                        <Typography variant="body2" fontWeight={600} noWrap>{w.fullName}</Typography>
-                        <Chip label={loadLabel} size="small" color={load} variant="outlined" sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }} />
-                        {w.hasIssues && <Chip label="Issues" size="small" color="warning" sx={{ height: 16, fontSize: "0.6rem", flexShrink: 0 }} />}
-                      </Stack>
-                    </Box>
-                    <Box sx={{ flex: 1 }}>
-                      <Tooltip title={
-                        w.totalSteps > 0
-                          ? `${w.completedSteps}/${w.totalSteps} steps · ${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued`
-                          : `${w.inProgress} active · ${w.paused} paused · ${w.notStarted} queued`
-                      } arrow>
-                        <Box sx={{ position: "relative", height: 10, borderRadius: 5, overflow: "hidden", background: "rgba(255,255,255,0.08)", display: "flex" }}>
-                          {w.totalSteps > 0 ? (
-                            <Box sx={{ width: `${stepPct}%`, bgcolor: barColor, transition: "width 0.4s" }} />
-                          ) : (
-                            <>
-                              {inPct > 0 && <Box sx={{ width: `${inPct}%`, bgcolor: "success.main", transition: "width 0.4s" }} />}
-                              {pausedPct > 0 && <Box sx={{ width: `${pausedPct}%`, bgcolor: "warning.main", transition: "width 0.4s" }} />}
-                              {notPct > 0 && <Box sx={{ width: `${notPct}%`, bgcolor: "text.secondary", transition: "width 0.4s" }} />}
-                            </>
-                          )}
-                        </Box>
-                      </Tooltip>
-                      {w.totalSteps > 0 && (
-                        <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.65rem" }}>
-                          {w.completedSteps}/{w.totalSteps} steps
-                        </Typography>
-                      )}
-                    </Box>
-                    <Chip label={w.totalAssigned} size="small" color={load} sx={{ fontWeight: 700, minWidth: 40 }} />
-                    <Tooltip title="View detail / print / download report">
-                      <span>
-                        <IconButton size="small"
-                          onClick={(e) => { e.stopPropagation(); setWorkloadReportTarget(w as ScopedWorkloadItem); }}
-                          sx={{ color: "text.secondary", flexShrink: 0 }}>
-                          <AssessmentOutlined sx={{ fontSize: 16 }} />
-                        </IconButton>
-                      </span>
-                    </Tooltip>
-                    <IconButton size="small" sx={{ color: "text.secondary", flexShrink: 0 }}
-                      onClick={(e) => { e.stopPropagation(); setExpandedWorkloadId(isExpanded ? null : w.userId); }}>
-                      {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
-                    </IconButton>
-                  </Stack>
-
-                  {/* ── Status counts row ── */}
-                  <Stack direction="row" spacing={0} alignItems="center" flexWrap="nowrap">
-                    <Typography variant="caption" color="text.secondary" noWrap>
-                      {w.inProgress} active ·{" "}
-                      <Tooltip title="Workflow run is currently paused" arrow>
-                        <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.paused} paused</span>
-                      </Tooltip>
-                      {" · "}
-                      <Tooltip title="No workflow run has been started yet" arrow>
-                        <span style={{ cursor: "help", textDecoration: "underline dotted" }}>{w.notStarted} queued</span>
-                      </Tooltip>
-                      {startLabel && <span style={{ opacity: 0.5 }}>{" · since "}{startLabel}</span>}
-                    </Typography>
-                  </Stack>
-
-                  {/* ── Project chips ── */}
-                  {w.projectBreakdown.length > 0 && (
-                    <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                      {w.projectBreakdown.map((pb) => (
-                        <Tooltip key={pb.projectId} title={`${pb.inProgress} active · ${pb.paused} paused · ${pb.notStarted} queued`} arrow>
-                          <Chip
-                            label={`${pb.jobNumber}: ${pb.total}`}
-                            size="small" variant="outlined"
-                            color={pb.inProgress > 0 ? "primary" : pb.paused > 0 ? "warning" : "default"}
-                            onClick={(e) => { e.stopPropagation(); navigate(`/projects/${pb.projectId}`); }}
-                            sx={{ height: 16, fontSize: "0.6rem", cursor: "pointer" }}
-                          />
-                        </Tooltip>
-                      ))}
-                    </Stack>
-                  )}
-
-                  {/* ── Expanded chevron detail ── */}
-                  <Collapse in={isExpanded} unmountOnExit>
-                    <Box sx={{ mt: 1, pt: 1, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
-                      {w.projectBreakdown.map((pb) => {
-                        const pbAssets = techAssets.filter((a) => a.projectId === pb.projectId);
-                        const proj = projectById.get(pb.projectId);
-                        return (
-                          <Box key={pb.projectId} sx={{ mb: 1.5 }}>
-                            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                              <Typography variant="caption" fontWeight={700} color="primary.main">
-                                {pb.jobNumber}
-                              </Typography>
-                              {proj?.customerName && (
-                                <Typography variant="caption" color="text.secondary" noWrap>— {proj.customerName}</Typography>
-                              )}
-                              {proj?.projectManager && (
-                                <Chip label={`PM: ${proj.projectManager}`} size="small" variant="outlined"
-                                  sx={{ height: 16, fontSize: "0.58rem", ml: "auto" }} />
-                              )}
-                            </Stack>
-                            <Stack spacing={0.4}>
-                              {pbAssets.map((a) => {
-                                const state = isPausedAsset(a.runStatus) ? "Paused"
-                                  : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "In Progress"
-                                  : isNotStartedAsset(a.status) ? "Not Started" : a.status;
-                                const stateColor = state === "In Progress" ? "primary" : state === "Paused" ? "warning" : "default";
-                                return (
-                                  <Stack key={a.id} direction="row" alignItems="center" spacing={1}
-                                    sx={{ px: 1, py: 0.25, borderRadius: 1, background: "rgba(255,255,255,0.03)" }}>
-                                    <Typography variant="caption" fontWeight={600} noWrap sx={{ flex: "0 0 100px", fontSize: "0.68rem" }}>
-                                      {a.assetTag || a.assetName || a.id}
-                                    </Typography>
-                                    <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1, fontSize: "0.65rem" }}>
-                                      {a.assetName || a.assetModel || ""}
-                                    </Typography>
-                                    {a.totalSteps > 0 && (
-                                      <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem", flexShrink: 0 }}>
-                                        {a.completedSteps}/{a.totalSteps} steps
-                                      </Typography>
-                                    )}
-                                    <Chip label={state} size="small" color={stateColor as "primary"|"warning"|"default"} variant="outlined"
-                                      sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
-                                  </Stack>
-                                );
-                              })}
-                              {pbAssets.length === 0 && (
-                                <Typography variant="caption" color="text.disabled" sx={{ pl: 1 }}>No open assets</Typography>
-                              )}
-                            </Stack>
-                          </Box>
-                        );
-                      })}
-                    </Box>
-                  </Collapse>
-                </Stack>
-              </Paper>
-            );
-          })}
-        </Stack>
-      )}
-    </Box>
+    <DashboardWorkloadPanel
+      scopedWorkload={scopedWorkload}
+      workloadLoading={workloadLoading}
+      cacheHydrated={cacheHydrated}
+      expandedWorkloadId={expandedWorkloadId}
+      onExpandedWorkloadIdChange={setExpandedWorkloadId}
+      openAssets={openAssets}
+      projectById={projectById}
+      onOpenAllReports={() => setWorkloadReportAllOpen(true)}
+      onOpenTechnicianReport={setWorkloadReportTarget}
+      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+    />
   );
 
   const InspectionInboxSection = showInspectionInbox ? (
