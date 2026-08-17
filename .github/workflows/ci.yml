@@ -18,10 +18,10 @@ jobs:
       - run: npm run build            # tsc -b (the only typecheck) + vite bundle
       - run: npm run check:bundle-budget
       - run: npm test                 # vitest run
-      # Lint is a non-blocking backlog gate for now (legacy codebase had no linter).
-      # Remove continue-on-error once the ~13 error-level findings are burned down.
+      # Blocking as of the S1 cleanup: the error-level findings are at zero, so a
+      # new one now fails the build. The ~244 warnings remain a deliberate backlog
+      # and do not fail — see eslint.config.js for which rules are errors and why.
       - run: npm run lint
-        continue-on-error: true
 
   backend:
     runs-on: ubuntu-latest

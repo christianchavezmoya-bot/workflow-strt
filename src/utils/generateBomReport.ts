@@ -94,7 +94,7 @@ function varianceLabel(expected: number, actual: number): string {
 }
 
 function safeFilename(s: string): string {
-  return s.replace(/[^a-zA-Z0-9_\-]/g, "_");
+  return s.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
 
 // Collect all unique capture field names across all inventory items

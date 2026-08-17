@@ -776,7 +776,7 @@ export default function WorkOrderRunner({
     setActiveRun(run);
     syncRunTimeState(run);
 
-    let prevValues: Record<string, Record<string, string>> = {};
+    const prevValues: Record<string, Record<string, string>> = {};
     let navRestored = false;
     if (run.stepResultsJson && run.stepResultsJson !== "[]") {
       try {
@@ -832,7 +832,7 @@ export default function WorkOrderRunner({
         }
       }
 
-      let run = activeRunId
+      const run = activeRunId
         ? await assetWorkflowRunService.getByIdFresh(activeRunId)
         : await assetWorkflowRunService.startRun(projectAssetId, workflowConfigId);
 
@@ -906,7 +906,7 @@ export default function WorkOrderRunner({
         }
       }
 
-      let run = activeRunId
+      const run = activeRunId
         ? await assetWorkflowRunService.getById(activeRunId)
         : await assetWorkflowRunService.startRun(projectAssetId!, workflowConfigId!);
 

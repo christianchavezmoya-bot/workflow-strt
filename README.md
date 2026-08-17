@@ -1,23 +1,118 @@
-# workflow-strt
+# Strata N-Go
 
-## Docs
+Field-operations app for telecom and utility project management: projects, installable assets, work
+instructions and workflows, inspections, issues, documents and e-signatures.
 
-Architecture documentation is generated from the current app structure.
+One React codebase ships three ways — desktop web, and Android and iOS via Capacitor wrappers — all
+talking to an ASP.NET Core API.
+
+| Part | Stack | Where |
+|---|---|---|
+| Frontend | React 18, TypeScript, MUI 5, Vite, Redux Toolkit | `src/` |
+| Backend | ASP.NET Core 8, EF Core, SQLite (dev) / Postgres (cloud) | `server/Commtrac.Api/` |
+| Mobile | Capacitor 8 wrapping the same web build | `android/`, `ios/` |
+
+---
+
+## Get it running
+
+You need two terminals: one for the API, one for the web app.
+
+### Prerequisites
+
+| Tool | Version | Check |
+|---|---|---|
+| Node.js | 24 | `node --version` |
+| .NET SDK | 8.0 | `dotnet --version` |
+| Git | any recent | `git --version` |
+
+Optional: Docker Desktop (for the Postgres staging stack), Xcode (iOS), Android Studio (Android).
+
+### 1. Install
 
 ```bash
-npm run docs:update
+git clone <repo-url>
+cd workflow-strt
+npm install
 ```
 
-This repo also uses a pre-commit hook to refresh `docs/ARCHITECTURE.md` before each commit.
-If hooks are not active in your local clone, run:
+### 2. Start the API — terminal one
 
 ```bash
-npm run hooks:install
+cd server/Commtrac.Api
+dotnet run
 ```
 
-## Android Terminal Setup
+Runs on **http://localhost:4000**. Swagger UI is at http://localhost:4000/swagger.
 
-Use the helper script before Gradle or ADB commands so Terminal uses the same JDK and SDK as Android Studio:
+The database is created and migrated automatically on first start. No manual setup.
+
+### 3. Start the web app — terminal two
+
+```bash
+npm run dev
+```
+
+Runs on **http://localhost:5173**.
+
+### 4. Sign in
+
+```
+admin@commtrac.local
+Admin123!
+```
+
+Seeded on first run. Configured in `server/Commtrac.Api/appsettings.json` under `SeedAdmin`.
+
+That's it — you should have a working app with seeded demo data.
+
+---
+
+## Everyday commands
+
+### Frontend
+
+| Command | What it does |
+|---|---|
+| `npm run dev` | Dev server on :5173 |
+| `npm run build` | **Also the only typecheck** — run this to verify TypeScript changes |
+| `npm test` | Unit tests |
+| `npm run lint` | Lint — blocking in CI, so keep it clean |
+| `npm run preview` | Serve the production build |
+
+### Backend
+
+Run from `server/Commtrac.Api/`:
+
+| Command | What it does |
+|---|---|
+| `dotnet run` | API on :4000 |
+| `dotnet build` | Build and typecheck |
+| `dotnet test` | Backend tests (from `server/`) |
+| `dotnet ef migrations add <Name>` | Add a migration — applied automatically on next start |
+
+### Checking you did no harm
+
+| Command | What it does |
+|---|---|
+| `npm run test:e2e` | Browser smoke test |
+| `npm run test:e2e:visual` | Compares every screen against reference images |
+| `npm run perf:baseline:compare` | Checks nothing got bigger or slower |
+
+See [`docs/VISUAL_BASELINE.md`](docs/VISUAL_BASELINE.md) for the last two.
+
+---
+
+## Mobile
+
+```bash
+npm run build && npx cap sync
+```
+
+**iOS:** `open ios/App/App.xcodeproj`
+
+**Android:** source the helper script first so the terminal uses the same JDK and SDK as Android
+Studio:
 
 ```bash
 source scripts/android-env.sh
@@ -25,8 +120,65 @@ cd android
 ./gradlew assembleDebug
 ```
 
-For LAN-based mobile testing, keep committed env files generic and set the device API host locally in an untracked override such as `.env.production.local`:
+### Important: phones cannot reach `localhost`
+
+A phone build must point at your machine's LAN address, not localhost. Keep committed env files
+generic and put your device address in an untracked local override:
 
 ```bash
+# .env.production.local  (not committed)
 VITE_API_BASE=http://192.168.1.102:4000/api
+```
+
+Then rebuild. On Windows, `allow-network-access.ps1` (run as admin) opens the firewall for ports
+5173 and 4000.
+
+---
+
+## Postgres staging stack
+
+Mirrors the cloud setup — Postgres, S3-compatible storage, containerised API:
+
+```bash
+./scripts/standup-staging.sh --build-web
+```
+
+| Service | Address |
+|---|---|
+| Web | http://localhost:5174 |
+| API | http://localhost:8080/api |
+| Object storage console | http://localhost:9001 |
+
+Login is `admin@StrataNgo.local` / `Admin123!`. Tear down with
+`docker compose -f docker-compose.staging.yml down`.
+
+---
+
+## Where to read next
+
+| Document | For |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | **Start here** — the non-obvious architecture, and the gotchas |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Generated inventory of routes, navigation and endpoints |
+| [`docs/EXCELLENCE_PROGRAMME.md`](docs/EXCELLENCE_PROGRAMME.md) | The current improvement plan and its stages |
+| [`docs/KNOWN_BUGS.md`](docs/KNOWN_BUGS.md) | Known problems and their status |
+| [`docs/BUG_TRIAGE.md`](docs/BUG_TRIAGE.md) | How faults get reported and triaged |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Conventions, and what CI will check |
+
+Three things worth knowing before changing anything:
+
+1. **`npm run build` is the only typecheck.** There is no separate `tsc` script.
+2. **Offline behaviour is native-only.** The request cache and offline queue are gated on running
+   inside Capacitor. On web, requests pass straight through.
+3. **`docs/ARCHITECTURE.md` is generated.** Edit `scripts/update-architecture-docs.mjs`, not the doc.
+
+---
+
+## Repo housekeeping
+
+The architecture inventory is regenerated by a pre-commit hook. If hooks are not active in your
+clone:
+
+```bash
+npm run hooks:install
 ```
