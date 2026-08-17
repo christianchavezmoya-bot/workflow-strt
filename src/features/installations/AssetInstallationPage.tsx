@@ -156,8 +156,12 @@ import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
 import { peekWebSessionCache, webCacheKey } from "../../services/webFreshCache";
 import type { PaginatedResult } from "../../types/paginatedList";
 import AssetInstallationFeatureExpandedRow from "./AssetInstallationFeatureExpandedRow";
+import AssetInstallationIssuesPanel from "./AssetInstallationIssuesPanel";
 import AssetInstallationOperationsTable from "./AssetInstallationOperationsTable";
+import AssetInstallationTimeTrackingPanel from "./AssetInstallationTimeTrackingPanel";
+import AssetInstallationWorkflowAssignmentsPanel from "./AssetInstallationWorkflowAssignmentsPanel";
 import { createOperationsAssetRowRenderer } from "./assetInstallationOperationsAssetRows";
+import { createOperationsColumnCellRenderer } from "./assetInstallationOperationsColumnCell";
 import { getOperationsColumnText, resolveOperationsConfigName, resolveOperationsConfigType } from "./assetInstallationOperationsTableLogic";
 import {
   OPERATIONS_CHECKBOX_W,
@@ -3634,218 +3638,44 @@ ${words.slice(midpoint).join(" ")}`;
   }
 
   function renderIssuesPanel(asset: ProjectAsset) {
-    let issues: AssetIssue[] = [];
-    try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
-
-    // Collect run issues WITH their runId for targeted patch saves
-    const runs = runsMap[asset.id] ?? [];
-    const runIssuesWithMeta: Array<RunIssue & { runId: string }> = [];
-    for (const run of runs) {
-      try {
-        const ri = JSON.parse(run.issuesJson || "[]") as RunIssue[];
-        runIssuesWithMeta.push(...ri.map(i => ({ ...i, runId: run.id })));
-      } catch {}
-    }
-
-    const openCount = issues.filter(i => !i.resolved).length + runIssuesWithMeta.filter(i => !i.resolved).length;
-    const totalCount = issues.length + runIssuesWithMeta.length;
-
-    function renderIssueCard(
-      issue: AssetIssue | RunIssue,
-      onSaveComment: (updated: AssetIssue | RunIssue) => void,
-      onCloseIssue: (note: string, media?: string[]) => void,
-      isRunIssue?: boolean,
-    ) {
-      const comments = issue.comments ?? [];
-      const commentVal = inlineCommentTexts[issue.id] ?? "";
-      const correctiveVal = inlineCorrectiveTexts[issue.id] ?? "";
-      const reportMediaVal    = inlineReportMedia[issue.id]     ?? [];
-      const resolutionMediaVal = inlineResolutionMedia[issue.id] ?? [];
-      return (
-        <Paper key={issue.id} variant="outlined" sx={{ p: 1.5, bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.03)", borderColor: issue.resolved ? "divider" : "error.dark", opacity: issue.resolved ? 0.65 : 1 }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
-            {/* Col 1 â€" Issue Description */}
-            <Box sx={{ flex: "0 0 28%", minWidth: 0 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
-                Issue Description
-              </Typography>
-              <Typography variant="caption" display="block" sx={{ mb: 0.5, textDecoration: issue.resolved ? "line-through" : "none" }}>
-                {issue.description}
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap mb={0.5}>
-                <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ fontSize: 9, height: 16 }} />
-                <Chip size="small" label={issue.isBlocking ? "Blocking" : "Observation"} color={issue.isBlocking ? "error" : "warning"} sx={{ fontSize: 9, height: 16 }} />
-                {isRunIssue && <Chip size="small" label="Workflow" sx={{ fontSize: 9, height: 16, "& .MuiChip-label": { px: 0.5 } }} />}
-                {issue.resolved && <Chip size="small" label="Resolved" color="success" sx={{ fontSize: 9, height: 16 }} />}
-              </Stack>
-              {issue.stepTitle && <Typography variant="caption" color="text.secondary" display="block">Step: {issue.stepTitle}</Typography>}
-              <Typography variant="caption" color="text.disabled" display="block">
-                {"createdBy" in issue && issue.createdBy ? `${issue.createdBy} | ` : ""}{new Date(issue.reportedAt).toLocaleString()}
-              </Typography>
-              {!issue.resolved && (
-                <Box sx={{ mt: 1 }}>
-                  <MediaCapture
-                    media={reportMediaVal}
-                    onChange={(m) => setInlineReportMedia(prev => ({ ...prev, [issue.id]: m }))}
-                    label="Attach Photo / Video"
-                    qrDocType="issue-photo"
-                    qrLinkedTo={issue.id}
-                  />
-                </Box>
-              )}
-              {issue.resolved && (issue.reportMedia ?? []).length > 0 && (
-                <Box sx={{ mt: 0.75 }}>
-                  <MediaCapture
-                    media={issue.reportMedia ?? []}
-                    onChange={() => {}}
-                    label="Reported Media"
-                    disabled
-                  />
-                </Box>
-              )}
-            </Box>
-
-            {/* Col 2 â€" Comments */}
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
-                Comments
-              </Typography>
-              {comments.length === 0 ? (
-                <Typography variant="caption" color="text.disabled" display="block" mb={0.75}>No comments yet.</Typography>
-              ) : (
-                <Stack spacing={0.75} sx={{ maxHeight: 120, overflowY: "auto", mb: 0.75 }}>
-                  {comments.map(c => (
-                    <Box key={c.id} sx={{ p: 0.5, borderRadius: 0.5, bgcolor: "rgba(255,255,255,0.04)" }}>
-                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
-                        <Typography variant="caption" fontWeight={700}>{c.author}</Typography>
-                        <Typography variant="caption" color="text.disabled">{new Date(c.createdAt).toLocaleString()}</Typography>
-                      </Stack>
-                      <Typography variant="caption" display="block">{c.text}</Typography>
-                    </Box>
-                  ))}
-                </Stack>
-              )}
-              {!issue.resolved && (
-                <>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    multiline
-                    rows={2}
-                    placeholder="Add a comment..."
-                    value={commentVal}
-                    onChange={(e) => setInlineCommentTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
-                    sx={{ fontSize: 11, mb: 0.5 }}
-                  />
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={!commentVal.trim() || inlineSaving}
-                    onClick={() => {
-                      const text = commentVal.trim();
-                      if (!text) return;
-                      const newComment = { id: randomId(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
-                      onSaveComment({ ...issue, reportMedia: inlineReportMedia[issue.id]?.length ? inlineReportMedia[issue.id] : issue.reportMedia, comments: [...(issue.comments ?? []), newComment] });
-                      setInlineCommentTexts(prev => ({ ...prev, [issue.id]: "" }));
-                    }}
-                    sx={{ fontSize: 11 }}
-                  >
-                    Save Comment
-                  </Button>
-                </>
-              )}
-            </Box>
-
-            {/* Col 3 â€" Corrective Action */}
-            <Box sx={{ flex: "0 0 28%", minWidth: 0 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
-                Corrective Action
-              </Typography>
-              {issue.resolved ? (
-                <Typography variant="caption" display="block" sx={{ fontStyle: "italic", color: "text.secondary" }}>
-                  {issue.resolutionNote ?? "-"}
-                </Typography>
-              ) : (
-                <>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    multiline
-                    rows={3}
-                    placeholder="Describe corrective action taken..."
-                    value={correctiveVal}
-                    onChange={(e) => setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
-                    sx={{ fontSize: 11, mb: 0.75 }}
-                  />
-                  <Box sx={{ mb: 0.75 }}>
-                    <MediaCapture
-                      media={resolutionMediaVal}
-                      onChange={(m) => setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: m }))}
-                      label="Resolution Evidence"
-                      qrDocType="issue-photo"
-                      qrLinkedTo={issue.id}
-                    />
-                  </Box>
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color="success"
-                    fullWidth
-                    disabled={!correctiveVal.trim() || inlineSaving}
-                    startIcon={<CheckCircleOutlined sx={{ fontSize: "0.85rem !important" }} />}
-                    onClick={() => {
-                      onCloseIssue(correctiveVal.trim(), resolutionMediaVal.length > 0 ? resolutionMediaVal : undefined);
-                      setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: "" }));
-                      setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: [] }));
-                    }}
-                    sx={{ fontSize: 11, py: 0.25 }}
-                  >
-                    Close Issue
-                  </Button>
-                </>
-              )}
-            </Box>
-          </Stack>
-        </Paper>
-      );
-    }
-
     return (
-      <Box sx={{ mt: 1.5 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary"
-            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Issues {totalCount > 0 && `(${openCount} open)`}
-          </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            color="error"
-            startIcon={<ReportProblemOutlined fontSize="small" />}
-            sx={{ fontSize: 11, py: 0.25 }}
-            onClick={() => { setIssueDialogAsset(asset); setIssueDialogOpen(true); }}
-          >
-            Add issue
-          </Button>
-        </Stack>
-        {totalCount === 0 ? (
-          <Typography variant="caption" color="text.disabled">No issues recorded.</Typography>
-        ) : (
-          <Stack spacing={1}>
-            {issues.map((issue) => renderIssueCard(
-              issue,
-              (updated) => saveInlineAssetIssue(asset, updated as AssetIssue),
-              (note, media) => saveInlineAssetIssue(asset, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
-            ))}
-            {runIssuesWithMeta.map((issue) => renderIssueCard(
-              issue,
-              (updated) => saveInlineRunIssue(issue.runId, asset.id, updated as RunIssue),
-              (note, media) => saveInlineRunIssue(issue.runId, asset.id, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
-              true,
-            ))}
-          </Stack>
-        )}
-      </Box>
+      <AssetInstallationIssuesPanel
+        asset={asset}
+        runs={runsMap[asset.id] ?? []}
+        currentUserName={currentUser?.fullName ?? "User"}
+        inlineCommentTexts={inlineCommentTexts}
+        inlineCorrectiveTexts={inlineCorrectiveTexts}
+        inlineReportMedia={inlineReportMedia}
+        inlineResolutionMedia={inlineResolutionMedia}
+        inlineSaving={inlineSaving}
+        onCommentTextChange={(issueId, text) =>
+          setInlineCommentTexts((prev) => ({ ...prev, [issueId]: text }))
+        }
+        onCorrectiveTextChange={(issueId, text) =>
+          setInlineCorrectiveTexts((prev) => ({ ...prev, [issueId]: text }))
+        }
+        onReportMediaChange={(issueId, media) =>
+          setInlineReportMedia((prev) => ({ ...prev, [issueId]: media }))
+        }
+        onResolutionMediaChange={(issueId, media) =>
+          setInlineResolutionMedia((prev) => ({ ...prev, [issueId]: media }))
+        }
+        onClearCommentText={(issueId) =>
+          setInlineCommentTexts((prev) => ({ ...prev, [issueId]: "" }))
+        }
+        onClearCorrectiveText={(issueId) =>
+          setInlineCorrectiveTexts((prev) => ({ ...prev, [issueId]: "" }))
+        }
+        onClearResolutionMedia={(issueId) =>
+          setInlineResolutionMedia((prev) => ({ ...prev, [issueId]: [] }))
+        }
+        onSaveAssetIssue={saveInlineAssetIssue}
+        onSaveRunIssue={saveInlineRunIssue}
+        onOpenAddIssue={(a) => {
+          setIssueDialogAsset(a);
+          setIssueDialogOpen(true);
+        }}
+      />
     );
   }
 
@@ -4221,310 +4051,49 @@ ${words.slice(midpoint).join(" ")}`;
   // Dynamic column cell renderer
   // ------------------------------------------------------------------
 
-  function renderColumnCell(
-    colId: string,
-    asset: ProjectAsset,
-    cfg: ProductConfig | null | undefined,
-    proj: ReturnType<typeof projectMap.get>,
-    tech: ReturnType<typeof userMap.get>,
-  ) {
-    switch (colId) {
-      case "assetName":
-        return <Typography variant="body2">{asset.assetName || "-"}</Typography>;
-      case "serialNumber":
-        return <Typography variant="body2" color="text.secondary">{asset.serialNumber || "-"}</Typography>;
-      case "assetModel":
-        return <Typography variant="body2" color="text.secondary">{asset.assetModel || "-"}</Typography>;
-      case "manufacturer":
-        return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "-"}</Typography>;
-      case "configType":
-        return (
-          <Typography variant="body2" color="text.secondary">
-            {resolveOperationsConfigType(asset, cfg, wfConfigMap)}
-          </Typography>
-        );
-      case "configName":
-        return (
-          <Typography variant="body2" color="text.secondary">
-            {resolveOperationsConfigName(asset, cfg, wfConfigMap)}
-          </Typography>
-        );
-      case "project":
-        return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
-      case "siteName":
-        return <Typography variant="body2" color="text.secondary">{proj?.siteName || "-"}</Typography>;
-      case "location":
-        return <Typography variant="body2" color="text.secondary">{asset.location || "-"}</Typography>;
-      case "dateCreated":
-        return (
-          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-            {formatAssetTableDate(asset.createdAt, officeZone)}
-          </Typography>
-        );
-      case "dateClosed":
-        return (
-          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-            {formatAssetTableDate(resolveAssetClosedAt(asset, runsMap[asset.id]), officeZone)}
-          </Typography>
-        );
-      case "assignedTech":
-        return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "-"}</Typography>;
-      case "features":
-        return featureCompletenessChip(asset);
-      case "status":
-        return captureTableStatusChip(asset, proj?.workflowMode);
-      default:
-        return null;
-    }
-  }
+  const featureCompletenessChipRef = useRef(featureCompletenessChip);
+  featureCompletenessChipRef.current = featureCompletenessChip;
+  const captureTableStatusChipRef = useRef(captureTableStatusChip);
+  captureTableStatusChipRef.current = captureTableStatusChip;
 
-  // ------------------------------------------------------------------
-  // Workflow assignments panel (expanded row)
-  // ------------------------------------------------------------------
+  const renderColumnCell = useMemo(
+    () =>
+      createOperationsColumnCellRenderer({
+        officeZone,
+        runsMap,
+        wfConfigMap,
+        renderFeatureCompletenessChip: (asset) => featureCompletenessChipRef.current(asset),
+        renderStatusChip: (asset, mode) => captureTableStatusChipRef.current(asset, mode),
+      }),
+    [officeZone, runsMap, wfConfigMap],
+  );
 
   function renderWorkflowAssignmentsPanel(asset: ProjectAsset) {
-    const assignments = assignmentsMap[asset.id] ?? [];
-    const runs = runsMap[asset.id] ?? [];
-    const runLoading = runnerLoading === asset.id;
-
     return (
-      <Box sx={{ mt: 1.5 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary"
-            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Workflow Assignments {assignments.length > 0 && `(${assignments.length})`}
-          </Typography>
-          <Stack direction="row" spacing={1}>
-            <Button
-              size="small"
-              variant="outlined"
-              color="inherit"
-              sx={{ fontSize: 11, py: 0.25 }}
-              onClick={() => setInspectionDialogAsset(asset)}
-            >
-              Inspections
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              color="primary"
-              startIcon={<AssignmentOutlined fontSize="small" />}
-              sx={{ fontSize: 11, py: 0.25 }}
-              onClick={() => openAssignDialog(asset)}
-            >
-              Assign workflow
-            </Button>
-          </Stack>
-        </Stack>
-        {assignments.length === 0 ? (
-          <Typography variant="caption" color="text.disabled">
-            No workflow assignments. Click "Assign workflow" to add one.
-          </Typography>
-        ) : (
-          <Stack spacing={0.5}>
-            {assignments.map((asgn) => {
-              const configRuns = runs.filter((r) => r.workflowConfigId === asgn.workflowConfigId);
-              const latestRun = configRuns
-                .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
-              const totalProductive = configRuns.reduce((s, r) => s + (r.productiveSeconds ?? 0), 0);
-              const totalDowntime   = configRuns.reduce((s, r) => s + (r.downtimeSeconds   ?? 0), 0);
-              return (
-                <Stack key={asgn.id} direction="row" alignItems="center" spacing={1}
-                  sx={{ p: 0.75, borderRadius: 1, border: "1px solid", borderColor: "divider", bgcolor: "rgba(255,255,255,0.02)" }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="caption" fontWeight={600}>{asgn.workflowTypeName || "Workflow"}</Typography>
-                    <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                      {asgn.workflowConfigName || asgn.workflowConfigId}
-                    </Typography>
-                    {configRuns.length > 0 && (
-                      <Stack direction="row" spacing={0.5} mt={0.25} useFlexGap flexWrap="wrap">
-                        <Chip size="small" label={`Productive ${formatRunDur(totalProductive)}`} color="success" variant="outlined"
-                          sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
-                        {totalDowntime > 0 && (
-                          <Chip size="small" label={`Downtime ${formatRunDur(totalDowntime)}`} color="warning" variant="outlined"
-                            sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
-                        )}
-                        {configRuns.length > 1 && (
-                          <Chip size="small" label={`${configRuns.length} runs`} variant="outlined"
-                            sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
-                        )}
-                        {(() => {
-                          // Collect all BOM items from completed runs for this assignment
-                          const allBom: import("../../types/workflow").BomActualItem[] = [];
-                          for (const r of configRuns) {
-                            if (!r.bomActualJson) continue;
-                            try { allBom.push(...JSON.parse(r.bomActualJson)); } catch { /* ignore */ }
-                          }
-                          if (allBom.length === 0) return null;
-                          const invCount = allBom.filter(b => b.isInventory).reduce((s, b) => s + b.actualQty, 0);
-                          const bomKey = `${asgn.id}`;
-                          const isBomOpen = expandedBomAsgnId === bomKey;
-                          return (
-                            <Chip size="small"
-                              label={`${allBom.length} part${allBom.length !== 1 ? "s" : ""}${invCount > 0 ? ` | ${invCount} inventory` : ""}`}
-                              color="info" variant="outlined" clickable
-                              sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }}
-                              onClick={(e) => { e.stopPropagation(); setExpandedBomAsgnId(isBomOpen ? null : bomKey); }}
-                            />
-                          );
-                        })()}
-                      </Stack>
-                    )}
-                    {/* BOM expandable detail */}
-                    {expandedBomAsgnId === asgn.id && (() => {
-                      const allBom: import("../../types/workflow").BomActualItem[] = [];
-                      for (const r of configRuns) {
-                        if (!r.bomActualJson) continue;
-                        try { allBom.push(...JSON.parse(r.bomActualJson)); } catch { /* ignore */ }
-                      }
-                      return allBom.length === 0 ? null : (
-                        <Stack spacing={0.5} sx={{ mt: 0.5, pl: 0.5, borderLeft: "2px solid", borderColor: "info.main" }}>
-                          {allBom.map((item, idx) => (
-                            <Box key={idx}>
-                              <Stack direction="row" spacing={0.75} alignItems="center">
-                                <Typography variant="caption" fontWeight={600}>{item.description}</Typography>
-                                <Typography variant="caption" color="text.secondary">x {item.actualQty} {item.unitOfMeasure}</Typography>
-                              </Stack>
-                              {item.isInventory && (item.unitCaptures ?? []).map((fields, i) => (
-                                <Typography key={i} variant="caption" color="text.secondary" display="block" sx={{ pl: 1 }}>
-                                  u{i + 1}: {Object.entries(fields).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" | ") || "-"}
-                                </Typography>
-                              ))}
-                            </Box>
-                          ))}
-                        </Stack>
-                      );
-                    })()}
-                  </Box>
-                  {latestRun && (
-                    <Chip
-                      size="small"
-                      label={latestRun.status}
-                      color={latestRun.status === "Complete" ? "success" : latestRun.status === "Issue" ? "error" : "primary"}
-                      variant={latestRun.isLocked ? "filled" : "outlined"}
-                      sx={{ fontSize: 10, height: 18 }}
-                    />
-                  )}
-                  {can.modifyData && (
-                    <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : latestRun?.status === "Issue" ? "Open run to review and resolve open issues" : ""}>
-                      <Button
-                        size="small"
-                        variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
-                        color={latestRun?.status === "Issue" ? "error" : latestRun?.status === "Complete" ? "inherit" : "success"}
-                        disabled={runLoading}
-                        startIcon={runLoading ? <CircularProgress size={12} /> : latestRun?.status === "Complete" ? <HistoryOutlined /> : <PlayArrowOutlined />}
-                        onClick={() =>
-                          latestRun?.status === "Complete" || latestRun?.status === "Issue"
-                            ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
-                            : checkAssignmentThenStart(asset, asgn)
-                        }
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setContextMenuAnchor(e.currentTarget);
-                          setContextMenuAsset(asset);
-                          setContextMenuAssignment(asgn);
-                        }}
-                        sx={{ fontSize: 11, py: 0.25 }}
-                      >
-                        {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View/Edit" : "Review"}
-                      </Button>
-                    </Tooltip>
-                  )}
-                  {can.modifyData && (
-                    <Tooltip title="Remove assignment">
-                      <IconButton size="small" onClick={() => removeAssignment(asset.id, asgn.id)}>
-                        <DeleteOutline sx={{ fontSize: "0.9rem" }} />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                </Stack>
-              );
-            })}
-          </Stack>
-        )}
-      </Box>
+      <AssetInstallationWorkflowAssignmentsPanel
+        asset={asset}
+        assignments={assignmentsMap[asset.id] ?? []}
+        runs={runsMap[asset.id] ?? []}
+        runLoading={runnerLoading === asset.id}
+        canModifyData={can.modifyData}
+        expandedBomAsgnId={expandedBomAsgnId}
+        onOpenInspections={setInspectionDialogAsset}
+        onOpenAssignDialog={openAssignDialog}
+        onToggleBomExpanded={setExpandedBomAsgnId}
+        onOpenRunHistory={openRunHistory}
+        onStartAssignment={checkAssignmentThenStart}
+        onAssignmentContextMenu={(anchor, a, asgn) => {
+          setContextMenuAnchor(anchor);
+          setContextMenuAsset(a);
+          setContextMenuAssignment(asgn);
+        }}
+        onRemoveAssignment={removeAssignment}
+      />
     );
   }
 
-  // ------------------------------------------------------------------
-  // Time tracking summary panel (expanded asset row)
-  // ------------------------------------------------------------------
-
   function renderTimeTrackingPanel(asset: ProjectAsset) {
-    const runs = runsMap[asset.id] ?? [];
-    if (runs.length === 0) return null;
-
-    const totalProductive = runs.reduce((s, r) => s + (r.productiveSeconds ?? 0), 0);
-    const totalDowntime   = runs.reduce((s, r) => s + (r.downtimeSeconds   ?? 0), 0);
-    const totalDtEvents   = runs.reduce((s, r) => s + (r.downtimeEvents    ?? 0), 0);
-    if (totalProductive === 0 && totalDowntime === 0) return null;
-
-    // Collect all downtime entries across all runs for the breakdown table
-    const allDowntimeEntries: Array<{ runNumber: number; reason: string | null; startedAtUtc: string; endedAtUtc?: string | null; durationSecs: number }> = [];
-    for (const run of runs) {
-      let entries: Array<{ id: string; category: string; startedAtUtc: string; endedAtUtc?: string | null; reason?: string | null }> = [];
-      try { entries = JSON.parse(run.timeTrackingJson ?? "[]"); } catch {}
-      for (const e of entries) {
-        if (e.category !== "downtime") continue;
-        const endMs   = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : (run.completedAt ? new Date(run.completedAt).getTime() : null);
-        const durSecs = endMs ? Math.max(0, Math.floor((endMs - new Date(e.startedAtUtc).getTime()) / 1000)) : 0;
-        allDowntimeEntries.push({ runNumber: run.runNumber ?? 1, reason: e.reason ?? null, startedAtUtc: e.startedAtUtc, endedAtUtc: e.endedAtUtc, durationSecs: durSecs });
-      }
-    }
-
-    return (
-      <Box>
-        <Typography variant="caption" fontWeight={700} color="text.secondary"
-          sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}>
-          Time Tracking
-        </Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={allDowntimeEntries.length > 0 ? 1.25 : 0}>
-          <Chip size="small" color="success" variant="outlined"
-            label={`Productive ${formatRunDur(totalProductive)}`}
-            sx={{ height: 20, fontSize: 10 }} />
-          <Chip size="small" color={totalDowntime > 0 ? "warning" : "default"} variant="outlined"
-            label={`Downtime ${formatRunDur(totalDowntime)}`}
-            sx={{ height: 20, fontSize: 10 }} />
-          {totalDtEvents > 0 && (
-            <Chip size="small" variant="outlined"
-              label={`${totalDtEvents} downtime event${totalDtEvents !== 1 ? "s" : ""}`}
-              sx={{ height: 20, fontSize: 10 }} />
-          )}
-          <Chip size="small" variant="outlined"
-            label={`${runs.length} run${runs.length !== 1 ? "s" : ""} total`}
-            sx={{ height: 20, fontSize: 10 }} />
-        </Stack>
-
-        {allDowntimeEntries.length > 0 && (
-          <Table size="small" sx={{ maxWidth: 600, minWidth: 650 }}>
-            <TableHead>
-              <TableRow sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 40 }}>Run</TableCell>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary" }}>Reason</TableCell>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 60 }}>Started</TableCell>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 55 }}>Duration</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {allDowntimeEntries.map((e, i) => (
-                <TableRow key={i}>
-                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.disabled" }}>#{e.runNumber}</TableCell>
-                  <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                    {e.reason || <Typography component="span" variant="caption" color="text.disabled">-</Typography>}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.secondary", whiteSpace: "nowrap" }}>
-                    {new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "warning.main", whiteSpace: "nowrap" }}>
-                    {e.durationSecs > 0 ? formatRunDur(e.durationSecs) : "-"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Box>
-    );
+    return <AssetInstallationTimeTrackingPanel runs={runsMap[asset.id] ?? []} />;
   }
 
   const renderOperationsAssetRows = useMemo(
