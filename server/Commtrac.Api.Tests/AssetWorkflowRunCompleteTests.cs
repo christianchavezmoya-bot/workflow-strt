@@ -14,6 +14,7 @@ namespace Commtrac.Api.Tests;
 /// returns HTTP 422. Pins server behaviour before AssetWorkflowRunsController is
 /// split in S6.
 /// </summary>
+[Collection(ApiTestCollection.Name)]
 public class AssetWorkflowRunCompleteTests : IClassFixture<ApiTestFactory>
 {
     private readonly ApiTestFactory _factory;

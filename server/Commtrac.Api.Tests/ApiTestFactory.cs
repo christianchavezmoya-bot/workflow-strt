@@ -39,6 +39,9 @@ public class ApiTestFactory : WebApplicationFactory<Program>
             config.AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["ConnectionStrings:DefaultConnection"] = $"Data Source={_dbPath}",
+                // Background backup touches the live DB on host start; disable in tests
+                // to avoid races when multiple factories start/stop in parallel on CI.
+                ["DatabaseBackups:Enabled"] = "false",
             });
         });
     }
