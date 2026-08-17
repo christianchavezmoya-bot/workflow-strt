@@ -3,6 +3,7 @@
  * request bodies, or step/photo content.
  */
 import pkg from "../../package.json";
+import type { FaultReportDraft } from "./faultReporting/types";
 import type { ApiDebugLog } from "./api";
 import {
   droppedActionsGetAll,
@@ -20,7 +21,7 @@ import { safeApiHost, toAllowlistedDiagnostics } from "../utils/syncDiagnostics"
 import { syncDiagnosticList, type SyncDiagnosticEntry } from "./syncDiagnosticsLog";
 import { checkPendingMediaIntegrity, type PendingMediaIntegrityRow } from "./pendingMediaIntegrity";
 
-export const SUPPORT_BUNDLE_SCHEMA_VERSION = 1;
+export const SUPPORT_BUNDLE_SCHEMA_VERSION = 2;
 
 export type SanitizedApiLog = Pick<
   ApiDebugLog,
@@ -53,6 +54,16 @@ export interface SyncSupportBundle {
   offlinePerf?: OfflinePerfEntry[];
   syncDiagnostics?: SyncDiagnosticEntry[];
   pendingMediaIntegrity?: PendingMediaIntegrityRow[];
+  reportedFault?: {
+    kind: FaultReportDraft["kind"];
+    severity: FaultReportDraft["severity"];
+    title: string;
+    description?: string;
+    referenceCode?: string;
+    occurredAt?: string;
+    errorName?: string;
+    errorMessage?: string;
+  };
 }
 
 /** Strip auth tokens and sensitive query params from URLs. */
@@ -119,7 +130,23 @@ function pendingExportRow(action: PendingAction): Record<string, unknown> {
   return row;
 }
 
-export async function buildSyncSupportBundle(): Promise<SyncSupportBundle> {
+export function toReportedFaultDiagnostics(draft?: FaultReportDraft | null): SyncSupportBundle["reportedFault"] {
+  if (!draft) return undefined;
+  return {
+    kind: draft.kind,
+    severity: draft.severity,
+    title: draft.title.slice(0, 200),
+    description: draft.description?.slice(0, 4_000),
+    referenceCode: draft.referenceCode,
+    occurredAt: draft.occurredAt,
+    errorName: draft.error?.name?.slice(0, 200),
+    errorMessage: draft.error?.message?.slice(0, 2_000),
+  };
+}
+
+export async function buildSyncSupportBundle(options?: {
+  faultDraft?: FaultReportDraft | null;
+}): Promise<SyncSupportBundle> {
   const [pending, dropped, bootstrap, diagnostics, mediaIntegrity] = await Promise.all([
     pendingGetAll(),
     droppedActionsGetAll(),
@@ -157,6 +184,7 @@ export async function buildSyncSupportBundle(): Promise<SyncSupportBundle> {
     offlinePerf: isMobileNativePlatform() ? getOfflinePerfLog().slice(-40) : undefined,
     syncDiagnostics: diagnostics,
     pendingMediaIntegrity: mediaIntegrity.filter((row) => row.missingPaths.length > 0),
+    reportedFault: toReportedFaultDiagnostics(options?.faultDraft),
   };
 }
 
