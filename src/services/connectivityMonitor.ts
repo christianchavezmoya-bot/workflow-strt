@@ -3,7 +3,7 @@
  *
  * Why this exists as its own module instead of living inside useSyncEngine:
  * useSyncEngine is a React hook, and it is currently called from several
- * components at once (SyncStatusBadge, ConnectivityDebugBar, PullToRefresh,
+ * components at once (SyncStatusBadge, PullToRefresh,
  * SyncCenterPage). Each call to a hook creates its own independent
  * useEffect/timer set — so a ping timer placed inside the hook itself would
  * run once per component, not once for the whole app, multiplying real

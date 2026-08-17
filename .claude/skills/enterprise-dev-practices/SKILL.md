@@ -12,11 +12,22 @@ description: >
 
 # Enterprise Dev Practices — Commtrac Codex 915
 
-This skill is the engineering-standards playbook for this repo. It exists
-because the repo has a clean architecture and TypeScript strict mode, but **no
-CI, no test suite, and no linter** — so "good practices" here means *following
-the layering that exists* and *closing the gaps deliberately*, not importing
-generic advice that ignores the codebase.
+This skill is the engineering-standards playbook for this repo. "Good practices"
+here means *following the layering that exists* and *closing the gaps
+deliberately*, not importing generic advice that ignores the codebase.
+
+Current state, as of the S1 cleanup — this paragraph previously claimed the repo
+had no CI, no test suite and no linter, which stopped being true some time ago:
+
+- **CI:** 7 jobs per PR (frontend, backend, standards, 4 Playwright suites)
+- **Tests:** ~253 frontend unit tests, 4 backend test files, 4 e2e suites
+- **Lint:** ESLint 9, **blocking** — error-level findings are at zero, with a
+  deliberate warning backlog
+- **Safety nets:** bundle-size budgets, performance budgets, and a visual
+  baseline covering every screen (see `docs/VISUAL_BASELINE.md`)
+
+The real gaps now are test coverage of the two largest screens and the component
+layer, not the absence of tooling. See `docs/EXCELLENCE_PROGRAMME.md`.
 
 All paths below are relative to the repo root (the `<unit>`).
 

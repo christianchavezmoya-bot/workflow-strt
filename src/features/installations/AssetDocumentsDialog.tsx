@@ -285,7 +285,7 @@ export default function AssetDocumentsDialog({
     // Normalize both sides: strip extension and collapse spaces/underscores/dashes
     // so "BHP Layout.pdf" ↔ "BHP_Layout" ↔ "bhp-layout.docx" are all treated equal.
     function normName(s: string) {
-      return s.toLowerCase().replace(/\.[^.]+$/, "").replace(/[\s_\-]+/g, "");
+      return s.toLowerCase().replace(/\.[^.]+$/, "").replace(/[\s_-]+/g, "");
     }
     try {
       const allDocs = await documentService.getDocuments();

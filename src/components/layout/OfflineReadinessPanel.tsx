@@ -161,7 +161,10 @@ export default function OfflineReadinessPanel() {
             <Switch
               size="small"
               checked={isManualOffline}
-              onChange={(_, checked) => { checked ? goOffline() : goOnline(); }}
+              onChange={(_, checked) => {
+                if (checked) goOffline();
+                else goOnline();
+              }}
             />
           }
           label={

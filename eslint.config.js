@@ -2,6 +2,10 @@
 // Pragmatic starting point for a codebase that had no linter: type-aware rules
 // off (too slow / too noisy on ~60 services at first), the highest-signal
 // correctness + hooks rules on. Tighten over time as the backlog is burned down.
+//
+// Error-level findings are at ZERO and `npm run lint` is blocking in CI. Warnings
+// are a deliberate backlog and do not fail the build. When promoting a rule from
+// warn to error, clear its existing findings in the same PR.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import reactHooks from "eslint-plugin-react-hooks";
