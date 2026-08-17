@@ -1277,7 +1277,6 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               onUpdateDecision={(dId, patch) => updateDecision(selectedStep.id, dId, patch)}
               onDeleteDecision={(dId) => deleteDecision(selectedStep.id, dId)}
               onAddInput={(type) => addInput(selectedStep.id, type)}
-              onAddFeatureInput={(feat) => addInput(selectedStep.id, feat.type, feat.options, feat.featureId, feat.label, feat.subFields)}
               onUpdateInput={(iId, patch) => updateInput(selectedStep.id, iId, patch)}
               onDeleteInput={(iId) => deleteInput(selectedStep.id, iId)}
               onAddCaptureField={() => addCaptureField(selectedStep.id)}
@@ -1732,7 +1731,6 @@ interface StepEditorPanelProps {
   onUpdateDecision: (id: string, patch: Partial<Decision>) => void;
   onDeleteDecision: (id: string) => void;
   onAddInput: (type: StepInputType) => void;
-  onAddFeatureInput: (feat: { type: StepInputType; options?: string[]; featureId: string; label: string; subFields?: { id: string; name: string }[] }) => void;
   onUpdateInput: (id: string, patch: Partial<StepInput>) => void;
   onDeleteInput: (id: string) => void;
   onAddCaptureField: () => void;
@@ -1758,7 +1756,6 @@ function StepEditorPanel({
   onUpdateDecision,
   onDeleteDecision,
   onAddInput,
-  onAddFeatureInput,
   onUpdateInput,
   onDeleteInput,
   onAddCaptureField,
@@ -2050,7 +2047,6 @@ function StepEditorPanel({
               productFeatures={productFeatures}
               featureSelections={featureSelections}
               onAddInput={onAddInput}
-              onAddFeatureInput={onAddFeatureInput}
               onUpdateInput={onUpdateInput}
               onDeleteInput={onDeleteInput}
             />
@@ -2207,24 +2203,11 @@ const INPUT_TYPES: { type: StepInputType; label: string }[] = [
   { type: "user-select", label: "User select (project team)" },
 ];
 
-// Map product feature value types to step input types
-function featureToInputType(valueType: string): StepInputType {
-  switch (valueType) {
-    case "number": case "percentage": case "rating": return "number";
-    case "tri-state": case "single-select": case "multi-select": return "choice";
-    case "date": return "date";
-    case "rich-text": return "note";
-    case "component": return "component";
-    default: return "text";
-  }
-}
-
 function InputsSection({
   step,
   productFeatures,
   featureSelections,
   onAddInput,
-  onAddFeatureInput,
   onUpdateInput,
   onDeleteInput,
 }: {
@@ -2232,13 +2215,10 @@ function InputsSection({
   productFeatures: ProductFeatureDefinition[];
   featureSelections?: FeatureSelection[];
   onAddInput: (type: StepInputType) => void;
-  onAddFeatureInput: (feat: { type: StepInputType; options?: string[]; featureId: string; label: string; subFields?: { id: string; name: string }[] }) => void;
   onUpdateInput: (id: string, patch: Partial<StepInput>) => void;
   onDeleteInput: (id: string) => void;
 }) {
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [selectedFeatIds, setSelectedFeatIds] = useState<Set<string>>(new Set());
-  const usedFeatureIds = new Set((step.inputs || []).map((i) => i.featureId).filter(Boolean) as string[]);
 
   return (
     <Stack spacing={2}>
@@ -2316,7 +2296,7 @@ function InputsSection({
       )}
 
       {/* Input type picker dialog */}
-      <Dialog open={pickerOpen} onClose={() => { setPickerOpen(false); setSelectedFeatIds(new Set()); }} maxWidth="xs" fullWidth>
+      <Dialog open={pickerOpen} onClose={() => setPickerOpen(false)} maxWidth="xs" fullWidth>
         <DialogTitle>Add an input</DialogTitle>
         <DialogContent>
           <Stack spacing={1} sx={{ mt: 1 }}>
@@ -2325,68 +2305,16 @@ function InputsSection({
                 key={type}
                 variant="outlined"
                 fullWidth
-                onClick={() => { onAddInput(type); setPickerOpen(false); setSelectedFeatIds(new Set()); }}
+                onClick={() => { onAddInput(type); setPickerOpen(false); }}
                 sx={{ justifyContent: "flex-start" }}
               >
                 {label}
               </Button>
             ))}
-            {/*
-              Retired in 661d98a when step-type auto-populate replaced "From features"
-              buttons. Verdict: dead code — delete in S8, do not re-enable.
-              See docs/S2_PRODUCT_DECISIONS.md §1.
-            */}
-            {/* eslint-disable-next-line no-constant-binary-expression */}
-            {false && productFeatures.length > 0 && (
-              <>
-                {productFeatures.map((feat) => {
-                  const alreadyAdded = usedFeatureIds.has(feat.id);
-                  const checked = selectedFeatIds.has(feat.id);
-                  return (
-                    <Stack key={feat.id} direction="row" spacing={0.5} alignItems="center" sx={{ opacity: alreadyAdded ? 0.5 : 1 }}>
-                      <Checkbox size="small" disabled={alreadyAdded} checked={checked}
-                        onChange={(e) => { setSelectedFeatIds((prev) => { const next = new Set(prev); if (e.target.checked) next.add(feat.id); else next.delete(feat.id); return next; }); }}
-                        sx={{ p: 0.5 }} />
-                      <Box sx={{ flex: 1, minWidth: 0 }}>
-                        <Typography variant="body2" noWrap>{feat.name}</Typography>
-                      </Box>
-                    </Stack>
-                  );
-                })}
-                {selectedFeatIds.size > 0 && (
-                  <Button
-                    variant="contained"
-                    size="small"
-                    onClick={() => {
-                      productFeatures
-                        .filter((f) => selectedFeatIds.has(f.id))
-                        .forEach((feat) => {
-                          const inputType = featureToInputType(feat.valueType);
-                          const options =
-                            feat.valueType === "tri-state" ? ["Yes", "No", "N/A"] :
-                            (feat.valueType === "single-select" || feat.valueType === "multi-select") ? (feat.options ?? []) :
-                            undefined;
-                          onAddFeatureInput({
-                            type: inputType,
-                            options,
-                            featureId: feat.id,
-                            label: feat.name,
-                            subFields: feat.subProperties?.map((sf) => ({ id: sf.id, name: sf.name })),
-                          });
-                        });
-                      setSelectedFeatIds(new Set());
-                      setPickerOpen(false);
-                    }}
-                  >
-                    Add selected ({selectedFeatIds.size})
-                  </Button>
-                )}
-              </>
-            )}
           </Stack>
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => { setPickerOpen(false); setSelectedFeatIds(new Set()); }}>Cancel</Button>
+          <Button onClick={() => setPickerOpen(false)}>Cancel</Button>
         </DialogActions>
       </Dialog>
     </Stack>

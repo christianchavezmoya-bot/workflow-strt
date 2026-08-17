@@ -130,7 +130,6 @@ import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../
 import AssetInspectionDialog from "./AssetInspectionDialog";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
-import QRUploadButton from "../../components/QRUploadButton";
 import AssetAddDialog from "./AssetAddDialog";
 import AssetEditDialog from "./AssetEditDialog";
 import type { MissingMediaFlag } from "../dashboard/photoUploadTypes";
@@ -170,12 +169,18 @@ import {
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import AssetInstallationBulkDocsUploadDialog from "./AssetInstallationBulkDocsUploadDialog";
 import AssetInstallationBulkTechAssignDialog from "./AssetInstallationBulkTechAssignDialog";
 import AssetInstallationBulkWarnDialog from "./AssetInstallationBulkWarnDialog";
 import AssetInstallationBulkWorkflowAssignDialog from "./AssetInstallationBulkWorkflowAssignDialog";
 import AssetInstallationCsvImportDialog from "./AssetInstallationCsvImportDialog";
 import AssetInstallationWorkflowAssignDialog from "./AssetInstallationWorkflowAssignDialog";
-import { buildBulkTechWarnRows, findAssetsWithAssignedUser } from "./assetInstallationBulkActions";
+import {
+  buildBulkDocsWarnRows,
+  buildBulkTechWarnRows,
+  findAssetsWithAssignedUser,
+} from "./assetInstallationBulkActions";
+import { useAssetInstallationBulkDocsUpload } from "./useAssetInstallationBulkDocsUpload";
 import { useAssetInstallationBulkTechAssign } from "./useAssetInstallationBulkTechAssign";
 import { useAssetInstallationBulkWorkflowAssign } from "./useAssetInstallationBulkWorkflowAssign";
 import { useAssetInstallationColumnConfig } from "./useAssetInstallationColumnConfig";
@@ -549,13 +554,22 @@ const AssetInstallationPage = () => {
     selectBulkTechUser,
     applyBulkTechAssign,
   } = useAssetInstallationBulkTechAssign();
-  // Bulk documents
-  const [bulkDocsOpen, setBulkDocsOpen] = useState(false);
-  const [bulkDocsFile, setBulkDocsFile] = useState<File | null>(null);
-  const [bulkDocsType, setBulkDocsType] = useState("Technical");
-  const [bulkDocsName, setBulkDocsName] = useState("");
-  const [bulkDocsSaving, setBulkDocsSaving] = useState(false);
-  const [bulkDocsResult, setBulkDocsResult] = useState<string | null>(null);
+  const {
+    bulkDocsOpen,
+    bulkDocsFile,
+    bulkDocsType,
+    bulkDocsName,
+    bulkDocsSaving,
+    bulkDocsResult,
+    openBulkDocsDialog,
+    closeBulkDocsDialog,
+    selectBulkDocsFile,
+    setBulkDocsType,
+    setBulkDocsName,
+    uploadBulkDocsFile,
+    attachBulkDocsQrUpload,
+  } = useAssetInstallationBulkDocsUpload();
+  // Bulk documents (toolbar uses bulk docs hook above)
   // Capture spreadsheet view
   const [capturePopupOpen, setCapturePopupOpen] = useState(false);
   const [libFeatures, setLibFeatures] = useState<LibFeature[]>([]);
@@ -5279,20 +5293,17 @@ ${words.slice(midpoint).join(" ")}`;
             size="small"
             variant="outlined"
             onClick={() => {
-              setBulkDocsFile(null); setBulkDocsType("Technical"); setBulkDocsName(""); setBulkDocsResult(null);
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
-              const atLimit = sel.filter((a) => (docsCountMap[a.id] ?? 0) >= 3);
-              const withDocs = sel.filter((a) => (docsCountMap[a.id] ?? 0) > 0 && (docsCountMap[a.id] ?? 0) < 3);
-              const affected = [
-                ...atLimit.map((a) => ({ assetTag: a.assetTag, current: "3/3 docs - will be skipped" })),
-                ...withDocs.map((a) => ({ assetTag: a.assetTag, current: `${docsCountMap[a.id]}/3 docs (existing kept)` })),
-              ];
-              if (affected.length === 0) { setBulkDocsOpen(true); return; }
+              const affected = buildBulkDocsWarnRows(sel, docsCountMap);
+              if (affected.length === 0) {
+                openBulkDocsDialog();
+                return;
+              }
               showBulkWarning({
                 title: "Some assets already have documents",
                 body: "Assets at the 3-document limit will be skipped. For assets with fewer than 3 documents, existing documents will NOT be deleted - the new document will be added alongside them.",
                 rows: affected,
-                onProceed: () => setBulkDocsOpen(true),
+                onProceed: openBulkDocsDialog,
               });
             }}
           >
@@ -6990,125 +7001,45 @@ ${words.slice(midpoint).join(" ")}`;
         </DialogActions>
       </Dialog>
 
-      {/* Bulk: Upload documents dialog */}
-      <Dialog open={bulkDocsOpen} onClose={() => setBulkDocsOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>Upload document to {selectedAssetIds.size} asset{selectedAssetIds.size !== 1 ? "s" : ""}</DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Alert severity="info" sx={{ fontSize: 12 }}>
-              The same file will be linked to every selected asset. Assets already at 3 documents will be skipped automatically.
-            </Alert>
-            <Stack direction="row" spacing={1} alignItems="center">
-              <Button variant="outlined" component="label" sx={{ justifyContent: "flex-start", textTransform: "none", flex: 1 }}>
-                {bulkDocsFile ? bulkDocsFile.name : "Choose file..."}
-                <input
-                  type="file"
-                  hidden
-                  accept=".pdf,.xlsx,.xls,.docx,.doc,.json,.png,.jpg,.jpeg"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0] ?? null;
-                    setBulkDocsFile(f);
-                    if (f && !bulkDocsName) setBulkDocsName(f.name.replace(/\.[^.]+$/, ""));
-                  }}
-                />
-              </Button>
-              <QRUploadButton
-                docType={bulkDocsType}
-                linkedTo="bulk"
-                label="Phone"
-                onUploaded={async (documentId) => {
-                  setBulkDocsSaving(true);
-                  setBulkDocsResult(null);
-                  const ids = [...selectedAssetIds];
-                  let uploaded = 0, skipped = 0, failed = 0;
-                  await Promise.all(ids.map(async (assetId) => {
-                    if ((docsCountMap[assetId] ?? 0) >= 3) { skipped++; return; }
-                    try {
-                      await assetDocumentLinkService.attach(assetId, documentId, currentUser?.fullName ?? undefined);
-                      uploaded++;
-                      setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
-                    } catch { failed++; }
-                  }));
-                  setBulkDocsSaving(false);
-                  const parts: string[] = [];
-                  if (uploaded) parts.push(`${uploaded} uploaded`);
-                  if (skipped) parts.push(`${skipped} skipped`);
-                  if (failed) parts.push(`${failed} failed`);
-                  setBulkDocsResult(`Done - ${parts.join(", ")}.`);
-                  if (failed === 0) setSelectedAssetIds(new Set());
-                  setBulkDocsOpen(false);
-                }}
-              />
-            </Stack>
-            <TextField
-              label="Document name"
-              size="small"
-              fullWidth
-              value={bulkDocsName}
-              onChange={(e) => setBulkDocsName(e.target.value)}
-            />
-            <FormControl fullWidth size="small">
-              <InputLabel shrink>Type</InputLabel>
-              <Select label="Type" value={bulkDocsType} onChange={(e) => setBulkDocsType(e.target.value)}>
-                {["Technical", "Drawings", "Procedures", "Authority to Work", "Tips & Tricks", "Tech Bulletins", "Informative", "Other"].map((t) => (
-                  <MenuItem key={t} value={t}>{t}</MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-            {bulkDocsSaving && <LinearProgress />}
-            {bulkDocsResult && (
-              <Alert severity={bulkDocsResult.startsWith("Done") ? "success" : "error"} sx={{ fontSize: 12 }}>
-                {bulkDocsResult}
-              </Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button variant="outlined" onClick={() => setBulkDocsOpen(false)} disabled={bulkDocsSaving}>Cancel</Button>
-          <Button
-            variant="contained"
-            disabled={!bulkDocsFile || bulkDocsSaving}
-            onClick={async () => {
-              if (!bulkDocsFile) return;
-              setBulkDocsSaving(true);
-              setBulkDocsResult(null);
-              let skipped = 0;
-              let failed = 0;
-              let uploaded = 0;
-              const ids = [...selectedAssetIds];
-              await Promise.all(ids.map(async (assetId) => {
-                if ((docsCountMap[assetId] ?? 0) >= 3) { skipped++; return; }
-                try {
-                  await assetDocumentLinkService.uploadAndLink(
-                    assetId,
-                    bulkDocsFile,
-                    bulkDocsType,
-                    bulkDocsName || bulkDocsFile.name.replace(/\.[^.]+$/, ""),
-                    undefined,
-                    undefined,
-                    currentUser?.fullName ?? undefined,
-                  );
-                  uploaded++;
-                  setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
-                } catch {
-                  failed++;
-                }
-              }));
-              setBulkDocsSaving(false);
-              const parts: string[] = [];
-              if (uploaded) parts.push(`${uploaded} uploaded`);
-              if (skipped) parts.push(`${skipped} skipped (at limit)`);
-              if (failed)  parts.push(`${failed} failed`);
-              setBulkDocsResult(`Done - ${parts.join(", ")}.`);
-              if (failed === 0) {
-                setSelectedAssetIds(new Set());
-              }
-            }}
-          >
-            {bulkDocsSaving ? "Uploading..." : "Upload to all"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationBulkDocsUploadDialog
+        open={bulkDocsOpen}
+        saving={bulkDocsSaving}
+        assetCount={selectedAssetIds.size}
+        file={bulkDocsFile}
+        docType={bulkDocsType}
+        docName={bulkDocsName}
+        result={bulkDocsResult}
+        onClose={closeBulkDocsDialog}
+        onFileChange={selectBulkDocsFile}
+        onDocTypeChange={setBulkDocsType}
+        onDocNameChange={setBulkDocsName}
+        onQrUploaded={(documentId) => {
+          void attachBulkDocsQrUpload(documentId, {
+            assetIds: [...selectedAssetIds],
+            docsCountMap,
+            uploadedBy: currentUser?.fullName ?? undefined,
+            onDocLinked: (assetId) => {
+              setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
+            },
+            onComplete: (_result, clearSelection) => {
+              if (clearSelection) setSelectedAssetIds(new Set());
+            },
+          });
+        }}
+        onUpload={() => {
+          void uploadBulkDocsFile({
+            assetIds: [...selectedAssetIds],
+            docsCountMap,
+            uploadedBy: currentUser?.fullName ?? undefined,
+            onDocLinked: (assetId) => {
+              setDocsCountMap((prev) => ({ ...prev, [assetId]: (prev[assetId] ?? 0) + 1 }));
+            },
+            onComplete: (_result, clearSelection) => {
+              if (clearSelection) setSelectedAssetIds(new Set());
+            },
+          });
+        }}
+      />
 
       <AssetInspectionDialog
         asset={inspectionDialogAsset}
