@@ -193,6 +193,7 @@ import AssetInstallationBulkArchiveConfirmDialog from "./AssetInstallationBulkAr
 import AssetInstallationPurgeConfirmDialog from "./AssetInstallationPurgeConfirmDialog";
 import AssetInstallationWorkflowMismatchDialog from "./AssetInstallationWorkflowMismatchDialog";
 import AssetInstallationAutoAssignConfirmDialog from "./AssetInstallationAutoAssignConfirmDialog";
+import AssetInstallationAddIssueDialog from "./AssetInstallationAddIssueDialog";
 import {
   buildBulkDocsWarnRows,
   buildBulkTechWarnRows,
@@ -4771,55 +4772,20 @@ ${words.slice(midpoint).join(" ")}`;
         onConfirm={confirmPurgeAsset}
       />
 
-      {/* Add issue dialog */}
-      <Dialog open={issueDialogOpen} onClose={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <ReportProblemOutlined color="error" fontSize="small" />
-            <span>Add Issue - {issueDialogAsset?.assetTag}</span>
-          </Stack>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <TextField
-              label="Description"
-              size="small"
-              fullWidth
-              multiline
-              rows={3}
-              value={issueForm.description}
-              onChange={(e) => setIssueForm((p) => ({ ...p, description: e.target.value }))}
-              placeholder="Describe the issue..."
-              InputLabelProps={{ shrink: true }}
-            />
-            <FormControl size="small" fullWidth>
-              <InputLabel shrink>Severity</InputLabel>
-              <Select
-                label="Severity"
-                value={issueForm.severity}
-                onChange={(e) => setIssueForm((p) => ({ ...p, severity: e.target.value as "low" | "medium" | "high" }))}
-              >
-                <MenuItem value="low">Low</MenuItem>
-                <MenuItem value="medium">Medium</MenuItem>
-                <MenuItem value="high">High</MenuItem>
-              </Select>
-            </FormControl>
-            <MediaCapture
-              media={issueMedia}
-              onChange={setIssueMedia}
-              label="Attach Photo / Video (optional)"
-              qrDocType="issue-photo"
-              qrLinkedTo={issueDialogAsset?.id ?? ""}
-            />
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => { setIssueDialogOpen(false); setIssueDialogAsset(null); setIssueMedia([]); }}>Cancel</Button>
-          <Button variant="contained" color="error" onClick={handleAddIssue} disabled={!issueForm.description.trim()}>
-            Add issue
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationAddIssueDialog
+        open={issueDialogOpen}
+        asset={issueDialogAsset}
+        form={issueForm}
+        media={issueMedia}
+        onClose={() => {
+          setIssueDialogOpen(false);
+          setIssueDialogAsset(null);
+          setIssueMedia([]);
+        }}
+        onFormChange={setIssueForm}
+        onMediaChange={setIssueMedia}
+        onSubmit={() => { void handleAddIssue(); }}
+      />
 
       <AssetInstallationColumnSettingsDialog
         open={colSettingsOpen}
