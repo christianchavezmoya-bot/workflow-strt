@@ -11,10 +11,14 @@ import {
   LS_COL_KEY,
   nextDraftConfigNumber,
   operationsStickyPrefixSx,
+  persistColumnConfig,
   projectHasInspection,
+  reorderColumnIds,
   resolveConfigWorkflowTypeId,
+  resolveVisibleColumns,
   tabDotColor,
   timeAgo,
+  toggleColumnHidden,
   workflowTypeMismatchMessage,
 } from "./assetInstallationPageLogic";
 
@@ -233,6 +237,58 @@ describe("timeAgo", () => {
     expect(timeAgo(new Date(now - 30_000), now)).toBe("just now");
     expect(timeAgo(new Date(now - 120_000), now)).toBe("2 min ago");
     expect(timeAgo(new Date(now - 7_200_000), now)).toBe("2h ago");
+  });
+});
+
+describe("resolveVisibleColumns", () => {
+  it("returns archive column set in archive mode", () => {
+    const cols = resolveVisibleColumns({ order: DEFAULT_COL_ORDER, hidden: [] }, true);
+    expect(cols.map((c) => c.id)).toEqual([
+      "serialNumber",
+      "assetModel",
+      "manufacturer",
+      "project",
+      "siteName",
+      "configType",
+      "status",
+    ]);
+  });
+
+  it("filters hidden columns in normal mode", () => {
+    const cols = resolveVisibleColumns(
+      { order: DEFAULT_COL_ORDER, hidden: ["location", "features"] },
+      false,
+    );
+    expect(cols.map((c) => c.id)).not.toContain("location");
+    expect(cols.map((c) => c.id)).not.toContain("features");
+    expect(cols.map((c) => c.id)).toContain("assetName");
+  });
+});
+
+describe("reorderColumnIds and toggleColumnHidden", () => {
+  it("moves a column id within the order array", () => {
+    expect(reorderColumnIds(["a", "b", "c"], 0, 2)).toEqual(["b", "c", "a"]);
+    expect(reorderColumnIds(["a", "b", "c"], 0, 0)).toEqual(["a", "b", "c"]);
+  });
+
+  it("adds and removes hidden column ids", () => {
+    expect(toggleColumnHidden(["location"], "features", false)).toEqual(["location", "features"]);
+    expect(toggleColumnHidden(["location", "features"], "location", true)).toEqual(["features"]);
+  });
+});
+
+describe("persistColumnConfig", () => {
+  afterEach(() => {
+    localStorage.removeItem(LS_COL_KEY);
+  });
+
+  it("writes column config to localStorage", () => {
+    persistColumnConfig({ order: ["assetName", "status"], hidden: ["location"] });
+    expect(JSON.parse(localStorage.getItem(LS_COL_KEY)!)).toEqual({
+      order: ["assetName", "status"],
+      hidden: ["location"],
+    });
+    expect(loadColumnConfig().hidden).toEqual(["location"]);
   });
 });
 
