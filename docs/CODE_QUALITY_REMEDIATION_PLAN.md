@@ -3,7 +3,9 @@
 Companion to [`CODE_QUALITY_ASSESSMENT.md`](./CODE_QUALITY_ASSESSMENT.md) (snapshot of `main` @
 `bac9d7b`). That document says what is wrong; this one says how to fix it without breaking a
 working, in-use product. Concrete defects and dead code are itemised separately in
-[`CODE_QUALITY_BUG_SWEEP.md`](./CODE_QUALITY_BUG_SWEEP.md).
+[`CODE_QUALITY_BUG_SWEEP.md`](./CODE_QUALITY_BUG_SWEEP.md), and dependency currency in
+[`MODERNIZATION_PLAN.md`](./MODERNIZATION_PLAN.md) — which carries the one hard deadline in the
+programme, .NET 8 reaching end of support on 10 November 2026.
 
 **Two targets, chosen deliberately.**
 
