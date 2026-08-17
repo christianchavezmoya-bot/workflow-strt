@@ -1,86 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { defaultDomains, roleConfigService, RolePermissions, DomainPermissions } from "../services/roleConfigService";
+import { roleConfigService, type RolePermissions } from "../services/roleConfigService";
+import {
+  buildEffectivePermissions,
+  FALLBACK_ROLE_PERMISSIONS,
+  resolveRoleDomains,
+} from "../utils/rolePermissionsResolve";
 import { useAuth } from "./useAuth";
-
-const createRolePermissions = (
-  base: Omit<RolePermissions, "domains">,
-  documentOverrides?: Partial<DomainPermissions["documents"]>
-): RolePermissions => {
-  const domains = defaultDomains(base);
-  return {
-    ...base,
-    domains: {
-      ...domains,
-      documents: {
-        ...domains.documents,
-        ...(documentOverrides ?? {}),
-      },
-    },
-  };
-};
-
-const FALLBACK_PERMISSIONS: Record<string, RolePermissions> = {
-  Admin:             createRolePermissions({ viewOnly: false, createDeleteTables: true,  createUsers: true,  editFields: true,  modifyData: true,  editForms: true }, { upload: true, delete: true }),
-  "Project Manager": createRolePermissions({ viewOnly: false, createDeleteTables: true,  createUsers: false, editFields: true,  modifyData: true,  editForms: true }, { upload: true, delete: true }),
-  Supervisor:        createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: true,  editForms: true }, { upload: false, delete: false }),
-  Engineer:          createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: false }, { upload: false, delete: false }),
-  "QA Inspector":    createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true }, { upload: false, delete: false }),
-  Installer:         createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: true,  modifyData: false, editForms: true }, { upload: false, delete: false }),
-  Technician:        createRolePermissions({ viewOnly: false, createDeleteTables: false, createUsers: false, editFields: false, modifyData: true,  editForms: true }, { upload: false, delete: false }),
-  Client:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),
-  Viewer:            createRolePermissions({ viewOnly: true,  createDeleteTables: false, createUsers: false, editFields: false, modifyData: false, editForms: false }, { upload: false, delete: false }),
-};
-
-const resolveDomains = (roleName: string | undefined, permissions: RolePermissions): DomainPermissions => {
-  let domains: DomainPermissions;
-  if (permissions.domains) {
-    // Merge computed defaults underneath the saved values so that fields added
-    // after a config was saved (e.g. viewScope, editScope) are filled in correctly
-    // rather than falling back to the hardcoded "own" missing-field default.
-    const defaults = defaultDomains(permissions);
-    const saved = permissions.domains;
-    domains = {
-      projects:                { ...defaults.projects,                ...saved.projects },
-      installationAssets:      { ...defaults.installationAssets,      ...saved.installationAssets },
-      workInstructionsBuilder: { ...defaults.workInstructionsBuilder, ...saved.workInstructionsBuilder },
-      documents:               { ...defaults.documents,               ...saved.documents },
-      // OR merge: Tier 1 createDeleteTables always guarantees settings access;
-      // saved false cannot revoke access the role's Tier 1 flags already grant.
-      settings: {
-        view: defaults.settings.view || (saved.settings?.view ?? false),
-        edit: defaults.settings.edit || (saved.settings?.edit ?? false),
-      },
-      // Added after the fact, so saved configs predating them have no entry — fall back to
-      // the computed defaults rather than to `undefined`, which would read as "denied" and
-      // silently strip BOM/Tips/Analytics from every existing role on upgrade.
-      bomProject: { ...defaults.bomProject, ...(saved.bomProject ?? {}) },
-      tips:       { ...defaults.tips,       ...(saved.tips ?? {}) },
-      analytics:  { ...defaults.analytics,  ...(saved.analytics ?? {}) },
-    };
-  } else {
-    const fallback = roleName ? FALLBACK_PERMISSIONS[roleName] : undefined;
-    domains = fallback?.domains ?? defaultDomains(permissions);
-  }
-
-  // Hard-lock: viewOnly roles (Viewer, Client) can never delete, archive, restore, or purge,
-  // regardless of what an admin may have saved in the role config.
-  if (permissions.viewOnly) {
-    return {
-      ...domains,
-      projects:           { ...domains.projects,           delete: false },
-      installationAssets: { ...domains.installationAssets, delete: false },
-      documents:          { ...domains.documents,          delete: false },
-      // Authoring a workflow is a write; a view-only role must never hold it even if an
-      // admin ticked the boxes in the role editor.
-      workInstructionsBuilder: {
-        ...domains.workInstructionsBuilder,
-        build: false, publish: false, archive: false, delete: false,
-      },
-    };
-  }
-
-  return domains;
-};
 
 export const usePermissions = () => {
   const { user } = useAuth();
@@ -128,48 +53,10 @@ export const usePermissions = () => {
   }, []);
 
   const can = useMemo(() => {
-    const config = roleConfig ?? FALLBACK_PERMISSIONS;
+    const config = roleConfig ?? FALLBACK_ROLE_PERMISSIONS;
     const perms: RolePermissions | undefined = user?.role ? config[user.role] : undefined;
-    const p = perms ?? FALLBACK_PERMISSIONS[user?.role ?? ""] ?? FALLBACK_PERMISSIONS.Viewer;
-
-    // Tier 2: use saved domains or derive from Tier 1 flags
-    const domains = resolveDomains(user?.role, p);
-
-    if (p.viewOnly) {
-      return {
-        // Tier 1
-        viewOnly: true, modifyData: false, createUsers: false,
-        editFields: false, editForms: false, createDeleteTables: false,
-        // Tier 2
-        projects:  domains.projects,
-        installationAssets:      domains.installationAssets,
-        workInstructionsBuilder: domains.workInstructionsBuilder,
-        documents: domains.documents,
-        settings:  domains.settings,
-        bomProject: { ...domains.bomProject, upload: false, map: false, commit: false, delete: false },
-        tips:       { ...domains.tips,       create: false, edit: false, delete: false },
-        analytics:  domains.analytics,
-      };
-    }
-
-    return {
-      // Tier 1
-      viewOnly: false,
-      modifyData: p.modifyData,
-      createUsers: p.createUsers,
-      editFields: p.editFields,
-      editForms: p.editForms,
-      createDeleteTables: p.createDeleteTables,
-      // Tier 2
-      projects:  domains.projects,
-      installationAssets:      domains.installationAssets,
-      workInstructionsBuilder: domains.workInstructionsBuilder,
-      documents: domains.documents,
-      settings:  domains.settings,
-      bomProject: domains.bomProject,
-      tips:       domains.tips,
-      analytics:  domains.analytics,
-    };
+    const p = perms ?? FALLBACK_ROLE_PERMISSIONS[user?.role ?? ""] ?? FALLBACK_ROLE_PERMISSIONS.Viewer;
+    return buildEffectivePermissions(user?.role, p, config);
   }, [user?.role, roleConfig]);
 
   // True only after both the real user identity and the role-config API call have
@@ -179,3 +66,6 @@ export const usePermissions = () => {
 
   return { ...can, permissionsReady };
 };
+
+// Re-export for callers that only need domain resolution in tests or utilities.
+export { resolveRoleDomains, buildEffectivePermissions, FALLBACK_ROLE_PERMISSIONS };

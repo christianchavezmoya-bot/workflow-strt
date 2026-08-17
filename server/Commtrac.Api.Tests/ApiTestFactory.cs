@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 
 namespace Commtrac.Api.Tests;
 
@@ -24,14 +26,21 @@ public class ApiTestFactory : WebApplicationFactory<Program>
     {
         // Set BEFORE the host builder runs (Program.cs reads these at build time).
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Development");
-        Environment.SetEnvironmentVariable(
-            "ConnectionStrings__DefaultConnection", $"Data Source={_dbPath}");
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
         builder.UseContentRoot(ApiContentRoot);
+        // Per-factory SQLite path — do not use a process-wide env var or parallel
+        // test classes stomp each other's databases.
+        builder.ConfigureAppConfiguration((_, config) =>
+        {
+            config.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["ConnectionStrings:DefaultConnection"] = $"Data Source={_dbPath}",
+            });
+        });
     }
 
     protected override void Dispose(bool disposing)
