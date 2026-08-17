@@ -102,6 +102,23 @@ export function isOpenInspectionStatus(status?: string | null) {
   return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
 }
 
+export type ProjectStatusChipColor = "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning";
+
+export const PROJECT_STATUS_CHIP_COLORS: Record<string, ProjectStatusChipColor> = {
+  "In Progress": "primary",
+  Completed: "success",
+  "Pending Approval": "warning",
+  Closed: "info",
+  Cancelled: "error",
+  Draft: "default",
+  Approved: "info",
+  "On Hold": "warning",
+};
+
+export function projectStatusChipColor(status?: string | null): ProjectStatusChipColor {
+  return PROJECT_STATUS_CHIP_COLORS[status ?? ""] ?? "default";
+}
+
 export function dashboardStatusChip(asset: {
   runStatus?: string | null;
   status?: string | null;
@@ -267,6 +284,15 @@ export function workflowModeChipColor(workflowMode?: string | null): "success" |
   if (workflowMode === "MIXED") return "warning";
   return "success";
 }
+
+export type AutoAssignFlag = {
+  id: string;
+  assetId: string;
+  assetTag: string;
+  jobNumber: string;
+  assignedBy: string;
+  assignedAt: string;
+};
 
 export function historyChipColor(status?: string | null): "default" | "success" | "warning" | "error" | "info" {
   const value = (status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
