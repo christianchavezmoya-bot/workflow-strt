@@ -12,7 +12,7 @@ Stage **S3** of [`EXCELLENCE_PROGRAMME.md`](./EXCELLENCE_PROGRAMME.md): characte
 | 3 | Offline queue temp-ID → server-ID remap | **Done (PR 1)** | `src/services/syncQueue.replaceReferences.test.ts` |
 | 4 | Backend controller tests (workflow endpoints beyond complete) | **Done (PR 2)** | `server/Commtrac.Api.Tests/AssetWorkflowRunProgressTests.cs` |
 | 5 | Characterisation tests for `AssetInstallationPage.tsx` | **Done (PR 3)** | `src/features/installations/assetInstallationPageLogic.test.ts` |
-| 6 | Characterisation tests for `Dashboard.tsx` | Pending | Before first S8 extraction |
+| 6 | Characterisation tests for `Dashboard.tsx` | **Done (PR 4)** | `src/features/dashboard/dashboardPageLogic.test.ts` |
 
 ## What PR 1 pins
 
@@ -78,6 +78,26 @@ Extracted to `src/features/installations/assetInstallationPageLogic.ts` (Class 0
 - `timeAgo` — sync timestamp labels
 - `operationsStickyPrefixSx` — sticky column styles (native vs web)
 
+## What PR 4 pins
+
+### Dashboard pure logic (client)
+
+Extracted to `src/features/dashboard/dashboardPageLogic.ts` (Class 0 — behaviour unchanged):
+
+- `pickActiveRunForAttention` — offline-run ghost suppression + signature gate
+- `dashboardStatusChip` — lightweight list status vocabulary (Issue → red In Progress)
+- My Jobs card mapping — `myJobsCardActionFromDisplayState`, helper text, compact labels
+- `assetLikelyHasWorkflow`, `myJobsAssetIdsKey`
+- Signature stage labels, workflow mode labels, history chip colors
+- Project visibility filter — `isDashboardVisibleProjectStatus`
+- Status normalisation helpers (`isPausedAsset`, `isInProgressAsset`, etc.)
+
+**Dedup:** Dashboard now imports `resolveConfigWorkflowTypeId` from `assetInstallationPageLogic.ts` (removed duplicate copy).
+
+## S3 complete
+
+All six priority items above are pinned. God-file extractions in **S8** can proceed with these characterisation tests as the safety net.
+
 ## Verification command
 
 ```bash
@@ -85,6 +105,6 @@ npm test
 dotnet test server/Commtrac.Api.Tests/Commtrac.Api.Tests.csproj
 ```
 
-## Next S3 PRs
+## After S3
 
-1. **Dashboard characterisation** — extract and test pure logic from `Dashboard.tsx` (including shared `resolveConfigWorkflowTypeId` dedup)
+Proceed to **S4** (dependency upgrades) or begin **S8** god-file extractions — characterisation tests are in place for both god files.
