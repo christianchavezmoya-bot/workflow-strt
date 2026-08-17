@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sanitizeUrl } from "./syncSupportBundleService";
+import { sanitizeUrl, toReportedFaultDiagnostics } from "./syncSupportBundleService";
 
 describe("sanitizeUrl", () => {
   it("removes token query params", () => {
@@ -12,5 +12,31 @@ describe("sanitizeUrl", () => {
 
   it("handles malformed URLs with regex fallback", () => {
     expect(sanitizeUrl("/api/foo?token=abc123")).not.toContain("abc123");
+  });
+});
+
+describe("toReportedFaultDiagnostics", () => {
+  it("includes the user-reported fault summary in the diagnostics bundle", () => {
+    expect(toReportedFaultDiagnostics({
+      kind: "user-report",
+      severity: "S1",
+      title: "Photo would not attach",
+      description: "Took the photo twice and the step stayed empty.",
+      referenceCode: "FR-ABC123",
+      occurredAt: "2026-08-16T21:51:16.788Z",
+      error: {
+        name: "UploadError",
+        message: "Attachment timed out",
+      },
+    })).toEqual({
+      kind: "user-report",
+      severity: "S1",
+      title: "Photo would not attach",
+      description: "Took the photo twice and the step stayed empty.",
+      referenceCode: "FR-ABC123",
+      occurredAt: "2026-08-16T21:51:16.788Z",
+      errorName: "UploadError",
+      errorMessage: "Attachment timed out",
+    });
   });
 });
