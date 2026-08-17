@@ -2,11 +2,21 @@
 
 Companion to [`CODE_QUALITY_ASSESSMENT.md`](./CODE_QUALITY_ASSESSMENT.md) (snapshot of `main` @
 `bac9d7b`). That document says what is wrong; this one says how to fix it without breaking a
-working, in-use product.
+working, in-use product. Concrete defects and dead code are itemised separately in
+[`CODE_QUALITY_BUG_SWEEP.md`](./CODE_QUALITY_BUG_SWEEP.md).
 
-**Goal.** Not perfection. The target is that **no competent developer inheriting this repo would
-call any part of it below average.** Phases 1–4 achieve that. Chasing "excellent" on every axis is
-not worth it for a product this size.
+**Two targets, chosen deliberately.**
+
+| Track | Phases | Target |
+|---|---|---|
+| **Baseline** | 1–5 | No competent developer inheriting this repo calls any part of it below average |
+| **Excellence** | 6–8 | A developer would call it well engineered, not merely acceptable |
+
+Phases 1–5 were scoped on the judgement that chasing excellence on every axis is not worth it for a
+product this size. That judgement holds for *some* axes — backend controller structure, schema
+consolidation — and those stay out of scope permanently. But three areas are worth pushing past
+average, and they are separated out as phases 6–8 so the decision to stop after phase 5 stays
+available.
 
 **Status:** not started. Deliberately deferred until device testing and the cloud move are done —
 see [Sequencing](#sequencing-against-the-cloud-move).
@@ -44,13 +54,19 @@ The safety net is largely built, which makes this far more tractable than the fi
 
 ## Phases
 
+### Baseline track (phases 1–5)
+
 ### Phase 1 — Presentation and hygiene
 **Risk: none.** No running code is touched.
 
 - A README that actually starts the app: prerequisites, `npm install`, `npm run dev`, starting the
   backend on port 4000, seeded login, and where to go next
 - Add `CONTRIBUTING.md`, `LICENSE`, `.nvmrc`, `.editorconfig`, and an `engines` field
-- Delete the 7 confirmed orphaned files, the 2 root `.patch` files, and the tracked `.bak`
+- Delete the **17** confirmed orphaned files (~1,988 lines), the 2 root `.patch` files, and the
+  tracked `.bak`. Six of the 17 are inside `src/modules/bom-project/` — see the
+  [bug sweep](./CODE_QUALITY_BUG_SWEEP.md#4-dead-code-is-roughly-triple-what-the-assessment-reported).
+  Verify each individually: `ConnectivityDebugBar.tsx` survives a naive grep because its only
+  external mention is inside a comment
 - Fix the stale opening paragraph in `.claude/skills/enterprise-dev-practices/SKILL.md`
   (still claims no CI, no tests, no linter)
 
@@ -59,11 +75,19 @@ The safety net is largely built, which makes this far more tractable than the fi
 ### Phase 2 — Correctness and honesty
 **Risk: low.** Small, isolated, individually verifiable changes.
 
+- **Decide the fate of the disabled product-features picker** in `WorkflowBuilder.tsx:2334`, which is
+  unreachable behind a hardcoded `{false && …}`. Either a feature was retired and left in place, or a
+  debugging change shipped and users have been missing functionality. This needs a product answer
+  before a code change, and it is the one finding in the sweep that may be user-visible
+- Fix the remaining **9 lint errors**, then make `npm run lint` a blocking CI gate. The fixes are
+  trivial (`prefer-const`, two useless regex escapes, one unused expression); the gate is the point
 - Route `projectService.ts`, `projectAssetService.ts` and `assetWorkflowAssignmentService.ts`
   through `api.ts`. **This is a real bug fix, not cosmetics** — those three currently bypass token
-  refresh and offline handling
-- De-duplicate helpers that exist in two copies: `resolveConfigWorkflowTypeId` and the
-  inspection-type checks (in both `Dashboard.tsx` and `AssetInstallationPage.tsx`)
+  refresh and offline handling. Do *not* "fix" `useTimeAnalyticsData.ts`: its axios import is a
+  type-only injection at the module boundary, which is the pattern to copy
+- De-duplicate `resolveConfigWorkflowTypeId`, defined identically in both `Dashboard.tsx` and
+  `AssetInstallationPage.tsx`. No live bug today — the two copies match — but workflow-type
+  resolution decides which workflow applies to an asset, and nothing stops one copy being fixed alone
 - Correct the architecture docs so the described layering matches reality — either adopt
   `repositories/` properly or document it honestly as a caching pattern for hot lists
 - Settle naming conventions and apply them to new code (do not mass-rename existing files; that
@@ -100,7 +124,72 @@ assignment panel, then the table body, leaving orchestration in the page.
 - Add global exception handling and a single error response shape
 - Split `Entities.cs` (1,559) and `Dtos.cs` (1,826) by domain
 - Address the security findings: scope `IssuesController.GetAll` and `SyncChangesController` to the
-  caller, and decide whether `ServeMedia` should stay `[AllowAnonymous]`
+  caller, and decide whether `ServeMedia` and `OfficesController.GetAll` should stay
+  `[AllowAnonymous]`. Record the verdict for all 20 anonymous endpoints in one place so the next
+  reviewer does not have to rediscover the reasoning — `SseController`'s exemption, for example, is
+  correct and already documented in the file
+
+---
+
+### Excellence track (phases 6–8)
+
+Everything above lands the repo at "no part is below average". These three phases are what separate
+that from "well engineered". Each is independently worth doing and independently skippable.
+
+### Phase 6 — Correctness sweep
+**Risk: low individually, medium in aggregate.** Every item is small; the volume is what needs care.
+
+Driven directly by [`CODE_QUALITY_BUG_SWEEP.md`](./CODE_QUALITY_BUG_SWEEP.md).
+
+- Work through the **44 `react-hooks/exhaustive-deps` warnings**, 13 of which are in the two god
+  files. **One per PR in those two files.** Adding a missing dependency to a `useEffect` inside a
+  7,752-line component can trigger the exact re-render loop the original author was working around,
+  and the in-file comments show that has already happened once. Do these behind the Phase 3
+  characterisation tests, ideally as part of the Phase 4 extractions
+- Establish a convention for deliberate error swallowing. There are 75 empty `catch {}` blocks and 97
+  whose body is only a comment. The rationale is sound — a failed cache read should not surface to a
+  field worker — but nothing distinguishes "safe to ignore" from "we hope this never happens". A
+  narrow helper or a marker comment, applied to new and touched code, is enough
+- Burn down the `no-console` warnings in the paths that ship to production, leaving them only where a
+  diagnostic is intentional
+
+### Phase 7 — Finish what phase 4 starts
+**Risk: medium.** Same technique as phase 4, applied to the next tier.
+
+Phase 4 splits the two worst files. **23 files exceed 1,000 lines**, and the next four are large
+enough to have the same "cannot reason about the blast radius" problem:
+
+| File | Lines |
+|---|---:|
+| `src/features/admin/UserManagement.tsx` | 4,768 |
+| `src/features/settings/Settings.tsx` | 4,376 |
+| `src/features/workInstructions/WorkOrderRunner.tsx` | 3,829 |
+| `src/features/workInstructions/WorkflowBuilder.tsx` | 3,595 |
+
+Same rule: characterise, then extract, one extraction per PR. `WorkOrderRunner.tsx` should come
+first — it is the screen a field worker spends the most time in, so it carries the highest cost when
+it breaks and the highest value when it is safe to change.
+
+Also in scope: establish component testing as a practice. `src/components` currently has **60 source
+files and zero test files**. The target is not a coverage percentage; it is that the next person to
+add a shared component has an obvious example to copy.
+
+### Phase 8 — A real error contract
+**Risk: low.** Additive, and independently shippable.
+
+The backend has 296 endpoints, three error body shapes (`{ message }` × 88, `{ error }` × 31,
+`{ status }` × 1), zero global exception handlers, and zero uses of `ModelState.IsValid`.
+
+- Add a global exception handler and one error response shape. Keep the old shapes readable by
+  clients during a transition rather than switching in a single release
+- Adopt request validation where request bodies are non-trivial. Not everywhere — start with the
+  workflow and asset endpoints, where a malformed payload currently reaches EF Core
+- Give the frontend a single place that understands the error contract, so a new screen gets correct
+  error handling by default instead of inventing its own
+
+This is the phase most worth doing **before** the cloud move rather than after, despite its number:
+once real users are on a hosted deployment, a consistent error shape is the difference between a
+diagnosable fault report and a screenshot of a blank dialog.
 
 ---
 
@@ -115,6 +204,9 @@ Knowing what *not* to do is part of the plan.
 | Consolidating the 23 `Ensure*` schema patches | Ugly but load-bearing legacy repair, already guarded by the migration test. Rewriting risks breaking existing installations for no user-visible gain |
 | Mass-renaming files for consistency | Destroys `git blame` history. Apply conventions to new and touched code instead |
 | Burning down all 244 lint warnings | Lint is a deliberate backlog gate. Fix the 10 errors, then make it blocking. Do not spend a week on warnings |
+| Splitting the remaining 17 files over 1,000 lines | Phases 4 and 7 cover the six that genuinely hurt. Below roughly 1,500 lines a single-purpose screen is navigable, and the churn costs more than it returns |
+| Chasing a coverage percentage | A number invites tests written to move the number. Phases 3, 6 and 7 name the logic worth protecting instead |
+| Rewriting the backend into a layered architecture | Phase 5 and 8 make controllers survivable and errors predictable. Full CQRS-style restructuring of 54 controllers is not proportionate to the problem |
 
 ---
 
@@ -131,13 +223,22 @@ to either the move or the refactor.
 |---|---|
 | 1, 2 | Safe any time, including during device testing |
 | 3 | Good to do **before** the cloud move — those tests protect the workflow logic first real users will exercise |
+| 8 | Also **before** the move, despite its number — a single error contract is what makes a hosted fault diagnosable |
 | 4, 5 | After the cloud deployment is stable |
+| 6 | Alongside 4, since the hook-dependency fixes belong inside those extractions |
+| 7 | After 4 has proven the extraction technique on the two worst files |
+
+The numbering is priority order within each track, not execution order. Phase 8 is numbered last
+because it is the least urgent for a developer reading the code, and scheduled early because it is
+the most urgent for anyone diagnosing production.
 
 ---
 
 ## Definition of done
 
-The programme is complete when a developer inheriting the repo would say:
+### Baseline (phases 1–5)
+
+A developer inheriting the repo would say:
 
 - The README got me running in under ten minutes
 - No single file made me afraid to change it
@@ -147,3 +248,24 @@ The programme is complete when a developer inheriting the repo would say:
 
 The accepted remaining weakness afterwards is backend controller structure, which is a fair trade
 against the effort of Phase 5.
+
+### Excellence (phases 6–8)
+
+The same developer would additionally say:
+
+- Lint and tests both block a bad PR, so I trusted green CI
+- The largest screen I opened was navigable in one sitting
+- When an API call failed, one error shape told me why
+- Where errors were swallowed, the code said whether that was intentional
+- I could tell which endpoints are public on purpose
+
+Measurable signals, for anyone auditing later:
+
+| Signal | Command |
+|---|---|
+| No lint errors, lint is blocking | `npm run lint` exits 0 and runs in CI |
+| No unreferenced modules | the dead-code sweep in the bug sweep appendix returns nothing |
+| One HTTP path | `grep -rln 'from "axios"' src/` returns only `api.ts` and the type-only injection |
+| No file over ~1,500 lines | `find src -name "*.ts*" -exec wc -l {} + \| awk '$1>1500'` |
+| Components are tested | `find src/components -name "*.test.ts*"` is non-empty |
+| One error contract | one global exception handler; a single error shape in new endpoints |
