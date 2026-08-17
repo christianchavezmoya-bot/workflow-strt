@@ -5,8 +5,6 @@ import {
   CheckBoxOutlined,
   DrawOutlined,
   ErrorOutlined,
-  ExpandLessOutlined,
-  ExpandMoreOutlined,
   PhotoCameraOutlined,
   RefreshOutlined,
   ReportProblemOutlined,
@@ -19,7 +17,6 @@ import {
   Button,
   Chip,
   CircularProgress,
-  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -29,7 +26,6 @@ import {
   FormGroup,
   IconButton,
   InputAdornment,
-  LinearProgress,
   List,
   ListItem,
   ListItemButton,
@@ -149,6 +145,7 @@ import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnFilterMenu from "./AssetInstallationColumnFilterMenu";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
 import AssetInstallationFilterBar from "./AssetInstallationFilterBar";
+import AssetInstallationHealthSummaryBar from "./AssetInstallationHealthSummaryBar";
 import AssetInstallationPageHeader from "./AssetInstallationPageHeader";
 import AssetInstallationPausedProgressPopover from "./AssetInstallationPausedProgressPopover";
 import AssetInstallationBulkDocsUploadDialog from "./AssetInstallationBulkDocsUploadDialog";
@@ -3660,14 +3657,6 @@ ${words.slice(midpoint).join(" ")}`;
     return null; // no open issues â†' use default status color
   }
 
-  function formatRunDur(totalSeconds: number): string {
-    const safe = Math.max(0, totalSeconds || 0);
-    const h = Math.floor(safe / 3600);
-    const m = Math.floor((safe % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    return `${m}m`;
-  }
-
   async function saveInlineAssetIssue(asset: ProjectAsset, updatedIssue: AssetIssue) {
     setInlineSaving(true);
     try {
@@ -4060,98 +4049,14 @@ ${words.slice(midpoint).join(" ")}`;
         </Alert>
       )}
 
-      {/* Health summary bar */}
       {!loadingAssets && activeHealth && activeHealth.total > 0 && (
-        <Paper className="glass-card" sx={{ px: 2.5, py: 1.5 }}>
-          {/* Header row — always visible */}
-          <Stack direction="row" alignItems="center" spacing={1.5} flexWrap="wrap" useFlexGap>
-            <Typography variant="caption" color="text.secondary" fontWeight={700}
-              sx={{ textTransform: "uppercase", letterSpacing: 0.5, flexShrink: 0 }}>
-              {activeProduct?.name ?? "All projects"} health
-            </Typography>
-            {/* Collapsed summary chips */}
-            {!healthExpanded && (
-              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap>
-                {activeHealth.complete > 0 && <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" sx={{ height: 18, fontSize: 10 }} />}
-                {activeHealth.closed > 0 && <Chip size="small" label={`${activeHealth.closed} Closed`} color="info" sx={{ height: 18, fontSize: 10 }} />}
-                {activeHealth.inProgress > 0 && <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" sx={{ height: 18, fontSize: 10 }} />}
-                {activeHealth.paused > 0 && <Chip size="small" label={`${activeHealth.paused} Paused`} color="warning" sx={{ height: 18, fontSize: 10 }} />}
-                {activeHealth.pending > 0 && <Chip size="small" label={`${activeHealth.pending} Pending`} color="warning" sx={{ height: 18, fontSize: 10 }} />}
-                {activeHealth.issue > 0 && <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" sx={{ height: 18, fontSize: 10 }} />}
-                <Typography variant="caption" color="text.secondary" sx={{ alignSelf: "center" }}>
-                  {activeHealth.total > 0 ? Math.round(((activeHealth.complete + activeHealth.closed) / activeHealth.total) * 100) : 0}%
-                </Typography>
-              </Stack>
-            )}
-            <Box sx={{ flex: 1 }} />
-            <Tooltip title={healthExpanded ? "Minimize health panel" : "Expand health panel"}>
-              <IconButton size="small" onClick={() => setHealthExpanded(v => !v)} sx={{ p: 0.25 }}>
-                {healthExpanded ? <ExpandLessOutlined sx={{ fontSize: 18 }} /> : <ExpandMoreOutlined sx={{ fontSize: 18 }} />}
-              </IconButton>
-            </Tooltip>
-          </Stack>
-          {/* Collapsible content */}
-          <Collapse in={healthExpanded}>
-            <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} spacing={1.5} flexWrap="wrap" useFlexGap sx={{ mt: 1.5 }}>
-              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                {activeHealth.notStarted > 0 && (
-                  <Chip size="small" label={`${activeHealth.notStarted} Not Started`} />
-                )}
-                {activeHealth.inProgress > 0 && (
-                  <Chip size="small" label={`${activeHealth.inProgress} In Progress`} color="primary" />
-                )}
-                {activeHealth.paused > 0 && (
-                  <Chip size="small" label={`${activeHealth.paused} Paused`} color="warning" />
-                )}
-                {activeHealth.pending > 0 && (
-                  <Chip size="small" label={`${activeHealth.pending} Pending`} color="warning" />
-                )}
-                {activeHealth.complete > 0 && (
-                  <Chip size="small" label={`${activeHealth.complete} Complete`} color="success" />
-                )}
-                {activeHealth.closed > 0 && (
-                  <Chip size="small" label={`${activeHealth.closed} Closed`} color="info" />
-                )}
-                {activeHealth.issue > 0 && (
-                  <Chip size="small" label={`${activeHealth.issue} Issue`} color="error" />
-                )}
-                {activeHealth.noWorkflow > 0 && (
-                  <Tooltip title="These assets have no workflow linked and cannot be worked on.">
-                    <Chip size="small" label={`${activeHealth.noWorkflow} No Workflow`} color="warning" variant="outlined" />
-                  </Tooltip>
-                )}
-              </Stack>
-              <Box sx={{ flex: 1, minWidth: 100 }}>
-                <LinearProgress
-                  variant="determinate"
-                  value={activeHealth.total > 0 ? ((activeHealth.complete + activeHealth.closed) / activeHealth.total) * 100 : 0}
-                  color={activeHealth.issue > 0 ? "error" : "success"}
-                  sx={{ height: 6, borderRadius: 1 }}
-                />
-              </Box>
-              <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                {activeHealth.total > 0 ? Math.round(((activeHealth.complete + activeHealth.closed) / activeHealth.total) * 100) : 0}% field work complete
-              </Typography>
-              {(activeTimeRollup.productive > 0 || activeTimeRollup.downtime > 0) && (
-                <>
-                  <Divider orientation="vertical" flexItem sx={{ mx: 0.5 }} />
-                  <Tooltip title="Total productive time across all visible assets">
-                    <Chip size="small" color="success" variant="outlined"
-                      label={`Productive ${formatRunDur(activeTimeRollup.productive)}`}
-                      sx={{ fontSize: 10, height: 20 }} />
-                  </Tooltip>
-                  {activeTimeRollup.downtime > 0 && (
-                    <Tooltip title={`${activeTimeRollup.downtimeEvents} downtime event${activeTimeRollup.downtimeEvents !== 1 ? "s" : ""} across all visible assets`}>
-                      <Chip size="small" color="warning" variant="outlined"
-                        label={`Downtime ${formatRunDur(activeTimeRollup.downtime)}`}
-                        sx={{ fontSize: 10, height: 20 }} />
-                    </Tooltip>
-                  )}
-                </>
-              )}
-            </Stack>
-          </Collapse>
-        </Paper>
+        <AssetInstallationHealthSummaryBar
+          productName={activeProduct?.name}
+          health={activeHealth}
+          expanded={healthExpanded}
+          onExpandedChange={setHealthExpanded}
+          timeRollup={activeTimeRollup}
+        />
       )}
 
       <AssetInstallationFilterBar
