@@ -20,6 +20,7 @@ public class FaultReportsController : ControllerBase
     private const int MaxDiagnosticsChars = 400_000;
     private const int MaxStackChars = 20_000;
     private const int MaxBreadcrumbChars = 20_000;
+    private const int MaxActionChars = 4_000;
 
     private static readonly string[] AllowedKinds = ["user-report", "crash", "unhandled-rejection"];
     private static readonly string[] AllowedSeverities = ["S0", "S1", "S2", "S3", "S4"];
@@ -151,7 +152,7 @@ public class FaultReportsController : ControllerBase
             LastSevenDays: rows.Count(r => r.CreatedAtUtc >= since)));
     }
 
-    /// <summary>Full report including stack, breadcrumbs and diagnostics.</summary>
+    /// <summary>Full report including stack, breadcrumbs, diagnostics and the update history.</summary>
     [HttpGet("{id}")]
     [Authorize(Roles = "Admin")]
     public async Task<ActionResult<FaultReportDetailDto>> GetById(string id)
@@ -159,11 +160,7 @@ public class FaultReportsController : ControllerBase
         var entity = await _db.FaultReports.AsNoTracking().FirstOrDefaultAsync(r => r.Id == id);
         if (entity is null) return NotFound();
 
-        return Ok(new FaultReportDetailDto(
-            ToDto(entity),
-            entity.ErrorStack,
-            entity.BreadcrumbsJson,
-            entity.DiagnosticsJson));
+        return Ok(await BuildDetailAsync(entity));
     }
 
     /// <summary>Look up by the code the user quotes over the phone.</summary>
@@ -178,11 +175,45 @@ public class FaultReportsController : ControllerBase
             .FirstOrDefaultAsync(r => r.ReferenceCode == normalized);
         if (entity is null) return NotFound();
 
-        return Ok(new FaultReportDetailDto(
-            ToDto(entity),
-            entity.ErrorStack,
-            entity.BreadcrumbsJson,
-            entity.DiagnosticsJson));
+        return Ok(await BuildDetailAsync(entity));
+    }
+
+    /// <summary>
+    /// Record a corrective action against a report. Appending rather than editing keeps the
+    /// history an audit trail, and moves the report's own status on so the list stays accurate.
+    /// </summary>
+    [HttpPost("{id}/updates")]
+    [Authorize(Roles = "Admin")]
+    public async Task<ActionResult<FaultReportUpdateDto>> AddUpdate(
+        string id,
+        [FromBody] AddFaultReportUpdateRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Action))
+        {
+            return BadRequest(new { error = "action required" });
+        }
+
+        var report = await _db.FaultReports.FirstOrDefaultAsync(r => r.Id == id);
+        if (report is null) return NotFound();
+
+        var status = Pick(request.Status, AllowedStatuses, report.Status);
+
+        var update = new FaultReportUpdateEntity
+        {
+            FaultReportId = report.Id,
+            Action = Truncate(request.Action.Trim(), MaxActionChars)!,
+            Status = status,
+            AuthorUserId = User.FindFirstValue(ClaimTypes.NameIdentifier),
+            AuthorName = User.FindFirstValue("name") ?? User.FindFirstValue(ClaimTypes.Email),
+            SystemGenerated = false,
+            CreatedAtUtc = DateTime.UtcNow,
+        };
+
+        _db.FaultReportUpdates.Add(update);
+        ApplyStatus(report, status);
+
+        await _db.SaveChangesAsync();
+        return Ok(ToUpdateDto(update));
     }
 
     /// <summary>Triage: change status/severity or add notes.</summary>
@@ -200,10 +231,23 @@ public class FaultReportsController : ControllerBase
                 return BadRequest(new { error = $"status must be one of {string.Join(", ", AllowedStatuses)}" });
             }
 
-            entity.Status = request.Status;
-            var resolved = request.Status is "Fixed" or "WontFix" or "Duplicate";
-            entity.ResolvedAtUtc = resolved ? DateTime.UtcNow : null;
-            entity.ResolvedByUserId = resolved ? User.FindFirstValue(ClaimTypes.NameIdentifier) : null;
+            // Record the transition so the history explains how the report reached its status,
+            // rather than the status silently changing with no trace of who or when.
+            if (entity.Status != request.Status)
+            {
+                _db.FaultReportUpdates.Add(new FaultReportUpdateEntity
+                {
+                    FaultReportId = entity.Id,
+                    Action = $"Status changed from {entity.Status} to {request.Status}.",
+                    Status = request.Status,
+                    AuthorUserId = User.FindFirstValue(ClaimTypes.NameIdentifier),
+                    AuthorName = User.FindFirstValue("name") ?? User.FindFirstValue(ClaimTypes.Email),
+                    SystemGenerated = true,
+                    CreatedAtUtc = DateTime.UtcNow,
+                });
+            }
+
+            ApplyStatus(entity, request.Status);
         }
 
         if (!string.IsNullOrWhiteSpace(request.Severity))
@@ -232,10 +276,40 @@ public class FaultReportsController : ControllerBase
         var entity = await _db.FaultReports.FirstOrDefaultAsync(r => r.Id == id);
         if (entity is null) return NotFound();
 
+        var updates = await _db.FaultReportUpdates.Where(u => u.FaultReportId == id).ToListAsync();
+        _db.FaultReportUpdates.RemoveRange(updates);
         _db.FaultReports.Remove(entity);
         await _db.SaveChangesAsync();
         return NoContent();
     }
+
+    private async Task<FaultReportDetailDto> BuildDetailAsync(FaultReportEntity entity)
+    {
+        var updates = await _db.FaultReportUpdates
+            .AsNoTracking()
+            .Where(u => u.FaultReportId == entity.Id)
+            .ToListAsync();
+
+        return new FaultReportDetailDto(
+            ToDto(entity),
+            entity.ErrorStack,
+            entity.BreadcrumbsJson,
+            entity.DiagnosticsJson,
+            updates
+                .OrderBy(u => u.CreatedAtUtc)
+                .Select(ToUpdateDto)
+                .ToList());
+    }
+
+    private static void ApplyStatus(FaultReportEntity entity, string status)
+    {
+        entity.Status = status;
+        var resolved = status is "Fixed" or "WontFix" or "Duplicate";
+        entity.ResolvedAtUtc = resolved ? (entity.ResolvedAtUtc ?? DateTime.UtcNow) : null;
+    }
+
+    private static FaultReportUpdateDto ToUpdateDto(FaultReportUpdateEntity u) => new(
+        u.Id, u.Action, u.Status, u.AuthorName, u.SystemGenerated, u.CreatedAtUtc);
 
     private static FaultReportDto ToDto(FaultReportEntity e) => new(
         e.Id, e.ReferenceCode, e.Kind, e.Severity, e.Status, e.Title, e.Description,

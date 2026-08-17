@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { buildIssueHistory, MAX_HISTORY_DEPTH } from "./issueHistory";
+import { buildIssueHistory } from "./issueHistory";
+import { MAX_HISTORY_DEPTH } from "./historyStaircase";
 import type { AssetIssue } from "../types/projectAsset";
 
 function issue(overrides: Partial<AssetIssue> = {}): AssetIssue {
@@ -21,7 +22,7 @@ describe("buildIssueHistory", () => {
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       depth: 0,
-      kind: "reported",
+      kind: "root",
       status: "Open",
       action: "Pump not starting. No response when power is applied.",
     });
@@ -56,7 +57,7 @@ describe("buildIssueHistory", () => {
 
     const last = rows[rows.length - 1];
     expect(last).toMatchObject({
-      kind: "closed",
+      kind: "closing",
       status: "Closed",
       action: "Pump operating normally.",
       author: "Alex",
@@ -133,16 +134,17 @@ describe("buildIssueHistory", () => {
     expect(rows[1].action).toBe("Real update");
   });
 
-  it("derives a readable fault reference and carries context onto the root row", () => {
+  it("derives a readable fault reference and lists context once, not per row", () => {
     const { context } = buildIssueHistory(issue(), {
       assetLabel: "Conveyor CV-104",
       projectLabel: "JOB-4021",
     });
 
-    expect(context.faultId).toBe("FAULT-ABC123");
-    expect(context.assetLabel).toBe("Conveyor CV-104");
-    expect(context.projectLabel).toBe("JOB-4021");
-    expect(context.severity).toBe("high");
+    expect(context.reference).toBe("FAULT-ABC123");
+    const meta = Object.fromEntries(context.meta.map((m) => [m.label, m.value]));
+    expect(meta["Asset / item"]).toBe("Conveyor CV-104");
+    expect(meta.Project).toBe("JOB-4021");
+    expect(meta.Severity).toBe("high");
   });
 
   it("still closes cleanly when a resolved issue has no resolution note", () => {

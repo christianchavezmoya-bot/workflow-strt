@@ -20,10 +20,10 @@ import {
 import type { AssetIssue } from "../../types/projectAsset";
 import type { RunIssue } from "../../types/assetWorkflowRun";
 import MediaCapture from "./MediaCapture";
-import IssueHistoryStaircase from "./IssueHistoryStaircase";
+import HistoryStaircase from "./HistoryStaircase";
 import { formatInstant } from "../../utils/datetime";
 import { buildIssueHistory, type IssueHistoryContext } from "../../utils/issueHistory";
-import { openIssueHistoryReport } from "../../utils/generateIssueHistoryReport";
+import { openHistoryReport } from "../../utils/generateHistoryReport";
 
 type AnyIssue = AssetIssue | RunIssue;
 
@@ -256,14 +256,14 @@ export default function IssueDetailDialog({
 
         {/* Fault history — staircase view */}
         <Box sx={{ px: 2.5, pb: 2.5 }}>
-          <IssueHistoryStaircase history={history} timeZoneId={timeZoneId} />
+          <HistoryStaircase view={history} timeZoneId={timeZoneId} />
         </Box>
       </DialogContent>
 
       <DialogActions sx={{ px: 2.5, py: 1.5 }}>
         <Button
           startIcon={<PrintOutlined />}
-          onClick={() => openIssueHistoryReport({ history, timeZoneId })}
+          onClick={() => openHistoryReport({ view: history, timeZoneId, documentLabel: "Fault history" })}
         >
           Print / export
         </Button>

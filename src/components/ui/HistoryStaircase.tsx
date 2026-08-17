@@ -1,33 +1,27 @@
 import { Box, Chip, Divider, Stack, Tooltip, Typography } from "@mui/material";
 import { FlagOutlined, HelpOutlineOutlined } from "@mui/icons-material";
-import type { IssueEventStatus } from "../../types/projectAsset";
 import {
-  ISSUE_STATUS_MEANING,
-  type IssueHistory,
-  type IssueHistoryRow,
-} from "../../utils/issueHistory";
+  statusesPresent,
+  styleFor,
+  type StaircaseRow,
+  type StaircaseView,
+} from "../../utils/historyStaircase";
 import { formatInstant } from "../../utils/datetime";
 
 /**
- * Staircase view of a fault's lifecycle: the original report sits at the left, and each later
- * event steps one level to the right so the indentation shows that it followed from the event
- * above. Later rows carry only time, action and status — asset and location appear once, on the
- * root row, and are never repeated.
+ * Staircase view of a fault's lifecycle: the opening row sits at the left, and each later event
+ * steps one level to the right so the indentation shows that it followed from the event above.
+ * Later rows carry only time, action and status — static context appears once, above the rows.
+ *
+ * Vocabulary-neutral: the caller supplies statuses, palette and legend, so the same layout serves
+ * app fault reports and asset maintenance faults.
  */
 
-/** Each level of indentation, in px. Narrower on mobile — see INDENT_STEP_XS. */
 const INDENT_STEP = 28;
 const INDENT_STEP_XS = 14;
 
-const STATUS_STYLE: Record<IssueEventStatus, { color: string; bg: string; border: string }> = {
-  Open: { color: "#ff7a7a", bg: "rgba(244,67,54,0.14)", border: "rgba(244,67,54,0.42)" },
-  "In Progress": { color: "#e8b34a", bg: "rgba(215,155,36,0.14)", border: "rgba(215,155,36,0.42)" },
-  "Pending Verification": { color: "#7cc4ff", bg: "rgba(58,161,255,0.14)", border: "rgba(58,161,255,0.42)" },
-  Closed: { color: "#6ede9a", bg: "rgba(46,155,94,0.16)", border: "rgba(46,155,94,0.45)" },
-};
-
-function StatusChip({ status, inferred }: { status: IssueEventStatus; inferred: boolean }) {
-  const style = STATUS_STYLE[status];
+function StatusChip({ view, status, inferred }: { view: StaircaseView; status: string; inferred?: boolean }) {
+  const style = styleFor(view, status);
   const chip = (
     <Chip
       size="small"
@@ -46,16 +40,16 @@ function StatusChip({ status, inferred }: { status: IssueEventStatus; inferred: 
   if (!inferred) return chip;
 
   return (
-    <Tooltip title="Recorded before per-update status existed — shown as In Progress because work was underway.">
+    <Tooltip title="Inferred — this predates per-update status being recorded.">
       <span>{chip}</span>
     </Tooltip>
   );
 }
 
 /**
- * The elbow that ties a row back to the one above it, mirroring the └── in the spec.
- * Once indentation reaches its cap, consecutive rows share a depth, so a straight vertical
- * connector is drawn instead of an elbow that would point into empty space.
+ * Ties a row back to the one above it, mirroring the └── in the layout. Once indentation reaches
+ * its cap consecutive rows share a depth, so a straight line is drawn rather than an elbow that
+ * would point into empty space.
  */
 function Connector({ straight }: { straight: boolean }) {
   const line = "2px solid rgba(45,212,191,0.35)";
@@ -85,13 +79,15 @@ function Connector({ straight }: { straight: boolean }) {
   );
 }
 
-function HistoryRow({
+function HistoryRowView({
+  view,
   row,
   isRoot,
   sameDepthAsPrevious,
   timeZoneId,
 }: {
-  row: IssueHistoryRow;
+  view: StaircaseView;
+  row: StaircaseRow;
   isRoot: boolean;
   sameDepthAsPrevious: boolean;
   timeZoneId?: string | null;
@@ -150,13 +146,29 @@ function HistoryRow({
                 </Typography>
               )}
               <Box sx={{ flex: 1 }} />
-              <StatusChip status={row.status} inferred={row.statusInferred} />
+              <StatusChip view={view} status={row.status} inferred={row.statusInferred} />
             </Stack>
+
+            {row.label && (
+              <Typography
+                variant="caption"
+                sx={{
+                  display: "block",
+                  mt: 0.25,
+                  color: "text.disabled",
+                  textTransform: "uppercase",
+                  letterSpacing: 0.5,
+                  fontSize: "0.62rem",
+                }}
+              >
+                {row.label}
+              </Typography>
+            )}
 
             <Typography
               variant="body2"
               sx={{
-                mt: 0.5,
+                mt: 0.25,
                 fontWeight: isRoot ? 600 : 500,
                 whiteSpace: "pre-wrap",
                 wordBreak: "break-word",
@@ -171,33 +183,26 @@ function HistoryRow({
   );
 }
 
-function ContextLine({ history }: { history: IssueHistory }) {
-  const { context } = history;
-  const parts = [
-    context.faultId,
-    context.assetLabel,
-    context.projectLabel,
-    context.location,
-  ].filter(Boolean) as string[];
-
-  if (parts.length === 0) return null;
+function ContextChips({ view }: { view: StaircaseView }) {
+  if (view.context.meta.length === 0) return null;
 
   return (
-    <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap sx={{ mb: 1 }}>
-      {parts.map((part, i) => (
+    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap sx={{ mb: 1.25 }}>
+      {view.context.meta.map((item) => (
         <Chip
-          key={`${part}-${i}`}
+          key={`${item.label}-${item.value}`}
           size="small"
-          label={part}
           variant="outlined"
-          sx={{ height: 20, fontSize: "0.68rem", borderColor: "rgba(255,255,255,0.16)" }}
+          label={`${item.label}: ${item.value}`}
+          sx={{ height: 20, fontSize: "0.66rem", borderColor: "rgba(255,255,255,0.16)" }}
         />
       ))}
     </Stack>
   );
 }
 
-function Legend({ statuses }: { statuses: IssueEventStatus[] }) {
+function Legend({ view }: { view: StaircaseView }) {
+  const statuses = statusesPresent(view);
   if (statuses.length === 0) return null;
 
   return (
@@ -210,12 +215,13 @@ function Legend({ statuses }: { statuses: IssueEventStatus[] }) {
                 width: 10,
                 height: 10,
                 borderRadius: "50%",
-                bgcolor: STATUS_STYLE[status].color,
+                bgcolor: styleFor(view, status).color,
                 flexShrink: 0,
               }}
             />
             <Typography variant="caption" sx={{ color: "text.secondary" }}>
-              <strong>{status}</strong> — {ISSUE_STATUS_MEANING[status]}
+              <strong>{status}</strong>
+              {view.meanings[status] ? ` — ${view.meanings[status]}` : ""}
             </Typography>
           </Stack>
         ))}
@@ -225,27 +231,23 @@ function Legend({ statuses }: { statuses: IssueEventStatus[] }) {
 }
 
 interface Props {
-  history: IssueHistory;
+  view: StaircaseView;
   timeZoneId?: string | null;
-  /** Hidden on narrow screens where the legend costs more than it explains. */
+  heading?: string;
   showLegend?: boolean;
   showContext?: boolean;
 }
 
-export default function IssueHistoryStaircase({
-  history,
+export default function HistoryStaircase({
+  view,
   timeZoneId,
+  heading = "Fault history",
   showLegend = true,
   showContext = true,
 }: Props) {
-  if (history.rows.length === 0) return null;
+  if (view.rows.length === 0) return null;
 
-  // Only explain the statuses actually present, in lifecycle order.
-  const present = history.rows.map((r) => r.status);
-  const statusesUsed = (["Open", "In Progress", "Pending Verification", "Closed"] as IssueEventStatus[])
-    .filter((s) => present.includes(s));
-
-  const anyInferred = history.rows.some((r) => r.statusInferred);
+  const anyInferred = view.rows.some((r) => r.statusInferred);
 
   return (
     <Box>
@@ -254,25 +256,26 @@ export default function IssueHistoryStaircase({
           variant="caption"
           sx={{ color: "text.secondary", textTransform: "uppercase", letterSpacing: 0.8 }}
         >
-          Fault history
+          {heading}
         </Typography>
       </Divider>
 
-      {showContext && <ContextLine history={history} />}
+      {showContext && <ContextChips view={view} />}
 
       <Box sx={{ overflowX: "auto" }}>
-        {history.rows.map((row, index) => (
-          <HistoryRow
+        {view.rows.map((row, index) => (
+          <HistoryRowView
             key={row.id}
+            view={view}
             row={row}
             isRoot={index === 0}
-            sameDepthAsPrevious={index > 0 && history.rows[index - 1].depth === row.depth}
+            sameDepthAsPrevious={index > 0 && view.rows[index - 1].depth === row.depth}
             timeZoneId={timeZoneId}
           />
         ))}
       </Box>
 
-      {showLegend && <Legend statuses={statusesUsed} />}
+      {showLegend && <Legend view={view} />}
 
       {anyInferred && (
         <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mt: 1 }}>

@@ -1,64 +1,47 @@
 /**
- * Printable fault history report — the same staircase as the on-screen view, rendered light for
- * paper and PDF. Uses the app's existing print-window helper rather than a PDF library, so the
- * layout stays identical to what is reviewed on screen and the browser handles pagination.
+ * Printable fault-history report — the same staircase as the on-screen view, rendered light for
+ * paper and PDF. Uses the app's print-window helper rather than a PDF library, so the printed
+ * layout matches what was reviewed on screen and the browser handles pagination.
+ *
+ * Vocabulary-neutral: works for app fault reports and asset maintenance faults alike.
  */
 import { escapeHtml, openPrintWindow } from "./printWindow";
 import { formatInstant } from "./datetime";
-import { ISSUE_STATUS_MEANING, type IssueHistory } from "./issueHistory";
-import type { IssueEventStatus } from "../types/projectAsset";
-
-/** Print palette — light, unlike the app UI, so it does not burn ink or wash out on paper. */
-const PRINT_STATUS_STYLE: Record<IssueEventStatus, { fg: string; bg: string; border: string }> = {
-  Open: { fg: "#b3261e", bg: "#fdecea", border: "#f3c0bb" },
-  "In Progress": { fg: "#8a5a00", bg: "#fff6e0", border: "#f0d9a3" },
-  "Pending Verification": { fg: "#0b5c9c", bg: "#e8f2fd", border: "#b8d8f5" },
-  Closed: { fg: "#1c6b45", bg: "#e9f7ef", border: "#b6e0c7" },
-};
+import { statusesPresent, styleFor, type StaircaseView } from "./historyStaircase";
 
 const INDENT_PX = 34;
 
-function statusBadge(status: IssueEventStatus, inferred: boolean): string {
-  const s = PRINT_STATUS_STYLE[status];
-  return `<span class="status" style="color:${s.fg};background:${s.bg};border-color:${s.border}">${escapeHtml(
+export interface HistoryReportOptions {
+  view: StaircaseView;
+  timeZoneId?: string | null;
+  /** Shown under the title — the app or customer name. */
+  brandName?: string;
+  /** Heading noun, e.g. "Fault report" or "Fault". */
+  documentLabel?: string;
+  autoPrint?: boolean;
+}
+
+function statusBadge(view: StaircaseView, status: string, inferred?: boolean): string {
+  const s = styleFor(view, status);
+  return `<span class="status" style="color:${s.printFg};background:${s.printBg};border-color:${s.printBorder}">${escapeHtml(
     inferred ? `${status} *` : status
   )}</span>`;
 }
 
-export interface IssueHistoryReportOptions {
-  history: IssueHistory;
-  timeZoneId?: string | null;
-  /** Shown in the header — e.g. the app or customer name. */
-  brandName?: string;
-  /** Open the browser print dialog immediately. */
-  autoPrint?: boolean;
-}
-
-export function buildIssueHistoryReportHtml({
-  history,
+export function buildHistoryReportHtml({
+  view,
   timeZoneId,
   brandName = "Strata NGo",
-}: Omit<IssueHistoryReportOptions, "autoPrint">): string {
-  const { rows, context, currentStatus } = history;
-
+  documentLabel = "Fault report",
+}: Omit<HistoryReportOptions, "autoPrint">): string {
+  const { rows, context } = view;
   const when = (iso: string) => escapeHtml(formatInstant(iso, timeZoneId, { withZone: false }) || iso);
 
-  const contextCells = [
-    context.faultId ? ["Fault", context.faultId] : null,
-    context.assetLabel ? ["Asset / Item", context.assetLabel] : null,
-    context.projectLabel ? ["Project", context.projectLabel] : null,
-    context.location ? ["Location", context.location] : null,
-    context.severity ? ["Severity", context.severity] : null,
-    context.reportedBy ? ["Reported by", context.reportedBy] : null,
-    rows[0] ? ["Date opened", formatInstant(rows[0].at, timeZoneId, { withZone: false }) || rows[0].at] : null,
-    ["Current status", currentStatus],
-  ].filter(Boolean) as [string, string][];
-
-  const summary = contextCells
+  const summary = context.meta
     .map(
-      ([label, value]) =>
-        `<div class="meta"><span class="meta-label">${escapeHtml(label)}</span><span class="meta-value">${escapeHtml(
-          value
+      (item) =>
+        `<div class="meta"><span class="meta-label">${escapeHtml(item.label)}</span><span class="meta-value">${escapeHtml(
+          item.value
         )}</span></div>`
     )
     .join("");
@@ -67,55 +50,52 @@ export function buildIssueHistoryReportHtml({
     .map((row, index) => {
       const isRoot = index === 0;
       const indent = row.depth * INDENT_PX;
-      // The elbow starts under the previous row's text and hooks right into this one, so the
-      // connection between consecutive events is visible rather than implied by indent alone.
-      // Past the depth cap consecutive rows share an indent, so a straight line is used instead.
+      // The elbow starts under the previous row's text and hooks right into this one, so the link
+      // between consecutive events is visible rather than implied by indentation alone. Past the
+      // depth cap consecutive rows share an indent, so a straight line is used instead.
       const sameDepth = index > 0 && rows[index - 1].depth === row.depth;
       const connectorLeft = Math.max(2, indent + 12 - (sameDepth ? 0 : 22));
-      const elbow = isRoot
+      const connector = isRoot
         ? ""
         : `<span class="${sameDepth ? "elbow straight" : "elbow"}" style="left:${connectorLeft}px" aria-hidden="true"></span>`;
       const author = row.author ? `<span class="author">· ${escapeHtml(row.author)}</span>` : "";
-      const label = isRoot ? "Original fault report" : row.kind === "closed" ? "Closed" : "Update";
+      const label = row.label ?? (isRoot ? "Original report" : "Update");
 
       return `
         <tr class="${isRoot ? "row root" : "row"}">
           <td class="cell-when">${when(row.at)}${author}</td>
           <td class="cell-action" style="padding-left:${indent + 12}px">
-            ${elbow}
+            ${connector}
             <div class="action-label">${escapeHtml(label)}</div>
             <div class="action-text">${escapeHtml(row.action || "—")}</div>
           </td>
-          <td class="cell-status">${statusBadge(row.status, row.statusInferred)}</td>
+          <td class="cell-status">${statusBadge(view, row.status, row.statusInferred)}</td>
         </tr>`;
     })
     .join("");
 
-  const statusesUsed = (["Open", "In Progress", "Pending Verification", "Closed"] as IssueEventStatus[])
-    .filter((s) => rows.some((r) => r.status === s));
-
-  const legend = statusesUsed
+  const legend = statusesPresent(view)
     .map((status) => {
-      const s = PRINT_STATUS_STYLE[status];
+      const s = styleFor(view, status);
       return `<div class="legend-row">
-        <span class="status" style="color:${s.fg};background:${s.bg};border-color:${s.border}">${escapeHtml(status)}</span>
-        <span class="legend-text">${escapeHtml(ISSUE_STATUS_MEANING[status])}</span>
+        <span class="status" style="color:${s.printFg};background:${s.printBg};border-color:${s.printBorder}">${escapeHtml(status)}</span>
+        <span class="legend-text">${escapeHtml(view.meanings[status] ?? "")}</span>
       </div>`;
     })
     .join("");
 
-  const anyInferred = rows.some((r) => r.statusInferred);
-  const inferredNote = anyInferred
-    ? `<p class="note">* Status inferred — this update was recorded before updates carried their own status.</p>`
+  const inferredNote = rows.some((r) => r.statusInferred)
+    ? `<p class="note">* Status inferred — recorded before updates carried their own status.</p>`
     : "";
 
   const generated = escapeHtml(formatInstant(new Date().toISOString(), timeZoneId, { withZone: true }) || "");
+  const heading = `${documentLabel} — ${context.reference ?? ""}`.trim().replace(/—\s*$/, "").trim();
 
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>${escapeHtml(context.faultId ?? "Fault")} — history</title>
+<title>${escapeHtml(heading)}</title>
 <style>
   * { box-sizing: border-box; }
   body {
@@ -124,6 +104,7 @@ export function buildIssueHistoryReportHtml({
     color: #1b2b33; background: #fff; font-size: 12px;
   }
   h1 { margin: 0 0 2px; font-size: 18px; }
+  .subject { color: #29404c; font-size: 13px; font-weight: 600; margin-bottom: 2px; }
   .brand { color: #5b7280; font-size: 11px; margin-bottom: 16px; }
   .summary {
     display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
@@ -132,7 +113,7 @@ export function buildIssueHistoryReportHtml({
   }
   .meta { display: flex; flex-direction: column; gap: 1px; }
   .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: .4px; color: #6b8290; }
-  .meta-value { font-weight: 600; }
+  .meta-value { font-weight: 600; word-break: break-word; }
   .intro { color: #4a5f6b; margin: 0 0 10px; }
   table { width: 100%; border-collapse: collapse; }
   thead th {
@@ -174,7 +155,8 @@ export function buildIssueHistoryReportHtml({
 </style>
 </head>
 <body>
-  <h1>Fault history — ${escapeHtml(context.faultId ?? "Fault")}</h1>
+  <h1>${escapeHtml(heading)}</h1>
+  ${context.title ? `<div class="subject">${escapeHtml(context.title)}</div>` : ""}
   <div class="brand">${escapeHtml(brandName)}</div>
 
   <div class="summary">${summary}</div>
@@ -203,7 +185,6 @@ export function buildIssueHistoryReportHtml({
 }
 
 /** Opens the report in a new window, optionally going straight to the print dialog. */
-export function openIssueHistoryReport(options: IssueHistoryReportOptions): Window | null {
-  const html = buildIssueHistoryReportHtml(options);
-  return openPrintWindow(html, options.autoPrint ?? false);
+export function openHistoryReport(options: HistoryReportOptions): Window | null {
+  return openPrintWindow(buildHistoryReportHtml(options), options.autoPrint ?? false);
 }
