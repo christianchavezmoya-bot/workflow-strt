@@ -86,293 +86,47 @@ import {
   isOfflineConfigMissingContext,
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
-import { getWorkflowDisplayState, myJobsCardChipFromDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
+import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
 import { mediaStore } from "../../services/mediaStore";
 import { buildProjectRequestKey, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import { get as dcGet, put as dcPut, DASHBOARD_CACHE_KEYS } from "../../services/dashboardCache";
 import { entityGetAsset } from "../../services/localDB";
 import { signatureService } from "../../services/signatureService";
 import { notificationService } from "../../services/notificationService";
+import { resolveConfigWorkflowTypeId } from "../installations/assetInstallationPageLogic";
+import {
+  assetLikelyHasWorkflow,
+  dashboardStatusChip,
+  fmtDate,
+  formatMyJobsStepCompletionLabel,
+  formatStepCompletionPercent,
+  historyChipColor,
+  isDashboardVisibleProjectStatus,
+  isInProgressAsset,
+  isIssueAsset,
+  isNotStartedAsset,
+  isOpenInspectionStatus,
+  isPausedAsset,
+  isPendingAsset,
+  myJobsAssetIdsKey,
+  myJobsCardActionFromDisplayState,
+  pendingSignatureStageLabel,
+  pendingSignatureStageText,
+  pickActiveRunForAttention,
+  workflowModeChipColor,
+  workflowModeLabel,
+  type MyJobsCardAction,
+  type MyJobsCardWidget,
+} from "./dashboardPageLogic";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
 const AssetDocumentsDialog = lazy(() => import("../installations/AssetDocumentsDialog"));
 
-function fmtDate(iso: string | null | undefined) {
-  if (!iso) return "-";
-  try { return new Date(iso).toLocaleDateString(); } catch { return iso; }
-}
-
-function isPausedAsset(status?: string | null) {
-  return (status ?? "").toLowerCase() === "paused";
-}
-
-function isInProgressAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "inprogress" || value === "issue" || value === "hasissue";
-}
-
-function isNotStartedAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase();
-  return value === "notstarted" || value === "not started";
-}
-
-function isIssueAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "issue" || value === "hasissue";
-}
-
-function isPendingAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "pending";
-}
-
-function isClosedAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "closed";
-}
-
-function isWaitingForSignature(signatureStatus?: string | null) {
-  const value = (signatureStatus ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "pendingcustomer" || value === "pendinginstaller";
-}
-
-function pendingSignatureStageLabel(signatureStatus?: string | null) {
-  const value = (signatureStatus ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  if (value === "pendinginstaller") return "Installer sign-off";
-  if (value === "pendingcustomer") return "Customer sign-off";
-  return "Sign-off";
-}
-
-function pendingSignatureStageText(signatureStatus?: string | null) {
-  const value = (signatureStatus ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  if (value === "pendinginstaller") return "Awaiting installer sign-off";
-  if (value === "pendingcustomer") return "Awaiting customer sign-off";
-  return "Awaiting sign-off";
-}
-
-/** Ignore stale offline-run ghosts when a locked completion already exists. */
-function pickActiveRunForAttention(sortedRuns: AssetWorkflowRun[]): AssetWorkflowRun | null {
-  const awaitingSignature = sortedRuns.some(
-    (run) => run.isLocked
-      && (run.signatureStatus === "PendingInstaller" || run.signatureStatus === "PendingCustomer"),
-  );
-  if (awaitingSignature) return null;
-
-  const unlocked = sortedRuns.find((run) => !run.isLocked) ?? null;
-  if (!unlocked) return null;
-
-  const lockedComplete = sortedRuns.find(
-    (run) => run.isLocked
-      && run.workflowConfigId === unlocked.workflowConfigId
-      && run.status === "Complete",
-  );
-  if (lockedComplete && unlocked.id.startsWith("offline-run-")) {
-    return null;
-  }
-  return unlocked;
-}
-
-function isActiveAsset(status?: string | null) {
-  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "notstarted" || value === "inprogress" || value === "onhold" 
-    || value === "issue" || value === "pending";
-}
-
-function isOpenInspectionStatus(status?: string | null) {
-  const value = (status ?? "").toLowerCase().replace(/[\s_-]+/g, "");
-  return value === "notstarted" || value === "inprogress" || value === "paused" || value === "onhold";
-}
-
-// Phase 3a: unified status chip for the Dashboard lists, aligned with the shared
-// display-state vocabulary (getWorkflowDisplayState / the Assets page card), so
-// the Dashboard and Assets page agree on status labels and colors.
-//
-// The Dashboard lists work off lightweight summary fields (runStatus/status/
-// evidenceStatus/signatureStatus) and do NOT load full runs, so this derives
-// from those fields rather than the full shared function. Vocabulary matches the
-// shared model:
-//   - raw "Issue"  -> label "In Progress", color "error" (Option A: the label
-//     matches the Assets page R2 rule, but the chip stays RED so a blocking
-//     issue is still visible on the Dashboard even without the widget row).
-//   - "Pending"    -> "Pending sign"
-//   - "Paused"     -> "Paused by user"
-//
-// UPGRADE SEAM (Option 1, future): when the Dashboard loads full runs per listed
-// asset, replace this with getWorkflowDisplayState(asset, runs, opts).status and
-// render its feature.widgets alongside — the label/color vocabulary already
-// matches, so only the data source changes.
-function dashboardStatusChip(asset: { runStatus?: string | null; status?: string | null; signatureStatus?: string | null; evidenceStatus?: string | null; hasOpenIssues?: boolean }): {
-  label: string;
-  color: "default" | "primary" | "success" | "error" | "warning" | "info";
-} {
-  const hasIssue = isIssueAsset(asset.status) || isIssueAsset(asset.runStatus);
-  if (asset.hasOpenIssues === true) return { label: "In Progress", color: "error" };
-  if ((asset.evidenceStatus ?? "").toLowerCase() === "missingdata") return { label: "Missing", color: "error" };
-  if (hasIssue) return { label: "In Progress", color: asset.hasOpenIssues === false ? "primary" : "error" };
-  if (isPausedAsset(asset.runStatus)) return { label: "Paused by user", color: "warning" };
-  if (isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)) return { label: "In Progress", color: "primary" };
-  if (isNotStartedAsset(asset.status)) return { label: "Not Started", color: "default" };
-  if (isPendingAsset(asset.status)) return { label: "Pending sign", color: "info" };
-  return { label: asset.runStatus || asset.status || "Unknown", color: "default" };
-}
-
-// Resting-face widgets for the "My Jobs" cards. Mirrors the Assets page
-// getWorkflowDisplayState().feature.widgets vocabulary, but derived from the
-// Dashboard summary fields (see Option B note in getMyJobsCardAction).
-type MyJobsCardWidget = {
-  kind: "missing-photo" | "issue";
-  /** exact count for missing-photo; 0 for the generic issue marker */
-  count: number;
-  color: "warning" | "error";
-};
-
-type MyJobsCardAction = {
-  actionKind: "default" | "missing-media" | "resolve-blocking" | "signature";
-  chipLabel: string;
-  chipColor: "default" | "primary" | "success" | "error" | "warning" | "info";
-  buttonLabel: string;
-  buttonColor: "inherit" | "primary" | "success" | "warning" | "error" | "info";
-  helperText: string;
-  widgets: MyJobsCardWidget[];
-};
-
-function myJobsAssetIdsKey(assets: Array<{ id: string }>): string {
-  return assets.map((a) => a.id).sort().join(",");
-}
-
-function assetLikelyHasWorkflow(
-  asset: { totalSteps?: number; workflowSummary?: { hasWorkflow?: boolean } },
-  cachedAsset?: ProjectAsset | null,
-): boolean {
-  if ((asset.totalSteps ?? 0) > 0) return true;
-  if (asset.workflowSummary?.hasWorkflow) return true;
-  if (cachedAsset?.productConfigId || cachedAsset?.workflowTemplateId) return true;
-  if (cachedAsset?.workflowSummary?.hasWorkflow) return true;
-  return false;
-}
-
 type NativeMyJobsCardContext = {
   asset: ProjectAsset;
   runs: AssetWorkflowRun[];
 };
-
-function myJobsCardWidgetsFromDisplayState(displayState: WorkflowDisplayState): MyJobsCardWidget[] {
-  const widgets: MyJobsCardWidget[] = [];
-  if (displayState.gates.missingMediaCount > 0) {
-    widgets.push({
-      kind: "missing-photo",
-      count: displayState.gates.missingMediaCount,
-      color: "warning",
-    });
-  }
-  if (displayState.gates.openIssueCount > 0) {
-    widgets.push({
-      kind: "issue",
-      count: displayState.gates.openIssueCount,
-      color: "error",
-    });
-  }
-  return widgets;
-}
-
-function myJobsCardHelperTextFromDisplayState(displayState: WorkflowDisplayState): string {
-  const actionKind = displayState.action?.kind ?? "none";
-  if (actionKind === "add-missing-photos") {
-    const count = displayState.gates.missingMediaCount;
-    return count > 0
-      ? `${count} missing photo${count === 1 ? "" : "s"}`
-      : "Required workflow captures are still missing";
-  }
-  if (actionKind === "resolve-blocking") {
-    const count = displayState.gates.blockingIssueCount;
-    return count > 0
-      ? `${count} blocking issue${count === 1 ? "" : "s"}`
-      : "Resolve the blocking issue before continuing";
-  }
-  if (actionKind === "installer-sign") return "Awaiting installer sign-off";
-  if (actionKind === "customer-sign") return "Awaiting customer sign-off";
-  if (actionKind === "resume") return "Paused by user";
-  if (actionKind === "continue") {
-    return displayState.gates.openIssueCount > 0 ? "In progress - issue flagged" : "Running";
-  }
-  if (actionKind === "start") return "Ready to start";
-  if (actionKind === "run-details") return "Field work complete";
-  if (actionKind === "upload-json") return "Import an inspection definition";
-  if (actionKind === "no-workflow") return "Assign a workflow to this asset first";
-  return displayState.status.label;
-}
-
-function compactNativeActionLabel(label: string): string {
-  if (label === "Add Missing Photos") return "Add Photos";
-  if (label === "Resolve Blocking Issue") return "Resolve Issue";
-  if (label.startsWith("Resolve ") && label.includes("Blocking Issues")) return "Resolve Issues";
-  return label;
-}
-
-function myJobsCardActionFromDisplayState(displayState: WorkflowDisplayState, compact = false): MyJobsCardAction {
-  const actionKind = displayState.action?.kind ?? "run-details";
-  const widgets = myJobsCardWidgetsFromDisplayState(displayState);
-  const chip = myJobsCardChipFromDisplayState(displayState);
-  const hasMissingMedia = actionKind === "add-missing-photos";
-
-  let resolvedActionKind: MyJobsCardAction["actionKind"] = "default";
-  if (actionKind === "add-missing-photos") resolvedActionKind = "missing-media";
-  else if (actionKind === "resolve-blocking") resolvedActionKind = "resolve-blocking";
-  else if (actionKind === "installer-sign" || actionKind === "customer-sign") resolvedActionKind = "signature";
-
-  return {
-    actionKind: resolvedActionKind,
-    chipLabel: chip.label,
-    chipColor: chip.color,
-    buttonLabel: compact
-      ? compactNativeActionLabel(displayState.action?.label ?? "Run Details")
-      : (displayState.action?.label ?? "Run Details"),
-    buttonColor:
-      actionKind === "add-missing-photos" || actionKind === "installer-sign" || actionKind === "customer-sign"
-        ? "warning"
-        : actionKind === "resolve-blocking"
-          ? "error"
-          : actionKind === "resume" || actionKind === "continue"
-            ? "primary"
-            : "inherit",
-    helperText: myJobsCardHelperTextFromDisplayState(displayState),
-    widgets,
-  };
-}
-
-function formatStepCompletionPercent(completedSteps: number, totalSteps: number) {
-  if (totalSteps <= 0) return null;
-  const percent = Math.round((Math.max(0, completedSteps) / totalSteps) * 100);
-  return `${Math.min(100, percent)}% complete`;
-}
-
-function formatMyJobsStepCompletionLabel(completedSteps: number, totalSteps: number) {
-  if (totalSteps <= 0) return null;
-  const percent = Math.round((Math.max(0, completedSteps) / totalSteps) * 100);
-  return `${Math.min(100, percent)}% completed`;
-}
-
-function workflowModeLabel(workflowMode?: string | null) {
-  if (workflowMode === "INSPECTION_ONLY") return "Inspection";
-  if (workflowMode === "MIXED") return "Mixed";
-  return "Installation";
-}
-
-function workflowModeChipColor(workflowMode?: string | null): "success" | "info" | "warning" {
-  if (workflowMode === "INSPECTION_ONLY") return "info";
-  if (workflowMode === "MIXED") return "warning";
-  return "success";
-}
-
-function historyChipColor(status?: string | null): "default" | "success" | "warning" | "error" | "info" {
-  const value = (status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
-  if (value === "closed") return "info";
-  if (value === "fieldworkcomplete" || value === "completed" || value === "finished") return "success";
-  if (value === "deleted") return "error";
-  if (value === "cancelled") return "warning";
-  return "default";
-}
 
 function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: number; size?: number; color?: string }) {
   const r = (size - 8) / 2;
@@ -397,15 +151,6 @@ function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: numb
       </Typography>
     </Box>
   );
-}
-
-// Derives the workflowTypeId a config implies, since a config's own type is
-// redundant to ask the user for separately (mirrors AssetInstallationPage).
-function resolveConfigWorkflowTypeId(config: WorkflowConfig, types: WorkflowType[]): string {
-  if (config.workflowTypeId) return config.workflowTypeId;
-  const normalized = config.configType?.trim().toLowerCase();
-  if (!normalized) return "";
-  return types.find((t) => t.name.trim().toLowerCase() === normalized)?.id ?? "";
 }
 
 const WINDOW_OPTIONS = [30, 60, 90, 180];
@@ -438,13 +183,6 @@ type WorkloadProjectBreakdown = { projectId: string; jobNumber: string; notStart
 type ScopedWorkloadItem = TechnicianWorkloadSummaryItem & {
   projectBreakdown: WorkloadProjectBreakdown[];
 };
-
-function isDashboardVisibleProjectStatus(status?: string | null) {
-  const normalized = String(status ?? "").trim().toLowerCase().replace(/\s+/g, "");
-  return normalized !== "cancelled"
-    && normalized !== "closed"
-    && normalized !== "archived";
-}
 
 const Dashboard = () => {
   const navigate   = useNavigate();
