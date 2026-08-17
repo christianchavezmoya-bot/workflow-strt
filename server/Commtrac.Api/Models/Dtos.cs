@@ -1799,8 +1799,23 @@ public record FaultReportDto(
     bool WasOffline,
     DateTime OccurredAtUtc,
     DateTime CreatedAtUtc,
+    DateTime LastUpdatedAtUtc,
     string? Notes,
     DateTime? ResolvedAtUtc
+);
+
+public record FaultReportUpdateDto(
+    string Id,
+    string Action,
+    string Status,
+    string? AuthorName,
+    bool SystemGenerated,
+    DateTime CreatedAtUtc
+);
+
+public record AddFaultReportUpdateRequest(
+    string Action,
+    string? Status
 );
 
 /// <summary>List rows omit stack, breadcrumbs and diagnostics — fetch one report for those.</summary>
@@ -1808,7 +1823,8 @@ public record FaultReportDetailDto(
     FaultReportDto Report,
     string? ErrorStack,
     string? BreadcrumbsJson,
-    string? DiagnosticsJson
+    string? DiagnosticsJson,
+    List<FaultReportUpdateDto> Updates
 );
 
 public record UpdateFaultReportRequest(

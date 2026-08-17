@@ -1557,3 +1557,35 @@ public class FaultReportEntity
     public string? ResolvedByUserId { get; set; }
 }
 
+/// <summary>
+/// One event in the life of a fault report — a corrective action or comment, and the status the
+/// report was in afterwards. Append-only: a separate row per update rather than a JSON blob, so
+/// two people triaging the same report at once cannot overwrite each other's entries.
+/// </summary>
+public class FaultReportUpdateEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+
+    [MaxLength(100)]
+    public string FaultReportId { get; set; } = string.Empty;
+
+    /// <summary>What was done or observed.</summary>
+    public string Action { get; set; } = string.Empty;
+
+    /// <summary>Status of the report after this update — same vocabulary as the report itself.</summary>
+    [MaxLength(20)]
+    public string Status { get; set; } = "Investigating";
+
+    [MaxLength(100)]
+    public string? AuthorUserId { get; set; }
+
+    [MaxLength(200)]
+    public string? AuthorName { get; set; }
+
+    /// <summary>True when the row was written automatically by a status change rather than typed.</summary>
+    public bool SystemGenerated { get; set; }
+
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+}
+
