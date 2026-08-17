@@ -2332,11 +2332,9 @@ function InputsSection({
               </Button>
             ))}
             {/*
-              This picker is switched off and unreachable. Whether it was retired
-              deliberately or disabled during debugging and never restored is an
-              open question — tracked as bug 1 in docs/KNOWN_BUGS.md. Left exactly
-              as found rather than removed or re-enabled, because either choice is
-              a product decision, not a lint fix.
+              Retired in 661d98a when step-type auto-populate replaced "From features"
+              buttons. Verdict: dead code — delete in S8, do not re-enable.
+              See docs/S2_PRODUCT_DECISIONS.md §1.
             */}
             {/* eslint-disable-next-line no-constant-binary-expression */}
             {false && productFeatures.length > 0 && (
