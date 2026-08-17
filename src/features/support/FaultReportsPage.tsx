@@ -20,14 +20,17 @@ import {
   TextField,
   Typography,
 } from "@mui/material";
-import { DownloadOutlined, RefreshOutlined } from "@mui/icons-material";
-import { useCallback, useEffect, useState } from "react";
+import { AddCommentOutlined, DownloadOutlined, PrintOutlined, RefreshOutlined } from "@mui/icons-material";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   faultReportAdminService,
   type FaultReportDetail,
   type FaultReportRow,
   type FaultReportSummary,
 } from "../../services/faultReportAdminService";
+import HistoryStaircase from "../../components/ui/HistoryStaircase";
+import { buildFaultReportHistory } from "../../utils/faultReportHistory";
+import { openHistoryReport } from "../../utils/generateHistoryReport";
 
 const STATUSES = ["New", "Investigating", "Fixed", "WontFix", "Duplicate"];
 const SEVERITIES = ["S0", "S1", "S2", "S3", "S4"];
@@ -57,6 +60,15 @@ export default function FaultReportsPage() {
   const [detail, setDetail] = useState<FaultReportDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
+  const [updateDraft, setUpdateDraft] = useState("");
+  const [updateStatus, setUpdateStatus] = useState("Investigating");
+  const [savingUpdate, setSavingUpdate] = useState(false);
+
+  // Rebuilt from the report and its updates, so the staircase and the printed report never diverge.
+  const history = useMemo(
+    () => (detail ? buildFaultReportHistory(detail.report, detail.updates) : null),
+    [detail]
+  );
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -85,10 +97,29 @@ export default function FaultReportsPage() {
       const full = await faultReportAdminService.get(id);
       setDetail(full);
       setNotesDraft(full.report.notes ?? "");
+      setUpdateDraft("");
+      setUpdateStatus(full.report.status === "New" ? "Investigating" : full.report.status);
     } catch {
       setError("Could not load that report.");
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const addUpdate = async () => {
+    const action = updateDraft.trim();
+    if (!detail || !action || savingUpdate) return;
+    setSavingUpdate(true);
+    try {
+      await faultReportAdminService.addUpdate(detail.report.id, { action, status: updateStatus });
+      // Re-read so the staircase shows the stored row rather than a guess at what was saved.
+      setDetail(await faultReportAdminService.get(detail.report.id));
+      setUpdateDraft("");
+      void load();
+    } catch {
+      setError("Could not save that update.");
+    } finally {
+      setSavingUpdate(false);
     }
   };
 
@@ -257,27 +288,62 @@ export default function FaultReportsPage() {
             </DialogTitle>
             <DialogContent dividers>
               <Stack spacing={2}>
-                <Box>
-                  <Typography variant="subtitle2">{detail.report.title}</Typography>
-                  {detail.report.description && (
-                    <Typography variant="body2" sx={{ whiteSpace: "pre-wrap", mt: 0.5 }}>
-                      {detail.report.description}
-                    </Typography>
-                  )}
+                {/* Staircase history — the report itself is the root row, so it is not repeated above */}
+                {history && <HistoryStaircase view={history} heading="Fault report history" />}
+
+                {/* Record a corrective action */}
+                <Box
+                  sx={{
+                    p: 1.5,
+                    borderRadius: 2,
+                    border: "1px solid rgba(45,212,191,0.22)",
+                    background: "rgba(45,212,191,0.04)",
+                  }}
+                >
+                  <Stack spacing={1.25}>
+                    <Typography variant="subtitle2">Add a corrective action</Typography>
+                    <TextField
+                      size="small"
+                      fullWidth
+                      multiline
+                      minRows={2}
+                      placeholder="What was done, checked or found?"
+                      value={updateDraft}
+                      onChange={(e) => setUpdateDraft(e.target.value)}
+                    />
+                    <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
+                      <TextField
+                        select
+                        size="small"
+                        label="Status after this update"
+                        value={updateStatus}
+                        onChange={(e) => setUpdateStatus(e.target.value)}
+                        sx={{ minWidth: 190 }}
+                      >
+                        {STATUSES.map((s) => (
+                          <MenuItem key={s} value={s}>{s}</MenuItem>
+                        ))}
+                      </TextField>
+                      <Box sx={{ flex: 1 }} />
+                      <Button
+                        variant="contained"
+                        startIcon={<AddCommentOutlined />}
+                        disabled={!updateDraft.trim() || savingUpdate}
+                        onClick={() => void addUpdate()}
+                      >
+                        {savingUpdate ? "Saving…" : "Add update"}
+                      </Button>
+                    </Stack>
+                  </Stack>
                 </Box>
 
                 <Divider />
 
-                <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
-                  <Detail label="Reported by" value={detail.report.userEmail ?? "—"} />
-                  <Detail label="Role" value={detail.report.userRole ?? "—"} />
-                  <Detail label="Platform" value={detail.report.platform} />
-                  <Detail label="App version" value={detail.report.appVersion ?? "—"} />
-                  <Detail label="Offline at the time" value={detail.report.wasOffline ? "Yes" : "No"} />
-                  <Detail label="Screen" value={detail.report.routePath ?? "—"} />
-                  <Detail label="Happened" value={formatWhen(detail.report.occurredAtUtc)} />
-                  {detail.report.traceId && <Detail label="Trace id" value={detail.report.traceId} />}
-                </Stack>
+                {detail.report.traceId && (
+                  <Stack direction="row" spacing={3} flexWrap="wrap" useFlexGap>
+                    <Detail label="Trace id" value={detail.report.traceId} />
+                  </Stack>
+                )}
 
                 {detail.report.errorMessage && (
                   <Box>
@@ -348,6 +414,16 @@ export default function FaultReportsPage() {
                   {detail.diagnosticsJson && (
                     <Button startIcon={<DownloadOutlined />} onClick={downloadDiagnostics}>
                       Diagnostics JSON
+                    </Button>
+                  )}
+                  {history && (
+                    <Button
+                      startIcon={<PrintOutlined />}
+                      onClick={() =>
+                        openHistoryReport({ view: history, documentLabel: "Fault report" })
+                      }
+                    >
+                      Print / export
                     </Button>
                   )}
                 </Stack>
