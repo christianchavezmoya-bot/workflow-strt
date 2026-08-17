@@ -171,15 +171,17 @@ import {
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
 import AssetInstallationCsvImportDialog from "./AssetInstallationCsvImportDialog";
+import AssetInstallationWorkflowAssignDialog from "./AssetInstallationWorkflowAssignDialog";
 import { useAssetInstallationColumnConfig } from "./useAssetInstallationColumnConfig";
 import { mergeImportedAssets, useAssetInstallationCsvImport } from "./useAssetInstallationCsvImport";
+import { useAssetInstallationWorkflowAssign } from "./useAssetInstallationWorkflowAssign";
+import { resolveRequestedWorkflowTypeId } from "./assetInstallationWorkflowAssign";
 import {
   assetHasConfiguredWorkflow,
   computeHealth,
   nextDraftConfigNumber,
   operationsStickyPrefixSx,
   projectHasInspection,
-  resolveConfigWorkflowTypeId,
   timeAgo,
   workflowTypeMismatchMessage,
   isInspectionConfigType,
@@ -273,6 +275,7 @@ const AssetInstallationPage = () => {
   const users = useAppSelector((s) => s.users.items);
   const usersLoading = useAppSelector((s) => s.users.loading);
   const [searchParams] = useSearchParams();
+  const requestedWorkflowType = searchParams.get("workflowType");
   const canEditAssetStatus = can.installationAssets?.editScope === "all";
   const canViewInstallationAssets = !!can.installationAssets?.view;
   const canEditInstallationAssets = !!can.installationAssets?.edit;
@@ -461,10 +464,38 @@ const AssetInstallationPage = () => {
   const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowConfig[]>([]);
   const [creatingWorkflowDraft, setCreatingWorkflowDraft] = useState(false);
-  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
-  const [assignDialogAsset, setAssignDialogAsset] = useState<ProjectAsset | null>(null);
-  const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
-  const [assignSaving, setAssignSaving] = useState(false);
+
+  const loadAssignmentsForAsset = useCallback(async (assetId: string) => {
+    try {
+      const [assignments, runs] = await Promise.all([
+        assetWorkflowAssignmentService.listByAsset(assetId),
+        assetWorkflowRunService.listByAsset(assetId),
+      ]);
+      setAssignmentsMap((prev) => ({ ...prev, [assetId]: assignments }));
+      setRunsMap((prev) => ({ ...prev, [assetId]: runs }));
+    } catch {
+      console.warn("[AssetInstallationPage] loadAssignmentsForAsset failed");
+    }
+  }, []);
+
+  const {
+    assignDialogOpen,
+    assignDialogAsset,
+    assignForm,
+    assignSaving,
+    workflowConfigs: assignWorkflowConfigs,
+    openAssignDialog,
+    closeAssignDialog,
+    selectAssignConfig,
+    saveAssignment,
+  } = useAssetInstallationWorkflowAssign({
+    requestedWorkflowType,
+    onWorkflowTypesLoaded: setWorkflowTypes,
+    onWorkflowConfigsLoaded: setWorkflowConfigs,
+    onAssignmentSaved: loadAssignmentsForAsset,
+    onSaveError: setInlineSaveError,
+  });
+
   const [inspectionDialogAsset, setInspectionDialogAsset] = useState<ProjectAsset | null>(null);
   const [runHistoryAsset, setRunHistoryAsset] = useState<ProjectAsset | null>(null);
   // New run history dialog (with re-run support)
@@ -931,16 +962,6 @@ const AssetInstallationPage = () => {
     }
     return out;
   }, [captureMaxUnits, publishedWfConfigs]);
-  const requestedWorkflowType = searchParams.get("workflowType");
-  const resolveRequestedWorkflowTypeId = useCallback((types: WorkflowType[]) => {
-    if (!requestedWorkflowType) return "";
-    const normalized = requestedWorkflowType.trim().toLowerCase();
-    return types.find((type) =>
-      type.id.trim().toLowerCase() === normalized ||
-      type.name.trim().toLowerCase() === normalized
-    )?.id ?? "";
-  }, [requestedWorkflowType]);
-
   useEffect(() => {
     const products = productsRef.current;
     // Defer expensive all-product fan-out until the user explicitly picks "All projects".
@@ -2495,81 +2516,6 @@ const AssetInstallationPage = () => {
   // ------------------------------------------------------------------
   // Workflow assignment helpers
   // ------------------------------------------------------------------
-
-  async function loadAssignmentsForAsset(assetId: string) {
-    try {
-      const [assignments, runs] = await Promise.all([
-        assetWorkflowAssignmentService.listByAsset(assetId),
-        assetWorkflowRunService.listByAsset(assetId),
-      ]);
-      setAssignmentsMap((prev) => ({ ...prev, [assetId]: assignments }));
-      setRunsMap((prev) => ({ ...prev, [assetId]: runs }));
-    } catch { console.warn("[AssetInstallationPage] loadAssignmentsForAsset failed"); }
-  }
-
-  async function openAssignDialog(asset: ProjectAsset) {
-    setAssignDialogAsset(asset);
-    setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
-    setAssignDialogOpen(true);
-    // Load workflow types (needed only to resolve a config's type id for the
-    // create() call — the dialog itself only shows Published configs) + configs.
-    try {
-      const [types, cfgs] = await Promise.all([
-        workflowTypeService.list(),
-        workflowConfigService.listByProduct(asset.productId, "Published"),
-      ]);
-      setWorkflowTypes(types);
-      setWorkflowConfigs(cfgs);
-      const requestedWorkflowTypeId = resolveRequestedWorkflowTypeId(types);
-      const matchingConfigs = requestedWorkflowTypeId
-        ? cfgs.filter((config) =>
-            config.workflowTypeId === requestedWorkflowTypeId ||
-            config.configType?.trim().toLowerCase() === requestedWorkflowType?.trim().toLowerCase()
-          )
-        : [];
-      const preselected = matchingConfigs.length === 1 ? matchingConfigs[0] : null;
-      setAssignForm({
-        workflowTypeId: preselected ? resolveConfigWorkflowTypeId(preselected, types) : "",
-        workflowConfigId: preselected?.id ?? "",
-      });
-    } catch { console.warn("[AssetInstallationPage] failed to load workflow types/configs"); }
-  }
-
-  async function saveAssignment() {
-    if (!assignDialogAsset || !assignForm.workflowConfigId) return;
-
-    // Resolve the workflow type id. resolveConfigWorkflowTypeId() returns "" when the
-    // config has no explicit workflowTypeId AND its configType can't be matched against
-    // the workflowTypes list — which is exactly what happens OFFLINE if that list failed
-    // to load. Previously saveAssignment() guarded on `!assignForm.workflowTypeId` and
-    // silently RETURNED: the user picked a config, pressed Save, and nothing happened at
-    // all — no save, no error, no closed dialog.
-    //
-    // Recover instead: re-resolve here (the list may have loaded since the dialog opened),
-    // and fall back to the config's own workflowTypeId. Only if we still have nothing do
-    // we tell the user — rather than doing nothing at all.
-    let workflowTypeId = assignForm.workflowTypeId;
-    if (!workflowTypeId) {
-      const cfg = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
-      workflowTypeId = cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) || (cfg.workflowTypeId ?? "") : "";
-    }
-    if (!workflowTypeId) {
-      setInlineSaveError("Could not determine the workflow type for this config. Reconnect and try again.");
-      return;
-    }
-
-    setAssignSaving(true);
-    try {
-      await assetWorkflowAssignmentService.create(assignDialogAsset.id, assignForm.workflowConfigId, workflowTypeId);
-      await loadAssignmentsForAsset(assignDialogAsset.id);
-      setAssignDialogOpen(false);
-    } catch (err) {
-      console.warn("[AssetInstallationPage] saveAssignment failed", err);
-      setInlineSaveError("Could not assign the workflow. Please try again.");
-    } finally {
-      setAssignSaving(false);
-    }
-  }
 
   async function removeAssignment(assetId: string, assignmentId: string) {
     try {
@@ -5277,7 +5223,7 @@ ${words.slice(midpoint).join(" ")}`;
             variant="outlined"
             onClick={() => {
               setBulkWfConfigId("");
-              setBulkWfTypeId(resolveRequestedWorkflowTypeId(workflowTypes));
+              setBulkWfTypeId(resolveRequestedWorkflowTypeId(requestedWorkflowType, workflowTypes));
               const sel = visibleAssets.filter((a) => selectedAssetIds.has(a.id));
               const withWf = sel.filter((a) =>
                 (assignmentsMap[a.id] && assignmentsMap[a.id].length > 0) ||
@@ -6239,55 +6185,16 @@ ${words.slice(midpoint).join(" ")}`;
         onHiddenChange={setSettingsHidden}
       />
 
-      {/* Assign workflow dialog */}
-      <Dialog open={assignDialogOpen} onClose={() => !assignSaving && setAssignDialogOpen(false)} maxWidth="xs" fullWidth>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <AssignmentOutlined fontSize="small" />
-            <span>Assign Workflow - {assignDialogAsset?.assetTag}</span>
-          </Stack>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <FormControl size="small" fullWidth required>
-              <InputLabel shrink>Workflow Config (Published) *</InputLabel>
-              <Select
-                label="Workflow Config (Published) *"
-                value={assignForm.workflowConfigId}
-                onChange={(e) => {
-                  const cfg = workflowConfigs.find((c) => c.id === e.target.value);
-                  setAssignForm({
-                    workflowConfigId: e.target.value,
-                    workflowTypeId: cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) : "",
-                  });
-                }}
-              >
-                {workflowConfigs.length === 0 && (
-                  <MenuItem value="" disabled>No published configs available</MenuItem>
-                )}
-                {workflowConfigs.map((c) => (
-                  <MenuItem key={c.id} value={c.id}>
-                    {c.name}
-                    {c.configType ? ` - ${c.configType}` : ""}
-                    <Typography component="span" variant="caption" color="text.secondary" sx={{ ml: 0.5 }}>v{c.version}</Typography>
-                  </MenuItem>
-                ))}
-              </Select>
-            </FormControl>
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => setAssignDialogOpen(false)} disabled={assignSaving}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={saveAssignment}
-            disabled={assignSaving || !assignForm.workflowConfigId}
-            startIcon={assignSaving ? <CircularProgress size={14} /> : undefined}
-          >
-            {assignSaving ? "Saving..." : "Assign"}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationWorkflowAssignDialog
+        open={assignDialogOpen}
+        saving={assignSaving}
+        asset={assignDialogAsset}
+        form={assignForm}
+        workflowConfigs={assignWorkflowConfigs}
+        onClose={closeAssignDialog}
+        onConfigChange={selectAssignConfig}
+        onSave={() => { void saveAssignment(); }}
+      />
 
       {/* Asset search dialog */}
       <Dialog
