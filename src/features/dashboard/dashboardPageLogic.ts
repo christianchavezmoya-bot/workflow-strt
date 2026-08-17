@@ -294,6 +294,12 @@ export type AutoAssignFlag = {
   assignedAt: string;
 };
 
+export function isInspectionWorkflowType(workflowTypeId?: string): boolean {
+  if (!workflowTypeId) return false;
+  const typeName = String(workflowTypeId).toLowerCase();
+  return typeName.includes("inspection") || typeName === "insp";
+}
+
 export function historyChipColor(status?: string | null): "default" | "success" | "warning" | "error" | "info" {
   const value = (status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   if (value === "closed") return "info";
