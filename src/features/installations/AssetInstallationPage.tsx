@@ -155,8 +155,19 @@ import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platf
 import { resolveProjectScopeId } from "../../utils/resolveProjectScopeId";
 import { peekWebSessionCache, webCacheKey } from "../../services/webFreshCache";
 import type { PaginatedResult } from "../../types/paginatedList";
-import OperationsVirtualizedTableBody from "./OperationsVirtualizedTableBody";
-import { OPERATIONS_VIRTUALIZE_MIN_ROWS } from "./operationsTableLayout";
+import AssetInstallationFeatureExpandedRow from "./AssetInstallationFeatureExpandedRow";
+import AssetInstallationIssuesPanel from "./AssetInstallationIssuesPanel";
+import AssetInstallationOperationsTable from "./AssetInstallationOperationsTable";
+import AssetInstallationTimeTrackingPanel from "./AssetInstallationTimeTrackingPanel";
+import AssetInstallationWorkflowAssignmentsPanel from "./AssetInstallationWorkflowAssignmentsPanel";
+import { createOperationsAssetRowRenderer } from "./assetInstallationOperationsAssetRows";
+import { createOperationsColumnCellRenderer } from "./assetInstallationOperationsColumnCell";
+import { getOperationsColumnText, resolveOperationsConfigName, resolveOperationsConfigType } from "./assetInstallationOperationsTableLogic";
+import {
+  OPERATIONS_CHECKBOX_W,
+  OPERATIONS_TAG_STICKY_LEFT,
+  shouldVirtualizeOperationsTable,
+} from "./operationsTableLayout";
 import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useOfficeTimeZone } from "../../hooks/useOfficeTimeZone";
@@ -211,10 +222,6 @@ const PhotoUploadDialog = lazy(() => import("../dashboard/PhotoUploadDialog"));
 const AssetDocumentsDialog = lazy(() => import("./AssetDocumentsDialog"));
 
 // Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
-
-const OPERATIONS_CHECKBOX_W = 28;
-const OPERATIONS_EXPAND_W = 36;
-const OPERATIONS_TAG_STICKY_LEFT = OPERATIONS_CHECKBOX_W + OPERATIONS_EXPAND_W;
 
 type AssetExportColumnOption = {
   id: string;
@@ -2017,8 +2024,10 @@ const AssetInstallationPage = () => {
     });
   }, [displayStateByAssetId, runsMap, pausedProgress, assignmentsMap]);
 
-  const virtualizeOperationsTable =
-    paginatedWebProject && displayAssets.length >= OPERATIONS_VIRTUALIZE_MIN_ROWS;
+  const virtualizeOperationsTable = shouldVirtualizeOperationsTable(
+    paginatedWebProject,
+    displayAssets.length,
+  );
 
   const mobileAssets = useMemo(() => {
     if (!isNativePlatform || mobileScope === "all") return displayAssets;
@@ -2948,38 +2957,16 @@ const AssetInstallationPage = () => {
     proj: ReturnType<typeof projectMap.get>,
     tech: ReturnType<typeof userMap.get>,
   ): string {
-    switch (colId) {
-      case "assetName":
-        return asset.assetName || "-";
-      case "serialNumber":
-        return asset.serialNumber || "-";
-      case "assetModel":
-        return asset.assetModel || "-";
-      case "manufacturer":
-        return asset.manufacturer || "-";
-      case "configType":
-        return cfg?.configType || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined) || "-";
-      case "configName":
-        return cfg?.name || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.name : undefined) || "-";
-      case "project":
-        return proj ? proj.jobNumber : asset.projectId.slice(0, 8);
-      case "siteName":
-        return proj?.siteName || "-";
-      case "location":
-        return asset.location || "-";
-      case "dateCreated":
-        return formatAssetTableDate(asset.createdAt, officeZone);
-      case "dateClosed":
-        return formatAssetTableDate(resolveAssetClosedAt(asset, runsMap[asset.id]), officeZone);
-      case "assignedTech":
-        return tech?.fullName || "-";
-      case "features":
-        return getCaptureStatusSummary(asset);
-      case "status":
-        return getOperationsStatusLabel(asset, proj?.workflowMode);
-      default:
-        return "-";
-    }
+    return getOperationsColumnText(colId, asset, {
+      officeZone,
+      runs: runsMap[asset.id],
+      project: proj ?? undefined,
+      tech: tech ?? undefined,
+      cfg,
+      wfConfigById: wfConfigMap,
+      featuresSummary: getCaptureStatusSummary(asset),
+      statusLabel: getOperationsStatusLabel(asset, proj?.workflowMode),
+    });
   }
 
   async function buildAssetExportPackage() {
@@ -3651,218 +3638,44 @@ ${words.slice(midpoint).join(" ")}`;
   }
 
   function renderIssuesPanel(asset: ProjectAsset) {
-    let issues: AssetIssue[] = [];
-    try { issues = JSON.parse(asset.issuesJson || "[]"); } catch {}
-
-    // Collect run issues WITH their runId for targeted patch saves
-    const runs = runsMap[asset.id] ?? [];
-    const runIssuesWithMeta: Array<RunIssue & { runId: string }> = [];
-    for (const run of runs) {
-      try {
-        const ri = JSON.parse(run.issuesJson || "[]") as RunIssue[];
-        runIssuesWithMeta.push(...ri.map(i => ({ ...i, runId: run.id })));
-      } catch {}
-    }
-
-    const openCount = issues.filter(i => !i.resolved).length + runIssuesWithMeta.filter(i => !i.resolved).length;
-    const totalCount = issues.length + runIssuesWithMeta.length;
-
-    function renderIssueCard(
-      issue: AssetIssue | RunIssue,
-      onSaveComment: (updated: AssetIssue | RunIssue) => void,
-      onCloseIssue: (note: string, media?: string[]) => void,
-      isRunIssue?: boolean,
-    ) {
-      const comments = issue.comments ?? [];
-      const commentVal = inlineCommentTexts[issue.id] ?? "";
-      const correctiveVal = inlineCorrectiveTexts[issue.id] ?? "";
-      const reportMediaVal    = inlineReportMedia[issue.id]     ?? [];
-      const resolutionMediaVal = inlineResolutionMedia[issue.id] ?? [];
-      return (
-        <Paper key={issue.id} variant="outlined" sx={{ p: 1.5, bgcolor: issue.resolved ? "rgba(255,255,255,0.02)" : "rgba(244,67,54,0.03)", borderColor: issue.resolved ? "divider" : "error.dark", opacity: issue.resolved ? 0.65 : 1 }}>
-          <Stack direction={{ xs: "column", md: "row" }} spacing={2} alignItems="flex-start">
-            {/* Col 1 â€" Issue Description */}
-            <Box sx={{ flex: "0 0 28%", minWidth: 0 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
-                Issue Description
-              </Typography>
-              <Typography variant="caption" display="block" sx={{ mb: 0.5, textDecoration: issue.resolved ? "line-through" : "none" }}>
-                {issue.description}
-              </Typography>
-              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap mb={0.5}>
-                <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ fontSize: 9, height: 16 }} />
-                <Chip size="small" label={issue.isBlocking ? "Blocking" : "Observation"} color={issue.isBlocking ? "error" : "warning"} sx={{ fontSize: 9, height: 16 }} />
-                {isRunIssue && <Chip size="small" label="Workflow" sx={{ fontSize: 9, height: 16, "& .MuiChip-label": { px: 0.5 } }} />}
-                {issue.resolved && <Chip size="small" label="Resolved" color="success" sx={{ fontSize: 9, height: 16 }} />}
-              </Stack>
-              {issue.stepTitle && <Typography variant="caption" color="text.secondary" display="block">Step: {issue.stepTitle}</Typography>}
-              <Typography variant="caption" color="text.disabled" display="block">
-                {"createdBy" in issue && issue.createdBy ? `${issue.createdBy} | ` : ""}{new Date(issue.reportedAt).toLocaleString()}
-              </Typography>
-              {!issue.resolved && (
-                <Box sx={{ mt: 1 }}>
-                  <MediaCapture
-                    media={reportMediaVal}
-                    onChange={(m) => setInlineReportMedia(prev => ({ ...prev, [issue.id]: m }))}
-                    label="Attach Photo / Video"
-                    qrDocType="issue-photo"
-                    qrLinkedTo={issue.id}
-                  />
-                </Box>
-              )}
-              {issue.resolved && (issue.reportMedia ?? []).length > 0 && (
-                <Box sx={{ mt: 0.75 }}>
-                  <MediaCapture
-                    media={issue.reportMedia ?? []}
-                    onChange={() => {}}
-                    label="Reported Media"
-                    disabled
-                  />
-                </Box>
-              )}
-            </Box>
-
-            {/* Col 2 â€" Comments */}
-            <Box sx={{ flex: 1, minWidth: 0 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
-                Comments
-              </Typography>
-              {comments.length === 0 ? (
-                <Typography variant="caption" color="text.disabled" display="block" mb={0.75}>No comments yet.</Typography>
-              ) : (
-                <Stack spacing={0.75} sx={{ maxHeight: 120, overflowY: "auto", mb: 0.75 }}>
-                  {comments.map(c => (
-                    <Box key={c.id} sx={{ p: 0.5, borderRadius: 0.5, bgcolor: "rgba(255,255,255,0.04)" }}>
-                      <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap">
-                        <Typography variant="caption" fontWeight={700}>{c.author}</Typography>
-                        <Typography variant="caption" color="text.disabled">{new Date(c.createdAt).toLocaleString()}</Typography>
-                      </Stack>
-                      <Typography variant="caption" display="block">{c.text}</Typography>
-                    </Box>
-                  ))}
-                </Stack>
-              )}
-              {!issue.resolved && (
-                <>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    multiline
-                    rows={2}
-                    placeholder="Add a comment..."
-                    value={commentVal}
-                    onChange={(e) => setInlineCommentTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
-                    sx={{ fontSize: 11, mb: 0.5 }}
-                  />
-                  <Button
-                    size="small"
-                    variant="outlined"
-                    disabled={!commentVal.trim() || inlineSaving}
-                    onClick={() => {
-                      const text = commentVal.trim();
-                      if (!text) return;
-                      const newComment = { id: randomId(), text, author: currentUser?.fullName ?? "User", createdAt: new Date().toISOString() };
-                      onSaveComment({ ...issue, reportMedia: inlineReportMedia[issue.id]?.length ? inlineReportMedia[issue.id] : issue.reportMedia, comments: [...(issue.comments ?? []), newComment] });
-                      setInlineCommentTexts(prev => ({ ...prev, [issue.id]: "" }));
-                    }}
-                    sx={{ fontSize: 11 }}
-                  >
-                    Save Comment
-                  </Button>
-                </>
-              )}
-            </Box>
-
-            {/* Col 3 â€" Corrective Action */}
-            <Box sx={{ flex: "0 0 28%", minWidth: 0 }}>
-              <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }} display="block" mb={0.5}>
-                Corrective Action
-              </Typography>
-              {issue.resolved ? (
-                <Typography variant="caption" display="block" sx={{ fontStyle: "italic", color: "text.secondary" }}>
-                  {issue.resolutionNote ?? "-"}
-                </Typography>
-              ) : (
-                <>
-                  <TextField
-                    size="small"
-                    fullWidth
-                    multiline
-                    rows={3}
-                    placeholder="Describe corrective action taken..."
-                    value={correctiveVal}
-                    onChange={(e) => setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: e.target.value }))}
-                    sx={{ fontSize: 11, mb: 0.75 }}
-                  />
-                  <Box sx={{ mb: 0.75 }}>
-                    <MediaCapture
-                      media={resolutionMediaVal}
-                      onChange={(m) => setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: m }))}
-                      label="Resolution Evidence"
-                      qrDocType="issue-photo"
-                      qrLinkedTo={issue.id}
-                    />
-                  </Box>
-                  <Button
-                    size="small"
-                    variant="contained"
-                    color="success"
-                    fullWidth
-                    disabled={!correctiveVal.trim() || inlineSaving}
-                    startIcon={<CheckCircleOutlined sx={{ fontSize: "0.85rem !important" }} />}
-                    onClick={() => {
-                      onCloseIssue(correctiveVal.trim(), resolutionMediaVal.length > 0 ? resolutionMediaVal : undefined);
-                      setInlineCorrectiveTexts(prev => ({ ...prev, [issue.id]: "" }));
-                      setInlineResolutionMedia(prev => ({ ...prev, [issue.id]: [] }));
-                    }}
-                    sx={{ fontSize: 11, py: 0.25 }}
-                  >
-                    Close Issue
-                  </Button>
-                </>
-              )}
-            </Box>
-          </Stack>
-        </Paper>
-      );
-    }
-
     return (
-      <Box sx={{ mt: 1.5 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary"
-            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Issues {totalCount > 0 && `(${openCount} open)`}
-          </Typography>
-          <Button
-            size="small"
-            variant="outlined"
-            color="error"
-            startIcon={<ReportProblemOutlined fontSize="small" />}
-            sx={{ fontSize: 11, py: 0.25 }}
-            onClick={() => { setIssueDialogAsset(asset); setIssueDialogOpen(true); }}
-          >
-            Add issue
-          </Button>
-        </Stack>
-        {totalCount === 0 ? (
-          <Typography variant="caption" color="text.disabled">No issues recorded.</Typography>
-        ) : (
-          <Stack spacing={1}>
-            {issues.map((issue) => renderIssueCard(
-              issue,
-              (updated) => saveInlineAssetIssue(asset, updated as AssetIssue),
-              (note, media) => saveInlineAssetIssue(asset, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
-            ))}
-            {runIssuesWithMeta.map((issue) => renderIssueCard(
-              issue,
-              (updated) => saveInlineRunIssue(issue.runId, asset.id, updated as RunIssue),
-              (note, media) => saveInlineRunIssue(issue.runId, asset.id, { ...issue, resolved: true, resolutionNote: note, resolutionMedia: media, resolvedAt: new Date().toISOString(), resolvedBy: currentUser?.fullName ?? "User" }),
-              true,
-            ))}
-          </Stack>
-        )}
-      </Box>
+      <AssetInstallationIssuesPanel
+        asset={asset}
+        runs={runsMap[asset.id] ?? []}
+        currentUserName={currentUser?.fullName ?? "User"}
+        inlineCommentTexts={inlineCommentTexts}
+        inlineCorrectiveTexts={inlineCorrectiveTexts}
+        inlineReportMedia={inlineReportMedia}
+        inlineResolutionMedia={inlineResolutionMedia}
+        inlineSaving={inlineSaving}
+        onCommentTextChange={(issueId, text) =>
+          setInlineCommentTexts((prev) => ({ ...prev, [issueId]: text }))
+        }
+        onCorrectiveTextChange={(issueId, text) =>
+          setInlineCorrectiveTexts((prev) => ({ ...prev, [issueId]: text }))
+        }
+        onReportMediaChange={(issueId, media) =>
+          setInlineReportMedia((prev) => ({ ...prev, [issueId]: media }))
+        }
+        onResolutionMediaChange={(issueId, media) =>
+          setInlineResolutionMedia((prev) => ({ ...prev, [issueId]: media }))
+        }
+        onClearCommentText={(issueId) =>
+          setInlineCommentTexts((prev) => ({ ...prev, [issueId]: "" }))
+        }
+        onClearCorrectiveText={(issueId) =>
+          setInlineCorrectiveTexts((prev) => ({ ...prev, [issueId]: "" }))
+        }
+        onClearResolutionMedia={(issueId) =>
+          setInlineResolutionMedia((prev) => ({ ...prev, [issueId]: [] }))
+        }
+        onSaveAssetIssue={saveInlineAssetIssue}
+        onSaveRunIssue={saveInlineRunIssue}
+        onOpenAddIssue={(a) => {
+          setIssueDialogAsset(a);
+          setIssueDialogOpen(true);
+        }}
+      />
     );
   }
 
@@ -4179,89 +3992,11 @@ ${words.slice(midpoint).join(" ")}`;
   }
 
   function renderFeatureExpandedRow(asset: ProjectAsset) {
-    let fv: Record<string, string> = {};
-    try { fv = JSON.parse(asset.featureValuesJson || "{}"); } catch {}
-    const inventoryFeatures = activeFeatures.filter((feat) => feat.isInventory);
-
-    if (inventoryFeatures.length === 0) {
-      const entries = Object.entries(fv);
-      if (!entries.length) {
-        return <Typography variant="caption" color="text.secondary">No inventory feature data recorded.</Typography>;
-      }
-      return (
-        <Stack spacing={0.5}>
-          {entries.map(([k, v]) => (
-            <Stack key={k} direction="row" spacing={2}>
-              <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{k.slice(0, 20)}</Typography>
-              <Typography variant="caption">{v}</Typography>
-            </Stack>
-          ))}
-        </Stack>
-      );
-    }
-
     return (
-      <Table size="small" sx={{ maxWidth: 680, minWidth: 650 }}>
-        <TableHead>
-          <TableRow sx={{ bgcolor: "rgba(255,255,255,0.06)" }}>
-            <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, width: "35%", color: "text.primary" }}>Feature</TableCell>
-            <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, color: "text.primary" }}>Value</TableCell>
-            <TableCell sx={{ fontWeight: 700, fontSize: 12, py: 0.75, width: 60, color: "text.primary" }}>Status</TableCell>
-          </TableRow>
-        </TableHead>
-        <TableBody>
-          {inventoryFeatures.flatMap((feat) => {
-            const raw = fv[feat.id];
-            const isComponent = feat.valueType === "component" && (feat.subProperties ?? []).length > 0;
-            let displayVal = "-";
-            let filled = !!raw;
-
-            if (raw && isComponent) {
-              try {
-                const sub: Record<string, string> = JSON.parse(raw);
-                const parts = (feat.subProperties ?? []).map((sp) => sub[sp.id] ? `${sp.name}: ${sub[sp.id]}` : null).filter(Boolean);
-                displayVal = parts.length ? `${parts.length} sub-field${parts.length !== 1 ? "s" : ""} filled` : "-";
-                filled = parts.length > 0;
-              } catch { filled = false; }
-            } else if (raw) {
-              displayVal = raw;
-            }
-
-            const parentRow = (
-              <TableRow key={feat.id}>
-                <TableCell sx={{ fontSize: 13, fontWeight: 600, py: 0.75, color: "text.primary" }}>{feat.name}</TableCell>
-                <TableCell sx={{ fontSize: 13, py: 0.75, color: filled ? "text.primary" : "text.secondary", fontStyle: filled ? "normal" : "italic" }}>
-                  {isComponent ? displayVal : (filled ? displayVal : "Not filled")}
-                </TableCell>
-                <TableCell sx={{ py: 0.75 }}>
-                  <Box sx={{ width: 9, height: 9, borderRadius: "50%", bgcolor: filled ? "success.main" : "grey.300" }} />
-                </TableCell>
-              </TableRow>
-            );
-
-            const subRows = isComponent && raw
-              ? (() => {
-                  try {
-                    const sub: Record<string, string> = JSON.parse(raw);
-                    return (feat.subProperties ?? []).map((sp) => (
-                      <TableRow key={`${feat.id}-${sp.id}`} sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
-                        <TableCell sx={{ fontSize: 12, pl: 3.5, color: "text.secondary", py: 0.5 }}>
-                          {"->"} {sp.name}
-                        </TableCell>
-                        <TableCell sx={{ fontSize: 12, py: 0.5 }}>{sub[sp.id] || "-"}</TableCell>
-                        <TableCell sx={{ py: 0.5 }}>
-                          <Box sx={{ width: 7, height: 7, borderRadius: "50%", bgcolor: sub[sp.id] ? "success.main" : "grey.300" }} />
-                        </TableCell>
-                      </TableRow>
-                    ));
-                  } catch { return []; }
-                })()
-              : [];
-
-            return [parentRow, ...subRows];
-          })}
-        </TableBody>
-      </Table>
+      <AssetInstallationFeatureExpandedRow
+        featureValuesJson={asset.featureValuesJson}
+        inventoryFeatures={activeFeatures.filter((feat) => feat.isInventory)}
+      />
     );
   }
 
@@ -4316,491 +4051,125 @@ ${words.slice(midpoint).join(" ")}`;
   // Dynamic column cell renderer
   // ------------------------------------------------------------------
 
-  function renderColumnCell(
-    colId: string,
-    asset: ProjectAsset,
-    cfg: ProductConfig | null | undefined,
-    proj: ReturnType<typeof projectMap.get>,
-    tech: ReturnType<typeof userMap.get>,
-  ) {
-    switch (colId) {
-      case "assetName":
-        return <Typography variant="body2">{asset.assetName || "-"}</Typography>;
-      case "serialNumber":
-        return <Typography variant="body2" color="text.secondary">{asset.serialNumber || "-"}</Typography>;
-      case "assetModel":
-        return <Typography variant="body2" color="text.secondary">{asset.assetModel || "-"}</Typography>;
-      case "manufacturer":
-        return <Typography variant="body2" color="text.secondary">{asset.manufacturer || "-"}</Typography>;
-      case "configType": {
-        const cfgType = cfg?.configType
-          || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.configType : undefined);
-        return <Typography variant="body2" color="text.secondary">{cfgType || "-"}</Typography>;
-      }
-      case "configName": {
-        const cfgName = cfg?.name
-          || (asset.productConfigId ? wfConfigMap.get(asset.productConfigId)?.name : undefined);
-        return <Typography variant="body2" color="text.secondary">{cfgName || "-"}</Typography>;
-      }
-      case "project":
-        return <Typography variant="body2" color="text.secondary">{proj ? proj.jobNumber : asset.projectId.slice(0, 8)}</Typography>;
-      case "siteName":
-        return <Typography variant="body2" color="text.secondary">{proj?.siteName || "-"}</Typography>;
-      case "location":
-        return <Typography variant="body2" color="text.secondary">{asset.location || "-"}</Typography>;
-      case "dateCreated":
-        return (
-          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-            {formatAssetTableDate(asset.createdAt, officeZone)}
-          </Typography>
-        );
-      case "dateClosed":
-        return (
-          <Typography variant="body2" color="text.secondary" sx={{ fontFamily: "monospace", fontSize: "0.78rem" }}>
-            {formatAssetTableDate(resolveAssetClosedAt(asset, runsMap[asset.id]), officeZone)}
-          </Typography>
-        );
-      case "assignedTech":
-        return <Typography variant="body2" color="text.secondary">{tech ? tech.fullName : "-"}</Typography>;
-      case "features":
-        return featureCompletenessChip(asset);
-      case "status":
-        return captureTableStatusChip(asset, proj?.workflowMode);
-      default:
-        return null;
-    }
-  }
+  const featureCompletenessChipRef = useRef(featureCompletenessChip);
+  featureCompletenessChipRef.current = featureCompletenessChip;
+  const captureTableStatusChipRef = useRef(captureTableStatusChip);
+  captureTableStatusChipRef.current = captureTableStatusChip;
 
-  function renderOperationsAssetRows(asset: ProjectAsset): [React.ReactNode, React.ReactNode] {
-    const cfg = asset.productConfigId ? configMap.get(asset.productConfigId) : null;
-    const proj = projectMap.get(asset.projectId);
-    const tech = asset.assignedUserId ? userMap.get(asset.assignedUserId) : null;
-    const isExpanded = expandedAssetId === asset.id;
-    const hasIssue = asset.status === "Issue";
-
-    return [
-      <TableRow
-        key={asset.id}
-        hover
-        sx={{
-          bgcolor: hasIssue
-            ? "rgba(211,47,47,0.04)"
-            : selectedAssetIds.has(asset.id)
-              ? "rgba(var(--primary-rgb,25,118,210),0.08)"
-              : undefined
-        }}
-      >
-        <TableCell sx={{ px: 0.5, ...operationsStickyPrefixSx(0, 2) }}>
-          <Checkbox
-            size="small"
-            checked={selectedAssetIds.has(asset.id)}
-            onChange={(e) => {
-              setSelectedAssetIds((prev) => {
-                const next = new Set(prev);
-                if (e.target.checked) next.add(asset.id);
-                else next.delete(asset.id);
-                return next;
-              });
-            }}
-          />
-        </TableCell>
-        <TableCell sx={{ px: 1, ...operationsStickyPrefixSx(OPERATIONS_CHECKBOX_W, 2) }}>
-          <IconButton size="small" onClick={() => {
-            const nextId = isExpanded ? null : asset.id;
-            setExpandedAssetId(nextId);
-            if (nextId) loadAssignmentsForAsset(nextId);
-          }}>
-            {isExpanded ? <ExpandLessOutlined fontSize="small" /> : <ExpandMoreOutlined fontSize="small" />}
-          </IconButton>
-        </TableCell>
-        <TableCell sx={operationsStickyPrefixSx(OPERATIONS_TAG_STICKY_LEFT, 2)}>
-          <Stack direction="row" alignItems="center" spacing={0.75}>
-            {hasIssue && (
-              <Box
-                sx={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: "50%",
-                  bgcolor: computeAssetHealth(asset, runsMap[asset.id] ?? []) === "red" ? "error.main" : "warning.main",
-                  flexShrink: 0
-                }}
-              />
-            )}
-            <Typography variant="body2" fontWeight={600}>{asset.assetTag}</Typography>
-            {issuesBadge(asset)}
-          </Stack>
-        </TableCell>
-        {visibleColumns.map((col) => (
-          <TableCell key={col.id}>
-            {renderColumnCell(col.id, asset, cfg, proj, tech ?? undefined)}
-          </TableCell>
-        ))}
-        <TableCell align="right">
-          <Stack direction="row" spacing={0.25} justifyContent="flex-end" alignItems="center">
-            {(canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled") && actionButton(asset, proj?.workflowMode)}
-            {canManageAssetDocuments && (
-              <Tooltip title={`Documents (${docsCountMap[asset.id] ?? 0}/3)`}>
-                <IconButton size="small" onClick={() => { setDocsAsset(asset); setDocsOpen(true); }}>
-                  <Badge
-                    badgeContent={`${docsCountMap[asset.id] ?? 0}/3`}
-                    color={
-                      (docsCountMap[asset.id] ?? 0) === 0 ? "default" :
-                      (docsCountMap[asset.id] ?? 0) === 3 ? "success" : "primary"
-                    }
-                    sx={{ "& .MuiBadge-badge": { fontSize: 9, minWidth: 28, height: 16 } }}
-                  >
-                    <FolderOutlined fontSize="small" />
-                  </Badge>
-                </IconButton>
-              </Tooltip>
-            )}
-            {canViewInstallationAssets && (
-              <Tooltip title="View/Export report">
-                <span>
-                  <IconButton
-                    size="small"
-                    disabled={reportGenerating === asset.id}
-                    onClick={() => openReportExportDialog(asset)}
-                  >
-                    {reportGenerating === asset.id
-                      ? <CircularProgress size={16} />
-                      : <ArticleOutlined fontSize="small" />}
-                  </IconButton>
-                </span>
-              </Tooltip>
-            )}
-            {canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
-              <Tooltip title="Edit asset">
-                <IconButton size="small" onClick={() => openEditAsset(asset)}>
-                  <EditOutlined fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode && (
-              <Tooltip title="Archive asset">
-                <IconButton size="small" color="error" onClick={() => setDeleteAsset(asset)}>
-                  <DeleteOutline fontSize="small" />
-                </IconButton>
-              </Tooltip>
-            )}
-            {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
-              <Tooltip title="Restore asset">
-                <span>
-                  <IconButton size="small" disabled={deletingAsset} onClick={() => confirmRestoreAsset(asset)}>
-                    <RestoreOutlined fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            )}
-            {canDeleteInstallationAssets && canEditAssetFromWebTable(asset) && archiveMode && (
-              <Tooltip title="Delete asset permanently">
-                <span>
-                  <IconButton size="small" color="error" disabled={purgingAsset} onClick={() => setPurgeAsset(asset)}>
-                    <DeleteForeverOutlined fontSize="small" />
-                  </IconButton>
-                </span>
-              </Tooltip>
-            )}
-            {!((canRunAssetWorkflow || asset.status === "Complete" || asset.status === "Closed" || asset.status === "Cancelled")
-              || canManageAssetDocuments
-              || canViewInstallationAssets
-              || (canEditInstallationAssets && canEditAssetFromWebTable(asset) && !archiveMode)
-              || (canDeleteInstallationAssets && canEditAssetFromWebTable(asset))) && (
-              <Typography variant="caption" color="text.disabled">
-                No actions
-              </Typography>
-            )}
-          </Stack>
-        </TableCell>
-      </TableRow>,
-
-      <TableRow key={`${asset.id}-detail`}>
-        <TableCell colSpan={3 + visibleColumns.length} sx={{ py: 0 }}>
-          <Collapse in={isExpanded} timeout="auto" unmountOnExit>
-            <Box sx={{ px: 3, py: 2, bgcolor: "rgba(45,212,191,0.05)", borderBottom: "1px solid", borderColor: "divider" }}>
-              <Typography
-                variant="caption"
-                fontWeight={700}
-                color="text.secondary"
-                sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1.5 }}
-              >
-                Feature Values &amp; Sub-Dependencies
-              </Typography>
-              {renderFeatureExpandedRow(asset)}
-              {asset.notes && (
-                <Box sx={{ mt: 1.5 }}>
-                  <Typography variant="caption" color="text.secondary" fontWeight={600}>Notes: </Typography>
-                  <Typography variant="caption">{asset.notes}</Typography>
-                </Box>
-              )}
-              <Divider sx={{ my: 1.5 }} />
-              {renderIssuesPanel(asset)}
-              {(() => {
-                const timePanel = renderTimeTrackingPanel(asset);
-                return timePanel ? (
-                  <>
-                    <Divider sx={{ my: 1.5 }} />
-                    {timePanel}
-                  </>
-                ) : null;
-              })()}
-              <Divider sx={{ my: 1.5 }} />
-              {renderWorkflowAssignmentsPanel(asset)}
-            </Box>
-          </Collapse>
-        </TableCell>
-      </TableRow>,
-    ];
-  }
-
-  // ------------------------------------------------------------------
-  // Workflow assignments panel (expanded row)
-  // ------------------------------------------------------------------
+  const renderColumnCell = useMemo(
+    () =>
+      createOperationsColumnCellRenderer({
+        officeZone,
+        runsMap,
+        wfConfigMap,
+        renderFeatureCompletenessChip: (asset) => featureCompletenessChipRef.current(asset),
+        renderStatusChip: (asset, mode) => captureTableStatusChipRef.current(asset, mode),
+      }),
+    [officeZone, runsMap, wfConfigMap],
+  );
 
   function renderWorkflowAssignmentsPanel(asset: ProjectAsset) {
-    const assignments = assignmentsMap[asset.id] ?? [];
-    const runs = runsMap[asset.id] ?? [];
-    const runLoading = runnerLoading === asset.id;
-
     return (
-      <Box sx={{ mt: 1.5 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
-          <Typography variant="caption" fontWeight={700} color="text.secondary"
-            sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
-            Workflow Assignments {assignments.length > 0 && `(${assignments.length})`}
-          </Typography>
-          <Stack direction="row" spacing={1}>
-            <Button
-              size="small"
-              variant="outlined"
-              color="inherit"
-              sx={{ fontSize: 11, py: 0.25 }}
-              onClick={() => setInspectionDialogAsset(asset)}
-            >
-              Inspections
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              color="primary"
-              startIcon={<AssignmentOutlined fontSize="small" />}
-              sx={{ fontSize: 11, py: 0.25 }}
-              onClick={() => openAssignDialog(asset)}
-            >
-              Assign workflow
-            </Button>
-          </Stack>
-        </Stack>
-        {assignments.length === 0 ? (
-          <Typography variant="caption" color="text.disabled">
-            No workflow assignments. Click "Assign workflow" to add one.
-          </Typography>
-        ) : (
-          <Stack spacing={0.5}>
-            {assignments.map((asgn) => {
-              const configRuns = runs.filter((r) => r.workflowConfigId === asgn.workflowConfigId);
-              const latestRun = configRuns
-                .sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime())[0];
-              const totalProductive = configRuns.reduce((s, r) => s + (r.productiveSeconds ?? 0), 0);
-              const totalDowntime   = configRuns.reduce((s, r) => s + (r.downtimeSeconds   ?? 0), 0);
-              return (
-                <Stack key={asgn.id} direction="row" alignItems="center" spacing={1}
-                  sx={{ p: 0.75, borderRadius: 1, border: "1px solid", borderColor: "divider", bgcolor: "rgba(255,255,255,0.02)" }}>
-                  <Box sx={{ flex: 1, minWidth: 0 }}>
-                    <Typography variant="caption" fontWeight={600}>{asgn.workflowTypeName || "Workflow"}</Typography>
-                    <Typography variant="caption" color="text.secondary" display="block" noWrap>
-                      {asgn.workflowConfigName || asgn.workflowConfigId}
-                    </Typography>
-                    {configRuns.length > 0 && (
-                      <Stack direction="row" spacing={0.5} mt={0.25} useFlexGap flexWrap="wrap">
-                        <Chip size="small" label={`Productive ${formatRunDur(totalProductive)}`} color="success" variant="outlined"
-                          sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
-                        {totalDowntime > 0 && (
-                          <Chip size="small" label={`Downtime ${formatRunDur(totalDowntime)}`} color="warning" variant="outlined"
-                            sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
-                        )}
-                        {configRuns.length > 1 && (
-                          <Chip size="small" label={`${configRuns.length} runs`} variant="outlined"
-                            sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }} />
-                        )}
-                        {(() => {
-                          // Collect all BOM items from completed runs for this assignment
-                          const allBom: import("../../types/workflow").BomActualItem[] = [];
-                          for (const r of configRuns) {
-                            if (!r.bomActualJson) continue;
-                            try { allBom.push(...JSON.parse(r.bomActualJson)); } catch { /* ignore */ }
-                          }
-                          if (allBom.length === 0) return null;
-                          const invCount = allBom.filter(b => b.isInventory).reduce((s, b) => s + b.actualQty, 0);
-                          const bomKey = `${asgn.id}`;
-                          const isBomOpen = expandedBomAsgnId === bomKey;
-                          return (
-                            <Chip size="small"
-                              label={`${allBom.length} part${allBom.length !== 1 ? "s" : ""}${invCount > 0 ? ` | ${invCount} inventory` : ""}`}
-                              color="info" variant="outlined" clickable
-                              sx={{ height: 14, fontSize: 9, "& .MuiChip-label": { px: 0.5 } }}
-                              onClick={(e) => { e.stopPropagation(); setExpandedBomAsgnId(isBomOpen ? null : bomKey); }}
-                            />
-                          );
-                        })()}
-                      </Stack>
-                    )}
-                    {/* BOM expandable detail */}
-                    {expandedBomAsgnId === asgn.id && (() => {
-                      const allBom: import("../../types/workflow").BomActualItem[] = [];
-                      for (const r of configRuns) {
-                        if (!r.bomActualJson) continue;
-                        try { allBom.push(...JSON.parse(r.bomActualJson)); } catch { /* ignore */ }
-                      }
-                      return allBom.length === 0 ? null : (
-                        <Stack spacing={0.5} sx={{ mt: 0.5, pl: 0.5, borderLeft: "2px solid", borderColor: "info.main" }}>
-                          {allBom.map((item, idx) => (
-                            <Box key={idx}>
-                              <Stack direction="row" spacing={0.75} alignItems="center">
-                                <Typography variant="caption" fontWeight={600}>{item.description}</Typography>
-                                <Typography variant="caption" color="text.secondary">x {item.actualQty} {item.unitOfMeasure}</Typography>
-                              </Stack>
-                              {item.isInventory && (item.unitCaptures ?? []).map((fields, i) => (
-                                <Typography key={i} variant="caption" color="text.secondary" display="block" sx={{ pl: 1 }}>
-                                  u{i + 1}: {Object.entries(fields).filter(([, v]) => v).map(([k, v]) => `${k}: ${v}`).join(" | ") || "-"}
-                                </Typography>
-                              ))}
-                            </Box>
-                          ))}
-                        </Stack>
-                      );
-                    })()}
-                  </Box>
-                  {latestRun && (
-                    <Chip
-                      size="small"
-                      label={latestRun.status}
-                      color={latestRun.status === "Complete" ? "success" : latestRun.status === "Issue" ? "error" : "primary"}
-                      variant={latestRun.isLocked ? "filled" : "outlined"}
-                      sx={{ fontSize: 10, height: 18 }}
-                    />
-                  )}
-                  {can.modifyData && (
-                    <Tooltip title={latestRun?.status === "Complete" ? "View run history, download report, or re-run workflow" : latestRun?.status === "Issue" ? "Open run to review and resolve open issues" : ""}>
-                      <Button
-                        size="small"
-                        variant={latestRun?.status === "InProgress" ? "contained" : "outlined"}
-                        color={latestRun?.status === "Issue" ? "error" : latestRun?.status === "Complete" ? "inherit" : "success"}
-                        disabled={runLoading}
-                        startIcon={runLoading ? <CircularProgress size={12} /> : latestRun?.status === "Complete" ? <HistoryOutlined /> : <PlayArrowOutlined />}
-                        onClick={() =>
-                          latestRun?.status === "Complete" || latestRun?.status === "Issue"
-                            ? openRunHistory(asset, asgn.workflowConfigId, asgn.workflowConfigName)
-                            : checkAssignmentThenStart(asset, asgn)
-                        }
-                        onContextMenu={(e) => {
-                          e.preventDefault();
-                          setContextMenuAnchor(e.currentTarget);
-                          setContextMenuAsset(asset);
-                          setContextMenuAssignment(asgn);
-                        }}
-                        sx={{ fontSize: 11, py: 0.25 }}
-                      >
-                        {!latestRun ? "Start" : latestRun.status === "InProgress" ? "Continue" : latestRun.status === "Complete" ? "View/Edit" : "Review"}
-                      </Button>
-                    </Tooltip>
-                  )}
-                  {can.modifyData && (
-                    <Tooltip title="Remove assignment">
-                      <IconButton size="small" onClick={() => removeAssignment(asset.id, asgn.id)}>
-                        <DeleteOutline sx={{ fontSize: "0.9rem" }} />
-                      </IconButton>
-                    </Tooltip>
-                  )}
-                </Stack>
-              );
-            })}
-          </Stack>
-        )}
-      </Box>
+      <AssetInstallationWorkflowAssignmentsPanel
+        asset={asset}
+        assignments={assignmentsMap[asset.id] ?? []}
+        runs={runsMap[asset.id] ?? []}
+        runLoading={runnerLoading === asset.id}
+        canModifyData={can.modifyData}
+        expandedBomAsgnId={expandedBomAsgnId}
+        onOpenInspections={setInspectionDialogAsset}
+        onOpenAssignDialog={openAssignDialog}
+        onToggleBomExpanded={setExpandedBomAsgnId}
+        onOpenRunHistory={openRunHistory}
+        onStartAssignment={checkAssignmentThenStart}
+        onAssignmentContextMenu={(anchor, a, asgn) => {
+          setContextMenuAnchor(anchor);
+          setContextMenuAsset(a);
+          setContextMenuAssignment(asgn);
+        }}
+        onRemoveAssignment={removeAssignment}
+      />
     );
   }
-
-  // ------------------------------------------------------------------
-  // Time tracking summary panel (expanded asset row)
-  // ------------------------------------------------------------------
 
   function renderTimeTrackingPanel(asset: ProjectAsset) {
-    const runs = runsMap[asset.id] ?? [];
-    if (runs.length === 0) return null;
-
-    const totalProductive = runs.reduce((s, r) => s + (r.productiveSeconds ?? 0), 0);
-    const totalDowntime   = runs.reduce((s, r) => s + (r.downtimeSeconds   ?? 0), 0);
-    const totalDtEvents   = runs.reduce((s, r) => s + (r.downtimeEvents    ?? 0), 0);
-    if (totalProductive === 0 && totalDowntime === 0) return null;
-
-    // Collect all downtime entries across all runs for the breakdown table
-    const allDowntimeEntries: Array<{ runNumber: number; reason: string | null; startedAtUtc: string; endedAtUtc?: string | null; durationSecs: number }> = [];
-    for (const run of runs) {
-      let entries: Array<{ id: string; category: string; startedAtUtc: string; endedAtUtc?: string | null; reason?: string | null }> = [];
-      try { entries = JSON.parse(run.timeTrackingJson ?? "[]"); } catch {}
-      for (const e of entries) {
-        if (e.category !== "downtime") continue;
-        const endMs   = e.endedAtUtc ? new Date(e.endedAtUtc).getTime() : (run.completedAt ? new Date(run.completedAt).getTime() : null);
-        const durSecs = endMs ? Math.max(0, Math.floor((endMs - new Date(e.startedAtUtc).getTime()) / 1000)) : 0;
-        allDowntimeEntries.push({ runNumber: run.runNumber ?? 1, reason: e.reason ?? null, startedAtUtc: e.startedAtUtc, endedAtUtc: e.endedAtUtc, durationSecs: durSecs });
-      }
-    }
-
-    return (
-      <Box>
-        <Typography variant="caption" fontWeight={700} color="text.secondary"
-          sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}>
-          Time Tracking
-        </Typography>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap mb={allDowntimeEntries.length > 0 ? 1.25 : 0}>
-          <Chip size="small" color="success" variant="outlined"
-            label={`Productive ${formatRunDur(totalProductive)}`}
-            sx={{ height: 20, fontSize: 10 }} />
-          <Chip size="small" color={totalDowntime > 0 ? "warning" : "default"} variant="outlined"
-            label={`Downtime ${formatRunDur(totalDowntime)}`}
-            sx={{ height: 20, fontSize: 10 }} />
-          {totalDtEvents > 0 && (
-            <Chip size="small" variant="outlined"
-              label={`${totalDtEvents} downtime event${totalDtEvents !== 1 ? "s" : ""}`}
-              sx={{ height: 20, fontSize: 10 }} />
-          )}
-          <Chip size="small" variant="outlined"
-            label={`${runs.length} run${runs.length !== 1 ? "s" : ""} total`}
-            sx={{ height: 20, fontSize: 10 }} />
-        </Stack>
-
-        {allDowntimeEntries.length > 0 && (
-          <Table size="small" sx={{ maxWidth: 600, minWidth: 650 }}>
-            <TableHead>
-              <TableRow sx={{ bgcolor: "rgba(255,255,255,0.03)" }}>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 40 }}>Run</TableCell>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary" }}>Reason</TableCell>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 60 }}>Started</TableCell>
-                <TableCell sx={{ fontSize: 10, py: 0.4, fontWeight: 700, color: "text.secondary", width: 55 }}>Duration</TableCell>
-              </TableRow>
-            </TableHead>
-            <TableBody>
-              {allDowntimeEntries.map((e, i) => (
-                <TableRow key={i}>
-                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.disabled" }}>#{e.runNumber}</TableCell>
-                  <TableCell sx={{ fontSize: 11, py: 0.5 }}>
-                    {e.reason || <Typography component="span" variant="caption" color="text.disabled">-</Typography>}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "text.secondary", whiteSpace: "nowrap" }}>
-                    {new Date(e.startedAtUtc).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}
-                  </TableCell>
-                  <TableCell sx={{ fontSize: 11, py: 0.5, color: "warning.main", whiteSpace: "nowrap" }}>
-                    {e.durationSecs > 0 ? formatRunDur(e.durationSecs) : "-"}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        )}
-      </Box>
-    );
+    return <AssetInstallationTimeTrackingPanel runs={runsMap[asset.id] ?? []} />;
   }
+
+  const renderOperationsAssetRows = useMemo(
+    () =>
+      createOperationsAssetRowRenderer({
+        visibleColumns,
+        expandedAssetId,
+        selectedAssetIds,
+        configMap,
+        projectMap,
+        userMap,
+        runsMap,
+        docsCountMap,
+        reportGenerating,
+        archiveMode,
+        deletingAsset,
+        purgingAsset,
+        canRunAssetWorkflow,
+        canManageAssetDocuments,
+        canViewInstallationAssets,
+        canEditInstallationAssets,
+        canDeleteInstallationAssets,
+        onToggleSelect: (assetId, checked) => {
+          setSelectedAssetIds((prev) => {
+            const next = new Set(prev);
+            if (checked) next.add(assetId);
+            else next.delete(assetId);
+            return next;
+          });
+        },
+        onToggleExpand: (assetId) => {
+          setExpandedAssetId((prev) => (prev === assetId ? null : assetId));
+        },
+        loadAssignmentsForAsset,
+        setDocsAsset,
+        setDocsOpen,
+        openReportExportDialog,
+        openEditAsset,
+        setDeleteAsset,
+        confirmRestoreAsset,
+        setPurgeAsset,
+        canEditAssetFromWebTable,
+        computeAssetHealth,
+        issuesBadge,
+        actionButton,
+        renderColumnCell,
+        renderFeatureExpandedRow,
+        renderIssuesPanel,
+        renderTimeTrackingPanel,
+        renderWorkflowAssignmentsPanel,
+      }),
+    [
+      visibleColumns,
+      expandedAssetId,
+      selectedAssetIds,
+      configMap,
+      projectMap,
+      userMap,
+      runsMap,
+      docsCountMap,
+      reportGenerating,
+      archiveMode,
+      deletingAsset,
+      purgingAsset,
+      canRunAssetWorkflow,
+      canManageAssetDocuments,
+      canViewInstallationAssets,
+      canEditInstallationAssets,
+      canDeleteInstallationAssets,
+      loadAssignmentsForAsset,
+      openReportExportDialog,
+      openEditAsset,
+      confirmRestoreAsset,
+      canEditAssetFromWebTable,
+    ],
+  );
 
   const getProjectById = useCallback(
     (projectId: string) => projectMap.get(projectId),
@@ -5860,98 +5229,24 @@ ${words.slice(midpoint).join(" ")}`;
           })}
         </Stack>
       ) : (
-        <Paper className="glass-card" sx={{ overflow: "hidden" }}>
-          <Box
-            ref={virtualizeOperationsTable ? operationsScrollRef : undefined}
-            sx={{
-              overflowX: "auto",
-              ...(virtualizeOperationsTable
-                ? { maxHeight: "min(70vh, calc(100vh - 280px))", overflowY: "auto" }
-                : {}),
-            }}
-          >
-            <Table size="small" stickyHeader={virtualizeOperationsTable} sx={{ minWidth: 900 }}>
-              <TableHead>
-                <TableRow>
-                  <TableCell sx={{ width: 28, px: 0.5, ...operationsStickyPrefixSx(0, 4) }}>
-                    <Checkbox
-                      size="small"
-                      indeterminate={selectedAssetIds.size > 0 && selectedAssetIds.size < displayAssets.length}
-                      checked={displayAssets.length > 0 && selectedAssetIds.size === displayAssets.length}
-                      onChange={(e) => {
-                        if (e.target.checked) setSelectedAssetIds(new Set(displayAssets.map((a) => a.id)));
-                        else setSelectedAssetIds(new Set());
-                      }}
-                    />
-                  </TableCell>
-                  <TableCell sx={{ width: 36, px: 1, ...operationsStickyPrefixSx(OPERATIONS_CHECKBOX_W, 4) }} />
-                  <TableCell sx={operationsStickyPrefixSx(OPERATIONS_TAG_STICKY_LEFT, 4)}>
-                    <Stack direction="row" alignItems="center" spacing={0.25}>
-                      <Typography variant="caption" fontWeight={700}>Asset Tag</Typography>
-                      <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: "assetTag" })}>
-                        <ArrowDropDown fontSize="small" />
-                      </IconButton>
-                    </Stack>
-                  </TableCell>
-                  {visibleColumns.map((col) => (
-                    <TableCell key={col.id}>
-                      <Stack direction="row" alignItems="center" spacing={0.25}>
-                        <Typography variant="caption" fontWeight={700}>{col.label}</Typography>
-                        {col.id === "features" ? (
-                          <Tooltip
-                            title={
-                              <Stack spacing={0.5}>
-                                <Typography variant="caption" sx={{ fontWeight: 700, color: "common.white" }}>Feature Colors</Typography>
-                                <Typography variant="caption">Amber: Pending or Paused</Typography>
-                                <Typography variant="caption">Blue: Running</Typography>
-                                <Typography variant="caption">Green: Complete</Typography>
-                                <Typography variant="caption">Red: Missing data</Typography>
-                              </Stack>
-                            }
-                          >
-                            <InfoOutlined sx={{ fontSize: 14, color: "text.disabled", cursor: "help" }} />
-                          </Tooltip>
-                        ) : (
-                          <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: col.id })}>
-                            <ArrowDropDown fontSize="small" />
-                          </IconButton>
-                        )}
-                      </Stack>
-                    </TableCell>
-                  ))}
-                  <TableCell align="right"><Typography variant="caption" fontWeight={700}>Actions</Typography></TableCell>
-                </TableRow>
-              </TableHead>
-              {virtualizeOperationsTable ? (
-                <OperationsVirtualizedTableBody
-                  scrollRef={operationsScrollRef}
-                  rowCount={displayAssets.length * 2}
-                  colSpan={3 + visibleColumns.length}
-                  renderRow={(index) => {
-                    const asset = displayAssets[Math.floor(index / 2)];
-                    if (!asset) return null;
-                    const rows = renderOperationsAssetRows(asset);
-                    return rows[index % 2];
-                  }}
-                />
-              ) : (
-                <TableBody>
-                  {displayAssets.flatMap((asset) => renderOperationsAssetRows(asset))}
-                </TableBody>
-              )}
-            </Table>
-          </Box>
-          {paginatedWebProject && projectAssetTotal > 0 && (
-            <TablePagination
-              component="div"
-              count={projectAssetTotal}
-              page={Math.max(0, projectAssetPage - 1)}
-              onPageChange={(_, nextPage) => setProjectAssetPage(nextPage + 1)}
-              rowsPerPage={PROJECT_ASSET_PAGE_SIZE}
-              rowsPerPageOptions={[PROJECT_ASSET_PAGE_SIZE]}
-            />
-          )}
-        </Paper>
+        <AssetInstallationOperationsTable
+          virtualize={virtualizeOperationsTable}
+          scrollRef={operationsScrollRef}
+          displayAssets={displayAssets}
+          visibleColumns={visibleColumns}
+          selectedAssetIds={selectedAssetIds}
+          onToggleSelectAll={(selectAll) => {
+            if (selectAll) setSelectedAssetIds(new Set(displayAssets.map((a) => a.id)));
+            else setSelectedAssetIds(new Set());
+          }}
+          onOpenColumnMenu={(anchorEl, columnKey) => setAutoMenu({ anchorEl, key: columnKey })}
+          renderAssetRows={renderOperationsAssetRows}
+          paginatedWebProject={paginatedWebProject}
+          projectAssetTotal={projectAssetTotal}
+          projectAssetPage={projectAssetPage}
+          pageSize={PROJECT_ASSET_PAGE_SIZE}
+          onPageChange={setProjectAssetPage}
+        />
       )}
 
       {/* Status action popover */}
