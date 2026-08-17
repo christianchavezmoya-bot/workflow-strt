@@ -66,20 +66,18 @@ export function getDefaultApiBaseUrl(): string {
     ? normalizeApiBaseUrl(import.meta.env.VITE_API_BASE)
     : "";
 
-  if (!isMobileNativePlatform() && (hostname === "localhost" || hostname === "127.0.0.1")) {
-    // Docker staging web (:5174) bakes VITE_API_BASE=http://localhost:8080/api — honour it.
+  // The staging port is checked before the loopback case: the API is a sibling
+  // container on the same host, so the live origin is more trustworthy than a
+  // build-time value, which is routinely stale from a device or another machine.
+  if (!isMobileNativePlatform() && port === "5174") {
+    return dockerStagingBrowserDefault;
+  }
+
+  if (!isMobileNativePlatform() && isLoopbackHost(hostname)) {
     if (baked && /localhost|127\.0\.0\.1/i.test(baked)) {
       return baked;
     }
     return localBrowserDefault;
-  }
-
-  if (!isMobileNativePlatform() && port === "5174") {
-    // Docker staging serves the web app on :5174 and the sibling API on :8080.
-    // Always prefer the live sibling API instead of any device-build value baked into the bundle.
-    return baked && /:8080\/api$/i.test(baked)
-      ? rehostBrowserApiBase(baked, hostname)
-      : dockerStagingBrowserDefault;
   }
 
   if (!isMobileNativePlatform() && baked) {
