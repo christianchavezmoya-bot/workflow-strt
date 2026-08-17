@@ -2,14 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
-  CheckCircleOutlined,
   CloudOffOutlined,
   CommentOutlined,
   DeleteOutlineOutlined,
   DrawOutlined,
   EditOutlined,
   EmailOutlined,
-  LockOutlined,
   PauseOutlined,
   PhotoCameraOutlined,
   PlayArrowOutlined,
@@ -25,7 +23,6 @@ import {
   Checkbox,
   Chip,
   CircularProgress,
-  Collapse,
   Dialog,
   DialogActions,
   DialogContent,
@@ -63,14 +60,13 @@ import QRUploadButton from "../../components/QRUploadButton";
 import WorkflowDateCapture from "../../components/ui/WorkflowDateCapture";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
-import RunTimeline from "../../components/ui/RunTimeline";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useAuth } from "../../hooks/useAuth";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
 import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
-import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
+import { measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
@@ -83,7 +79,14 @@ import WorkOrderRunnerConsumablesStage, { type UnlistedConsumable } from "./Work
 import WorkOrderRunnerCustomerSignStage from "./WorkOrderRunnerCustomerSignStage";
 import WorkOrderRunnerInstallerSignStage from "./WorkOrderRunnerInstallerSignStage";
 import WorkOrderRunnerSetupStage from "./WorkOrderRunnerSetupStage";
-import { renderAssetIdentifier, runnerBodyStackSx, runnerDialogContentSx } from "./workOrderRunnerUi";
+import WorkOrderRunnerSummaryStage from "./WorkOrderRunnerSummaryStage";
+import {
+  formatDuration,
+  parseRunTimeEntries,
+  renderAssetIdentifier,
+  runnerBodyStackSx,
+  runnerDialogContentSx,
+} from "./workOrderRunnerUi";
 
 // Types
 
@@ -99,14 +102,6 @@ interface StepCapture {
   values: Record<string, string>;
   completedAt: string;
   iterationIndex?: number;
-}
-
-interface RunTimeEntry {
-  id: string;
-  category: "productive" | "downtime";
-  startedAtUtc: string;
-  endedAtUtc?: string | null;
-  reason?: string | null;
 }
 
 interface WorkOrderRunnerProps {
@@ -161,63 +156,6 @@ type PendingStepAction =
   | { type: "review"; stepId: string | null; iterationIndex?: number };
 
 type MissingCaptureTarget = MissingWorkflowItem & { stepId: string; iterationIndex?: number };
-
-function parseRunTimeEntries(json: string): RunTimeEntry[] {
-  try {
-    const raw = JSON.parse(json) as Record<string, unknown>[];
-    if (!Array.isArray(raw)) return [];
-    // Normalize both camelCase (new) and PascalCase (legacy DB records)
-    return raw.map((e) => ({
-      id: String(e.id ?? e.Id ?? ""),
-      category: String(e.category ?? e.Category ?? "productive") as "productive" | "downtime",
-      startedAtUtc: String(e.startedAtUtc ?? e.StartedAtUtc ?? ""),
-      endedAtUtc: (e.endedAtUtc ?? e.EndedAtUtc ?? null) as string | null,
-      reason: (e.reason ?? e.Reason ?? null) as string | null,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-function formatDuration(totalSeconds: number): string {
-  const safe = Math.max(0, totalSeconds || 0);
-  const h = Math.floor(safe / 3600);
-  const m = Math.floor((safe % 3600) / 60);
-  const s = safe % 60;
-  if (h > 0) return `${h}h ${m}m ${s}s`;
-  return `${m}m ${s}s`;
-}
-
-function countStoredMediaItems(value: string): number {
-  try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? parsed.length : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function formatSummaryInputValue(input: StepInput, value: string): string {
-  if (input.type === "checkbox") return value === "true" ? "Yes" : "No";
-  if (input.type === "photo") {
-    const count = countStoredMediaItems(value);
-    return `${count} photo${count === 1 ? "" : "s"} attached`;
-  }
-  if (input.type === "video") {
-    const count = countStoredMediaItems(value);
-    return `${count} video${count === 1 ? "" : "s"} attached`;
-  }
-  if (input.type === "signature") return "Signature captured";
-  if (input.type === "component") {
-    try {
-      const parsed = JSON.parse(value) as Record<string, string>;
-      return `${Object.values(parsed ?? {}).filter(Boolean).length} field${Object.values(parsed ?? {}).filter(Boolean).length === 1 ? "" : "s"} completed`;
-    } catch {
-      return "Component data captured";
-    }
-  }
-  return value;
-}
 
 export default function WorkOrderRunner({
   open,
@@ -2556,52 +2494,10 @@ export default function WorkOrderRunner({
     );
   }
 
-  // ---------------------------------------------------------------
-  // Stage: summary
-  // ---------------------------------------------------------------
-  function renderSummary() {
-    if (isPreviewWalkthrough) {
-      return (
-        <>
-          <DialogTitle>
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <CheckCircleOutlined color="success" />
-              <Typography variant="subtitle1" fontWeight={600}>Workflow preview complete</Typography>
-            </Stack>
-          </DialogTitle>
-          <DialogContent dividers sx={{ overflowX: "hidden" }}>
-            <Stack spacing={2} sx={{ mt: 1 }}>
-              <Paper variant="outlined" sx={{ p: 2 }}>
-                <Stack spacing={1.25}>
-                  <Typography variant="h6" fontWeight={700}>
-                    Previewed all workflow steps
-                  </Typography>
-                  <Typography variant="body2" color="text.secondary">
-                    This was a preview walkthrough only. No run was created, no asset data was loaded, and no validation was enforced.
-                  </Typography>
-                  <Chip
-                    size="small"
-                    color="success"
-                    variant="outlined"
-                    label={`${stepsSorted.length} step${stepsSorted.length === 1 ? "" : "s"} previewed`}
-                    sx={{ alignSelf: "flex-start" }}
-                  />
-                </Stack>
-              </Paper>
-            </Stack>
-          </DialogContent>
-          <DialogActions sx={{ justifyContent: "space-between" }}>
-            <Button onClick={() => setStage("running")} variant="outlined" size="small">
-              Back to steps
-            </Button>
-            <Button onClick={onClose} variant="contained" size="small">
-              Close preview
-            </Button>
-          </DialogActions>
-        </>
-      );
-    }
+  const issueForDetail = issueDetailId ? issues.find((i) => i.id === issueDetailId) ?? null : null;
 
+  const summaryStage = (() => {
+    if (stage !== "summary") return null;
     const stepsData = buildStepsData();
     const summaryStepResultsJson = JSON.stringify(stepsData);
     const blockingIssues = issues.filter((i) => i.isBlocking && !i.resolved);
@@ -2609,460 +2505,23 @@ export default function WorkOrderRunner({
     const qtyModificationCount = Object.keys(qtyModifications).length;
     const payloadEstimate = measurePayload({ stepResultsJson: summaryStepResultsJson });
     const showLargePayloadWarning = payloadEstimate.payloadBytes > API_LARGE_PAYLOAD_WARNING_BYTES;
-
     const missingCaptureTargets = getMissingCaptureTargets(stepsData);
     const missingCaptureCount = missingCaptureTargets.length;
     const hasMissingCaptures = missingCaptureCount > 0;
     const primaryBlockingIssue = blockingIssues[0] ?? null;
-
-    return (
-      <>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <CheckCircleOutlined color="success" />
-            <Typography variant="subtitle1" fontWeight={600}>Workflow complete</Typography>
-          </Stack>
-          {renderAssetIdentifier(assetTag)}
-        </DialogTitle>
-        <DialogContent dividers sx={{ overflowX: "hidden" }}>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Stack spacing={1.5}>
-                <Typography variant="h6" fontWeight={700}>
-                  Great job - all workflow steps are complete
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  {stepsSorted.length} step{stepsSorted.length === 1 ? "" : "s"} completed.
-                </Typography>
-                <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                  <Chip size="small" color="success" variant="outlined" label={`${stepsSorted.length} steps completed`} />
-                  <Chip
-                    size="small"
-                    color={hasMissingCaptures ? "warning" : "success"}
-                    variant="outlined"
-                    label={hasMissingCaptures ? `${missingCaptureCount} missing capture${missingCaptureCount === 1 ? "" : "s"}` : "No missing captures"}
-                  />
-                  <Chip
-                    size="small"
-                    color={hasBlockingIssues ? "error" : issues.length > 0 ? "warning" : "default"}
-                    variant="outlined"
-                    label={
-                      hasBlockingIssues
-                        ? `${blockingIssues.length} blocking issue${blockingIssues.length === 1 ? "" : "s"}`
-                        : `${issues.length} issue${issues.length === 1 ? "" : "s"} flagged`
-                    }
-                  />
-                  {qtyModificationCount > 0 && (
-                    <Chip size="small" color="warning" variant="outlined" label={`${qtyModificationCount} qty change${qtyModificationCount === 1 ? "" : "s"}`} />
-                  )}
-                </Stack>
-                {isRealRun && (
-                  <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                    <Chip size="small" color="success" variant="outlined" label={`Productive ${formatDuration(productiveSecondsLive)}`} />
-                    <Chip size="small" color={downtimeSecondsLive > 0 ? "warning" : "default"} variant="outlined" label={`Downtime ${formatDuration(downtimeSecondsLive)}`} />
-                  </Stack>
-                )}
-                {activeRun?.timeTrackingJson && (
-                  <Box sx={{ mt: 0.5 }}>
-                    <RunTimeline entries={parseRunTimeEntries(activeRun.timeTrackingJson)} timeZoneId={resolvedTimeZone} />
-                  </Box>
-                )}
-              </Stack>
-            </Paper>
-
-            {hasMissingCaptures && (
-              <Alert severity="warning" icon={<PhotoCameraOutlined />}>
-                {missingCaptureCount} capture{missingCaptureCount === 1 ? "" : "s"} still missing. Add the missing photos before locking the run.
-              </Alert>
-            )}
-
-            {showLargePayloadWarning && (
-              <Alert severity="info" icon={<SyncOutlined />}>
-                This run is carrying about {formatPayloadSize(payloadEstimate.payloadBytes)} of step-result data. Large photo payloads can take longer to sync on the phone.
-              </Alert>
-            )}
-
-            {issues.length > 0 && (
-              <Stack spacing={1}>
-                <Divider />
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => setShowSummaryIssues((open) => !open)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  {showSummaryIssues ? "Hide issues" : `Show issues (${issues.length})`}
-                </Button>
-                <Collapse in={showSummaryIssues}>
-                  <Stack spacing={1} sx={{ mt: 1 }}>
-                    {issues.map((issue) => (
-                      <Paper key={issue.id} variant="outlined" sx={{ p: 1.25, borderColor: issue.isBlocking ? "error.main" : undefined }}>
-                        {editingIssueId === issue.id ? (
-                          <Stack spacing={0.75}>
-                            <TextField size="small" fullWidth multiline rows={2} label="Description"
-                              value={editIssueDesc} onChange={(e) => setEditIssueDesc(e.target.value)} />
-                            <FormControl size="small" sx={{ maxWidth: 220 }}>
-                              <InputLabel shrink>Severity</InputLabel>
-                              <Select label="Severity" value={editIssueSeverity}
-                                onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
-                                <MenuItem value="low">Low - observation only</MenuItem>
-                                <MenuItem value="medium">Medium - attention needed</MenuItem>
-                                <MenuItem value="high">High - blocks completion</MenuItem>
-                              </Select>
-                            </FormControl>
-                            <Stack direction="row" spacing={0.75}>
-                              <Button size="small" variant="contained" color="primary" disabled={!editIssueDesc.trim()} onClick={saveEditIssue}>Save</Button>
-                              <Button size="small" onClick={() => setEditingIssueId(null)}>Cancel</Button>
-                            </Stack>
-                          </Stack>
-                        ) : (
-                          <Stack spacing={0.5}>
-                            <Stack direction="row" alignItems="flex-start" justifyContent="space-between">
-                              <Stack direction="row" spacing={0.5} flexWrap="wrap" useFlexGap>
-                                {issue.resolved
-                                  ? <Chip size="small" label="Resolved" color="success" sx={{ flexShrink: 0 }} />
-                                  : <Chip size="small"
-                                      label={issue.issueType === "scope-deviation" ? "Scope Var." : issue.isBlocking ? "Blocking" : "Observation"}
-                                      color={issue.issueType === "scope-deviation" ? "warning" : issue.isBlocking ? "error" : "default"}
-                                      sx={{ flexShrink: 0 }} />
-                                }
-                                {issue.issueType !== "scope-deviation" && (
-                                  <Chip size="small" label={issue.severity} variant="outlined" sx={{ flexShrink: 0 }} />
-                                )}
-                                {issue.issueType === "scope-deviation" && (issue.extraHours != null || issue.costImpact) && (
-                                  <Chip size="small" variant="outlined" color="warning"
-                                    label={[issue.extraHours != null ? `+${issue.extraHours}h` : null, issue.costImpact].filter(Boolean).join(" - ")}
-                                    sx={{ flexShrink: 0 }} />
-                                )}
-                                {issue.stepTitle && <Chip size="small" label={issue.stepTitle} variant="outlined" sx={{ flexShrink: 0 }} />}
-                              </Stack>
-                              <Stack direction="row" spacing={0}>
-                                <Tooltip title="Add comments or close issue">
-                                  <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
-                                    <CommentOutlined sx={{ fontSize: 14 }} />
-                                  </IconButton>
-                                </Tooltip>
-                                <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                                <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                              </Stack>
-                            </Stack>
-                            <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
-                            <Typography variant="caption" color="text.disabled" sx={{ fontSize: 10 }}>
-                              {issue.createdBy ? `${issue.createdBy} - ` : ""}{formatInstant(issue.reportedAt, resolvedTimeZone, { withZone: false })}
-                            </Typography>
-                          </Stack>
-                        )}
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Collapse>
-              </Stack>
-            )}
-
-            {qtyModificationCount > 0 && (
-              <Stack spacing={1}>
-                <Divider />
-                <Button
-                  size="small"
-                  variant="outlined"
-                  color="warning"
-                  onClick={() => setShowSummaryQtyMods((open) => !open)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  {showSummaryQtyMods ? "Hide qty changes" : `Show qty changes (${qtyModificationCount})`}
-                </Button>
-                <Collapse in={showSummaryQtyMods}>
-                  <Stack spacing={1} sx={{ mt: 1 }}>
-                    {Object.values(qtyModifications).map((mod) => (
-                      <Paper key={mod.stepId} variant="outlined" sx={{ p: 1.25, borderColor: "warning.main" }}>
-                        <Stack spacing={0.25}>
-                          <Stack direction="row" spacing={0.75} alignItems="center">
-                            <Chip size="small" color="warning" label="Qty Modified" />
-                            <Typography variant="caption" fontWeight={600}>{mod.featureName}</Typography>
-                          </Stack>
-                          <Typography variant="caption">
-                            Expected: <strong>{mod.expectedQty}</strong>{" -> "}Installed: <strong>{mod.actualQty}</strong>
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary">Reason: {mod.reason}</Typography>
-                        </Stack>
-                      </Paper>
-                    ))}
-                  </Stack>
-                </Collapse>
-              </Stack>
-            )}
-
-            {hasBlockingIssues && !blockingError && (
-              <Alert severity="error" sx={{ fontSize: 12 }}>
-                {blockingIssues.length} blocking issue{blockingIssues.length === 1 ? "" : "s"} must be closed before locking this run.
-                {activeRunId
-                  ? " Click the comment icon on each blocking issue to add notes and close it."
-                  : " (Preview mode: not enforced)"}
-              </Alert>
-            )}
-
-            {stepsData.length > 0 && (
-              <Stack spacing={1.5}>
-                <Divider />
-                <Button
-                  size="small"
-                  variant="outlined"
-                  onClick={() => setShowSummaryCapturedData((open) => !open)}
-                  sx={{ alignSelf: "flex-start" }}
-                >
-                  {showSummaryCapturedData ? "Hide captured data" : "Show captured data"}
-                </Button>
-                <Collapse in={showSummaryCapturedData}>
-                  <Stack spacing={1} sx={{ mt: 1 }}>
-                    {stepsData.map((sc, index) => {
-                      const step = stepsSorted.find((s) => s.id === sc.stepId);
-                      if (!step) return null;
-                      return (
-                        <Paper key={`${sc.stepId}-${index}`} variant="outlined" sx={{ p: 1.5 }}>
-                          <Typography variant="caption" fontWeight={600} display="block" mb={0.75}>
-                            {String(step.order).padStart(2, "0")} - {step.title || "(Untitled step)"}
-                          </Typography>
-                          <Stack spacing={0.5}>
-                            {(step.inputs ?? []).map((inp) => {
-                              const val = sc.values[inp.id];
-                              if (!val) return null;
-                              return (
-                                <Stack key={inp.id} direction="row" spacing={1} alignItems="flex-start">
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{inp.label}:</Typography>
-                                  <Typography variant="caption" sx={{ wordBreak: "break-word" }}>{formatSummaryInputValue(inp, val)}</Typography>
-                                </Stack>
-                              );
-                            })}
-                            {(step.captureFields ?? []).map((field) => {
-                              const val = sc.values[field.id];
-                              if (!val) return null;
-                              return (
-                                <Stack key={field.id} direction="row" spacing={1} alignItems="flex-start">
-                                  <Typography variant="caption" color="text.secondary" sx={{ minWidth: 120 }}>{field.label}:</Typography>
-                                  <Typography variant="caption" sx={{ wordBreak: "break-word" }}>{val}</Typography>
-                                </Stack>
-                              );
-                            })}
-                          </Stack>
-                        </Paper>
-                      );
-                    })}
-                  </Stack>
-                </Collapse>
-              </Stack>
-            )}
-
-            {blockingError && <Alert severity="error" sx={{ fontSize: 12 }}>{blockingError}</Alert>}
-            {saveError && <Alert severity="error" sx={{ fontSize: 12 }}>{saveError}</Alert>}
-            {!saved && activeRunId && (
-              <Alert severity="warning" sx={{ fontSize: 12 }}>
-                Review recorded time and captured fields before locking. Use <strong>Adjust time</strong> or <strong>Back to steps</strong> if anything needs correction. After you sign as installer, you will not be able to edit time or field captures (Project Managers and Admins may still correct data until customer sign-off).
-              </Alert>
-            )}
-            {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" && (
-              <Alert severity="info" sx={{ fontSize: 12 }}>
-                Review recorded time and captured fields, then continue to installer sign-off.
-              </Alert>
-            )}
-            {saved && !signoffReviewMode && (
-              <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
-                Run locked and saved successfully.
-              </Alert>
-            )}
-            {saved && signoffReviewMode && activeRun?.signatureStatus !== "PendingInstaller" && (
-              <Alert severity="success" sx={{ fontSize: 12 }} icon={<LockOutlined fontSize="small" />}>
-                Run locked and saved successfully.
-              </Alert>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{
-          flexDirection: isMobileNativePlatform() ? "column" : "row",
-          alignItems: isMobileNativePlatform() ? "stretch" : "center",
-          justifyContent: "space-between",
-          gap: isMobileNativePlatform() ? 0.75 : 0,
-          px: isMobileNativePlatform() ? 1.5 : 2,
-          py: isMobileNativePlatform() ? 1 : 1,
-          position: "sticky",
-          bottom: 0,
-          zIndex: 1,
-          bgcolor: "background.paper",
-          borderTop: "1px solid",
-          borderColor: "divider",
-        }}>
-          <Stack direction="row" spacing={0.5} alignItems="center" flexWrap="wrap" useFlexGap>
-            <Button size={isMobileNativePlatform() ? "small" : "medium"} onClick={requestDiscardRun} disabled={saving || discarding}>
-              {saved ? "Close" : "Discard"}
-            </Button>
-            {!saved && runEditPerms.data && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setStage("running")}
-              >
-                {isMobileNativePlatform() ? "Back" : "Back to steps"}
-              </Button>
-            )}
-            {!saved && runEditPerms.time && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setTimeEditorOpen(true)}
-              >
-                Adjust time
-              </Button>
-            )}
-            {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" && runEditPerms.time && (
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => setTimeEditorOpen(true)}
-              >
-                Adjust time
-              </Button>
-            )}
-          </Stack>
-          {saved && signoffReviewMode && activeRun?.signatureStatus === "PendingInstaller" ? (
-            <Button
-              variant="contained"
-              size={isMobileNativePlatform() ? "small" : "medium"}
-              onClick={() => {
-                setInstName(currentUserName ?? "");
-                setInstConsent(false);
-                setStage("installer-sign");
-              }}
-            >
-              Continue to sign-off
-            </Button>
-          ) : !saved && (
-            <>
-              {(primaryBlockingIssue || hasMissingCaptures) && (
-                <Stack direction="row" spacing={0.5} useFlexGap flexWrap="wrap">
-                  {primaryBlockingIssue && (
-                    <Button
-                      variant="outlined"
-                      color="error"
-                      size="small"
-                      disabled={saving}
-                      startIcon={<ReportProblemOutlined sx={{ fontSize: 16 }} />}
-                      sx={{ minWidth: 0, flex: isMobileNativePlatform() ? "1 1 auto" : undefined, fontSize: "0.75rem", px: 1 }}
-                      onClick={() => {
-                        setShowSummaryIssues(true);
-                        setIssueDetailId(primaryBlockingIssue.id);
-                      }}
-                    >
-                      {isMobileNativePlatform()
-                        ? (blockingIssues.length === 1 ? "Resolve Issue" : "Resolve Issues")
-                        : (blockingIssues.length === 1 ? "Resolve Blocking Issue" : "Resolve Blocking Issues")}
-                    </Button>
-                  )}
-                  {hasMissingCaptures && (
-                    <Button
-                      variant="outlined"
-                      color="warning"
-                      size="small"
-                      disabled={saving}
-                      startIcon={<PhotoCameraOutlined sx={{ fontSize: 16 }} />}
-                      sx={{ minWidth: 0, flex: isMobileNativePlatform() ? "1 1 auto" : undefined, fontSize: "0.75rem", px: 1 }}
-                      onClick={() => jumpToWorkflowStep(missingCaptureTargets[0]?.stepId ?? null, missingCaptureTargets[0]?.iterationIndex)}
-                    >
-                      {isMobileNativePlatform() ? "Add Photos" : "Add Missing Photos"}
-                    </Button>
-                  )}
-                </Stack>
-              )}
-              <Stack
-                direction="row"
-                spacing={0.75}
-                justifyContent={isMobileNativePlatform() ? "stretch" : "flex-end"}
-                sx={{ width: "100%" }}
-              >
-                {(hasBlockingIssues || hasMissingCaptures) && Boolean(activeRunId) && (
-                  <Button
-                    variant="outlined"
-                    color="warning"
-                    size={isMobileNativePlatform() ? "small" : "medium"}
-                    disabled={saving}
-                    startIcon={saving ? <CircularProgress size={14} /> : undefined}
-                    sx={{ flex: isMobileNativePlatform() ? 1 : undefined, minWidth: 0, fontSize: isMobileNativePlatform() ? "0.75rem" : undefined }}
-                    onClick={async () => {
-                      setSaving(true);
-                      try {
-                        await flushAutosave(undefined, undefined, "InProgress");
-                        onClose();
-                      } catch { setSaveError("Failed to save progress."); }
-                      finally { setSaving(false); }
-                    }}
-                  >
-                    Save & close
-                  </Button>
-                )}
-                <Button
-                  variant="contained"
-                  size={isMobileNativePlatform() ? "small" : "medium"}
-                  sx={{ flex: isMobileNativePlatform() ? 1 : undefined, minWidth: 0, fontSize: isMobileNativePlatform() ? "0.75rem" : undefined }}
-                  onClick={() => {
-                  const allBomItems = workflow.bomItems ?? [];
-                  const inventoryItems = allBomItems.filter(i => i.isInventory);
-                  const bomConsumableItems = allBomItems.filter(i => !i.isInventory);
-                  // Include lib consumable features not already covered by a BOM item
-                  const bomDescriptions = new Set(bomConsumableItems.map(i => i.description.toLowerCase()));
-                  const extraConsumables = libConsumableFeatures.filter(
-                    f => !bomDescriptions.has(f.name.toLowerCase())
-                  );
-                  const hasConsumables = bomConsumableItems.length > 0 || extraConsumables.length > 0;
-
-                  if (activeRunId) {
-                    // Build bomActual: BOM inventory + BOM consumables + library consumable features
-                    const bomEntries: BomActualItem[] = allBomItems.map((item) => ({
-                      bomItemId: item.id,
-                      description: item.description,
-                      isInventory: item.isInventory,
-                      expectedQty: item.expectedQty,
-                      actualQty: item.expectedQty,
-                      unitOfMeasure: item.unitOfMeasure,
-                      isNA: false,
-                      unitCaptures: item.isInventory
-                        ? Array.from({ length: item.expectedQty }, () =>
-                            Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
-                        : undefined,
-                    }));
-                    const libEntries: BomActualItem[] = extraConsumables.map((f) => ({
-                      bomItemId: `lib-${f.id}`,
-                      description: f.name,
-                      isInventory: false,
-                      expectedQty: 1,
-                      actualQty: 1,
-                      unitOfMeasure: "ea",
-                      isNA: false,
-                    }));
-                    setBomActual([...bomEntries, ...libEntries]);
-                    setUnlistedConsumables([]);
-                    if (inventoryItems.length > 0) {
-                      setStage("bom");
-                    } else if (hasConsumables) {
-                      setStage("consumables");
-                    } else {
-                      handleSave();
-                    }
-                  } else {
-                    handleSave();
-                  }
-                }}
-                disabled={saving || (Boolean(activeRunId) && (hasBlockingIssues || hasMissingCaptures))}
-                startIcon={saving ? <CircularProgress size={14} /> : undefined}
-              >
-                {saving ? "Saving..." : activeRunId ? "Lock run" : "Done (preview)"}
-              </Button>
-              </Stack>
-            </>
-          )}
-        </DialogActions>
-      </>
-    );
-  }
-
-  const issueForDetail = issueDetailId ? issues.find((i) => i.id === issueDetailId) ?? null : null;
+    return {
+      stepsData,
+      blockingIssues,
+      hasBlockingIssues,
+      qtyModificationCount,
+      showLargePayloadWarning,
+      payloadBytes: payloadEstimate.payloadBytes,
+      missingCaptureTargets,
+      missingCaptureCount,
+      hasMissingCaptures,
+      primaryBlockingIssue,
+    };
+  })();
 
   return (
     <>
@@ -3103,7 +2562,134 @@ export default function WorkOrderRunner({
           />
         )}
         {stage === "running"        && renderRunning()}
-        {stage === "summary"        && renderSummary()}
+        {summaryStage && (
+          <WorkOrderRunnerSummaryStage
+            isPreviewWalkthrough={isPreviewWalkthrough}
+            stepsCount={stepsSorted.length}
+            assetTag={assetTag}
+            stepsData={summaryStage.stepsData}
+            stepsSorted={stepsSorted}
+            issues={issues}
+            blockingIssues={summaryStage.blockingIssues}
+            hasBlockingIssues={summaryStage.hasBlockingIssues}
+            primaryBlockingIssue={summaryStage.primaryBlockingIssue}
+            qtyModifications={qtyModifications}
+            qtyModificationCount={summaryStage.qtyModificationCount}
+            showLargePayloadWarning={summaryStage.showLargePayloadWarning}
+            payloadBytes={summaryStage.payloadBytes}
+            missingCaptureTargets={summaryStage.missingCaptureTargets}
+            missingCaptureCount={summaryStage.missingCaptureCount}
+            hasMissingCaptures={summaryStage.hasMissingCaptures}
+            isRealRun={isRealRun}
+            productiveSecondsLive={productiveSecondsLive}
+            downtimeSecondsLive={downtimeSecondsLive}
+            timeTrackingJson={activeRun?.timeTrackingJson}
+            timeZoneId={resolvedTimeZone}
+            showSummaryIssues={showSummaryIssues}
+            onToggleSummaryIssues={() => setShowSummaryIssues((open) => !open)}
+            showSummaryQtyMods={showSummaryQtyMods}
+            onToggleSummaryQtyMods={() => setShowSummaryQtyMods((open) => !open)}
+            showSummaryCapturedData={showSummaryCapturedData}
+            onToggleSummaryCapturedData={() => setShowSummaryCapturedData((open) => !open)}
+            editingIssueId={editingIssueId}
+            editIssueDesc={editIssueDesc}
+            editIssueSeverity={editIssueSeverity}
+            onEditIssueDescChange={setEditIssueDesc}
+            onEditIssueSeverityChange={setEditIssueSeverity}
+            onStartEditIssue={startEditIssue}
+            onSaveEditIssue={saveEditIssue}
+            onCancelEditIssue={() => setEditingIssueId(null)}
+            onDeleteIssue={deleteIssue}
+            onOpenIssueDetail={setIssueDetailId}
+            blockingError={blockingError}
+            saveError={saveError}
+            saved={saved}
+            activeRunId={activeRunId}
+            signoffReviewMode={signoffReviewMode}
+            signatureStatus={activeRun?.signatureStatus}
+            runEditPerms={runEditPerms}
+            saving={saving}
+            discarding={discarding}
+            onClose={onClose}
+            onBackToRunning={() => setStage("running")}
+            onDiscardRequest={requestDiscardRun}
+            onOpenTimeEditor={() => setTimeEditorOpen(true)}
+            onContinueToInstallerSign={() => {
+              setInstName(currentUserName ?? "");
+              setInstConsent(false);
+              setStage("installer-sign");
+            }}
+            onResolveBlockingIssue={() => {
+              setShowSummaryIssues(true);
+              if (summaryStage.primaryBlockingIssue) {
+                setIssueDetailId(summaryStage.primaryBlockingIssue.id);
+              }
+            }}
+            onJumpToMissingCapture={() => jumpToWorkflowStep(
+              summaryStage.missingCaptureTargets[0]?.stepId ?? null,
+              summaryStage.missingCaptureTargets[0]?.iterationIndex,
+            )}
+            onSaveAndClose={async () => {
+              setSaving(true);
+              try {
+                await flushAutosave(undefined, undefined, "InProgress");
+                onClose();
+              } catch {
+                setSaveError("Failed to save progress.");
+              } finally {
+                setSaving(false);
+              }
+            }}
+            onLockRun={() => {
+              const allBomItems = workflow.bomItems ?? [];
+              const inventoryItems = allBomItems.filter((i) => i.isInventory);
+              const bomConsumableItems = allBomItems.filter((i) => !i.isInventory);
+              const bomDescriptions = new Set(bomConsumableItems.map((i) => i.description.toLowerCase()));
+              const extraConsumables = libConsumableFeatures.filter(
+                (f) => !bomDescriptions.has(f.name.toLowerCase()),
+              );
+              const hasConsumables = bomConsumableItems.length > 0 || extraConsumables.length > 0;
+
+              if (activeRunId) {
+                const bomEntries: BomActualItem[] = allBomItems.map((item) => ({
+                  bomItemId: item.id,
+                  description: item.description,
+                  isInventory: item.isInventory,
+                  expectedQty: item.expectedQty,
+                  actualQty: item.expectedQty,
+                  unitOfMeasure: item.unitOfMeasure,
+                  isNA: false,
+                  unitCaptures: item.isInventory
+                    ? Array.from({ length: item.expectedQty }, () =>
+                        Object.fromEntries((item.captureFields ?? ["Serial No"]).map((f) => [f, ""])))
+                    : undefined,
+                }));
+                const libEntries: BomActualItem[] = extraConsumables.map((f) => ({
+                  bomItemId: `lib-${f.id}`,
+                  description: f.name,
+                  isInventory: false,
+                  expectedQty: 1,
+                  actualQty: 1,
+                  unitOfMeasure: "ea",
+                  isNA: false,
+                }));
+                setBomActual([...bomEntries, ...libEntries]);
+                setUnlistedConsumables([]);
+                if (inventoryItems.length > 0) {
+                  setStage("bom");
+                } else if (hasConsumables) {
+                  setStage("consumables");
+                } else {
+                  handleSave();
+                }
+              } else {
+                handleSave();
+              }
+            }}
+            onPreviewClose={onClose}
+            onPreviewBack={() => setStage("running")}
+          />
+        )}
         {stage === "bom" && (
           <WorkOrderRunnerBomStage
             assetTag={assetTag}
