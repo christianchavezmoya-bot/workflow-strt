@@ -3,7 +3,7 @@ import {
   IconButton, InputLabel, LinearProgress, MenuItem, Paper, Select, Snackbar, Stack, Tab, Tabs, TextField, Tooltip, Typography,
 } from "@mui/material";
 import {
-  AssessmentOutlined, AssignmentLateOutlined, CheckCircleOutlineOutlined, CheckCircleOutlined, CloseOutlined,
+  AssignmentLateOutlined, CheckCircleOutlineOutlined, CheckCircleOutlined, CloseOutlined,
   EditOutlined, ErrorOutlineOutlined,
   FactCheckOutlined, FolderOutlined, OpenInNewOutlined, PendingActionsOutlined, PersonOutlined,
   PhotoCameraOutlined, PlayArrowOutlined, PrintOutlined, ReportOutlined, SwitchAccountOutlined, TrendingUpOutlined,
@@ -81,6 +81,10 @@ import DashboardAdminInstallWorkspace, { type AdminInstallFilter } from "./Dashb
 import DashboardInspectionInboxSection from "./DashboardInspectionInboxSection";
 import DashboardMyInspectionJobsToday from "./DashboardMyInspectionJobsToday";
 import DashboardMyInspectionJobHistory from "./DashboardMyInspectionJobHistory";
+import DashboardInstallHistoryCard from "./DashboardInstallHistoryCard";
+import DashboardPendingApprovalsSection from "./DashboardPendingApprovalsSection";
+import DashboardAutoAssignFlagsSection from "./DashboardAutoAssignFlagsSection";
+import DashboardWorkloadReportDialogs from "./DashboardWorkloadReportDialogs";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -113,7 +117,6 @@ import {
   fmtDate,
   formatMyJobsStepCompletionLabel,
   formatStepCompletionPercent,
-  historyChipColor,
   isDashboardVisibleProjectStatus,
   isInProgressAsset,
   isIssueAsset,
@@ -129,6 +132,7 @@ import {
   workflowModeChipColor,
   workflowModeLabel,
   projectStatusChipColor,
+  type AutoAssignFlag,
   type MyJobsCardAction,
   type MyJobsCardWidget,
 } from "./dashboardPageLogic";
@@ -250,7 +254,6 @@ const Dashboard = () => {
   const [draftConfigs, setDraftConfigs] = useState<{id:string; name:string; updatedAt?:string}[]>([]);
 
   // PM: auto-assign flags from installers self-assigning
-  type AutoAssignFlag = { id: string; assetId: string; assetTag: string; jobNumber: string; assignedBy: string; assignedAt: string };
   const [autoAssignFlags, setAutoAssignFlags] = useState<AutoAssignFlag[]>(() =>
     JSON.parse(localStorage.getItem("pm_auto_assign_flags") ?? "[]")
   );
@@ -1956,37 +1959,6 @@ const Dashboard = () => {
     return () => window.removeEventListener("repo:assignments:updated", onAssignmentsUpdated);
   }, [isNativePlatform]);
 
-  const renderHistoryCard = useCallback((asset: DashboardWorkspaceAssetItem) => (
-    <Paper
-      key={asset.id}
-      elevation={0}
-      onClick={() => { void openHistoryReport(asset); }}
-      sx={{
-        p: 1.25,
-        border: "1px solid var(--stroke)",
-        borderRadius: 1.5,
-        cursor: "pointer",
-        "&:hover": { borderColor: "success.main", background: "rgba(45,212,191,0.04)" },
-      }}
-    >
-      <Stack direction="row" spacing={1} alignItems="center">
-        <Box sx={{ flex: 1, minWidth: 0 }}>
-          <Typography variant="caption" fontWeight={600} noWrap display="block">
-            {asset.assetTag || asset.assetName || asset.id}
-          </Typography>
-          <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ fontSize: "0.65rem" }}>
-            {asset.jobNumber}{" · "}{asset.completedAt ? `Completed ${fmtDate(asset.completedAt)}` : `Updated ${fmtDate(asset.latestActivityAt)}`}
-          </Typography>
-        </Box>
-        <Stack direction="row" spacing={0.75} alignItems="center">
-          {historyDialogLoading === asset.id && <CircularProgress size={12} />}
-          <Chip label={asset.historyStatus} size="small" color={historyChipColor(asset.historyStatus)} variant="outlined"
-            sx={{ height: 18, fontSize: "0.62rem" }} />
-        </Stack>
-      </Stack>
-    </Paper>
-  ), [historyDialogLoading, openHistoryReport]);
-
   // Quick action dialog for "My Jobs Today" assets
   type QuickActionAsset = typeof myInstallAssets[0];
   const [quickActionAsset, setQuickActionAsset] = useState<QuickActionAsset | null>(null);
@@ -3330,69 +3302,18 @@ const Dashboard = () => {
       {NeedsAttentionSection}
 
       {pendingApprovals.length > 0 && (
-        <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(230,119,0,0.07)" }}>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-            <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
-            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Pending Approvals</Typography>
-            <Chip label={pendingApprovals.length} size="small" color="warning" variant="outlined"
-              sx={{ height: 20, fontSize: "0.7rem" }} />
-          </Stack>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            Projects waiting for your approval
-          </Typography>
-          <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }} flexWrap="nowrap">
-            {pendingApprovals.map((p) => (
-              <Chip key={p.id}
-                label={p.jobNumber || p.id}
-                onClick={() => navigate(`/projects/${p.id}`)}
-                color="warning" variant="outlined"
-                sx={{ flexShrink: 0, cursor: "pointer" }} />
-            ))}
-          </Stack>
-        </Box>
+        <DashboardPendingApprovalsSection
+          projects={pendingApprovals}
+          onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+          emphasized
+        />
       )}
 
-      {autoAssignFlags.length > 0 && (
-        <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
-          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-            <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
-            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>New Auto-assignments</Typography>
-            <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-            <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
-              onClick={() => {
-                localStorage.removeItem("pm_auto_assign_flags");
-                setAutoAssignFlags([]);
-              }}>
-              Dismiss all
-            </Button>
-          </Stack>
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-            Assets auto-assigned when an installer started a workflow
-          </Typography>
-          <Stack spacing={0.25}>
-            {autoAssignFlags.map((f) => (
-              <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
-                <Box sx={{ flex: 1 }}>
-                  <DashboardAttentionItemRow
-                    label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                    sub={`Assigned by ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
-                    onClick={() => navigate("/installations/assets")}
-                  />
-                </Box>
-                <Button size="small" variant="text" color="inherit"
-                  sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                  onClick={() => {
-                    const updated = autoAssignFlags.filter((x) => x.id !== f.id);
-                    localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
-                    setAutoAssignFlags(updated);
-                  }}>
-                  ×
-                </Button>
-              </Stack>
-            ))}
-          </Stack>
-        </Box>
-      )}
+      <DashboardAutoAssignFlagsSection
+        flags={autoAssignFlags}
+        onFlagsChange={setAutoAssignFlags}
+        onNavigateToAssets={() => navigate("/installations/assets")}
+      />
 
       <Box className="glass-card" sx={{ p: 2 }}>
         <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: canViewAllProjects ? 1 : 1.5 }}>
@@ -4071,7 +3992,14 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.secondary">No install history yet</Typography>
             ) : (
               <Stack spacing={0.75}>
-                {myInstallHistory.slice(0, 6).map(renderHistoryCard)}
+                {myInstallHistory.slice(0, 6).map((asset) => (
+                  <DashboardInstallHistoryCard
+                    key={asset.id}
+                    asset={asset}
+                    loading={historyDialogLoading === asset.id}
+                    onClick={() => { void openHistoryReport(asset); }}
+                  />
+                ))}
               </Stack>
             )}
           </Box>
@@ -4171,7 +4099,14 @@ const Dashboard = () => {
               <Typography variant="caption" color="text.secondary">No install history yet</Typography>
             ) : (
               <Stack spacing={0.75}>
-                {myInstallHistory.slice(0, 6).map(renderHistoryCard)}
+                {myInstallHistory.slice(0, 6).map((asset) => (
+                  <DashboardInstallHistoryCard
+                    key={asset.id}
+                    asset={asset}
+                    loading={historyDialogLoading === asset.id}
+                    onClick={() => { void openHistoryReport(asset); }}
+                  />
+                ))}
               </Stack>
             )}
           </Box>
@@ -4267,75 +4202,23 @@ const Dashboard = () => {
           {pmDashboardTab === "my-inspections" && !isAdmin && InspectionInboxSection}
           {pmDashboardTab === "my-inspections" && isAdmin && AdminInspectionWorkspace}
 
-          {/* Pending Approvals strip - if any */}
-          {pmDashboardTab === "pm-projects" && pendingApprovals.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Pending Approvals</Typography>
-                <Chip label={pendingApprovals.length} size="small" color="warning" variant="outlined"
-                  sx={{ height: 20, fontSize: "0.7rem" }} />
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-                Projects waiting for your approval
-              </Typography>
-              <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }} flexWrap="nowrap">
-                {pendingApprovals.map((p) => (
-                  <Chip key={p.id}
-                    label={p.jobNumber || p.id}
-                    onClick={() => navigate(`/projects/${p.id}`)}
-                    color="warning" variant="outlined"
-                    sx={{ flexShrink: 0, cursor: "pointer" }} />
-                ))}
-              </Stack>
-            </Box>
+          {pmDashboardTab === "pm-projects" && (
+            <DashboardPendingApprovalsSection
+              projects={pendingApprovals}
+              onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+            />
           )}
 
           {/* Inspection signals */}
           {pmDashboardTab === "pm-projects" && InspectionInboxSection}
 
-          {/* Auto-assignment flags - field user self-assigned */}
-          {pmDashboardTab === "pm-projects" && autoAssignFlags.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>
-                  New Auto-assignments
-                </Typography>
-                <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-                <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
-                  onClick={() => {
-                    localStorage.removeItem("pm_auto_assign_flags");
-                    setAutoAssignFlags([]);
-                  }}>
-                  Dismiss all
-                </Button>
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Assets that were auto-assigned when an installer started a workflow
-              </Typography>
-              <Stack spacing={0.25}>
-                {autoAssignFlags.map((f) => (
-                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
-                    <Box sx={{ flex: 1 }}>
-                      <DashboardAttentionItemRow
-                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`Assigned to ${f.assignedBy} - ${fmtDate(f.assignedAt)}`}
-                        onClick={() => navigate("/installations/assets")}
-                      />
-                    </Box>
-                    <Button size="small" variant="text" color="inherit" sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = autoAssignFlags.filter((x) => x.id !== f.id);
-                        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
-                        setAutoAssignFlags(updated);
-                      }}>
-                      x
-                    </Button>
-                  </Stack>
-                ))}
-              </Stack>
-            </Box>
+          {pmDashboardTab === "pm-projects" && (
+            <DashboardAutoAssignFlagsSection
+              flags={autoAssignFlags}
+              onFlagsChange={setAutoAssignFlags}
+              onNavigateToAssets={() => navigate("/installations/assets")}
+              assignedByLabel="to"
+            />
           )}
 
           {/* Installer media updates - PM notifications when installers upload missing media */}
@@ -4555,7 +4438,14 @@ const Dashboard = () => {
                   <Typography variant="caption" color="text.secondary">No install history yet</Typography>
                 ) : (
                   <Stack spacing={0.75}>
-                    {myInstallHistory.slice(0, 6).map(renderHistoryCard)}
+                    {myInstallHistory.slice(0, 6).map((asset) => (
+                  <DashboardInstallHistoryCard
+                    key={asset.id}
+                    asset={asset}
+                    loading={historyDialogLoading === asset.id}
+                    onClick={() => { void openHistoryReport(asset); }}
+                  />
+                ))}
                   </Stack>
                 )}
               </Box>
@@ -4615,174 +4505,18 @@ const Dashboard = () => {
         </>
       )}
 
-      {/* ── Per-installer workload report dialog ── */}
-      {workloadReportTarget && (() => {
-        const w = workloadReportTarget;
-        const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
-        const load = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
-        return (
-          <Dialog open onClose={() => setWorkloadReportTarget(null)} fullWidth maxWidth="md" id="workload-report-dialog">
-            <DialogTitle>
-              <Stack direction="row" alignItems="center" spacing={1}>
-                <AssessmentOutlined sx={{ color: "primary.main" }} />
-                <Box sx={{ flex: 1 }}>
-                  <Typography variant="h6" sx={{ fontFamily: "Sora" }}>{w.fullName} — Workload Report</Typography>
-                  <Typography variant="caption" color="text.secondary">{new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}</Typography>
-                </Box>
-                <IconButton size="small" onClick={() => setWorkloadReportTarget(null)}><CloseOutlined fontSize="small" /></IconButton>
-              </Stack>
-            </DialogTitle>
-            <DialogContent dividers>
-              <Stack spacing={2}>
-                {/* Summary */}
-                <Stack direction="row" spacing={2} flexWrap="wrap">
-                  {[
-                    { label: "Total Assets", value: w.totalAssigned, color: load },
-                    { label: "In Progress", value: w.inProgress, color: "primary" },
-                    { label: "Paused", value: w.paused, color: "warning" },
-                    { label: "Queued", value: w.notStarted, color: "default" },
-                  ].map(({ label, value, color }) => (
-                    <Paper key={label} elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, minWidth: 90 }}>
-                      <Typography variant="caption" color="text.secondary" display="block">{label}</Typography>
-                      <Typography variant="h5" fontWeight={700} color={`${color}.main`}>{value}</Typography>
-                    </Paper>
-                  ))}
-                  {w.totalSteps > 0 && (
-                    <Paper elevation={0} sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, minWidth: 120 }}>
-                      <Typography variant="caption" color="text.secondary" display="block">Steps</Typography>
-                      <Typography variant="h5" fontWeight={700}>{w.completedSteps}/{w.totalSteps}</Typography>
-                    </Paper>
-                  )}
-                </Stack>
-                <Divider />
-                {/* Per-project asset detail */}
-                {w.projectBreakdown.map((pb) => {
-                  const proj = projectById.get(pb.projectId);
-                  const pbAssets = techAssets.filter((a) => a.projectId === pb.projectId);
-                  return (
-                    <Box key={pb.projectId}>
-                      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.75 }}>
-                        <Typography variant="subtitle2" fontWeight={700} color="primary.main">{pb.jobNumber}</Typography>
-                        {proj?.customerName && <Typography variant="body2" color="text.secondary">— {proj.customerName}</Typography>}
-                        {proj?.projectManager && (
-                          <Chip label={`PM: ${proj.projectManager}`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.65rem", ml: "auto" }} />
-                        )}
-                        <Chip label={`${pb.inProgress} active · ${pb.paused} paused · ${pb.notStarted} queued`} size="small" variant="outlined" sx={{ height: 18, fontSize: "0.62rem" }} />
-                      </Stack>
-                      <Stack spacing={0.4}>
-                        {pbAssets.map((a) => {
-                          const state = isPausedAsset(a.runStatus) ? "Paused"
-                            : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "In Progress"
-                            : isNotStartedAsset(a.status) ? "Not Started" : a.status;
-                          const stateColor = state === "In Progress" ? "primary" : state === "Paused" ? "warning" : "default";
-                          return (
-                            <Stack key={a.id} direction="row" alignItems="center" spacing={1}
-                              sx={{ px: 1.5, py: 0.5, borderRadius: 1, background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.06)" }}>
-                              <Typography variant="caption" fontWeight={700} sx={{ flex: "0 0 110px" }}>{a.assetTag || a.id}</Typography>
-                              <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1 }}>{a.assetName || a.assetModel || "—"}</Typography>
-                              <Typography variant="caption" color="text.disabled" sx={{ flexShrink: 0 }}>{a.location || ""}</Typography>
-                              {a.totalSteps > 0 && (
-                                <Typography variant="caption" color="text.disabled" sx={{ flexShrink: 0 }}>{a.completedSteps}/{a.totalSteps} steps</Typography>
-                              )}
-                              <Chip label={state} size="small" color={stateColor as "primary"|"warning"|"default"} variant="outlined"
-                                sx={{ height: 18, fontSize: "0.62rem", flexShrink: 0 }} />
-                            </Stack>
-                          );
-                        })}
-                        {pbAssets.length === 0 && <Typography variant="caption" color="text.disabled" sx={{ pl: 1.5 }}>No individual asset data available</Typography>}
-                      </Stack>
-                    </Box>
-                  );
-                })}
-              </Stack>
-            </DialogContent>
-            <DialogActions sx={{ px: 3, py: 1.5 }}>
-              <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print</Button>
-              <Button variant="contained" startIcon={<AssessmentOutlined />}
-                disabled={reportingTechId === w.userId}
-                onClick={() => void handleGenerateTechReport(w as TechnicianWorkloadSummaryItem)}>
-                Download PDF
-              </Button>
-              <Button onClick={() => setWorkloadReportTarget(null)}>Close</Button>
-            </DialogActions>
-          </Dialog>
-        );
-      })()}
-
-      {/* ── All-installers workload report dialog ── */}
-      <Dialog open={workloadReportAllOpen} onClose={() => setWorkloadReportAllOpen(false)} fullWidth maxWidth="lg" id="workload-report-all-dialog">
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" spacing={1}>
-            <PrintOutlined sx={{ color: "primary.main" }} />
-            <Box sx={{ flex: 1 }}>
-              <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Technician Workload — Full Report</Typography>
-              <Typography variant="caption" color="text.secondary">
-                {scopedWorkload.length} technician{scopedWorkload.length !== 1 ? "s" : ""} · {new Date().toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}
-              </Typography>
-            </Box>
-            <IconButton size="small" onClick={() => setWorkloadReportAllOpen(false)}><CloseOutlined fontSize="small" /></IconButton>
-          </Stack>
-        </DialogTitle>
-        <DialogContent dividers>
-          <Stack spacing={3}>
-            {scopedWorkload.map((w) => {
-              const techAssets = openAssets.filter((a) => a.assignedUserId === w.userId);
-              const load = w.totalAssigned >= 10 ? "error" : w.totalAssigned >= 5 ? "warning" : "success";
-              return (
-                <Box key={w.userId}>
-                  <Stack direction="row" alignItems="center" spacing={1.5} sx={{ mb: 1 }}>
-                    <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>{w.fullName}</Typography>
-                    <Chip label={w.totalAssigned >= 10 ? "Heavy" : w.totalAssigned >= 5 ? "Moderate" : "Light"}
-                      size="small" color={load} variant="outlined" sx={{ height: 18, fontSize: "0.65rem" }} />
-                    {w.hasIssues && <Chip label="Issues" size="small" color="warning" sx={{ height: 18, fontSize: "0.65rem" }} />}
-                    <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
-                      {w.inProgress} active · {w.paused} paused · {w.notStarted} queued · {w.totalAssigned} total
-                    </Typography>
-                  </Stack>
-                  {w.projectBreakdown.map((pb) => {
-                    const proj = projectById.get(pb.projectId);
-                    const pbAssets = techAssets.filter((a) => a.projectId === pb.projectId);
-                    return (
-                      <Box key={pb.projectId} sx={{ mb: 1, pl: 1 }}>
-                        <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                          <Typography variant="caption" fontWeight={700} color="primary.main">{pb.jobNumber}</Typography>
-                          {proj?.customerName && <Typography variant="caption" color="text.secondary">— {proj.customerName}</Typography>}
-                          {proj?.projectManager && <Typography variant="caption" color="text.disabled">· PM: {proj.projectManager}</Typography>}
-                        </Stack>
-                        <Stack spacing={0.3}>
-                          {pbAssets.map((a) => {
-                            const state = isPausedAsset(a.runStatus) ? "Paused"
-                              : isInProgressAsset(a.runStatus) || isInProgressAsset(a.status) ? "In Progress"
-                              : isNotStartedAsset(a.status) ? "Not Started" : a.status;
-                            const stateColor = state === "In Progress" ? "primary" : state === "Paused" ? "warning" : "default";
-                            return (
-                              <Stack key={a.id} direction="row" alignItems="center" spacing={1}
-                                sx={{ px: 1, py: 0.25, borderRadius: 1, background: "rgba(255,255,255,0.03)" }}>
-                                <Typography variant="caption" fontWeight={600} sx={{ flex: "0 0 100px", fontSize: "0.68rem" }}>{a.assetTag || a.id}</Typography>
-                                <Typography variant="caption" color="text.secondary" noWrap sx={{ flex: 1, fontSize: "0.65rem" }}>{a.assetName || a.assetModel || "—"}</Typography>
-                                {a.totalSteps > 0 && <Typography variant="caption" color="text.disabled" sx={{ fontSize: "0.62rem", flexShrink: 0 }}>{a.completedSteps}/{a.totalSteps} steps</Typography>}
-                                <Chip label={state} size="small" color={stateColor as "primary"|"warning"|"default"} variant="outlined"
-                                  sx={{ height: 16, fontSize: "0.58rem", flexShrink: 0 }} />
-                              </Stack>
-                            );
-                          })}
-                        </Stack>
-                      </Box>
-                    );
-                  })}
-                  <Divider sx={{ mt: 1 }} />
-                </Box>
-              );
-            })}
-          </Stack>
-        </DialogContent>
-        <DialogActions sx={{ px: 3, py: 1.5 }}>
-          {!isNativePlatform && (
-            <Button startIcon={<PrintOutlined />} onClick={() => window.print()}>Print All</Button>
-          )}
-          <Button onClick={() => setWorkloadReportAllOpen(false)}>Close</Button>
-        </DialogActions>
-      </Dialog>
+      <DashboardWorkloadReportDialogs
+        reportTarget={workloadReportTarget}
+        allReportsOpen={workloadReportAllOpen}
+        scopedWorkload={scopedWorkload}
+        openAssets={openAssets}
+        projectById={projectById}
+        reportingTechId={reportingTechId}
+        isNativePlatform={isNativePlatform}
+        onCloseTarget={() => setWorkloadReportTarget(null)}
+        onCloseAll={() => setWorkloadReportAllOpen(false)}
+        onGenerateTechReport={(target) => { void handleGenerateTechReport(target); }}
+      />
 
       {/* Photo upload dialog - installer adds missing photos to a completed run */}
       {photoUploadTarget && (

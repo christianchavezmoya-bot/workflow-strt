@@ -285,6 +285,15 @@ export function workflowModeChipColor(workflowMode?: string | null): "success" |
   return "success";
 }
 
+export type AutoAssignFlag = {
+  id: string;
+  assetId: string;
+  assetTag: string;
+  jobNumber: string;
+  assignedBy: string;
+  assignedAt: string;
+};
+
 export function historyChipColor(status?: string | null): "default" | "success" | "warning" | "error" | "info" {
   const value = (status ?? "").trim().toLowerCase().replace(/[\s_-]+/g, "");
   if (value === "closed") return "info";
