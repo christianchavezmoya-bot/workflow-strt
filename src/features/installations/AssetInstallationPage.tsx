@@ -1,22 +1,15 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, startTransition } from "react";
 import {
-  AddOutlined,
   ArrowDropDown,
-  AssignmentOutlined,
   CheckBoxOutlineBlankOutlined,
   CheckBoxOutlined,
-  CloseOutlined,
   DrawOutlined,
   ErrorOutlined,
   ExpandLessOutlined,
   ExpandMoreOutlined,
-  FileUploadOutlined,
-  GridOnOutlined,
-  InfoOutlined,
   PhotoCameraOutlined,
   RefreshOutlined,
   ReportProblemOutlined,
-  SearchOutlined,
   ViewColumnOutlined,
 } from "@mui/icons-material";
 import {
@@ -32,19 +25,15 @@ import {
   DialogContent,
   DialogTitle,
   Divider,
-  FormControl,
   FormControlLabel,
   FormGroup,
   IconButton,
   InputAdornment,
-  InputLabel,
   LinearProgress,
   List,
   ListItem,
   ListItemButton,
-  MenuItem,
   Paper,
-  Select,
   Skeleton,
   Stack,
   Table,
@@ -55,8 +44,6 @@ import {
   TablePagination,
   TableRow,
   TextField,
-  ToggleButton,
-  ToggleButtonGroup,
   Snackbar,
   Tooltip,
   Typography,
@@ -88,7 +75,6 @@ import type { WorkflowReportExportContext } from "../../utils/workflowReportExpo
 import { resolveReportTimeZone } from "../../utils/datetime";
 import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
 import { BulkWorkflowReportDialog } from "../../components/reports/BulkWorkflowReportDialog";
-import ProjectJobSelect from "../../components/ProjectJobSelect";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
 import { randomId } from "../../utils/randomId";
 import { getWorkflowDisplayState, type WorkflowDisplayState } from "../../utils/workflowDisplayState";
@@ -162,6 +148,8 @@ import {
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnFilterMenu from "./AssetInstallationColumnFilterMenu";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import AssetInstallationFilterBar from "./AssetInstallationFilterBar";
+import AssetInstallationPageHeader from "./AssetInstallationPageHeader";
 import AssetInstallationPausedProgressPopover from "./AssetInstallationPausedProgressPopover";
 import AssetInstallationBulkDocsUploadDialog from "./AssetInstallationBulkDocsUploadDialog";
 import AssetInstallationBulkTechAssignDialog from "./AssetInstallationBulkTechAssignDialog";
@@ -4047,69 +4035,24 @@ ${words.slice(midpoint).join(" ")}`;
 
   return (
     <Stack spacing={3}>
-      {/* Header */}
-      <Stack direction={{ xs: "column", md: "row" }} justifyContent="space-between" alignItems="center" gap={2}>
-        <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
-          <Typography variant="h5" sx={{ fontFamily: "Sora" }}>Project Assets</Typography>
-          {activeProduct?.name && <Chip size="small" color="primary" variant="outlined" label={activeProduct.name} />}
-          <Tooltip title={
-            selectedProject
-              ? selectedProjectHasInspection
-                ? `Track project assets for ${selectedProject.jobNumber} - manage installation and inspection workflows from one workspace.`
-                : `Track assets for ${selectedProject.jobNumber} - start work orders, record status, and monitor progress.`
-              : "Track assets across all projects - start work orders, record status, and monitor progress."
-          }>
-            <InfoOutlined sx={{ fontSize: 16, color: "text.secondary", cursor: "pointer" }} />
-          </Tooltip>
-          <Tooltip title="Refresh">
-            <IconButton size="small" onClick={refreshAssets}>
-              <RefreshOutlined sx={{ fontSize: 18 }} />
-            </IconButton>
-          </Tooltip>
-        </Stack>
-        <Stack direction="row" spacing={1} alignItems="center">
-          {selectedProjectHasInspection && selectedProject && (
-            <Button
-              size="small"
-              variant="outlined"
-              onClick={() => navigate(`/projects/${selectedProject.id}`)}
-            >
-              Inspection Assets
-            </Button>
-          )}
-          {showAdvancedAssetActions && can.modifyData && !!activeProduct && (
-            <Tooltip title={`Open the workflow builder for ${activeProduct.name}`}>
-              <span>
-                <Button
-                  size="small"
-                  variant="outlined"
-                  startIcon={<AssignmentOutlined />}
-                  disabled={!canCreateWorkflow || creatingWorkflowDraft}
-                  onClick={() => { void openWorkflowBuilderForProduct(); }}
-                >
-                  {creatingWorkflowDraft ? "Creating Draft..." : "Create Workflow"}
-                </Button>
-              </span>
-            </Tooltip>
-          )}
-          {showAdvancedAssetActions && can.modifyData && !!activeProduct && (
-            <Button
-              size="small"
-              variant="outlined"
-              startIcon={<FileUploadOutlined />}
-              onClick={() => {
-                workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
-                setCsvImportOpen(true);
-              }}
-            >
-              Import CSV
-            </Button>
-          )}
-          {showAdvancedAssetActions && can.modifyData && !!activeProduct && (
-            <Button variant="contained" startIcon={<AddOutlined />} onClick={openAdd}>Add asset</Button>
-          )}
-        </Stack>
-      </Stack>
+      <AssetInstallationPageHeader
+        activeProductName={activeProduct?.name}
+        selectedProjectJobNumber={selectedProject?.jobNumber}
+        selectedProjectHasInspection={selectedProjectHasInspection}
+        showAdvancedAssetActions={showAdvancedAssetActions}
+        canModifyData={can.modifyData}
+        canCreateWorkflow={canCreateWorkflow}
+        creatingWorkflowDraft={creatingWorkflowDraft}
+        onRefresh={refreshAssets}
+        onNavigateInspectionAssets={() => navigate(`/projects/${selectedProject!.id}`)}
+        onCreateWorkflow={() => { void openWorkflowBuilderForProduct(); }}
+        onImportCsv={() => {
+          if (!activeProduct) return;
+          workflowConfigService.listByProduct(activeProduct.id, "Published").then(setWorkflowConfigs);
+          setCsvImportOpen(true);
+        }}
+        onAddAsset={openAdd}
+      />
 
       {arrivalBanner && (
         <Alert severity={arrivalBanner.severity} sx={{ mt: 0.5 }}>
@@ -4211,203 +4154,28 @@ ${words.slice(midpoint).join(" ")}`;
         </Paper>
       )}
 
-      {/* Filters */}
-      {isNativePlatform ? (
-        <Stack spacing={0.75}>
-          {/* Row 1: project picker + search */}
-          <Stack direction="row" spacing={1} alignItems="center">
-            <ProjectJobSelect
-              projects={productProjects}
-              value={selectedProjectId}
-              onChange={handleProjectChange}
-              labelStyle="mobile"
-              sx={{ flex: 1 }}
-            />
-            <IconButton
-              size="small"
-              onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
-              sx={{ border: "1px solid", borderColor: search ? "primary.main" : "divider", borderRadius: 1, color: search ? "primary.main" : "text.secondary", p: 0.75, flexShrink: 0 }}
-            >
-              <SearchOutlined sx={{ fontSize: 20 }} />
-            </IconButton>
-            {search.trim() && (
-              <Button
-                size="small"
-                variant="outlined"
-                color="inherit"
-                startIcon={<CloseOutlined sx={{ fontSize: 16 }} />}
-                onClick={() => setSearch("")}
-                sx={{ flexShrink: 0, fontSize: 11, whiteSpace: "nowrap", height: 34 }}
-              >
-                Clear search
-              </Button>
-            )}
-            {canViewCaptureMatrix && activeProduct && (
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<GridOnOutlined sx={{ fontSize: 16 }} />}
-                onClick={() => setCapturePopupOpen(true)}
-                sx={{ flexShrink: 0, fontSize: 11, whiteSpace: "nowrap" }}
-              >
-                Table view
-              </Button>
-            )}
-          </Stack>
-          {search.trim() && (
-            <Chip
-              size="small"
-              color="primary"
-              variant="outlined"
-              label={`Filter: ${search}`}
-              onDelete={() => setSearch("")}
-              sx={{ alignSelf: "flex-start", maxWidth: "100%" }}
-            />
-          )}
-          {/* Row 2: My/All scope toggle */}
-          <ToggleButtonGroup
-            value={mobileScope}
-            exclusive
-            size="small"
-            onChange={(_, v) => { if (v) setMobileScope(v as "mine" | "all"); }}
-            sx={{ alignSelf: "flex-start" }}
-          >
-            <ToggleButton value="mine" sx={{ fontSize: 11, py: 0.4, px: 1.25 }}>My Assets</ToggleButton>
-            <ToggleButton value="all" sx={{ fontSize: 11, py: 0.4, px: 1.25 }}>All Assets</ToggleButton>
-          </ToggleButtonGroup>
-          {/* Row 3: status chips */}
-          <Box sx={{ overflowX: "auto", pb: 0.25, mx: -0.25 }}>
-            <Stack direction="row" spacing={0.6} sx={{ width: "max-content", px: 0.25 }}>
-              {([
-                { value: "All",        label: "All",         color: "default"  },
-                { value: "NotStarted", label: "Not Started", color: "default"  },
-                { value: "InProgress", label: "In Progress", color: "primary"  },
-                { value: "Paused",     label: "Paused",      color: "warning"  },
-                { value: "Pending",    label: "Pending",     color: "default"  },
-                { value: "Complete",   label: "Complete",    color: "success"  },
-                { value: "Closed",     label: "Closed",      color: "info"     },
-                { value: "Issue",      label: "Issue",       color: "error"    },
-              ] as const).map(({ value, label, color }) => (
-                <Chip
-                  key={value}
-                  label={label}
-                  size="small"
-                  color={statusFilter === value ? (color as "default" | "primary" | "success" | "error" | "warning" | "info") : "default"}
-                  variant={statusFilter === value ? "filled" : "outlined"}
-                  clickable
-                  onClick={() => { setStatusFilter(value as ProjectAssetStatus | "All"); setShowNoWorkflow(false); }}
-                  sx={{ fontSize: 11, height: 26 }}
-                />
-              ))}
-              <Chip
-                label="No Workflow"
-                size="small"
-                color={showNoWorkflow ? "warning" : "default"}
-                variant={showNoWorkflow ? "filled" : "outlined"}
-                clickable
-                onClick={() => { setShowNoWorkflow((v) => !v); if (!showNoWorkflow) setStatusFilter("All"); }}
-                sx={{ fontSize: 11, height: 26 }}
-              />
-            </Stack>
-          </Box>
-        </Stack>
-      ) : (
-        <Stack direction="row" spacing={1.5} alignItems="center" flexWrap="wrap" useFlexGap>
-          <ProjectJobSelect
-            projects={productProjects}
-            value={selectedProjectId}
-            onChange={handleProjectChange}
-            labelStyle="desktop"
-          />
-          <Button
-            size="small"
-            variant={allProjectsExplicit ? "contained" : "outlined"}
-            onClick={() => handleProjectChange("")}
-            sx={{ whiteSpace: "nowrap", height: 40 }}
-          >
-            All projects
-          </Button>
-          <Tooltip title={statusFilter !== "All" ? "Reset status filter to use this" : ""}>
-            <span>
-              <Button
-                size="small"
-                variant={showNoWorkflow ? "contained" : "outlined"}
-                color={showNoWorkflow ? "warning" : "inherit"}
-                disabled={statusFilter !== "All"}
-                onClick={() => setShowNoWorkflow((v) => !v)}
-                sx={{ whiteSpace: "nowrap", height: 40 }}
-              >
-                No Workflow
-              </Button>
-            </span>
-          </Tooltip>
-          <FormControl size="small" sx={{ minWidth: 140 }}>
-            <InputLabel shrink>Status</InputLabel>
-            <Select
-              label="Status"
-              value={statusFilter}
-              disabled={showNoWorkflow}
-              onChange={(e) => setStatusFilter(e.target.value as ProjectAssetStatus | "All")}
-            >
-              <MenuItem value="All">All statuses</MenuItem>
-              <MenuItem value="NotStarted">Not Started</MenuItem>
-              <MenuItem value="InProgress">In Progress</MenuItem>
-              <MenuItem value="Paused">Paused</MenuItem>
-              <MenuItem value="Pending">Pending</MenuItem>
-              <MenuItem value="Complete">Complete</MenuItem>
-              <MenuItem value="Closed">Closed</MenuItem>
-              <MenuItem value="Issue">Issue</MenuItem>
-              <MenuItem value="Cancelled">Cancelled</MenuItem>
-            </Select>
-          </FormControl>
-          <Tooltip title="Search by asset tag, serial, part #, captures, or installer">
-            <IconButton
-              size="small"
-              onClick={() => { setAssetSearchQuery(""); setAssetSearchOpen(true); }}
-              sx={{
-                border: "1px solid",
-                borderColor: search ? "primary.main" : "divider",
-                borderRadius: 1,
-                color: search ? "primary.main" : "text.secondary",
-                p: 0.75,
-              }}
-            >
-              <SearchOutlined sx={{ fontSize: 20 }} />
-            </IconButton>
-          </Tooltip>
-          {search.trim() && (
-            <Button
-              size="small"
-              variant="outlined"
-              color="inherit"
-              startIcon={<CloseOutlined sx={{ fontSize: 16 }} />}
-              onClick={() => setSearch("")}
-              sx={{ whiteSpace: "nowrap", height: 40 }}
-            >
-              Clear search
-            </Button>
-          )}
-          {canViewCaptureMatrix && selectedProjectId && (
-            // Plain link so ctrl/cmd-click opens the standalone matrix in its own tab.
-            <Tooltip title="Open the full-job capture table. Ctrl/Cmd-click for a new tab.">
-              <Button
-                size="small"
-                variant="outlined"
-                component="a"
-                href={`/installations/capture?project=${encodeURIComponent(selectedProjectId)}`}
-                onClick={(e: React.MouseEvent<HTMLAnchorElement>) => {
-                  if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return;
-                  e.preventDefault();
-                  navigate(`/installations/capture?project=${encodeURIComponent(selectedProjectId)}`);
-                }}
-                sx={{ fontSize: 11, py: 0.5, px: 1.25, whiteSpace: "nowrap" }}
-              >
-                Capture table
-              </Button>
-            </Tooltip>
-          )}
-        </Stack>
-      )}
+      <AssetInstallationFilterBar
+        isNativePlatform={isNativePlatform}
+        projects={productProjects}
+        selectedProjectId={selectedProjectId}
+        allProjectsExplicit={allProjectsExplicit}
+        search={search}
+        statusFilter={statusFilter}
+        showNoWorkflow={showNoWorkflow}
+        mobileScope={mobileScope}
+        canViewCaptureMatrix={canViewCaptureMatrix && !!activeProduct}
+        onProjectChange={handleProjectChange}
+        onSearchChange={setSearch}
+        onOpenAssetSearch={() => {
+          setAssetSearchQuery("");
+          setAssetSearchOpen(true);
+        }}
+        onStatusFilterChange={setStatusFilter}
+        onShowNoWorkflowChange={setShowNoWorkflow}
+        onMobileScopeChange={setMobileScope}
+        onOpenCaptureTable={() => setCapturePopupOpen(true)}
+        onNavigateCaptureTable={(projectId) => navigate(`/installations/capture?project=${encodeURIComponent(projectId)}`)}
+      />
 
       {search.trim() && !isNativePlatform && (
         <Chip
