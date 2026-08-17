@@ -41,6 +41,9 @@ coverage/
 playwright-report/
 test-results/
 .playwright/
+# Throwaway e2e run output. The committed baselines live in e2e/ instead:
+# e2e/perf-baseline.json and e2e/visual-baseline/*.png
+e2e-results/
 
 # Debug
 .vscode/launch.json
