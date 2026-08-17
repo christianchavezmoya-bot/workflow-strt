@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -27,11 +28,19 @@ public class FaultReportsController : ControllerBase
     private static readonly string[] AllowedStatuses = ["New", "Investigating", "Fixed", "WontFix", "Duplicate"];
 
     private readonly AppDbContext _db;
+    private readonly NotificationFeedService _feed;
+    private readonly SseHub _sse;
     private readonly ILogger<FaultReportsController> _logger;
 
-    public FaultReportsController(AppDbContext db, ILogger<FaultReportsController> logger)
+    public FaultReportsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        SseHub sse,
+        ILogger<FaultReportsController> logger)
     {
         _db = db;
+        _feed = feed;
+        _sse = sse;
         _logger = logger;
     }
 
@@ -53,6 +62,8 @@ public class FaultReportsController : ControllerBase
 
         // Reuse the code the client already showed the user, when it looks like ours.
         var reference = NormalizeReference(request.ClientReferenceCode) ?? GenerateReference();
+
+        var now = DateTime.UtcNow;
 
         var entity = new FaultReportEntity
         {
@@ -77,11 +88,24 @@ public class FaultReportsController : ControllerBase
             DiagnosticsJson = Truncate(request.DiagnosticsJson, MaxDiagnosticsChars),
             WasOffline = request.WasOffline ?? false,
             OccurredAtUtc = request.OccurredAtUtc ?? DateTime.UtcNow,
-            CreatedAtUtc = DateTime.UtcNow,
+            CreatedAtUtc = now,
         };
 
         _db.FaultReports.Add(entity);
         await _db.SaveChangesAsync();
+
+        await _feed.NotifyRolesAsync(
+            eventType: "fault-report-created",
+            severity: ToNotificationSeverity(entity.Severity),
+            title: $"Fault report {entity.ReferenceCode}",
+            message: BuildNotificationMessage(entity),
+            recipientRoles: ["Admin"],
+            entityType: "fault-report",
+            entityId: entity.Id,
+            triggeredByUserId: userId,
+            triggeredByName: PickTriggeredByName(userEmail, userRole, entity.Platform));
+
+        await BroadcastUpdatedAsync(entity, entity.CreatedAtUtc);
 
         // Also emit to the server log so it lands wherever cloud logs are shipped.
         _logger.LogWarning(
@@ -89,7 +113,7 @@ public class FaultReportsController : ControllerBase
             entity.ReferenceCode, entity.Kind, entity.Severity, entity.Platform,
             entity.AppVersion ?? "?", entity.RoutePath ?? "?", entity.Title);
 
-        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity));
+        return CreatedAtAction(nameof(GetById), new { id = entity.Id }, ToDto(entity, entity.CreatedAtUtc));
     }
 
     /// <summary>List reports for triage, newest first.</summary>
@@ -126,11 +150,19 @@ public class FaultReportsController : ControllerBase
         }
 
         var rows = await query
-            .OrderByDescending(r => r.CreatedAtUtc)
+            .Select(r => new
+            {
+                Report = r,
+                LastUpdatedAtUtc = _db.FaultReportUpdates
+                    .Where(u => u.FaultReportId == r.Id)
+                    .Max(u => (DateTime?)u.CreatedAtUtc) ?? r.CreatedAtUtc,
+            })
+            .OrderByDescending(r => r.LastUpdatedAtUtc)
+            .ThenByDescending(r => r.Report.CreatedAtUtc)
             .Take(Math.Clamp(take, 1, 500))
             .ToListAsync();
 
-        return Ok(rows.Select(ToDto).ToList());
+        return Ok(rows.Select(row => ToDto(row.Report, row.LastUpdatedAtUtc)).ToList());
     }
 
     /// <summary>Counts for the admin dashboard card.</summary>
@@ -213,6 +245,7 @@ public class FaultReportsController : ControllerBase
         ApplyStatus(report, status);
 
         await _db.SaveChangesAsync();
+        await BroadcastUpdatedAsync(report, update.CreatedAtUtc);
         return Ok(ToUpdateDto(update));
     }
 
@@ -223,6 +256,8 @@ public class FaultReportsController : ControllerBase
     {
         var entity = await _db.FaultReports.FirstOrDefaultAsync(r => r.Id == id);
         if (entity is null) return NotFound();
+        var changed = false;
+        DateTime? lastUpdatedAtUtc = null;
 
         if (!string.IsNullOrWhiteSpace(request.Status))
         {
@@ -245,6 +280,8 @@ public class FaultReportsController : ControllerBase
                     SystemGenerated = true,
                     CreatedAtUtc = DateTime.UtcNow,
                 });
+                lastUpdatedAtUtc = DateTime.UtcNow;
+                changed = true;
             }
 
             ApplyStatus(entity, request.Status);
@@ -257,16 +294,31 @@ public class FaultReportsController : ControllerBase
                 return BadRequest(new { error = $"severity must be one of {string.Join(", ", AllowedSeverities)}" });
             }
 
+            if (entity.Severity != request.Severity)
+            {
+                changed = true;
+            }
             entity.Severity = request.Severity;
         }
 
         if (request.Notes is not null)
         {
+            if (!string.Equals(entity.Notes ?? "", request.Notes ?? "", StringComparison.Ordinal))
+            {
+                changed = true;
+            }
             entity.Notes = request.Notes;
         }
 
+        if (!changed)
+        {
+            return Ok(ToDto(entity, await GetLastUpdatedAtUtcAsync(entity.Id, entity.CreatedAtUtc)));
+        }
+
         await _db.SaveChangesAsync();
-        return Ok(ToDto(entity));
+        var resolvedLastUpdatedAtUtc = lastUpdatedAtUtc ?? await GetLastUpdatedAtUtcAsync(entity.Id, entity.CreatedAtUtc);
+        await BroadcastUpdatedAsync(entity, resolvedLastUpdatedAtUtc);
+        return Ok(ToDto(entity, resolvedLastUpdatedAtUtc));
     }
 
     [HttpDelete("{id}")]
@@ -288,17 +340,17 @@ public class FaultReportsController : ControllerBase
         var updates = await _db.FaultReportUpdates
             .AsNoTracking()
             .Where(u => u.FaultReportId == entity.Id)
+            .OrderBy(u => u.CreatedAtUtc)
             .ToListAsync();
 
+        var lastUpdatedAtUtc = updates.LastOrDefault()?.CreatedAtUtc ?? entity.CreatedAtUtc;
+
         return new FaultReportDetailDto(
-            ToDto(entity),
+            ToDto(entity, lastUpdatedAtUtc),
             entity.ErrorStack,
             entity.BreadcrumbsJson,
             entity.DiagnosticsJson,
-            updates
-                .OrderBy(u => u.CreatedAtUtc)
-                .Select(ToUpdateDto)
-                .ToList());
+            updates.Select(ToUpdateDto).ToList());
     }
 
     private static void ApplyStatus(FaultReportEntity entity, string status)
@@ -311,11 +363,58 @@ public class FaultReportsController : ControllerBase
     private static FaultReportUpdateDto ToUpdateDto(FaultReportUpdateEntity u) => new(
         u.Id, u.Action, u.Status, u.AuthorName, u.SystemGenerated, u.CreatedAtUtc);
 
-    private static FaultReportDto ToDto(FaultReportEntity e) => new(
+    private static FaultReportDto ToDto(FaultReportEntity e, DateTime lastUpdatedAtUtc) => new(
         e.Id, e.ReferenceCode, e.Kind, e.Severity, e.Status, e.Title, e.Description,
         e.Platform, e.AppVersion, e.UserAgent, e.RoutePath, e.UserId, e.UserEmail, e.UserRole,
-        e.ErrorName, e.ErrorMessage, e.TraceId, e.WasOffline, e.OccurredAtUtc, e.CreatedAtUtc,
+        e.ErrorName, e.ErrorMessage, e.TraceId, e.WasOffline, e.OccurredAtUtc, e.CreatedAtUtc, lastUpdatedAtUtc,
         e.Notes, e.ResolvedAtUtc);
+
+    private async Task<DateTime> GetLastUpdatedAtUtcAsync(string faultReportId, DateTime fallbackUtc)
+    {
+        var latestUpdateAtUtc = await _db.FaultReportUpdates
+            .AsNoTracking()
+            .Where(u => u.FaultReportId == faultReportId)
+            .MaxAsync(u => (DateTime?)u.CreatedAtUtc);
+
+        return latestUpdateAtUtc ?? fallbackUtc;
+    }
+
+    private async Task BroadcastUpdatedAsync(FaultReportEntity entity, DateTime lastUpdatedAtUtc)
+    {
+        await _sse.BroadcastAsync("fault-reports:updated", new
+        {
+            id = entity.Id,
+            referenceCode = entity.ReferenceCode,
+            status = entity.Status,
+            severity = entity.Severity,
+            createdAtUtc = entity.CreatedAtUtc,
+            lastUpdatedAtUtc,
+        });
+    }
+
+    private static string ToNotificationSeverity(string severity) => severity switch
+    {
+        "S0" or "S1" => "error",
+        "S2" => "warning",
+        _ => "info",
+    };
+
+    private static string BuildNotificationMessage(FaultReportEntity entity)
+    {
+        var summary = Truncate(entity.Title, 120) ?? "Untitled fault report";
+        var route = string.IsNullOrWhiteSpace(entity.RoutePath) ? null : entity.RoutePath;
+        var reporter = string.IsNullOrWhiteSpace(entity.UserEmail) ? entity.Platform : entity.UserEmail;
+        return route is null
+            ? $"{reporter} reported: {summary}"
+            : $"{reporter} reported at {route}: {summary}";
+    }
+
+    private static string PickTriggeredByName(string? userEmail, string? userRole, string platform)
+    {
+        if (!string.IsNullOrWhiteSpace(userEmail)) return userEmail;
+        if (!string.IsNullOrWhiteSpace(userRole)) return userRole;
+        return platform;
+    }
 
     private static string Pick(string? value, string[] allowed, string fallback) =>
         !string.IsNullOrWhiteSpace(value) && allowed.Contains(value) ? value : fallback;

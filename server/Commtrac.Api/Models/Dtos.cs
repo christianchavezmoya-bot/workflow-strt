@@ -1799,6 +1799,7 @@ public record FaultReportDto(
     bool WasOffline,
     DateTime OccurredAtUtc,
     DateTime CreatedAtUtc,
+    DateTime LastUpdatedAtUtc,
     string? Notes,
     DateTime? ResolvedAtUtc
 );
