@@ -1,5 +1,10 @@
 # Modernisation plan — dependencies, not patterns
 
+> **Start with [`EXCELLENCE_PROGRAMME.md`](./EXCELLENCE_PROGRAMME.md)**, which sequences this plan
+> together with `CODE_QUALITY_REMEDIATION_PLAN.md` into ten stages and adds the UX divergence
+> protocol. This document remains the detail for dependency work; M1–M9 map onto stages S1, S4, S7
+> and S9 there.
+
 **Snapshot of `main` @ `bac9d7b`, August 2026.** Companion to
 [`CODE_QUALITY_REMEDIATION_PLAN.md`](./CODE_QUALITY_REMEDIATION_PLAN.md), which deals with structure.
 This one deals with the question "what here is legacy, and how do we modernise it without the app

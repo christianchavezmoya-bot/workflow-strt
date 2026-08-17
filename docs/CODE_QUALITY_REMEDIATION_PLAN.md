@@ -1,5 +1,9 @@
 # Code quality remediation plan
 
+> **Start with [`EXCELLENCE_PROGRAMME.md`](./EXCELLENCE_PROGRAMME.md)**, which sequences this plan
+> together with `MODERNIZATION_PLAN.md` into ten stages and adds the UX divergence protocol. This
+> document remains the detail for the structural and testing phases.
+
 Companion to [`CODE_QUALITY_ASSESSMENT.md`](./CODE_QUALITY_ASSESSMENT.md) (snapshot of `main` @
 `bac9d7b`). That document says what is wrong; this one says how to fix it without breaking a
 working, in-use product. Concrete defects and dead code are itemised separately in

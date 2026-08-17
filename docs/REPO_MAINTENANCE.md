@@ -90,10 +90,10 @@ done
 - **Offline ops:** `OFFLINE_*`, `RELEASE_CHECKLIST.md`, `BUG_TRIAGE.md`, `MOBILE_BUILD.md`
 - **Generated:** `ARCHITECTURE.md` (via `npm run docs:update` — do not hand-edit)
 - **Agent index:** `AGENT_RETEST_INDEX.md`
-- **Code quality:** `CODE_QUALITY_ASSESSMENT.md` (dated snapshot — re-run rather than edit),
-  `CODE_QUALITY_BUG_SWEEP.md` (dated snapshot of concrete defects — re-run rather than edit),
-  `CODE_QUALITY_REMEDIATION_PLAN.md` (living; update phase status as work lands),
-  `MODERNIZATION_PLAN.md` (living; dependency ladder and the .NET 8 EOL deadline)
+- **Code quality:** `EXCELLENCE_PROGRAMME.md` (**start here** — the ordered programme, the UX
+  divergence protocol and the divergence register), backed by `CODE_QUALITY_ASSESSMENT.md` and
+  `CODE_QUALITY_BUG_SWEEP.md` (dated snapshots — re-run rather than edit) plus
+  `CODE_QUALITY_REMEDIATION_PLAN.md` and `MODERNIZATION_PLAN.md` (living; update status as work lands)
 
 ### Archived → `docs/archive/`
 

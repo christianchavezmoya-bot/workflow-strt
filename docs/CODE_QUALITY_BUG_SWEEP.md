@@ -9,7 +9,9 @@ Everything below was reproduced against the working tree. Nothing here is inferr
 assumed from a file name. Commands are in the [appendix](#appendix--reproducing-the-findings).
 
 The findings feed phases 6 and 7 of the
-[remediation plan](./CODE_QUALITY_REMEDIATION_PLAN.md#phase-6--correctness-sweep).
+[remediation plan](./CODE_QUALITY_REMEDIATION_PLAN.md#phase-6--correctness-sweep), and are scheduled
+in stages S1, S2 and S8 of [`EXCELLENCE_PROGRAMME.md`](./EXCELLENCE_PROGRAMME.md) — start there for
+ordering.
 
 ---
 
