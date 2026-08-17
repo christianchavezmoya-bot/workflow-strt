@@ -170,6 +170,24 @@ import {
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
+import {
+  ARCHIVE_COL_IDS,
+  assetHasConfiguredWorkflow,
+  computeHealth,
+  CONFIGURABLE_COLUMNS,
+  loadColumnConfig,
+  LS_COL_KEY,
+  nextDraftConfigNumber,
+  operationsStickyPrefixSx,
+  projectHasInspection,
+  resolveConfigWorkflowTypeId,
+  timeAgo,
+  workflowTypeMismatchMessage,
+  isInspectionConfigType,
+  isInspectionWorkflowType,
+  type AssetHealth,
+  type ColumnDef,
+} from "./assetInstallationPageLogic";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const CaptureSpreadsheetDialog = lazy(() => import("./CaptureSpreadsheetDialog"));
@@ -178,14 +196,9 @@ const AssetDocumentsDialog = lazy(() => import("./AssetDocumentsDialog"));
 
 // Reference media is merged inside loadWorkflowOpenPayload when mergeMedia: true.
 
-// ------------------------------------------------------------------
-// Column configuration
-// ------------------------------------------------------------------
-
-interface ColumnDef {
-  id: string;
-  label: string;
-}
+const OPERATIONS_CHECKBOX_W = 28;
+const OPERATIONS_EXPAND_W = 36;
+const OPERATIONS_TAG_STICKY_LEFT = OPERATIONS_CHECKBOX_W + OPERATIONS_EXPAND_W;
 
 type AssetExportColumnOption = {
   id: string;
@@ -195,155 +208,6 @@ type AssetExportColumnOption = {
   noteLabel?: string;
   valueFor: (asset: ProjectAsset) => string;
 };
-
-const CONFIGURABLE_COLUMNS: ColumnDef[] = [
-  { id: "assetName",     label: "Asset Name" },
-  { id: "serialNumber",  label: "Serial #" },
-  { id: "assetModel",    label: "Asset Model" },
-  { id: "manufacturer",  label: "Manufacturer" },
-  { id: "configType",    label: "Config Type" },
-  { id: "configName",    label: "Workflow Configuration Name" },
-  { id: "project",       label: "Project" },
-  { id: "siteName",      label: "Site Name" },
-  { id: "location",      label: "Location" },
-  { id: "dateCreated",   label: "Date Created" },
-  { id: "dateClosed",    label: "Date Closed" },
-  { id: "assignedTech",  label: "Assigned Tech" },
-  { id: "features",      label: "Features" },
-  { id: "status",        label: "Status" },
-];
-
-const DEFAULT_COL_ORDER = CONFIGURABLE_COLUMNS.map((c) => c.id);
-const OPERATIONS_CHECKBOX_W = 28;
-const OPERATIONS_EXPAND_W = 36;
-const OPERATIONS_TAG_STICKY_LEFT = OPERATIONS_CHECKBOX_W + OPERATIONS_EXPAND_W;
-
-function operationsStickyPrefixSx(left: number, zIndex: number) {
-  return isMobileNativePlatform()
-    ? {}
-    : {
-      position: "sticky" as const,
-      left,
-      zIndex,
-      bgcolor: "background.paper",
-      ...(left > 0 ? { boxShadow: "2px 0 6px rgba(0,0,0,0.12)" } : {}),
-    };
-}
-const LS_COL_KEY = "asset_installation_columns_v2";
-const FORCE_VISIBLE_COL_IDS = ["dateCreated", "dateClosed"] as const;
-const ARCHIVE_COL_IDS = ["serialNumber", "assetModel", "manufacturer", "project", "siteName", "configType", "status"];
-
-function loadColumnConfig(): { order: string[]; hidden: string[] } {
-  try {
-    const raw = localStorage.getItem(LS_COL_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw) as { order?: string[]; hidden?: string[] };
-      const knownIds = new Set(CONFIGURABLE_COLUMNS.map((column) => column.id));
-      const savedOrder = Array.isArray(parsed.order) ? parsed.order.filter((id) => knownIds.has(id)) : [];
-      const missingIds = DEFAULT_COL_ORDER.filter((id) => !savedOrder.includes(id));
-      return {
-        order: [...savedOrder, ...missingIds],
-        hidden: Array.isArray(parsed.hidden)
-          ? parsed.hidden.filter((id) => knownIds.has(id) && !FORCE_VISIBLE_COL_IDS.includes(id as typeof FORCE_VISIBLE_COL_IDS[number]))
-          : [],
-      };
-    }
-  } catch {}
-  return { order: DEFAULT_COL_ORDER, hidden: [] };
-}
-
-// ------------------------------------------------------------------
-// Status helpers — shared maps live in assetStatusDisplay.ts
-// ------------------------------------------------------------------
-
-/** Time-ago helper for mobile sync timestamp display */
-function timeAgo(date: Date): string {
-  const secs = Math.floor((Date.now() - date.getTime()) / 1000);
-  if (secs < 60) return "just now";
-  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
-  return `${Math.floor(secs / 3600)}h ago`;
-}
-
-function projectHasInspection(workflowMode?: string | null) {
-  return workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
-}
-
-function isInspectionConfigType(configType?: string | null): boolean {
-  const n = (configType ?? "").trim().toLowerCase();
-  return n === "inspection" || n === "wftype-inspection";
-}
-
-function isInspectionWorkflowType(typeName?: string | null): boolean {
-  return (typeName ?? "").trim().toLowerCase().includes("inspection");
-}
-
-function workflowTypeMismatchMessage(typeName: string | undefined, configType: string | null | undefined): string | null {
-  const typeIsInspection = isInspectionWorkflowType(typeName);
-  const configIsInspection = isInspectionConfigType(configType);
-  if (typeIsInspection && !configIsInspection)
-    return `The selected workflow config is an installation/generic type but the workflow type is "${typeName}". Using an inspection workflow type with a non-inspection config may produce unexpected results.`;
-  if (!typeIsInspection && configIsInspection)
-    return `The selected workflow config is an inspection type but the workflow type is "${typeName}". Inspection configs should only be used with an Inspection workflow type.`;
-  return null;
-}
-
-/**
- * The Assign Workflow dialog only asks for a config now (workflow type is
- * redundant — every config already implies its own type). This derives the
- * workflowTypeId the create() call still needs from the chosen config itself:
- * its own workflowTypeId FK when set, else matched by configType name.
- */
-function resolveConfigWorkflowTypeId(config: WorkflowConfig, types: WorkflowType[]): string {
-  if (config.workflowTypeId) return config.workflowTypeId;
-  const normalized = config.configType?.trim().toLowerCase();
-  if (!normalized) return "";
-  return types.find((t) => t.name.trim().toLowerCase() === normalized)?.id ?? "";
-}
-
-// ------------------------------------------------------------------
-// Health tracking
-// ------------------------------------------------------------------
-
-interface AssetHealth {
-  total: number;
-  notStarted: number;
-  inProgress: number;
-  paused: number;
-  pending: number;
-  complete: number;
-  closed: number;
-  issue: number;
-  noWorkflow: number;
-}
-
-function assetHasConfiguredWorkflow(asset: ProjectAsset): boolean {
-  return !!asset.workflowSummary?.hasWorkflow || !!asset.productConfigId || !!asset.workflowTemplateId;
-}
-
-function computeHealth(list: ProjectAsset[]): AssetHealth {
-  return {
-    total: list.length,
-    notStarted: list.filter((a) => a.status === "NotStarted").length,
-    inProgress: list.filter((a) => a.status === "InProgress").length,
-    paused: list.filter((a) => a.status === "Paused").length,
-    pending: list.filter((a) => a.status === "Pending").length,
-    complete: list.filter((a) => a.status === "Complete").length,
-    closed: list.filter((a) => a.status === "Closed").length,
-    issue: list.filter((a) => a.status === "Issue").length,
-    noWorkflow: list.filter((a) => !assetHasConfiguredWorkflow(a)).length,
-  };
-}
-
-function tabDotColor(h: AssetHealth | undefined): string | null {
-  if (!h || h.total === 0) return null;
-  if (h.issue > 0) return "error.main";
-  if (h.complete + h.closed === h.total) return "success.main";
-  return "warning.main";
-}
-
-function escapeRegExp(value: string) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
 
 type AssetAttentionSummary = {
   paused: boolean;
@@ -361,17 +225,6 @@ type AssetAttentionSummary = {
 type AssetPrimaryAction =
   | { label: string; tooltip: string; color: "success" | "warning" | "error" | "info" | "inherit"; icon: React.ReactElement; onClick: () => void; variant?: "contained" | "outlined" | "text" }
   | null;
-
-function nextDraftConfigNumber(configs: WorkflowConfig[], productName: string) {
-  const pattern = new RegExp(`^${escapeRegExp(productName)}\\s+Config\\s+(\\d+)$`, "i");
-  const maxMatch = configs.reduce((max, cfg) => {
-    const match = cfg.name.match(pattern);
-    if (!match) return max;
-    const parsed = Number(match[1]);
-    return Number.isFinite(parsed) ? Math.max(max, parsed) : max;
-  }, 0);
-  return maxMatch + 1;
-}
 
 // ------------------------------------------------------------------
 // Report generator (type only â€" the async function lives inside the component)
