@@ -68,6 +68,10 @@ import type { MissingMediaFlag as PhotoMissingMediaFlag, PhotoUpdateNotification
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../../components/ui/WorkflowSignatureFlowHost";
 import AttentionItemList from "./AttentionItemList";
+import DashboardAttentionItemRow from "./DashboardAttentionItemRow";
+import DashboardGaugeCircle from "./DashboardGaugeCircle";
+import DashboardNeedsAttentionSection from "./DashboardNeedsAttentionSection";
+import DashboardInspectionAttentionSection from "./DashboardInspectionAttentionSection";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -127,31 +131,6 @@ type NativeMyJobsCardContext = {
   asset: ProjectAsset;
   runs: AssetWorkflowRun[];
 };
-
-function GaugeCircle({ value, size = 80, color = "primary.main" }: { value: number; size?: number; color?: string }) {
-  const r = (size - 8) / 2;
-  const circ = 2 * Math.PI * r;
-  const dash = (value / 100) * circ;
-  return (
-    <Box sx={{ position: "relative", width: size, height: size, flexShrink: 0 }}>
-      <svg width={size} height={size}>
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(255,255,255,0.08)" strokeWidth={7} />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none"
-          stroke="currentColor"
-          strokeWidth={7}
-          strokeDasharray={`${dash} ${circ}`}
-          strokeLinecap="round"
-          transform={`rotate(-90 ${size / 2} ${size / 2})`}
-          style={{ color: color === "primary.main" ? "#2dd4bf" : color }}
-        />
-      </svg>
-      <Typography variant="caption" fontWeight={700}
-        sx={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", fontSize: size > 70 ? "1rem" : "0.75rem" }}>
-        {value}%
-      </Typography>
-    </Box>
-  );
-}
 
 const WINDOW_OPTIONS = [30, 60, 90, 180];
 
@@ -3321,402 +3300,37 @@ const Dashboard = () => {
       setDashboardError("Could not build the workload report. Check your connection and try again.");
     } finally { setReportingTechId(null); }
   }
-  // Reusable: individual clickable item row
-  const ItemRow = ({
-    label,
-    sub,
-    onClick,
-    actionLabel,
-    customerLinkSentAt,
-    projectTimeZoneId,
-    requestSent,
-  }: {
-    label: string;
-    sub?: string;
-    onClick: () => void;
-    actionLabel?: string;
-    customerLinkSentAt?: string | null;
-    projectTimeZoneId?: string | null;
-    requestSent?: boolean;
-  }) => (
-    <Stack
-      direction="row"
-      spacing={1}
-      alignItems="center"
-      onClick={(e) => { e.stopPropagation(); onClick(); }}
-      sx={{
-        px: 1, py: 0.5, borderRadius: 1, cursor: "pointer",
-        "&:hover": { background: "rgba(255,255,255,0.07)" },
-        transition: "background 0.15s",
-      }}
-    >
-      <Box sx={{ flex: 1, minWidth: 0 }}>
-        <Typography variant="caption" color="text.secondary" noWrap display="block">
-          - {label}
-        </Typography>
-        {sub && <Typography variant="caption" color="text.disabled" noWrap display="block" sx={{ pl: 1.5, fontSize: "0.65rem" }}>{sub}</Typography>}
-      </Box>
-      {actionLabel && (
-        <Stack direction="row" spacing={0.5} alignItems="center" sx={{ flexShrink: 0 }}>
-          {requestSent && (
-            <Stack direction="row" spacing={0.35} alignItems="center">
-              <CheckCircleOutlined
-                sx={{ fontSize: 16, color: "success.main" }}
-                onClick={(e) => e.stopPropagation()}
-              />
-              <Typography variant="caption" color="success.main" sx={{ fontSize: "0.6rem" }}>
-                Request sent
-              </Typography>
-            </Stack>
-          )}
-          {customerLinkSentAt && (
-            <Tooltip
-              title={`Link sent ${formatInstant(customerLinkSentAt, projectTimeZoneId, { withZone: true })}`}
-              arrow
-            >
-              <CheckCircleOutlined
-                sx={{ fontSize: 16, color: "success.main" }}
-                onClick={(e) => e.stopPropagation()}
-              />
-            </Tooltip>
-          )}
-          <Chip
-            label={actionLabel}
-            size="small"
-            color="info"
-            variant="outlined"
-            sx={{ height: 18, fontSize: "0.6rem" }}
-          />
-        </Stack>
-      )}
-    </Stack>
-  );
-  // Reusable JSX blocks
-
-  // Fix: My Installs has its own scoped "Needs Attention" panel (blocking
-  // issues, pending signatures, high observations — all filtered to the
-  // current user's assigned install assets), but My Inspections never had
-  // an equivalent. The underlying data (myInspectionBlocking,
-  // myInspectionPendingSigs, myInspectionHighObservations,
-  // myInspectionAttentionCount) was correctly computed and even drove the
-  // small notification badge on the Inspections tab label, but no panel
-  // ever rendered it — so blocking issues, pending signatures, and high
-  // observations on inspection assets were never surfaced to the user.
-  // Modeled directly on the Installer "Needs Attention" block.
   const MyInspectionAttentionSection = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <WarningAmberOutlined sx={{ color: myInspectionAttentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
-        <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 64, ml: 1 }}>
-          {attentionLoading ? (
-            <CircularProgress size={14} />
-          ) : myInspectionAttentionCount === 0 ? (
-            <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-          ) : null}
-        </Box>
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" variant="text" component={Link} to="/issues"
-          endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
-          Issues Board
-        </Button>
-      </Stack>
-
-      <Grid container spacing={2}>
-
-        {/* My Blocking Issues (inspections) */}
-        <Grid item xs={12} sm={6} md={4}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: myInspectionBlocking.length > 0 ? "error.main" : "rgba(255,255,255,0.08)",
-            background:  myInspectionBlocking.length > 0
-              ? "linear-gradient(180deg, rgba(64,15,17,0.78) 0%, rgba(33,13,14,0.56) 100%)"
-              : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <ErrorOutlineOutlined sx={{ fontSize: 18, color: myInspectionBlocking.length > 0 ? "error.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Blocking Issues</Typography>
-              {resolvingDashboardIssueId && (
-                <Chip
-                  label="Updating"
-                  size="small"
-                  color="error"
-                  variant="outlined"
-                  sx={{ height: 18, fontSize: "0.62rem", fontWeight: 700 }}
-                />
-              )}
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={myInspectionBlocking.length > 0 ? "error.main" : "text.secondary"}>
-              {myInspectionBlocking.length}
-            </Typography>
-            {myInspectionBlocking.length > 0 ? (
-              <AttentionItemList
-                items={myInspectionBlocking}
-                maxCollapsed={3}
-                getKey={(iss) => iss.issueId}
-                renderItem={(iss) => (
-                  <ItemRow
-                    label={assetAttentionLabel(iss)}
-                    sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
-                    actionLabel="Resolve now"
-                    onClick={() => openIssueRepair(iss)}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">
-                {resolvingDashboardIssueId ? "Refreshing blocking issues..." : "No blocking issues"}
-              </Typography>
-            )}
-          </Box>
-        </Grid>
-
-        {/* My Pending Signatures (inspections) */}
-        <Grid item xs={12} sm={6} md={4}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: myInspectionPendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
-            background:  myInspectionPendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <PendingActionsOutlined sx={{ fontSize: 18, color: myInspectionPendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Pending Signatures</Typography>
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={myInspectionPendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
-              {myInspectionPendingSigs.length}
-            </Typography>
-            {myInspectionPendingSigs.length > 0 ? (
-              <AttentionItemList
-                items={myInspectionPendingSigs}
-                maxCollapsed={3}
-                getKey={(s) => s.runId}
-                renderItem={(s) => (
-                  <ItemRow
-                    label={assetAttentionLabel(s)}
-                    sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
-                    actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
-                    requestSent={Boolean(isManager && isPendingInstallerSignature(s.signatureStatus) && installerReminderSentByRunId[s.runId])}
-                    {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
-                      ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
-                      : {})}
-                    onClick={() => { void openSignatureRepair(s); }}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">All signatures collected</Typography>
-            )}
-          </Box>
-        </Grid>
-
-        {/* My High Observations (inspections) */}
-        <Grid item xs={12} sm={6} md={4}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: myInspectionHighObservations.length > 0 ? "warning.dark" : "rgba(255,255,255,0.08)",
-            background:  myInspectionHighObservations.length > 0 ? "rgba(249,168,37,0.07)" : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <ReportOutlined sx={{ fontSize: 18, color: myInspectionHighObservations.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>My Observations & Scope</Typography>
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={myInspectionHighObservations.length > 0 ? "warning.main" : "text.secondary"}>
-              {myInspectionHighObservations.length}
-            </Typography>
-            {myInspectionHighObservations.length > 0 ? (
-              <AttentionItemList
-                items={myInspectionHighObservations}
-                maxCollapsed={3}
-                getKey={(iss) => iss.issueId}
-                renderItem={(iss) => (
-                  <ItemRow
-                    label={assetAttentionLabel(iss)}
-                    sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
-                    actionLabel="Review"
-                    onClick={() => openIssueRepair(iss)}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
-            )}
-          </Box>
-        </Grid>
-
-      </Grid>
-    </Box>
+    <DashboardInspectionAttentionSection
+      myInspectionAttentionCount={myInspectionAttentionCount}
+      attentionLoading={attentionLoading}
+      myInspectionBlocking={myInspectionBlocking}
+      myInspectionPendingSigs={myInspectionPendingSigs}
+      myInspectionHighObservations={myInspectionHighObservations}
+      resolvingDashboardIssueId={resolvingDashboardIssueId}
+      isManager={isManager}
+      installerReminderSentByRunId={installerReminderSentByRunId}
+      assetAttentionLabel={assetAttentionLabel}
+      onOpenIssue={openIssueRepair}
+      onOpenSignature={openSignatureRepair}
+    />
   );
 
   const NeedsAttentionSection = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 2 }}>
-        <WarningAmberOutlined sx={{ color: attentionCount > 0 ? "warning.main" : "success.main", fontSize: 20 }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora" }}>Needs Attention</Typography>
-        <Box sx={{ display: "inline-flex", alignItems: "center", minWidth: 64, ml: 1 }}>
-          {attentionLoading ? (
-            <CircularProgress size={14} />
-          ) : attentionCount === 0 ? (
-            <Chip label="All clear" size="small" color="success" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-          ) : null}
-        </Box>
-        <Box sx={{ flex: 1 }} />
-        <Button size="small" variant="text" component={Link} to="/issues"
-          endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />} sx={{ fontSize: "0.72rem" }}>
-          Issues Board
-        </Button>
-      </Stack>
-
-      <Grid container spacing={2}>
-
-        {/* Blocking Issues */}
-        <Grid item xs={6} sm={6} md={3}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: blockingIssues.length > 0 ? "error.main" : "rgba(255,255,255,0.08)",
-            background:  blockingIssues.length > 0 ? "rgba(211,47,47,0.07)" : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <ErrorOutlineOutlined sx={{ fontSize: 18, color: blockingIssues.length > 0 ? "error.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>Blocking Issues</Typography>
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={blockingIssues.length > 0 ? "error.main" : "text.secondary"}>
-              {blockingIssues.length}
-            </Typography>
-            {blockingIssues.length > 0 ? (
-              <AttentionItemList
-                items={blockingIssues}
-                maxCollapsed={4}
-                getKey={(iss) => iss.issueId}
-                renderItem={(iss) => (
-                  <ItemRow
-                    label={assetAttentionLabel(iss)}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
-                    actionLabel="Resolve"
-                    onClick={() => openIssueRepair(iss)}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">No blocking issues</Typography>
-            )}
-          </Box>
-        </Grid>
-
-        {/* Overdue Projects */}
-        <Grid item xs={6} sm={6} md={3}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: overdueProjects.length > 0 ? "error.main" : "rgba(255,255,255,0.08)",
-            background:  overdueProjects.length > 0 ? "rgba(211,47,47,0.07)" : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <AssignmentLateOutlined sx={{ fontSize: 18, color: overdueProjects.length > 0 ? "error.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>Overdue Projects</Typography>
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={overdueProjects.length > 0 ? "error.main" : "text.secondary"}>
-              {overdueProjects.length}
-            </Typography>
-            {overdueProjects.length > 0 ? (
-              <AttentionItemList
-                items={overdueProjects}
-                maxCollapsed={4}
-                getKey={(p) => p.id}
-                renderItem={(p) => (
-                  <ItemRow
-                    label={isAdmin
-                      ? projectAttentionLabel(p.id, p.jobNumber, p.customerName)
-                      : `${p.jobNumber} - ${p.customerName || ""}`}
-                    sub={`Due ${fmtDate(p.finishDate)}`}
-                    onClick={() => navigate(`/projects/${p.id}`)}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">No overdue projects</Typography>
-            )}
-          </Box>
-        </Grid>
-
-        {/* Pending Signatures */}
-        <Grid item xs={6} sm={6} md={3}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: visiblePendingSigs.length > 0 ? "warning.main" : "rgba(255,255,255,0.08)",
-            background:  visiblePendingSigs.length > 0 ? "rgba(230,119,0,0.07)" : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <PendingActionsOutlined sx={{ fontSize: 18, color: visiblePendingSigs.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>Pending Signatures</Typography>
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={visiblePendingSigs.length > 0 ? "warning.main" : "text.secondary"}>
-              {visiblePendingSigs.length}
-            </Typography>
-            {visiblePendingSigs.length > 0 ? (
-              <AttentionItemList
-                items={visiblePendingSigs}
-                maxCollapsed={4}
-                getKey={(s) => s.runId}
-                renderItem={(s) => (
-                  <ItemRow
-                    label={assetAttentionLabel(s)}
-                    sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
-                    actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
-                    {...(isPendingCustomerSignature(s.signatureStatus) && s.customerLinkSentAt
-                      ? { customerLinkSentAt: s.customerLinkSentAt, projectTimeZoneId: s.projectTimeZoneId }
-                      : {})}
-                    onClick={() => { void openSignatureRepair(s); }}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">All signatures collected</Typography>
-            )}
-          </Box>
-        </Grid>
-
-        {/* High Observations */}
-        <Grid item xs={6} sm={6} md={3}>
-          <Box sx={{
-            p: { xs: 1.5, sm: 2 }, borderRadius: 2, height: "100%",
-            border: "1px solid", transition: "all 0.2s",
-            borderColor: highIssues.length > 0 ? "warning.dark" : "rgba(255,255,255,0.08)",
-            background:  highIssues.length > 0 ? "rgba(249,168,37,0.07)" : "rgba(255,255,255,0.03)",
-          }}>
-            <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-              <ReportOutlined sx={{ fontSize: 18, color: highIssues.length > 0 ? "warning.main" : "text.disabled" }} />
-              <Typography variant="subtitle2" fontWeight={700} sx={{ lineHeight: 1.2 }}>Observations & Scope</Typography>
-            </Stack>
-            <Typography variant="h5" fontWeight={700} color={highIssues.length > 0 ? "warning.main" : "text.secondary"}>
-              {highIssues.length}
-            </Typography>
-            {highIssues.length > 0 ? (
-              <AttentionItemList
-                items={highIssues}
-                maxCollapsed={4}
-                getKey={(iss) => iss.issueId}
-                renderItem={(iss) => (
-                  <ItemRow
-                    label={assetAttentionLabel(iss)}
-                    sub={iss.description.slice(0, 50) + (iss.description.length > 50 ? "..." : "")}
-                    actionLabel="Review"
-                    onClick={() => openIssueRepair(iss)}
-                  />
-                )}
-              />
-            ) : (
-              <Typography variant="caption" color="success.main">No observations or scope variations</Typography>
-            )}
-          </Box>
-        </Grid>
-
-      </Grid>
-    </Box>
+    <DashboardNeedsAttentionSection
+      attentionCount={attentionCount}
+      attentionLoading={attentionLoading}
+      blockingIssues={blockingIssues}
+      overdueProjects={overdueProjects}
+      visiblePendingSigs={visiblePendingSigs}
+      highIssues={highIssues}
+      isAdmin={isAdmin}
+      assetAttentionLabel={assetAttentionLabel}
+      projectAttentionLabel={projectAttentionLabel}
+      onOpenIssue={openIssueRepair}
+      onOpenSignature={openSignatureRepair}
+      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+    />
   );
 
   const RegionalSnapshotSection = (
@@ -4202,7 +3816,7 @@ const Dashboard = () => {
           {evidenceLoading ? <LinearProgress /> : evidenceData ? (
             <Stack spacing={2}>
               <Stack direction="row" spacing={3} alignItems="center">
-                <GaugeCircle value={evidenceData.overallScore} size={90} />
+                <DashboardGaugeCircle value={evidenceData.overallScore} size={90} />
                 <Stack spacing={1} sx={{ flex: 1 }}>
                   {[
                     { label: "Signed",         pct: evidenceData.signedPct,           n: evidenceData.signed },
@@ -4266,7 +3880,7 @@ const Dashboard = () => {
             <Stack spacing={2}>
               <Stack direction="row" spacing={3} alignItems="center">
                 <Box sx={{ position: "relative" }}>
-                  <GaugeCircle value={healthData.overallScore} size={90}
+                  <DashboardGaugeCircle value={healthData.overallScore} size={90}
                     color={healthData.overallScore >= 80 ? "#2e7d32" : healthData.overallScore >= 60 ? "#ed6c02" : "#d32f2f"} />
                   <Tooltip title={`vs previous ${healthWindow}d: ${healthData.scoreDelta > 0 ? "+" : ""}${healthData.scoreDelta}%`}>
                     <Box sx={{ position: "absolute", bottom: -4, right: -4 }}>
@@ -4729,7 +4343,7 @@ const Dashboard = () => {
                 {autoAssignFlags.map((f) => (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
-                      <ItemRow
+                      <DashboardAttentionItemRow
                         label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
                         sub={`Assigned by ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
                         onClick={() => navigate("/installations/assets")}
@@ -5286,7 +4900,7 @@ const Dashboard = () => {
                       maxCollapsed={3}
                       getKey={(iss) => iss.issueId}
                       renderItem={(iss) => (
-                        <ItemRow
+                        <DashboardAttentionItemRow
                           label={assetAttentionLabel(iss)}
                           sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
                           actionLabel="Resolve now"
@@ -5323,7 +4937,7 @@ const Dashboard = () => {
                       maxCollapsed={3}
                       getKey={(s) => s.runId}
                       renderItem={(s) => (
-                        <ItemRow
+                        <DashboardAttentionItemRow
                           label={assetAttentionLabel(s)}
                           sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                           actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
@@ -5361,7 +4975,7 @@ const Dashboard = () => {
                       maxCollapsed={3}
                       getKey={(iss) => iss.issueId}
                       renderItem={(iss) => (
-                        <ItemRow
+                        <DashboardAttentionItemRow
                           label={assetAttentionLabel(iss)}
                           sub={iss.description.slice(0, 40) + (iss.description.length > 40 ? "..." : "")}
                           actionLabel="Review"
@@ -5434,7 +5048,7 @@ const Dashboard = () => {
                 ) : (
                   <Stack spacing={0.25}>
                     {unassignedAssets.slice(0, 5).map((a) => (
-                      <ItemRow key={a.id}
+                      <DashboardAttentionItemRow key={a.id}
                         label={a.assetTag || a.assetName || a.id}
                         sub={a.jobNumber}
                         onClick={() => navigate("/installations/assets")} />
@@ -5465,7 +5079,7 @@ const Dashboard = () => {
                 ) : (
                   <Stack spacing={0.25}>
                     {notStartedAssets.slice(0, 5).map((a) => (
-                      <ItemRow key={a.id}
+                      <DashboardAttentionItemRow key={a.id}
                         label={a.assetTag || a.assetName || a.id}
                         sub={[a.jobNumber, a.assignedUserId ? `Assigned: ${a.assignedUserId}` : undefined].filter(Boolean).join(" - ")}
                         onClick={() => navigate("/installations/assets")} />
@@ -5531,7 +5145,7 @@ const Dashboard = () => {
                     maxCollapsed={5}
                     getKey={(s) => s.runId}
                     renderItem={(s) => (
-                      <ItemRow
+                      <DashboardAttentionItemRow
                         label={assetAttentionLabel(s)}
                         sub={`${pendingSignatureStageText(s.signatureStatus)} · Field work complete ${fmtDate(s.completedAt)}`}
                         actionLabel={pendingSignatureStageLabel(s.signatureStatus)}
@@ -5562,7 +5176,7 @@ const Dashboard = () => {
                 ) : (
                   <Stack spacing={0.25}>
                     {draftConfigs.slice(0, 5).map((cfg) => (
-                      <ItemRow key={cfg.id}
+                      <DashboardAttentionItemRow key={cfg.id}
                         label={cfg.name}
                         sub={cfg.updatedAt ? `Updated ${fmtDate(cfg.updatedAt)}` : undefined}
                         onClick={() => navigate("/work-instructions")} />
@@ -5646,7 +5260,7 @@ const Dashboard = () => {
                 {autoAssignFlags.map((f) => (
                   <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
                     <Box sx={{ flex: 1 }}>
-                      <ItemRow
+                      <DashboardAttentionItemRow
                         label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
                         sub={`Assigned to ${f.assignedBy} - ${fmtDate(f.assignedAt)}`}
                         onClick={() => navigate("/installations/assets")}
