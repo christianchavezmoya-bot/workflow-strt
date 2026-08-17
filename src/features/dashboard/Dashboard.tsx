@@ -74,6 +74,8 @@ import DashboardInspectionAttentionSection from "./DashboardInspectionAttentionS
 import DashboardRegionalSnapshotSection from "./DashboardRegionalSnapshotSection";
 import DashboardEvidenceHealthGrid from "./DashboardEvidenceHealthGrid";
 import DashboardWorkloadPanel, { type ScopedWorkloadItem, type WorkloadProjectBreakdown } from "./DashboardWorkloadPanel";
+import DashboardProjectStatusGrid, { type DashboardProjectScope } from "./DashboardProjectStatusGrid";
+import DashboardManagerMobileHome from "./DashboardManagerMobileHome";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import type { AssetWorkflowRun, RunIssue } from "../../types/assetWorkflowRun";
 import type { Workflow } from "../../types/workflow";
@@ -121,6 +123,7 @@ import {
   pickActiveRunForAttention,
   workflowModeChipColor,
   workflowModeLabel,
+  projectStatusChipColor,
   type MyJobsCardAction,
   type MyJobsCardWidget,
 } from "./dashboardPageLogic";
@@ -147,8 +150,6 @@ type DashboardTabSignal = {
   count: number;
   tone: "primary" | "warning" | "error" | "info" | "success";
 };
-type DashboardProjectScope = "mine" | "all";
-
 type InspectionRunSignal = {
   id: string;
   projectId: string;
@@ -3100,11 +3101,6 @@ const Dashboard = () => {
     return Object.entries(counts).sort((a, b) => b[1] - a[1]);
   }, [dashboardProjects]);
 
-  const statusColor: Record<string, string> = {
-    "In Progress": "primary", "Completed": "success", "Pending Approval": "warning",
-    "Closed": "info", "Cancelled": "error", "Draft": "default", "Approved": "info", "On Hold": "warning",
-  };
-
   const MyInspectionJobsToday = (
     <Box className="glass-card" sx={{ p: 2.5 }}>
       <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
@@ -3344,178 +3340,24 @@ const Dashboard = () => {
   );
 
   const ProjectStatusGrid = (
-    <Box className="glass-card" sx={{ p: 2.5 }}>
-      <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-        <TrendingUpOutlined sx={{ fontSize: 18, color: "primary.main" }} />
-        <Typography variant="h6" sx={{ fontFamily: "Sora", fontSize: "1rem", flex: 1 }}>
-          {isAdmin ? "Projects" : "Project Status"}
-        </Typography>
-        <Chip
-          label={dashboardProjects.length}
-          size="small"
-          color="info"
-          variant="outlined"
-          sx={{ height: 20, fontSize: "0.7rem" }}
-        />
-        {isAdmin && projectsMissingPm.length > 0 && (
-          <Chip
-            label={`${projectsMissingPm.length} missing PM`}
-            size="small"
-            color="warning"
-            variant="outlined"
-            sx={{ height: 20, fontSize: "0.7rem" }}
-          />
-        )}
-        {canViewAllProjects && (
-          <FormControl size="small" sx={{ minWidth: 130 }}>
-            <Select
-              value={dashboardProjectScope}
-              onChange={(e) => setDashboardProjectScope(e.target.value as DashboardProjectScope)}
-              sx={{ fontSize: "0.75rem", height: 26 }}
-            >
-              <MenuItem value="mine"><em>My Projects</em></MenuItem>
-              <MenuItem value="all">All Projects</MenuItem>
-            </Select>
-          </FormControl>
-        )}
-      </Stack>
-      <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1.5 }}>
-        {viewedDashboardUserId
-          ? `${dashboardProjectScope === "mine" ? "My" : "All"} open projects and projects ready to close for ${viewingOwnDashboard ? "you" : viewedDashboardUser?.fullName ?? "this user"}`
-          : isAdmin
-            ? `${dashboardProjectScope === "mine" ? "Your" : "All"} open projects and projects ready to close in the current dashboard scope.`
-            : `${dashboardProjectScope === "mine" ? "Your" : "All"} open projects and projects ready to close in the current dashboard scope.`}
-      </Typography>
-
-      {dashboardProjects.length === 0 ? (
-        <Typography variant="caption" color="text.disabled">No assigned projects in this scope.</Typography>
-      ) : (
-        <Stack spacing={1.25}>
-          {dashboardProjects.map((project) => {
-            const { issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct } = getProjectCompletionMetrics(project);
-            const readyToClose = isReadyToCloseProject(project, completionPct);
-            const productNames = (project.productIds ?? [])
-              .map((id) => productNameById.get(id) ?? id)
-              .filter(Boolean)
-              .join(", ");
-
-            return (
-              <Box
-                key={project.id}
-                sx={{
-                  px: 2,
-                  py: 1.25,
-                  borderRadius: 2,
-                  border: readyToClose ? "1px solid rgba(59,130,246,0.45)" : "1px solid rgba(255,255,255,0.08)",
-                  background: readyToClose ? "linear-gradient(135deg, rgba(59,130,246,0.12), rgba(16,185,129,0.08))" : "rgba(255,255,255,0.03)",
-                  cursor: "pointer",
-                  transition: "all 0.2s",
-                  "&:hover": {
-                    background: readyToClose ? "linear-gradient(135deg, rgba(59,130,246,0.16), rgba(16,185,129,0.1))" : "rgba(45,212,191,0.06)",
-                    borderColor: readyToClose ? "rgba(59,130,246,0.6)" : "rgba(45,212,191,0.25)",
-                  },
-                }}
-                onClick={() => navigate(projectAssetsPath(project))}
-              >
-                <Stack spacing={0.7}>
-                  <Stack direction={{ xs: "column", xl: "row" }} spacing={0.9} alignItems={{ xl: "center" }}>
-                    <Stack direction="row" spacing={0.75} alignItems="center" flexWrap="wrap" useFlexGap sx={{ minWidth: 0 }}>
-                      <Typography variant="subtitle2" fontWeight={700}>
-                        {project.jobNumber}
-                      </Typography>
-                      <Chip
-                        label={project.status}
-                        size="small"
-                        color={(statusColor[project.status] ?? "default") as "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"}
-                        variant="outlined"
-                        sx={{ height: 20, fontSize: "0.68rem" }}
-                      />
-                      <Typography
-                        variant="caption"
-                        color="text.secondary"
-                        fontWeight={700}
-                        sx={{ textTransform: "uppercase", letterSpacing: 0.4 }}
-                      >
-                        {totalAssets} assets
-                      </Typography>
-                      {readyToClose && (
-                        <Chip
-                          label="Ready to Close"
-                          size="small"
-                          color="info"
-                          sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700 }}
-                        />
-                      )}
-                    </Stack>
-                    <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
-                      {notStarted > 0 && <Chip size="small" label={`${notStarted} Not Started`} sx={{ height: 20, fontSize: "0.68rem" }} />}
-                      {inProgress > 0 && <Chip size="small" label={`${inProgress} In Progress`} color="primary" sx={{ height: 20, fontSize: "0.68rem" }} />}
-                      {complete > 0 && <Chip size="small" label={`${complete} Complete`} color="success" sx={{ height: 20, fontSize: "0.68rem" }} />}
-                      {issueCount > 0 && <Chip size="small" label={`${issueCount} Issue`} color="error" sx={{ height: 20, fontSize: "0.68rem" }} />}
-                      {noWorkflowCount > 0 && <Chip size="small" label={`${noWorkflowCount} No Workflow`} color="warning" variant="outlined" sx={{ height: 20, fontSize: "0.68rem" }} />}
-                    </Stack>
-                    <Box sx={{ flex: 1, minWidth: { xs: 120, xl: 180 } }}>
-                      <LinearProgress
-                        variant="determinate"
-                        value={completionPct}
-                        color={issueCount > 0 ? "error" : "success"}
-                        sx={{ height: 6, borderRadius: 1 }}
-                      />
-                    </Box>
-                    <Typography variant="caption" color="text.secondary" sx={{ minWidth: 56, textAlign: { xl: "right" }, flexShrink: 0 }}>
-                      {completionPct}%
-                    </Typography>
-                  </Stack>
-                  <Typography variant="caption" color="text.secondary" noWrap>
-                    {[project.customerName, project.siteName, productNames || "No products linked"].filter(Boolean).join(" - ")}
-                  </Typography>
-                  {readyToClose && (
-                    <Typography variant="caption" color="info.main">
-                      {project.completedAtUtc
-                        ? `Completed ${new Date(project.completedAtUtc).toLocaleString()}${project.completedBy ? ` by ${project.completedBy}` : ""}`
-                        : "This project is complete and waiting for PM/Admin closure."}
-                    </Typography>
-                  )}
-                  <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
-                    <Typography variant="caption" color={project.projectManager?.trim() ? "text.secondary" : "warning.main"} noWrap>
-                      PM: {project.projectManager?.trim() || "No PM assigned"}
-                    </Typography>
-                    <Stack direction="row" spacing={1} useFlexGap>
-                      {readyToClose && isManager && (
-                        <Button
-                          size="small"
-                          variant="contained"
-                          disabled={closingDashboardProjectId === project.id}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            void closeProjectFromDashboard(project.id);
-                          }}
-                          sx={{ fontSize: "0.72rem", minHeight: 26 }}
-                        >
-                          {closingDashboardProjectId === project.id ? "Closing..." : "Mark as Closed"}
-                        </Button>
-                      )}
-                      <Button
-                        size="small"
-                        variant="outlined"
-                        endIcon={<OpenInNewOutlined sx={{ fontSize: 13 }} />}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          navigate(projectAssetsPath(project));
-                        }}
-                        sx={{ fontSize: "0.72rem", minHeight: 26 }}
-                      >
-                        Go to Project Assets
-                      </Button>
-                    </Stack>
-                  </Stack>
-                </Stack>
-              </Box>
-            );
-          })}
-        </Stack>
-      )}
-    </Box>
+    <DashboardProjectStatusGrid
+      isAdmin={isAdmin}
+      isManager={isManager}
+      canViewAllProjects={canViewAllProjects}
+      dashboardProjects={dashboardProjects}
+      projectsMissingPmCount={projectsMissingPm.length}
+      dashboardProjectScope={dashboardProjectScope}
+      onDashboardProjectScopeChange={setDashboardProjectScope}
+      viewedDashboardUserId={viewedDashboardUserId}
+      viewingOwnDashboard={viewingOwnDashboard}
+      viewedDashboardUserName={viewedDashboardUser?.fullName}
+      getProjectCompletionMetrics={getProjectCompletionMetrics}
+      isReadyToCloseProject={isReadyToCloseProject}
+      productNameById={productNameById}
+      closingDashboardProjectId={closingDashboardProjectId}
+      onCloseProject={(projectId) => void closeProjectFromDashboard(projectId)}
+      onNavigateToProjectAssets={(project) => navigate(projectAssetsPath(project))}
+    />
   );
 
   const AdminInspectionWorkspace = (
@@ -3843,324 +3685,249 @@ const Dashboard = () => {
     </Box>
   ) : null;
 
-  const ManagerMobileHome = (
-    <Stack spacing={2}>
-      <Box className="glass-card" sx={{ p: 2 }}>
-        <Stack spacing={1.5}>
-          <Box>
-            <Typography variant="h6" sx={{ fontFamily: "Sora", lineHeight: 1.1 }}>{user.fullName}</Typography>
-            <Typography variant="caption" color="text.secondary">
-              {user.role} · {activeOffice === "All" ? "All offices" : activeOffice}
-            </Typography>
-          </Box>
-          <Stack direction="row" spacing={1}>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>{canViewAllProjects ? "All Projects" : "My Projects"}</Typography>
-              <Typography variant="h6" fontWeight={700}>{managedProjects.length}</Typography>
-            </Paper>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>Overdue</Typography>
-              <Typography variant="h6" fontWeight={700} color={managedOverdueProjects.length > 0 ? "error.main" : "inherit"}>{managedOverdueProjects.length}</Typography>
-            </Paper>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>Inspections</Typography>
-              <Typography variant="h6" fontWeight={700}>{managedInspectionProjects.length}</Typography>
-            </Paper>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>Open Installs</Typography>
-              <Typography variant="h6" fontWeight={700}>{managedOpenAssets.length}</Typography>
-            </Paper>
+  const managerMobileProjectsTab = (
+    <>
+      {NeedsAttentionSection}
+
+      {pendingApprovals.length > 0 && (
+        <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(230,119,0,0.07)" }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
+            <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Pending Approvals</Typography>
+            <Chip label={pendingApprovals.length} size="small" color="warning" variant="outlined"
+              sx={{ height: 20, fontSize: "0.7rem" }} />
           </Stack>
-          <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap", gap: 0.5 }}>
-            <Tooltip title="Workflow run is currently active" arrow>
-              <Chip icon={<PlayArrowOutlined sx={{ fontSize: 13 }} />}
-                label={`${overviewActiveCount} active`} size="small"
-                color={overviewActiveCount > 0 ? "primary" : "default"} variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-            </Tooltip>
-            <Tooltip title="Workflow run is currently paused" arrow>
-              <Chip label={`${overviewPausedCount} paused`} size="small"
-                color={overviewPausedCount > 0 ? "warning" : "default"} variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-            </Tooltip>
-            <Tooltip title="Assigned, no workflow run started yet" arrow>
-              <Chip label={`${overviewQueuedCount} queued`} size="small"
-                color="default" variant="outlined"
-                sx={{ height: 22, fontSize: "0.7rem" }} />
-            </Tooltip>
-            {overviewPendingCount > 0 && (
-              <Tooltip title="Asset acknowledged but workflow hasn't started" arrow>
-                <Chip label={`${overviewPendingCount} pending`} size="small"
-                  color="info" variant="outlined"
-                  sx={{ height: 22, fontSize: "0.7rem" }} />
-              </Tooltip>
-            )}
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Projects waiting for your approval
+          </Typography>
+          <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }} flexWrap="nowrap">
+            {pendingApprovals.map((p) => (
+              <Chip key={p.id}
+                label={p.jobNumber || p.id}
+                onClick={() => navigate(`/projects/${p.id}`)}
+                color="warning" variant="outlined"
+                sx={{ flexShrink: 0, cursor: "pointer" }} />
+            ))}
           </Stack>
-          {isAdmin && dashboardUsers.length > 0 && (
-            <Box>
-              {!viewingOwnDashboard && viewedDashboardUser && (
-                <Box sx={{ display: "flex", alignItems: "center", gap: 1, mb: 1, p: 0.75, borderRadius: 1, background: "rgba(2,136,209,0.1)", border: "1px solid rgba(2,136,209,0.3)" }}>
-                  <SwitchAccountOutlined sx={{ fontSize: 14, color: "info.main", flexShrink: 0 }} />
-                  <Typography variant="caption" sx={{ flex: 1, color: "info.main", fontSize: "0.7rem" }}>
-                    Viewing {viewedDashboardUser.fullName} ({viewedDashboardUser.role})
-                  </Typography>
-                  <IconButton size="small" onClick={() => setSelectedDashboardId(user.id)} sx={{ p: 0.25 }}>
-                    <CloseOutlined sx={{ fontSize: 14 }} />
-                  </IconButton>
+        </Box>
+      )}
+
+      {autoAssignFlags.length > 0 && (
+        <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
+          <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
+            <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
+            <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>New Auto-assignments</Typography>
+            <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
+            <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
+              onClick={() => {
+                localStorage.removeItem("pm_auto_assign_flags");
+                setAutoAssignFlags([]);
+              }}>
+              Dismiss all
+            </Button>
+          </Stack>
+          <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
+            Assets auto-assigned when an installer started a workflow
+          </Typography>
+          <Stack spacing={0.25}>
+            {autoAssignFlags.map((f) => (
+              <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
+                <Box sx={{ flex: 1 }}>
+                  <DashboardAttentionItemRow
+                    label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
+                    sub={`Assigned by ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
+                    onClick={() => navigate("/installations/assets")}
+                  />
                 </Box>
-              )}
-              <FormControl size="small" fullWidth>
-                <InputLabel shrink sx={{ fontSize: "0.75rem" }}>View as</InputLabel>
-                <Select
-                  label="View as"
-                  value={selectedDashboardId === ALL_DASHBOARDS_VALUE ? user.id : selectedDashboardId}
-                  onChange={(e) => setSelectedDashboardId(e.target.value)}
-                  sx={{ fontSize: "0.75rem" }}
-                >
-                  <MenuItem value={user.id}><em>My Dashboard</em></MenuItem>
-                  {dashboardUsers.map((u) => (
-                    <MenuItem key={u.id} value={u.id} sx={{ fontSize: "0.8rem" }}>{u.fullName} ({u.role})</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
-            </Box>
-          )}
-        </Stack>
-      </Box>
-
-      <Stack direction="row" spacing={1}>
-        {([
-          { key: "projects" as const, label: "My Projects" },
-          { key: "inspections" as const, label: "My Inspections" },
-          { key: "installs" as const, label: "My Installs" },
-        ]).map((tab) => (
-          <Chip
-            key={tab.key}
-            label={tab.label}
-            clickable
-            color={mobileManagerTab === tab.key ? "primary" : "default"}
-            variant={mobileManagerTab === tab.key ? "filled" : "outlined"}
-            onClick={() => setMobileManagerTab(tab.key)}
-            sx={{ flex: 1, height: 34 }}
-          />
-        ))}
-      </Stack>
-
-      {mobileManagerTab === "projects" && (
-        <>
-          {NeedsAttentionSection}
-
-          {pendingApprovals.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "warning.dark", background: "rgba(230,119,0,0.07)" }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 1 }}>
-                <AssignmentLateOutlined sx={{ fontSize: 18, color: "warning.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>Pending Approvals</Typography>
-                <Chip label={pendingApprovals.length} size="small" color="warning" variant="outlined"
-                  sx={{ height: 20, fontSize: "0.7rem" }} />
-              </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Projects waiting for your approval
-              </Typography>
-              <Stack direction="row" spacing={1} sx={{ overflowX: "auto", pb: 0.5 }} flexWrap="nowrap">
-                {pendingApprovals.map((p) => (
-                  <Chip key={p.id}
-                    label={p.jobNumber || p.id}
-                    onClick={() => navigate(`/projects/${p.id}`)}
-                    color="warning" variant="outlined"
-                    sx={{ flexShrink: 0, cursor: "pointer" }} />
-                ))}
-              </Stack>
-            </Box>
-          )}
-
-          {autoAssignFlags.length > 0 && (
-            <Box className="glass-card" sx={{ p: 2, border: "1px solid", borderColor: "info.dark", background: "rgba(2,136,209,0.07)" }}>
-              <Stack direction="row" alignItems="center" spacing={1} sx={{ mb: 0.5 }}>
-                <PersonOutlined sx={{ fontSize: 18, color: "info.main" }} />
-                <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora", flex: 1 }}>New Auto-assignments</Typography>
-                <Chip label={autoAssignFlags.length} size="small" color="info" variant="outlined" sx={{ height: 20, fontSize: "0.7rem" }} />
-                <Button size="small" variant="text" color="info" sx={{ fontSize: "0.72rem" }}
+                <Button size="small" variant="text" color="inherit"
+                  sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
                   onClick={() => {
-                    localStorage.removeItem("pm_auto_assign_flags");
-                    setAutoAssignFlags([]);
+                    const updated = autoAssignFlags.filter((x) => x.id !== f.id);
+                    localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
+                    setAutoAssignFlags(updated);
                   }}>
-                  Dismiss all
+                  ×
                 </Button>
               </Stack>
-              <Typography variant="caption" color="text.secondary" display="block" sx={{ mb: 1 }}>
-                Assets auto-assigned when an installer started a workflow
-              </Typography>
-              <Stack spacing={0.25}>
-                {autoAssignFlags.map((f) => (
-                  <Stack key={f.id} direction="row" alignItems="center" spacing={1}>
-                    <Box sx={{ flex: 1 }}>
-                      <DashboardAttentionItemRow
-                        label={`${f.jobNumber ? f.jobNumber + ": " : ""}${f.assetTag}`}
-                        sub={`Assigned by ${f.assignedBy} · ${fmtDate(f.assignedAt)}`}
-                        onClick={() => navigate("/installations/assets")}
-                      />
-                    </Box>
-                    <Button size="small" variant="text" color="inherit"
-                      sx={{ fontSize: "0.65rem", minWidth: 0, px: 1, opacity: 0.6 }}
-                      onClick={() => {
-                        const updated = autoAssignFlags.filter((x) => x.id !== f.id);
-                        localStorage.setItem("pm_auto_assign_flags", JSON.stringify(updated));
-                        setAutoAssignFlags(updated);
-                      }}>
-                      ×
-                    </Button>
-                  </Stack>
-                ))}
-              </Stack>
-            </Box>
-          )}
-
-          <Box className="glass-card" sx={{ p: 2 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: canViewAllProjects ? 1 : 1.5 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Projects</Typography>
-              <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
-            </Stack>
-            {canViewAllProjects && (
-              <Stack direction="row" spacing={0.75} sx={{ mb: 1.5 }}>
-                <Chip label="My Projects" clickable size="small"
-                  color={dashboardProjectScope === "mine" ? "primary" : "default"}
-                  variant={dashboardProjectScope === "mine" ? "filled" : "outlined"}
-                  onClick={() => setDashboardProjectScope("mine")}
-                  sx={{ height: 26, fontSize: "0.72rem" }} />
-                <Chip label="All Projects" clickable size="small"
-                  color={dashboardProjectScope === "all" ? "primary" : "default"}
-                  variant={dashboardProjectScope === "all" ? "filled" : "outlined"}
-                  onClick={() => setDashboardProjectScope("all")}
-                  sx={{ height: 26, fontSize: "0.72rem" }} />
-              </Stack>
-            )}
-            {dashboardProjects.length === 0
-              ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
-              : <Stack spacing={1}>
-                  {dashboardProjects.slice(0, 6).map((project) => {
-                    const { issueCount, totalAssets, complete, completionPct } = getProjectCompletionMetrics(project);
-
-                    return (
-                      <Paper key={project.id} elevation={0} onClick={() => navigate(projectAssetsPath(project))}
-                        sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                              "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                        <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
-                          <Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1 }}>
-                            {project.jobNumber}
-                          </Typography>
-                          <Chip
-                            label={workflowModeLabel(project.workflowMode)}
-                            color={workflowModeChipColor(project.workflowMode)}
-                            size="small"
-                            variant="outlined"
-                            sx={{ height: 22, fontSize: 11 }}
-                          />
-                        </Stack>
-                        <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ mb: 1 }}>
-                          {project.customerName || "No customer"} · {project.status}
-                        </Typography>
-                        <Stack direction="row" spacing={1} alignItems="center">
-                          <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                            {totalAssets} assets
-                          </Typography>
-                          <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
-                            {complete} done
-                          </Typography>
-                          <Box sx={{ flex: 1, minWidth: 80 }}>
-                            <LinearProgress
-                              variant="determinate"
-                              value={completionPct}
-                              color={issueCount > 0 ? "error" : "success"}
-                              sx={{ height: 6, borderRadius: 1 }}
-                            />
-                          </Box>
-                          <Typography variant="caption" color="text.secondary" sx={{ minWidth: 34, textAlign: "right", flexShrink: 0 }}>
-                            {completionPct}%
-                          </Typography>
-                        </Stack>
-                      </Paper>
-                    );
-                  })}
-                </Stack>
-            }
-          </Box>
-
-          {InspectionInboxSection}
-          {EvidenceHealthGrid}
-          {WorkloadPanel}
-        </>
+            ))}
+          </Stack>
+        </Box>
       )}
 
-      {mobileManagerTab === "inspections" && (
-        <>
-          {MyInspectionJobsToday}
-          {MyInspectionAttentionSection}
-          {MyInspectionJobHistory}
-          {InspectionInboxSection}
-          <Box className="glass-card" sx={{ p: 2 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Inspection Projects</Typography>
-              <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
-            </Stack>
-            {managedInspectionProjects.length === 0
-              ? <Typography variant="caption" color="text.secondary">No inspection projects in scope.</Typography>
-              : <Stack spacing={1}>
-                  {managedInspectionProjects.slice(0, 6).map((project) => (
-                    <Paper key={project.id} elevation={0} onClick={() => navigate(`/projects/${project.id}`)}
-                      sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                            "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                      <Typography variant="body2" fontWeight={700} noWrap>{project.jobNumber}</Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap display="block">
-                        {project.customerName || "No customer"} · {project.workflowMode ?? "Inspection"}
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: canViewAllProjects ? 1 : 1.5 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Projects</Typography>
+          <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
+        </Stack>
+        {canViewAllProjects && (
+          <Stack direction="row" spacing={0.75} sx={{ mb: 1.5 }}>
+            <Chip label="My Projects" clickable size="small"
+              color={dashboardProjectScope === "mine" ? "primary" : "default"}
+              variant={dashboardProjectScope === "mine" ? "filled" : "outlined"}
+              onClick={() => setDashboardProjectScope("mine")}
+              sx={{ height: 26, fontSize: "0.72rem" }} />
+            <Chip label="All Projects" clickable size="small"
+              color={dashboardProjectScope === "all" ? "primary" : "default"}
+              variant={dashboardProjectScope === "all" ? "filled" : "outlined"}
+              onClick={() => setDashboardProjectScope("all")}
+              sx={{ height: 26, fontSize: "0.72rem" }} />
+          </Stack>
+        )}
+        {dashboardProjects.length === 0
+          ? <Typography variant="caption" color="text.secondary">No projects in scope.</Typography>
+          : <Stack spacing={1}>
+              {dashboardProjects.slice(0, 6).map((project) => {
+                const { issueCount, totalAssets, complete, completionPct } = getProjectCompletionMetrics(project);
+
+                return (
+                  <Paper key={project.id} elevation={0} onClick={() => navigate(projectAssetsPath(project))}
+                    sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                          "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                    <Stack direction="row" spacing={1} alignItems="center" sx={{ mb: 0.5 }}>
+                      <Typography variant="body2" fontWeight={700} noWrap sx={{ flex: 1 }}>
+                        {project.jobNumber}
                       </Typography>
-                    </Paper>
-                  ))}
-                </Stack>
-            }
-          </Box>
-        </>
-      )}
-
-      {mobileManagerTab === "installs" && (
-        <>
-          <Box className="glass-card" sx={{ p: 2 }}>
-            <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-              <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Installs</Typography>
-              <Button size="small" variant="text" onClick={() => navigate("/installations/assets")}>View all</Button>
-            </Stack>
-            {managedOpenAssets.length === 0
-              ? <Typography variant="caption" color="text.secondary">No installation assets in scope.</Typography>
-              : <Stack spacing={1}>
-                  {managedOpenAssets.slice(0, 6).map((asset) => (
-                    <Paper key={asset.id} elevation={0} onClick={() => navigate("/installations/assets")}
-                      sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                            "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                      <Stack direction="row" spacing={1} alignItems="center">
-                        <Box sx={{ flex: 1, minWidth: 0 }}>
-                          <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag || asset.assetName || asset.id}</Typography>
-                          <Typography variant="caption" color="text.secondary" noWrap display="block">
-                            {asset.jobNumber} · {asset.assignedUserId ? "Assigned" : "Unassigned"}
-                          </Typography>
-                        </Box>
-                        <Chip
-                          label={dashboardStatusChip(asset).label}
-                          size="small"
-                          color={dashboardStatusChip(asset).color}
-                          variant="outlined"
-                          sx={{ height: 18, fontSize: "0.62rem" }}
+                      <Chip
+                        label={workflowModeLabel(project.workflowMode)}
+                        color={workflowModeChipColor(project.workflowMode)}
+                        size="small"
+                        variant="outlined"
+                        sx={{ height: 22, fontSize: 11 }}
+                      />
+                    </Stack>
+                    <Typography variant="caption" color="text.secondary" noWrap display="block" sx={{ mb: 1 }}>
+                      {project.customerName || "No customer"} · {project.status}
+                    </Typography>
+                    <Stack direction="row" spacing={1} alignItems="center">
+                      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                        {totalAssets} assets
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ flexShrink: 0 }}>
+                        {complete} done
+                      </Typography>
+                      <Box sx={{ flex: 1, minWidth: 80 }}>
+                        <LinearProgress
+                          variant="determinate"
+                          value={completionPct}
+                          color={issueCount > 0 ? "error" : "success"}
+                          sx={{ height: 6, borderRadius: 1 }}
                         />
-                      </Stack>
-                    </Paper>
-                  ))}
-                </Stack>
-            }
-          </Box>
+                      </Box>
+                      <Typography variant="caption" color="text.secondary" sx={{ minWidth: 34, textAlign: "right", flexShrink: 0 }}>
+                        {completionPct}%
+                      </Typography>
+                    </Stack>
+                  </Paper>
+                );
+              })}
+            </Stack>
+        }
+      </Box>
 
-          {WorkloadPanel}
-          {EvidenceHealthGrid}
-        </>
-      )}
-    </Stack>
+      {InspectionInboxSection}
+      {EvidenceHealthGrid}
+      {WorkloadPanel}
+    </>
+  );
+
+  const managerMobileInspectionsTab = (
+    <>
+      {MyInspectionJobsToday}
+      {MyInspectionAttentionSection}
+      {MyInspectionJobHistory}
+      {InspectionInboxSection}
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>Inspection Projects</Typography>
+          <Button size="small" variant="text" onClick={() => navigate("/projects")}>View all</Button>
+        </Stack>
+        {managedInspectionProjects.length === 0
+          ? <Typography variant="caption" color="text.secondary">No inspection projects in scope.</Typography>
+          : <Stack spacing={1}>
+              {managedInspectionProjects.slice(0, 6).map((project) => (
+                <Paper key={project.id} elevation={0} onClick={() => navigate(`/projects/${project.id}`)}
+                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                        "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                  <Typography variant="body2" fontWeight={700} noWrap>{project.jobNumber}</Typography>
+                  <Typography variant="caption" color="text.secondary" noWrap display="block">
+                    {project.customerName || "No customer"} · {project.workflowMode ?? "Inspection"}
+                  </Typography>
+                </Paper>
+              ))}
+            </Stack>
+        }
+      </Box>
+    </>
+  );
+
+  const managerMobileInstallsTab = (
+    <>
+      <Box className="glass-card" sx={{ p: 2 }}>
+        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
+          <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Installs</Typography>
+          <Button size="small" variant="text" onClick={() => navigate("/installations/assets")}>View all</Button>
+        </Stack>
+        {managedOpenAssets.length === 0
+          ? <Typography variant="caption" color="text.secondary">No installation assets in scope.</Typography>
+          : <Stack spacing={1}>
+              {managedOpenAssets.slice(0, 6).map((asset) => (
+                <Paper key={asset.id} elevation={0} onClick={() => navigate("/installations/assets")}
+                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
+                        "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
+                  <Stack direction="row" spacing={1} alignItems="center">
+                    <Box sx={{ flex: 1, minWidth: 0 }}>
+                      <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag || asset.assetName || asset.id}</Typography>
+                      <Typography variant="caption" color="text.secondary" noWrap display="block">
+                        {asset.jobNumber} · {asset.assignedUserId ? "Assigned" : "Unassigned"}
+                      </Typography>
+                    </Box>
+                    <Chip
+                      label={dashboardStatusChip(asset).label}
+                      size="small"
+                      color={dashboardStatusChip(asset).color}
+                      variant="outlined"
+                      sx={{ height: 18, fontSize: "0.62rem" }}
+                    />
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+        }
+      </Box>
+
+      {WorkloadPanel}
+      {EvidenceHealthGrid}
+    </>
+  );
+
+  const ManagerMobileHome = (
+    <DashboardManagerMobileHome
+      userFullName={user.fullName}
+      userRole={user.role}
+      userId={user.id}
+      activeOffice={activeOffice}
+      canViewAllProjects={canViewAllProjects}
+      managedProjectsCount={managedProjects.length}
+      managedOverdueCount={managedOverdueProjects.length}
+      managedInspectionCount={managedInspectionProjects.length}
+      managedOpenAssetsCount={managedOpenAssets.length}
+      overviewActiveCount={overviewActiveCount}
+      overviewPausedCount={overviewPausedCount}
+      overviewQueuedCount={overviewQueuedCount}
+      overviewPendingCount={overviewPendingCount}
+      isAdmin={isAdmin}
+      dashboardUsers={dashboardUsers}
+      viewingOwnDashboard={viewingOwnDashboard}
+      viewedDashboardUser={viewedDashboardUser ?? null}
+      selectedDashboardId={selectedDashboardId}
+      allDashboardsValue={ALL_DASHBOARDS_VALUE}
+      onSelectedDashboardIdChange={setSelectedDashboardId}
+      mobileManagerTab={mobileManagerTab}
+      onMobileManagerTabChange={setMobileManagerTab}
+      projectsTab={managerMobileProjectsTab}
+      inspectionsTab={managerMobileInspectionsTab}
+      installsTab={managerMobileInstallsTab}
+    />
   );
 
   return (
@@ -5178,7 +4945,7 @@ const Dashboard = () => {
                   {statusGroups.map(([status, count]) => (
                     <Stack key={status} direction="row" alignItems="center" spacing={1.5}>
                       <Chip label={status} size="small"
-                        color={(statusColor[status] ?? "default") as "default" | "primary" | "secondary" | "error" | "info" | "success" | "warning"}
+                        color={projectStatusChipColor(status)}
                         variant="outlined" sx={{ fontSize: "0.68rem", height: 20, minWidth: 100 }} />
                       <Box sx={{ flex: 1, height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
                         <Box sx={{
