@@ -5,7 +5,6 @@ import {
   AssignmentOutlined,
   CheckBoxOutlineBlankOutlined,
   CheckBoxOutlined,
-  CheckCircleOutlined,
   CloseOutlined,
   DrawOutlined,
   ErrorOutlined,
@@ -13,7 +12,6 @@ import {
   ExpandMoreOutlined,
   FileUploadOutlined,
   GridOnOutlined,
-  HourglassEmptyOutlined,
   InfoOutlined,
   PhotoCameraOutlined,
   RefreshOutlined,
@@ -26,7 +24,6 @@ import {
   Badge,
   Box,
   Button,
-  Checkbox,
   Chip,
   CircularProgress,
   Collapse,
@@ -45,11 +42,8 @@ import {
   List,
   ListItem,
   ListItemButton,
-  ListItemText,
-  Menu,
   MenuItem,
   Paper,
-  Popover,
   Select,
   Skeleton,
   Stack,
@@ -166,7 +160,9 @@ import {
   retryOfflineDownload,
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
+import AssetInstallationColumnFilterMenu from "./AssetInstallationColumnFilterMenu";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import AssetInstallationPausedProgressPopover from "./AssetInstallationPausedProgressPopover";
 import AssetInstallationBulkDocsUploadDialog from "./AssetInstallationBulkDocsUploadDialog";
 import AssetInstallationBulkTechAssignDialog from "./AssetInstallationBulkTechAssignDialog";
 import AssetInstallationBulkWarnDialog from "./AssetInstallationBulkWarnDialog";
@@ -4674,38 +4670,26 @@ ${words.slice(midpoint).join(" ")}`;
         onUpdated={handleEditAssetUpdated}
       />
 
-      {/* Column sort / filter menu */}
-      <Menu anchorEl={autoMenu.anchorEl} open={Boolean(autoMenu.anchorEl)} onClose={() => setAutoMenu({ anchorEl: null, key: "" })}>
-        {(autoMenu.key === "dateCreated" || autoMenu.key === "dateClosed") ? (
-          <>
-            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort oldest first</MenuItem>
-            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort newest first</MenuItem>
-          </>
-        ) : (
-          <>
-            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort A → Z</MenuItem>
-            <MenuItem onClick={() => { if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: "desc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Sort Z → A</MenuItem>
-          </>
-        )}
-        <MenuItem onClick={() => { setAutoSort({ key: "", dir: "asc" }); setAutoMenu({ anchorEl: null, key: "" }); }}>Clear sort</MenuItem>
-        {(assetFilterOptions[autoMenu.key] ?? []).map((option) => {
-          const label = option || "(Blank)";
-          const selected = !!autoFilters[autoMenu.key]?.has(option);
-          return (
-            <MenuItem key={`${autoMenu.key}-${option}`} onClick={() => {
-              if (!autoMenu.key) return;
-              setAutoFilters((prev) => {
-                const cur = new Set(prev[autoMenu.key] ?? []);
-                if (cur.has(option)) cur.delete(option); else cur.add(option);
-                return { ...prev, [autoMenu.key]: cur };
-              });
-            }}>
-              <Checkbox checked={selected} size="small" />
-              <ListItemText primary={label} />
-            </MenuItem>
-          );
-        })}
-      </Menu>
+      <AssetInstallationColumnFilterMenu
+        anchorEl={autoMenu.anchorEl}
+        columnKey={autoMenu.key}
+        filterOptions={assetFilterOptions[autoMenu.key] ?? []}
+        selectedOptions={autoMenu.key ? autoFilters[autoMenu.key] : undefined}
+        onClose={() => setAutoMenu({ anchorEl: null, key: "" })}
+        onApplySort={(direction) => {
+          if (autoMenu.key) setAutoSort({ key: autoMenu.key, dir: direction });
+        }}
+        onClearSort={() => setAutoSort({ key: "", dir: "asc" })}
+        onToggleFilterOption={(option) => {
+          if (!autoMenu.key) return;
+          setAutoFilters((prev) => {
+            const cur = new Set(prev[autoMenu.key] ?? []);
+            if (cur.has(option)) cur.delete(option);
+            else cur.add(option);
+            return { ...prev, [autoMenu.key]: cur };
+          });
+        }}
+      />
 
       <AssetInstallationArchiveConfirmDialog
         asset={deleteAsset}
@@ -4874,42 +4858,14 @@ ${words.slice(midpoint).join(" ")}`;
         onComplete={() => { void refreshAssets(); }}
       />
 
-      {/* Paused progress popover â€" click badge to see completed steps */}
-      <Popover
-        open={Boolean(progressPopoverAnchor)}
+      <AssetInstallationPausedProgressPopover
         anchorEl={progressPopoverAnchor}
-        onClose={() => { setProgressPopoverAnchor(null); setProgressPopoverAssetId(null); }}
-        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
-        transformOrigin={{ vertical: "top", horizontal: "center" }}
-        slotProps={{ paper: { sx: { p: 1.5, minWidth: 220, maxWidth: 320 } } }}
-      >
-        {progressPopoverAssetId && (() => {
-          const prog = pausedProgress[progressPopoverAssetId];
-          if (!prog) return null;
-          return (
-            <Box>
-              <Typography variant="caption" fontWeight={700} color="text.secondary"
-                sx={{ textTransform: "uppercase", letterSpacing: 0.5, display: "block", mb: 1 }}>
-                Progress - {prog.done} of {prog.total} steps
-              </Typography>
-              <Stack spacing={0.4}>
-                {prog.completedTitles.map((title, idx) => (
-                  <Stack key={idx} direction="row" alignItems="center" spacing={0.75}>
-                    <CheckCircleOutlined sx={{ fontSize: 14, color: "success.main", flexShrink: 0 }} />
-                    <Typography variant="caption" noWrap>{title || `Step ${idx + 1}`}</Typography>
-                  </Stack>
-                ))}
-                {prog.done < prog.total && (
-                  <Stack direction="row" alignItems="center" spacing={0.75} sx={{ opacity: 0.45 }}>
-                    <HourglassEmptyOutlined sx={{ fontSize: 14, flexShrink: 0 }} />
-                    <Typography variant="caption">{prog.total - prog.done} step{prog.total - prog.done !== 1 ? "s" : ""} remaining</Typography>
-                  </Stack>
-                )}
-              </Stack>
-            </Box>
-          );
-        })()}
-      </Popover>
+        progress={progressPopoverAssetId ? pausedProgress[progressPopoverAssetId] : null}
+        onClose={() => {
+          setProgressPopoverAnchor(null);
+          setProgressPopoverAssetId(null);
+        }}
+      />
 
       <AssetInstallationAssignmentContextMenu
         anchorEl={contextMenuAnchor}
