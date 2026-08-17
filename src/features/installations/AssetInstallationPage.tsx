@@ -170,7 +170,9 @@ import {
 } from "../../services/workflowOpenService";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import AssetInstallationColumnSettingsDialog from "./AssetInstallationColumnSettingsDialog";
+import AssetInstallationCsvImportDialog from "./AssetInstallationCsvImportDialog";
 import { useAssetInstallationColumnConfig } from "./useAssetInstallationColumnConfig";
+import { mergeImportedAssets, useAssetInstallationCsvImport } from "./useAssetInstallationCsvImport";
 import {
   assetHasConfiguredWorkflow,
   computeHealth,
@@ -417,6 +419,16 @@ const AssetInstallationPage = () => {
     applyColumnSettings,
   } = useAssetInstallationColumnConfig(archiveMode);
 
+  const {
+    csvImportOpen,
+    setCsvImportOpen,
+    csvRows,
+    setCsvRows,
+    csvImporting,
+    closeCsvImport,
+    importCsv,
+  } = useAssetInstallationCsvImport();
+
   // Issues
   const [issueDialogOpen, setIssueDialogOpen] = useState(false);
   const [issueDialogAsset, setIssueDialogAsset] = useState<ProjectAsset | null>(null);
@@ -474,11 +486,6 @@ const AssetInstallationPage = () => {
 
   // Column filters
   const [colFilters, setColFilters] = useState<Record<string, string>>({});
-
-  // CSV import
-  const [csvImportOpen, setCsvImportOpen] = useState(false);
-  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
-  const [csvImporting, setCsvImporting] = useState(false);
 
   // Bulk selection
   const [selectedAssetIds, setSelectedAssetIds] = useState<Set<string>>(new Set());
@@ -2142,6 +2149,20 @@ const AssetInstallationPage = () => {
     setAddOpen(true);
   }
 
+  async function handleImportCsv() {
+    if (!activeProduct) return;
+    await importCsv({
+      activeProduct,
+      projectId: selectedProjectId,
+      fallbackProjectId: projects[0]?.id,
+      workflowConfigs,
+      onAssetsCreated: (created) => {
+        setAssets((prev) => mergeImportedAssets(prev, created));
+      },
+      onRefresh: () => { void refreshAssets(); },
+    });
+  }
+
   // ------------------------------------------------------------------
   // Edit asset
   // ------------------------------------------------------------------
@@ -3576,70 +3597,6 @@ ${words.slice(midpoint).join(" ")}`;
   }, []);
 
   // ------------------------------------------------------------------
-  // CSV import helpers
-  // ------------------------------------------------------------------
-
-  function parseCSV(text: string): Record<string, string>[] {
-    const lines = text.trim().split("\n");
-    if (lines.length < 2) return [];
-    const cols = lines[0].split(",").map((c) => c.trim().toLowerCase().replace(/[\s#]+/g, "_").replace(/^"|"$/g, ""));
-    return lines.slice(1).map((row) => {
-      const vals = row.split(",").map((v) => v.trim().replace(/^"|"$/g, ""));
-      return Object.fromEntries(cols.map((c, i) => [c, vals[i] ?? ""]));
-    }).filter((r) => Object.values(r).some(Boolean));
-  }
-
-  async function handleCSVFile(file: File) {
-    const text = await file.text();
-    const rows = parseCSV(text);
-    setCsvRows(rows);
-    setCsvImportOpen(true);
-  }
-
-  async function importCSV() {
-    if (!activeProduct || csvRows.length === 0) return;
-    setCsvImporting(true);
-    try {
-      const configsByType = new Map(workflowConfigs.map((c) => [c.configType?.toLowerCase(), c]));
-      const assets = csvRows
-        .filter((r) => r.asset_tag || r.assettag)
-        .map((r) => ({
-          assetTag: r.asset_tag || r.assettag || "",
-          assetName: r.asset_name || r.assetname || "",
-          serialNumber: r.serial_number || r["serial_#"] || r.serialnumber || "",
-          assetModel: r.model || r.asset_model || "",
-          manufacturer: r.manufacturer || "",
-          productConfigId: (() => {
-            const ct = (r.config_type || r.configtype || "").toLowerCase();
-            return configsByType.get(ct)?.id;
-          })(),
-        }));
-      const created = await Promise.all(assets.map((a) =>
-        projectAssetService.create({
-          projectId: selectedProjectId || projects[0]?.id || "",
-          productId: activeProduct.id,
-          assetTag: a.assetTag,
-          assetName: a.assetName || undefined,
-          serialNumber: a.serialNumber || undefined,
-          assetModel: a.assetModel || undefined,
-          manufacturer: a.manufacturer || undefined,
-          productConfigId: a.productConfigId,
-        }),
-      ));
-      setAssets((prev) => {
-        const merged = [...prev];
-        for (const asset of created) {
-          if (!merged.some((item) => item.id === asset.id)) merged.push(asset);
-        }
-        return merged;
-      });
-      setCsvImportOpen(false);
-      setCsvRows([]);
-      void refreshAssets();
-    } catch { alert("Import failed. Check your CSV and try again."); } finally {
-      setCsvImporting(false);
-    }
-  }
 
   function issuesBadge(asset: ProjectAsset) {
     let issues: AssetIssue[] = [];
@@ -6482,126 +6439,14 @@ ${words.slice(midpoint).join(" ")}`;
         </DialogActions>
       </Dialog>
 
-      {/* CSV import dialog */}
-      <Dialog open={csvImportOpen} onClose={() => !csvImporting && setCsvImportOpen(false)} maxWidth="md" fullWidth>
-        <DialogTitle>
-          <Stack direction="row" alignItems="center" justifyContent="space-between">
-            <Stack direction="row" alignItems="center" spacing={1}>
-              <FileUploadOutlined fontSize="small" />
-              <span>Import Assets from CSV</span>
-            </Stack>
-            <Tooltip title={
-              <Box sx={{ fontSize: 12 }}>
-                <strong>Expected columns:</strong><br />
-                Asset Tag* (required)<br />
-                Asset Name<br />
-                Config Type (matched to published configs)<br />
-                Serial # / Serial Number<br />
-                Model / Asset Model<br />
-                Manufacturer
-              </Box>
-            }>
-              <IconButton size="small" sx={{ opacity: 0.6 }}>
-                <Typography sx={{ fontSize: 14, fontWeight: 700, lineHeight: 1 }}>i</Typography>
-              </IconButton>
-            </Tooltip>
-          </Stack>
-        </DialogTitle>
-        <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {csvRows.length === 0 ? (
-              <Box
-                sx={{
-                  border: "2px dashed",
-                  borderColor: "divider",
-                  borderRadius: 2,
-                  p: 4,
-                  textAlign: "center",
-                  cursor: "pointer",
-                  "&:hover": { borderColor: "primary.main", bgcolor: "action.hover" },
-                }}
-                onClick={() => document.getElementById("csv-upload-input")?.click()}
-              >
-                <FileUploadOutlined sx={{ fontSize: 40, opacity: 0.4, mb: 1 }} />
-                <Typography variant="body2" color="text.secondary">Click to upload a CSV file</Typography>
-                <Typography variant="caption" color="text.disabled">or drag and drop</Typography>
-                <input
-                  id="csv-upload-input"
-                  type="file"
-                  accept=".csv"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) handleCSVFile(file);
-                    e.target.value = "";
-                  }}
-                />
-              </Box>
-            ) : (
-              <>
-                <Alert severity="info" sx={{ fontSize: 12 }}>
-                  {csvRows.filter((r) => r.asset_tag || r.assettag).length} valid rows found.
-                  {csvRows.filter((r) => !r.asset_tag && !r.assettag).length > 0 &&
-                    ` ${csvRows.filter((r) => !r.asset_tag && !r.assettag).length} rows skipped (missing asset tag).`
-                  }
-                </Alert>
-                <Box sx={{ maxHeight: 320, overflow: "auto" }}>
-                  <Table size="small" sx={{ minWidth: 650 }}>
-                    <TableHead>
-                      <TableRow>
-                        <TableCell><Typography variant="caption" fontWeight={700}>Asset Tag</Typography></TableCell>
-                        <TableCell><Typography variant="caption" fontWeight={700}>Asset Name</Typography></TableCell>
-                        <TableCell><Typography variant="caption" fontWeight={700}>Config Type</Typography></TableCell>
-                        <TableCell><Typography variant="caption" fontWeight={700}>Serial #</Typography></TableCell>
-                        <TableCell><Typography variant="caption" fontWeight={700}>Model</Typography></TableCell>
-                      </TableRow>
-                    </TableHead>
-                    <TableBody>
-                      {csvRows.map((r, i) => {
-                        const tag = r.asset_tag || r.assettag;
-                        const valid = !!tag;
-                        return (
-                          <TableRow key={i} sx={{ opacity: valid ? 1 : 0.4 }}>
-                            <TableCell>
-                              <Stack direction="row" alignItems="center" spacing={0.5}>
-                                <Box sx={{ width: 6, height: 6, borderRadius: "50%", bgcolor: valid ? "success.main" : "error.main", flexShrink: 0 }} />
-                                <Typography variant="body2">{tag || "(missing)"}</Typography>
-                              </Stack>
-                            </TableCell>
-                            <TableCell><Typography variant="body2">{r.asset_name || r.assetname || "-"}</Typography></TableCell>
-                            <TableCell><Typography variant="body2">{r.config_type || r.configtype || "-"}</Typography></TableCell>
-                            <TableCell><Typography variant="body2">{r.serial_number || r["serial_#"] || r.serialnumber || "-"}</Typography></TableCell>
-                            <TableCell><Typography variant="body2">{r.model || r.asset_model || "-"}</Typography></TableCell>
-                          </TableRow>
-                        );
-                      })}
-                    </TableBody>
-                  </Table>
-                </Box>
-                <Button
-                  size="small"
-                  variant="text"
-                  onClick={() => setCsvRows([])}
-                  sx={{ alignSelf: "flex-start", fontSize: 12 }}
-                >
-                  Clear / upload different file
-                </Button>
-              </>
-            )}
-          </Stack>
-        </DialogContent>
-        <DialogActions>
-          <Button onClick={() => { setCsvImportOpen(false); setCsvRows([]); }} disabled={csvImporting}>Cancel</Button>
-          <Button
-            variant="contained"
-            onClick={importCSV}
-            disabled={csvImporting || csvRows.filter((r) => r.asset_tag || r.assettag).length === 0}
-            startIcon={csvImporting ? <CircularProgress size={14} /> : <FileUploadOutlined />}
-          >
-            {csvImporting ? "Importing..." : `Import ${csvRows.filter((r) => r.asset_tag || r.assettag).length} asset${csvRows.filter((r) => r.asset_tag || r.assettag).length !== 1 ? "s" : ""}`}
-          </Button>
-        </DialogActions>
-      </Dialog>
+      <AssetInstallationCsvImportDialog
+        open={csvImportOpen}
+        importing={csvImporting}
+        rows={csvRows}
+        onClose={closeCsvImport}
+        onRowsChange={setCsvRows}
+        onImport={() => { void handleImportCsv(); }}
+      />
 
       <Dialog
         open={reportExportOpen}
