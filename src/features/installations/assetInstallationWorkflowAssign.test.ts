@@ -1,10 +1,16 @@
 import { describe, expect, it } from "vitest";
+import type { ProjectAsset } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
-import type { WorkflowType } from "../../types/workflowType";
+import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import {
   assignFormFromConfigSelection,
   buildAssignFormPreselection,
+  buildBulkAssignOpenForm,
+  buildBulkAssignWarnRows,
+  dedupeLatestPublishedWorkflowConfigs,
+  filterBulkWorkflowConfigs,
   filterPublishedConfigsForRequestedType,
+  findAssetsNeedingBulkAssignWarning,
   resolveAssignmentWorkflowTypeId,
   resolveRequestedWorkflowTypeId,
 } from "./assetInstallationWorkflowAssign";
@@ -123,5 +129,78 @@ describe("resolveAssignmentWorkflowTypeId", () => {
 
   it("returns empty when config is missing and form type is empty", () => {
     expect(resolveAssignmentWorkflowTypeId("", "missing", [], types)).toBe("");
+  });
+});
+
+describe("dedupeLatestPublishedWorkflowConfigs", () => {
+  it("keeps highest version per config name", () => {
+    const configs = [
+      config({ id: "v1", name: "Install", version: 1 }),
+      config({ id: "v3", name: "Install", version: 3 }),
+      config({ id: "v2", name: "Install", version: 2 }),
+      config({ id: "other", name: "Inspect", version: 1 }),
+    ];
+    expect(dedupeLatestPublishedWorkflowConfigs(configs).map((c) => c.id)).toEqual(["other", "v3"]);
+  });
+});
+
+describe("filterBulkWorkflowConfigs", () => {
+  const configs = [
+    config({ id: "c1", name: "A", workflowTypeId: "type-install", configType: "Installation" }),
+    config({ id: "c2", name: "B", workflowTypeId: "type-inspection", configType: "Inspection" }),
+  ];
+
+  it("returns all configs when no type is selected", () => {
+    expect(filterBulkWorkflowConfigs(configs, null)).toEqual(configs);
+  });
+
+  it("filters by workflowTypeId or configType name", () => {
+    expect(filterBulkWorkflowConfigs(configs, types[0]).map((c) => c.id)).toEqual(["c1"]);
+  });
+});
+
+describe("bulk assign warning helpers", () => {
+  const assets = [
+    { id: "a1", assetTag: "TAG-1", status: "NotStarted" },
+    { id: "a2", assetTag: "TAG-2", status: "InProgress" },
+    { id: "a3", assetTag: "TAG-3", status: "NotStarted" },
+  ] as ProjectAsset[];
+
+  const assignmentsMap: Record<string, WorkflowAssignment[]> = {
+    a3: [
+      {
+        id: "asgn-1",
+        assetId: "a3",
+        workflowConfigId: "cfg-1",
+        workflowTypeId: "type-install",
+        workflowTypeName: "Installation",
+        workflowConfigName: "Install v1",
+        active: true,
+        assignedAt: "",
+      },
+    ],
+  };
+
+  it("findAssetsNeedingBulkAssignWarning flags assignments and active statuses", () => {
+    expect(findAssetsNeedingBulkAssignWarning(assets, assignmentsMap).map((a) => a.id)).toEqual([
+      "a2",
+      "a3",
+    ]);
+  });
+
+  it("buildBulkAssignWarnRows describes current assignment or status", () => {
+    expect(buildBulkAssignWarnRows([assets[1], assets[2]], assignmentsMap)).toEqual([
+      { assetTag: "TAG-2", current: "InProgress" },
+      { assetTag: "TAG-3", current: "Installation" },
+    ]);
+  });
+});
+
+describe("buildBulkAssignOpenForm", () => {
+  it("preselects workflow type from URL param and clears config", () => {
+    expect(buildBulkAssignOpenForm("installation", types)).toEqual({
+      workflowTypeId: "type-install",
+      workflowConfigId: "",
+    });
   });
 });
