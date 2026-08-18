@@ -18,7 +18,10 @@ export interface Feature {
   manufacturerPartNumber?: string;
   unitPrice?: number;
   productLink?: string;
+  /** Linked product display names (for read-only display, e.g. table chips). */
   linkedProducts?: string[];
+  /** Linked product ids — the many-to-many Feature↔Product link, editable via featureService.linkToProduct/unlinkFromProduct. */
+  linkedProductIds?: string[];
 }
 
 export interface FeatureSubProperty {

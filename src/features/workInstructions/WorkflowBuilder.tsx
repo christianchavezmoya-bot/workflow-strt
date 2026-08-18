@@ -3,6 +3,7 @@ import {
   AccountTreeOutlined,
   AddOutlined,
   AttachFileOutlined,
+  CancelOutlined,
   CheckCircleOutlined,
   ContentCopyOutlined,
   DeleteOutline,
@@ -51,7 +52,7 @@ import {
   Typography,
 } from "@mui/material";
 import type { CaptureField, CaptureFieldType, Decision, MediaItem, StepInput, StepInputType, StepType, Workflow, WorkflowStep } from "../../types/workflow";
-import { STEP_TYPE_LABELS } from "../../types/workflow";
+import { STEP_TYPE_LABELS, isOptionListInputType } from "../../types/workflow";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
@@ -182,6 +183,8 @@ function defaultLabelForInput(type: StepInputType, workflowTypeName?: string): s
     case "text": return "Text response";
     case "number": return "Numeric value";
     case "choice": return "Select one";
+    case "dropdown": return "Select one";
+    case "wheel": return "Select one";
     case "checkbox": return "Confirm";
     case "photo": return "Upload photo";
     case "video": return "Upload video";
@@ -231,6 +234,13 @@ interface WorkflowBuilderProps {
   onConfigPublished?: (config: WorkflowConfig) => void;
   /** Called when user clicks "New Work Instruction" from inside the builder. */
   onNewConfig?: () => void;
+  /**
+   * Called when the user cancels out of the builder. If the active config was a
+   * still-unpublished Draft, it has already been deleted server-side by the time
+   * this fires and `deletedConfigId` is set so the caller can drop it from any
+   * local list state; navigates back to the instructions list either way.
+   */
+  onCancel?: (deletedConfigId?: string) => void;
 }
 
 // ─── MobileStepStrip ───────────────────────────────────────────────────────
@@ -288,7 +298,7 @@ function MobileStepStrip({ stepsSorted, selectedStepId, onSelect, onAdd }: Mobil
 
 // ───────────────────────────────────────────────────────────────────────────
 
-const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished, onNewConfig }: WorkflowBuilderProps) => {
+const WorkflowBuilder = ({ productId, productName, productFeatures = [], initialConfigId, configName, onConfigSaved, onConfigPublished, onNewConfig, onCancel }: WorkflowBuilderProps) => {
   // Publishing is a separate Tier-2 right from building: a role may be allowed to draft a
   // workflow without being allowed to release it to the field. Entry into the builder is
   // gated on `build` by WorkInstructions; this gates the release action itself.
@@ -384,6 +394,14 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   // Load workflow from WorkflowConfig
   useEffect(() => {
+    // Guards against a slow/stale response landing after the user has already
+    // switched to a different config (e.g. clicking "New Workflow" again before
+    // the previous config's GET resolves) — without this, the late response
+    // would silently overwrite the newly-selected config's freshly-loaded state,
+    // and the debounce autosave would then persist the stale content onto the
+    // NEW config's server record.
+    let cancelled = false;
+
     justLoadedRef.current = true;
     importedRef.current = false;  // reset import guard on config change
     setCurrentConfig(null);
@@ -408,7 +426,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     // Authoritative load from API — skip if user already imported a file
     workflowConfigService.getById(initialConfigId)
       .then((cfg) => {
-        if (!cfg) return;
+        if (cancelled || !cfg) return;
         setCurrentConfig(cfg);
         if (importedRef.current) return; // user imported after page load — don't overwrite
         try {
@@ -449,6 +467,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         }
       })
       .catch(() => { /* keep LS fallback */ });
+
+    return () => { cancelled = true; };
   }, [productId, initialConfigId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const stepsSorted = useMemo(
@@ -788,7 +808,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         type,
         label: label ?? defaultLabelForInput(type, activeTypeName),
         required: false,
-        options: options ?? (type === "choice" ? ["Option A", "Option B"] : undefined),
+        options: options ?? (isOptionListInputType(type) ? ["Option A", "Option B"] : undefined),
         featureId,
         subFields: subFields?.length ? subFields : undefined,
       });
@@ -1152,6 +1172,39 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               Reset
             </Button>
           </Tooltip>
+          {onCancel && (
+            <Tooltip title={isReadOnly ? "Leave the builder without changes" : "Discard this draft and go back"}>
+              <Button
+                size="small"
+                variant="outlined"
+                color="error"
+                startIcon={<CancelOutlined />}
+                onClick={() => {
+                  const activeConfigId = resolvedConfigIdRef.current ?? initialConfigId;
+                  const isDraft = !isReadOnly;
+                  setConfirmDialog({
+                    message: isDraft
+                      ? "Cancel this workflow? The draft that was created for it will be permanently deleted and cannot be recovered."
+                      : "Leave the builder and go back to Work Instructions?",
+                    onConfirm: () => {
+                      void (async () => {
+                        if (isDraft && activeConfigId) {
+                          try {
+                            await workflowConfigService.remove(activeConfigId, productId);
+                          } catch (err) {
+                            console.error("Failed to delete draft workflow config", err);
+                          }
+                        }
+                        onCancel(isDraft ? (activeConfigId ?? undefined) : undefined);
+                      })();
+                    },
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+            </Tooltip>
+          )}
         </Stack>
       </Stack>
 
@@ -2194,7 +2247,9 @@ function DecisionsSection({
 const INPUT_TYPES: { type: StepInputType; label: string }[] = [
   { type: "text", label: "Text" },
   { type: "number", label: "Number" },
-  { type: "choice", label: "Choice (multiple options)" },
+  { type: "choice", label: "Choice buttons (best for ≤5 options)" },
+  { type: "dropdown", label: "Dropdown (best for many options)" },
+  { type: "wheel", label: "Wheel picker (best for many options)" },
   { type: "checkbox", label: "Checkbox (confirm)" },
   { type: "photo", label: "Photo capture" },
   { type: "video", label: "Video capture" },
@@ -2283,7 +2338,7 @@ function InputsSection({
                     </Typography>
                   </Stack>
                 </Stack>
-                {inp.type === "choice" && (
+                {isOptionListInputType(inp.type) && (
                   <OptionsField
                     options={inp.options || []}
                     onCommit={(opts) => onUpdateInput(inp.id, { options: opts })}
@@ -3510,6 +3565,44 @@ function InputPreview({ inp }: { inp: StepInput }) {
         ) : (
           inp.options!.map((opt, idx) => <Chip key={idx} label={opt} size="small" variant="outlined" />)
         )}
+      </Stack>
+    );
+  }
+  if (inp.type === "dropdown") {
+    const opts = inp.options ?? [];
+    return (
+      <FormControl size="small" fullWidth disabled>
+        <Select value={opts[0] ?? ""} displayEmpty>
+          {opts.length === 0 ? (
+            <MenuItem value="" disabled>No options set</MenuItem>
+          ) : (
+            opts.map((opt, idx) => <MenuItem key={idx} value={opt}>{opt}</MenuItem>)
+          )}
+        </Select>
+      </FormControl>
+    );
+  }
+  if (inp.type === "wheel") {
+    const opts = inp.options ?? [];
+    if (opts.length === 0) {
+      return <Typography variant="caption" color="text.secondary">No options set</Typography>;
+    }
+    return (
+      <Stack sx={{ width: 160, border: "1px solid", borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
+        {opts.slice(0, 3).map((opt, idx) => (
+          <Box
+            key={idx}
+            sx={{
+              px: 1, py: 0.5, textAlign: "center",
+              bgcolor: idx === 1 ? "action.selected" : "transparent",
+              borderTop: idx === 1 ? "1px solid" : "none",
+              borderBottom: idx === 1 ? "1px solid" : "none",
+              borderColor: "primary.main",
+            }}
+          >
+            <Typography variant="caption" fontWeight={idx === 1 ? 700 : 400}>{opt}</Typography>
+          </Box>
+        ))}
       </Stack>
     );
   }

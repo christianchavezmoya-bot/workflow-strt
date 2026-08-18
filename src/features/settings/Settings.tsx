@@ -677,6 +677,8 @@ const Settings = () => {
   const [featureEditId, setFeatureEditId] = useState<string | null>(null);
   const [featureJustCreatedId, setFeatureJustCreatedId] = useState<string | null>(null);
   const [featureForm, setFeatureForm] = useState({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [] as string[], brand: "", supplier: "", alternativePartNumber: "", manufacturerPartNumber: "", unitPrice: "", productLink: "", productLinks: [] as string[] });
+  /** Snapshot of the product ids linked when the edit dialog was opened, used to diff against featureForm.productLinks on save. */
+  const [featureOriginalProductLinks, setFeatureOriginalProductLinks] = useState<string[]>([]);
   const [featureSaving, setFeatureSaving] = useState(false);
   const [featureError, setFeatureError] = useState<string | null>(null);
 
@@ -918,6 +920,16 @@ const Settings = () => {
           captureFields: featureForm.captureFields,
           ...procurementFields,
         });
+        // Sync product links: link newly-checked products, unlink newly-unchecked ones
+        const toLink = featureForm.productLinks.filter((pid) => !featureOriginalProductLinks.includes(pid));
+        const toUnlink = featureOriginalProductLinks.filter((pid) => !featureForm.productLinks.includes(pid));
+        if (toLink.length > 0 || toUnlink.length > 0) {
+          await Promise.all([
+            ...toLink.map((pid) => featureService.linkToProduct(pid, featureEditId)),
+            ...toUnlink.map((pid) => featureService.unlinkFromProduct(pid, featureEditId)),
+          ]);
+          await loadProducts();
+        }
         await loadFeatures();
         setFeatureDialog(false);
       } else {
@@ -2403,6 +2415,7 @@ const Settings = () => {
                     setFeatureEditId(null);
                     setFeatureJustCreatedId(null);
                     setFeatureForm({ name: "", description: "", valueType: "text", isInventory: false, captureFields: [], brand: "", supplier: "", alternativePartNumber: "", manufacturerPartNumber: "", unitPrice: "", productLink: "", productLinks: [] });
+                    setFeatureOriginalProductLinks([]);
                     setFeatureError(null);
                     setFeatureDialog(true);
                   }}
@@ -2571,7 +2584,8 @@ const Settings = () => {
                                   e.stopPropagation();
                                   setFeatureEditId(f.id);
                                   setFeatureJustCreatedId(null);
-                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [], brand: f.brand ?? "", supplier: f.supplier ?? "", alternativePartNumber: f.alternativePartNumber ?? "", manufacturerPartNumber: f.manufacturerPartNumber ?? "", unitPrice: f.unitPrice != null ? String(f.unitPrice) : "", productLink: f.productLink ?? "", productLinks: [] });
+                                  setFeatureForm({ name: f.name, description: f.description ?? "", valueType: f.valueType, isInventory: f.isInventory ?? false, captureFields: f.captureFields ?? [], brand: f.brand ?? "", supplier: f.supplier ?? "", alternativePartNumber: f.alternativePartNumber ?? "", manufacturerPartNumber: f.manufacturerPartNumber ?? "", unitPrice: f.unitPrice != null ? String(f.unitPrice) : "", productLink: f.productLink ?? "", productLinks: f.linkedProductIds ?? [] });
+                                  setFeatureOriginalProductLinks(f.linkedProductIds ?? []);
                                   setFeatureError(null);
                                   setFeatureDialog(true);
                                 }}>
@@ -4050,13 +4064,13 @@ const Settings = () => {
                   </Stack>
                 </FormControl>
               )}
-              {/* Link to products (only shown when creating, not editing) */}
-              {!featureEditId && (
+              {/* Link to products — one feature can belong to multiple products */}
+              {(
                 <>
-                  <Divider><Typography variant="caption" color="text.secondary">Link to products (optional)</Typography></Divider>
+                  <Divider><Typography variant="caption" color="text.secondary">Related products</Typography></Divider>
                   <FormControl size="small" fullWidth>
                     <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
-                      Select products to link this feature to
+                      Select the products this feature belongs to
                     </Typography>
                     <Box sx={{ maxHeight: 200, overflowY: "auto", border: "1px solid", borderColor: "divider", borderRadius: 1 }}>
                       {products.length === 0 ? (

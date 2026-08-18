@@ -65,6 +65,7 @@ import type { Feature } from "../../types/feature";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Workflow } from "../../types/workflow";
 import type { CaptureField, StepInput, WorkflowStep } from "../../types/workflow";
+import { isOptionListInputType } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
@@ -152,8 +153,8 @@ function printPdf(cfg: WorkflowConfig, productName: string) {
   const contentW = previewFrameW - sidebarW - innerPad * 2;
 
   const fieldTypeLabel = (input: StepInput | CaptureField) => {
-    const baseType = input.type === "choice" ? "CHOICE" : input.type.toUpperCase();
-    if (input.type === "choice" && "options" in input && input.options && input.options.length > 0) {
+    const baseType = input.type.toUpperCase();
+    if (isOptionListInputType(input.type) && "options" in input && input.options && input.options.length > 0) {
       return `${baseType} · ${input.options.join(" / ")}`;
     }
     if ("unit" in input && input.unit) {
@@ -744,7 +745,7 @@ function PreviewDialog({ open, cfg, productName, onClose }: PreviewProps) {
                               sx={{ color: "rgba(226,232,240,0.54)", textTransform: "uppercase", letterSpacing: 0.4 }}
                             >
                               {inp.type}
-                              {inp.type === "choice" && (inp.options ?? []).length > 0
+                              {isOptionListInputType(inp.type) && (inp.options ?? []).length > 0
                                 ? ` · ${inp.options!.join(" / ")}`
                                 : ""}
                             </Typography>
@@ -1268,6 +1269,17 @@ const WorkInstructions = () => {
     safeSetSearchParams(params);
   }
 
+  function handleBuilderCancel(deletedConfigId?: string) {
+    if (deletedConfigId) {
+      setConfigs((prev) => prev.filter((c) => c.id !== deletedConfigId));
+    }
+    setSelectedConfigId(null);
+    setViewMode("instructions");
+    const params: Record<string, string> = { view: "instructions" };
+    if (activeProduct?.id) params.product = activeProduct.id;
+    safeSetSearchParams(params);
+  }
+
   // ─── Render ───
 
   return (
@@ -1670,6 +1682,7 @@ const WorkInstructions = () => {
             onConfigSaved={handleConfigSaved}
             onConfigPublished={handleConfigPublished}
             onNewConfig={openNewConfig}
+            onCancel={handleBuilderCancel}
           />
           </Suspense>
         </Stack>

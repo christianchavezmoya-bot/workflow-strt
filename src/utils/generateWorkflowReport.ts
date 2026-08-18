@@ -17,6 +17,7 @@ import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../ty
 import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { WorkflowStep } from "../types/workflow";
+import { isOptionListInputType } from "../types/workflow";
 import type { SignatureEvent } from "../types/signature";
 import { getMissingWorkflowItems } from "./workflowCompleteness";
 import { openObjectUrl } from "./printWindow";
@@ -813,7 +814,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
             } catch { }
           }
 
-          if (inputDef.type === "choice" && (inputDef.options?.length ?? 0) > 0) {
+          if (isOptionListInputType(inputDef.type) && (inputDef.options?.length ?? 0) > 0) {
             bodyRows.push([
               label,
               encodeChoiceRow({

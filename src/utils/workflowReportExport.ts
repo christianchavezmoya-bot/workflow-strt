@@ -4,6 +4,7 @@ import type { Feature } from "../types/feature";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { SignatureEvent } from "../types/signature";
 import type { WorkflowStep } from "../types/workflow";
+import { isOptionListInputType } from "../types/workflow";
 import { formatInstant, resolveProjectTimeZone } from "./datetime";
 import { normalizeCapturedValueForDisplay } from "./capturedValueFormat";
 
@@ -175,7 +176,7 @@ export function buildCapturedFields(context: WorkflowReportExportContext): Captu
         businessPartNumber: feature?.alternativePartNumber,
         fieldKey: captureDef?.key ?? inputDef?.id ?? inputId,
         selectedValue: normalizeCapturedValueForDisplay(rawValue),
-        allOptions: inputDef?.type === "choice" ? (inputDef.options ?? []) : undefined,
+        allOptions: inputDef && isOptionListInputType(inputDef.type) ? (inputDef.options ?? []) : undefined,
         capturedAt: result.completedAt,
       });
     }

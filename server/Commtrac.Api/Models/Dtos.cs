@@ -225,7 +225,8 @@ public record FeatureDto(
     decimal? UnitPrice = null,
     string? ProductLink = null,
     string? ManufacturerPartNumber = null,
-    List<string>? LinkedProducts = null
+    List<string>? LinkedProducts = null,
+    List<string>? LinkedProductIds = null
 );
 
 public record CreateFeatureRequest(

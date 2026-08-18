@@ -5,6 +5,8 @@ export type StepInputType =
   | "text"
   | "number"
   | "choice"
+  | "dropdown"
+  | "wheel"
   | "checkbox"
   | "photo"
   | "video"
@@ -44,9 +46,17 @@ export interface StepInput {
   type: StepInputType;
   label: string;
   required: boolean;
-  options?: string[]; // for "choice" type
+  options?: string[]; // for "choice" / "dropdown" / "wheel" types
   featureId?: string; // set when sourced from a product feature definition
   subFields?: { id: string; name: string }[]; // for "component" type
+}
+
+/** Single-select-from-a-list input types — all three share the same `options` editor,
+ *  default seed values, and "show all options" report behavior; only the runtime
+ *  picker widget differs (toggle buttons / native dropdown / vertical wheel). */
+const OPTION_LIST_INPUT_TYPES = new Set<StepInputType>(["choice", "dropdown", "wheel"]);
+export function isOptionListInputType(type: StepInputType): boolean {
+  return OPTION_LIST_INPUT_TYPES.has(type);
 }
 
 export type StepType =

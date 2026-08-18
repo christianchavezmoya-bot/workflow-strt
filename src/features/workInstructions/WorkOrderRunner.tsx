@@ -58,6 +58,7 @@ import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import MediaCapture from "../../components/ui/MediaCapture";
 import QRUploadButton from "../../components/QRUploadButton";
 import WorkflowDateCapture from "../../components/ui/WorkflowDateCapture";
+import WheelPicker from "../../components/ui/WheelPicker";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
 import SignaturePad from "../../components/ui/SignaturePad";
@@ -1457,6 +1458,26 @@ export default function WorkOrderRunner({
           ))}
         </ToggleButtonGroup>
       );
+    }
+    if (inp.type === "dropdown") {
+      const opts = inp.options ?? [];
+      return (
+        <FormControl size="small" fullWidth error={isReq}>
+          <Select
+            displayEmpty
+            value={val || ""}
+            onChange={(e) => onChange(e.target.value)}
+          >
+            <MenuItem value="" disabled>Select…</MenuItem>
+            {opts.map((opt) => (
+              <MenuItem key={opt} value={opt}>{opt}</MenuItem>
+            ))}
+          </Select>
+        </FormControl>
+      );
+    }
+    if (inp.type === "wheel") {
+      return <WheelPicker options={inp.options ?? []} value={val} onChange={onChange} error={isReq} />;
     }
     if (inp.type === "note") {
       return (
