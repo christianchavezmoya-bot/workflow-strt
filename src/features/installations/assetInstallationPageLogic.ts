@@ -1,6 +1,7 @@
 import type { ProjectAsset } from "../../types/projectAsset";
+import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { WorkflowConfig } from "../../types/workflowConfig";
-import type { WorkflowType } from "../../types/workflowType";
+import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
 import { isMobileNativePlatform } from "../../utils/platform";
 
 // ------------------------------------------------------------------
@@ -152,6 +153,27 @@ export function workflowTypeMismatchMessage(
   if (!typeIsInspection && configIsInspection)
     return `The selected workflow config is an inspection type but the workflow type is "${typeName}". Inspection configs should only be used with an Inspection workflow type.`;
   return null;
+}
+
+export function pickPreferredAssignment(
+  asset: Pick<ProjectAsset, "id" | "productConfigId">,
+  assignments: WorkflowAssignment[],
+  runs: AssetWorkflowRun[] = [],
+): WorkflowAssignment | undefined {
+  if (assignments.length === 0) return undefined;
+
+  const activeRun = runs.find((run) => !run.isLocked);
+  if (activeRun) {
+    const matchingActiveRun = assignments.find((item) => item.workflowConfigId === activeRun.workflowConfigId);
+    if (matchingActiveRun) return matchingActiveRun;
+  }
+
+  if (asset.productConfigId) {
+    const matchingConfig = assignments.find((item) => item.workflowConfigId === asset.productConfigId);
+    if (matchingConfig) return matchingConfig;
+  }
+
+  return assignments[0];
 }
 
 /**
