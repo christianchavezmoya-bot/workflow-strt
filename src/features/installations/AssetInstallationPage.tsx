@@ -47,6 +47,7 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
+import { useCatalogPrefetch } from "../../hooks/useCatalogPrefetch";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
@@ -567,12 +568,11 @@ const AssetInstallationPage = () => {
   const [cacheStale, setCacheStale] = useState<"soft" | "hard" | null>(null);
   const [serverReachable, setServerReachable] = useState<boolean | null>(null); // null = unknown (first load)
 
+  useCatalogPrefetch();
+
   useEffect(() => {
-    if (!productsState.items.length && !productsState.loading) dispatch(fetchProducts());
-    if (!projects.length && !projectsLoading) dispatch(fetchProjects());
-    if (!users.length && !usersLoading) dispatch(fetchUsers());
     siteService.getSites().then(setSites).catch(() => {});
-  }, [dispatch, productsState.items.length, productsState.loading, projects.length, projectsLoading, users.length, usersLoading]);
+  }, []);
 
   const products = useMemo(
     () => (productsState.loading ? [] : productsState.items),
