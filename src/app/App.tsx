@@ -209,7 +209,7 @@ const App = () => {
     return <Login />;
   }
 
-  if (authState === "session-unlocked") {
+  if (authState === "session-unlocked" || authState === "not-native") {
     return <AppRoutes />;
   }
 

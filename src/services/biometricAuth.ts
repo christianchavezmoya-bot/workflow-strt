@@ -157,7 +157,12 @@ async function isDeviceOnlineForAuthAsync(): Promise<boolean> {
  * Now async to check biometric availability.
  */
 export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
-  if (!isMobileNativePlatform()) return "not-native";
+  if (!isMobileNativePlatform()) {
+    const token = secureGet("auth_token");
+    if (!token) return "no-session";
+    if (isAuthTokenExpired(token)) return "no-session";
+    return "session-unlocked";
+  }
   if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
 
   const token = secureGet("auth_token");
@@ -187,7 +192,12 @@ export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
  * Assumes biometric is available on native platforms.
  */
 export function getLaunchAuthMode(): BiometricCheckResult {
-  if (!isMobileNativePlatform()) return "not-native";
+  if (!isMobileNativePlatform()) {
+    const token = secureGet("auth_token");
+    if (!token) return "no-session";
+    if (isAuthTokenExpired(token)) return "no-session";
+    return "session-unlocked";
+  }
   if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
 
   const token = secureGet("auth_token");
