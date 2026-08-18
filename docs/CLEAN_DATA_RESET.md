@@ -32,6 +32,9 @@ notification/SMTP settings.
 After a reset, check **Settings → Notifications → Frontend Base URL** points at the machine
 serving the web app (e.g. `http://192.168.1.102:5173`) so invite and signature links work.
 
+The `e2e-full` and `e2e-web-perf` Playwright configs boot the API with `SeedProfile=Demo`,
+because those specs need a product/project fixture to drive.
+
 ## Running with a profile
 
 ```bash

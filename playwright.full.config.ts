@@ -27,6 +27,9 @@ export default defineConfig({
       timeout: 180_000,
       env: {
         ASPNETCORE_ENVIRONMENT: "Development",
+        // Demo catalog is opt-in since the default seed starts empty; the builder
+        // specs need a product to open a workflow against.
+        SeedProfile: "Demo",
       },
     },
     {
