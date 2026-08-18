@@ -468,9 +468,9 @@ const ProjectList = () => {
   }, [currentRequestKey, dispatch, reloadProjects]);
 
   useEffect(() => {
-    if (productsState.items.length || productsState.loading) return;
+    if (productsState.hasFetchedOnce || productsState.loading) return;
     dispatch(fetchProducts());
-  }, [dispatch, productsState.items.length, productsState.loading]);
+  }, [dispatch, productsState.hasFetchedOnce, productsState.loading]);
 
   useEffect(() => {
     const openId = searchParams.get("open");
