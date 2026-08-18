@@ -895,10 +895,15 @@ export default function WorkOrderRunner({
     setCurrentStepId(prev);
   }
 
+  /**
+   * Required step data (inputs and as-built capture fields) has to be entered before the
+   * step can be left. Required media only warns here — it is enforced at Lock run and
+   * installer sign-off, so an installer can keep working and come back for photos.
+   */
   function splitMissingItems(items: MissingWorkflowItem[]) {
     return {
-      blocking: items.filter((item) => item.kind === "input"),
-      warning: items.filter((item) => item.kind === "capture" || item.kind === "photo" || item.kind === "video"),
+      blocking: items.filter((item) => item.kind === "input" || item.kind === "capture"),
+      warning: items.filter((item) => item.kind === "photo" || item.kind === "video"),
     };
   }
 

@@ -2330,16 +2330,24 @@ function InputsSection({
                     value={inp.label}
                     onChange={(e) => onUpdateInput(inp.id, { label: e.target.value })}
                   />
-                  <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
-                    <Switch
-                      size="small"
-                      checked={inp.required}
-                      onChange={(e) => onUpdateInput(inp.id, { required: e.target.checked })}
-                    />
-                    <Typography variant="caption" sx={{ whiteSpace: "nowrap" }}>
-                      {inp.required ? "Required" : "Optional"}
-                    </Typography>
-                  </Stack>
+                  <Tooltip
+                    title={
+                      inp.type === "photo" || inp.type === "video"
+                        ? "Required media does not block the next step — it blocks locking the run and signing it off. Optional media never counts as missing."
+                        : "Required fields must be filled before the technician can move to the next step."
+                    }
+                  >
+                    <Stack direction="row" alignItems="center" spacing={1} sx={{ flexShrink: 0 }}>
+                      <Switch
+                        size="small"
+                        checked={inp.required}
+                        onChange={(e) => onUpdateInput(inp.id, { required: e.target.checked })}
+                      />
+                      <Typography variant="caption" sx={{ whiteSpace: "nowrap" }}>
+                        {inp.required ? "Required" : "Optional"}
+                      </Typography>
+                    </Stack>
+                  </Tooltip>
                 </Stack>
                 {isOptionListInputType(inp.type) && (
                   <OptionsField

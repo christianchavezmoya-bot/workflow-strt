@@ -3,6 +3,13 @@ import type { CaptureField, StepInput, WorkflowStep } from "../types/workflow";
 
 export type MissingWorkflowItemKind = "photo" | "video" | "input" | "capture";
 
+/**
+ * Only items the author marked Required ever appear here, for every kind including
+ * photo/video. The gates differ by kind, not by strictness:
+ *   - "input"/"capture": must be filled before the runner advances to the next step.
+ *   - "photo"/"video": the runner warns but lets the step advance; they block Lock run
+ *     and installer sign-off instead.
+ */
 export interface MissingWorkflowItem {
   id: string;
   label: string;
@@ -103,6 +110,7 @@ function getMissingItemsForUncapturedStep(step: WorkflowStep | undefined): Missi
   const missingInputs: MissingWorkflowItem[] = [];
   for (const input of step.inputs ?? []) {
     if (input.type === "photo" || input.type === "video") {
+      if (!input.required) continue;
       missingInputs.push({
         id: input.id,
         label: input.label || (input.type === "video" ? "Video" : "Photo"),
@@ -160,7 +168,9 @@ export function getMissingWorkflowItems(
   for (const input of step.inputs ?? []) {
     const raw = values?.[input.id];
     if (input.type === "photo" || input.type === "video") {
-      if (!hasInputValue(input, raw)) {
+      // Optional media is genuinely optional: it never counts as missing, so it cannot
+      // hold up Lock run, sign-off, or the evidence badges.
+      if (input.required && !hasInputValue(input, raw)) {
         missingInputs.push({
           id: input.id,
           label: input.label || (input.type === "video" ? "Video" : "Photo"),
