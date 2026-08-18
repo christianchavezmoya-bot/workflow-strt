@@ -516,6 +516,9 @@ const Settings = () => {
       loadProducts();
       if (divisions.length === 0) loadDivisions();
     }
+    if (activeTabKey === "divisions" && divisions.length === 0) {
+      loadDivisions();
+    }
     if (activeTabKey === "features") {
       loadFeatures();
     }
