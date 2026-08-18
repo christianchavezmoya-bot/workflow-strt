@@ -36,6 +36,7 @@ import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
 import { useTableConfig } from "../../hooks/useTableConfig";
+import { isDuplicateProjectDynamicField } from "./projectFieldDedupe";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import { projectService } from "../../services/projectService";
 import { fieldService } from "../../services/fieldService";
@@ -161,9 +162,15 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const usersState = useAppSelector((state) => state.users);
   const projectsDynamic = useDynamicFields("projects");
   const allFieldDefinitions = useFieldDefinitions();
+  // Same name/id overlaps as the Projects list — otherwise built-ins render again
+  // as custom fields at the bottom of the form.
+  const projectsDynamicFieldDefs = useMemo(
+    () => projectsDynamic.definitions.filter((field) => !isDuplicateProjectDynamicField(field)),
+    [projectsDynamic.definitions],
+  );
   const projectsTableConfig = useTableConfig(
     "projects",
-    projectsDynamic.definitions.map((field) => ({
+    projectsDynamicFieldDefs.map((field) => ({
       id: field.id,
       name: field.name,
       type: field.fieldType,
@@ -172,8 +179,11 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     }))
   );
   const availableFieldsForProjects = useMemo(
-    () => allFieldDefinitions.definitions.filter((field) => !field.tables.includes("projects")),
-    [allFieldDefinitions.definitions]
+    () =>
+      allFieldDefinitions.definitions.filter(
+        (field) => !field.tables.includes("projects") && !isDuplicateProjectDynamicField(field),
+      ),
+    [allFieldDefinitions.definitions],
   );
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const saveModeRef = useRef<"draft" | "final">("final");
@@ -356,25 +366,25 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   }, [canEditExistingProject, editingProject, embedded, id, navigate]);
 
   useEffect(() => {
-    if (projectsDynamic.definitions.length === 0) return;
+    if (projectsDynamicFieldDefs.length === 0) return;
     setProjectDynamicValues((prev) => {
       const next = { ...prev };
-      projectsDynamic.definitions.forEach((field) => {
+      projectsDynamicFieldDefs.forEach((field) => {
         if (next[field.id] === undefined) next[field.id] = "";
       });
       return next;
     });
-  }, [projectsDynamic.definitions]);
+  }, [projectsDynamicFieldDefs]);
 
   useEffect(() => {
     if (!id) return;
     const existing = projectsDynamic.valuesByEntity[id] || {};
     const next: Record<string, string> = {};
-    projectsDynamic.definitions.forEach((field) => {
+    projectsDynamicFieldDefs.forEach((field) => {
       next[field.id] = existing[field.id]?.value || "";
     });
     setProjectDynamicValues(next);
-  }, [id, projectsDynamic.definitions, projectsDynamic.valuesByEntity]);
+  }, [id, projectsDynamicFieldDefs, projectsDynamic.valuesByEntity]);
 
 
   const projectType = watch("projectType");
@@ -633,7 +643,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
 
     // Dynamic fields required flags are stored in baseFieldMeta by field id.
     if (shouldEnforceRequiredFields) {
-      const missingDynamicDefs = projectsDynamic.definitions
+      const missingDynamicDefs = projectsDynamicFieldDefs
         .filter((def) => !!meta[def.id]?.required && !hiddenSet.has(def.id))
         .filter((def) => isBlank(dynamicValueForValidation(def)))
         .map((def) => ({ id: def.id, name: def.name }));
@@ -664,7 +674,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     }
     pushUiLog("ProjectForm submit");
     const dynamicValuesToSave = { ...projectDynamicValues };
-    projectsDynamic.definitions.forEach((def) => {
+    projectsDynamicFieldDefs.forEach((def) => {
       const type = (def.fieldType || "").toLowerCase();
       if (type !== "lookup field" || !def.linkToFieldId) return;
       const target = allDefinitionsById.get(def.linkToFieldId);
@@ -945,22 +955,26 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   );
   const hiddenSet = useMemo(() => new Set(projectsTableConfig.config.hidden || []), [projectsTableConfig.config.hidden]);
   const baseFieldMeta = projectsTableConfig.config.baseFieldMeta || {};
-  const projectManagerMeta = baseFieldMeta["projectManager"] || {};
   const isRequiredField = (fieldId: string) => !!baseFieldMeta[fieldId]?.required && !hiddenSet.has(fieldId);
   const labelWithRequired = (fieldId: string, label: string) => (isRequiredField(fieldId) ? `${label} *` : label);
   const projectManagerOptions = useMemo(() => {
     const userNames = usersState.items
-      .filter(
-        (user) =>
-          user.isActive &&
-          String(user.role || "").trim().toLowerCase() === "project manager"
-      )
+      .filter((user) => {
+        if (!user.isActive) return false;
+        const role = String(user.role || "").trim().toLowerCase();
+        return role === "project manager" || role === "pm";
+      })
       .map((user) => user.fullName)
       .filter((name): name is string => !!name && !!name.trim());
+    // Keep a previously saved name selectable even if that user is inactive / role-changed.
+    const current = String(projectManager || "").trim();
+    if (current && !userNames.some((n) => n.toLowerCase() === current.toLowerCase())) {
+      userNames.push(current);
+    }
     return Array.from(new Set(userNames)).sort((a, b) =>
       a.localeCompare(b, undefined, { sensitivity: "base", numeric: true })
     );
-  }, [usersState.items]);
+  }, [usersState.items, projectManager]);
   const activeUserOptions = useMemo(() => {
     return [...usersState.items]
       .filter((user) => user.isActive && !!String(user.fullName || "").trim())
@@ -993,8 +1007,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   }, [allSites, selectedCustomerId, customerNameById]);
 
   const dynamicDefById = useMemo(
-    () => new Map(projectsDynamic.definitions.map((def) => [def.id, def])),
-    [projectsDynamic.definitions]
+    () => new Map(projectsDynamicFieldDefs.map((def) => [def.id, def])),
+    [projectsDynamicFieldDefs]
   );
   const allDefinitionsById = useMemo(() => {
     const map = new Map<string, FieldDefinition>();
@@ -1003,7 +1017,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   }, [allFieldDefinitions.definitions]);
 
   const orderedVisibleIds = useMemo(() => {
-    const dynamicIds = projectsDynamic.definitions.map((def) => def.id);
+    const dynamicIds = projectsDynamicFieldDefs.map((def) => def.id);
     const allIds = [...baseFieldIds, ...dynamicIds];
 
     let order: string[];
@@ -1018,10 +1032,10 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     // Filter unknown ids and hidden ids.
     const known = new Set(allIds);
     return order.filter((id) => known.has(id) && !hiddenSet.has(id));
-  }, [projectsTableConfig.config.order, baseFieldIds, projectsDynamic.definitions, hiddenSet]);
+  }, [projectsTableConfig.config.order, baseFieldIds, projectsDynamicFieldDefs, hiddenSet]);
   const visibleIdSet = useMemo(() => new Set(orderedVisibleIds), [orderedVisibleIds]);
   const cityFieldId = useMemo(() => {
-    return projectsDynamic.definitions.find((def) => {
+    return projectsDynamicFieldDefs.find((def) => {
       const type = (def.fieldType || "").toLowerCase();
       if (type !== "lookup field") return false;
       if (!/city/i.test(def.name || "") && !/city/i.test(def.id || "")) return false;
@@ -1029,7 +1043,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       const target = allDefinitionsById.get(def.linkToFieldId);
       return !!target && (target.tables || []).includes("sites");
     })?.id;
-  }, [projectsDynamic.definitions, allDefinitionsById]);
+  }, [projectsDynamicFieldDefs, allDefinitionsById]);
   const extraDynamicIds = useMemo(() => {
     const excluded = new Set([cityFieldId || ""]);
     return orderedVisibleIds.filter((id) => !baseFieldIds.includes(id) && !excluded.has(id));
@@ -1294,38 +1308,28 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
               name="projectManager"
               control={control}
               render={({ field }) => (
-                (["dropdown", "single select", "reference", "lookup field"] as string[]).includes(
-                  (projectManagerMeta.fieldType || "").toLowerCase()
-                ) ? (
-                  <TextField
-                    {...field}
-                    label={labelWithRequired("projectManager", labelProjectManager)}
-                    fullWidth
-                    select
-                    SelectProps={{ native: true }}
-                    InputLabelProps={{ shrink: true }}
-                    error={!!errors.projectManager}
-                    helperText={
-                      errors.projectManager?.message ||
-                      "Select from active project managers."
-                    }
-                  >
-                    <option value="">Select project manager</option>
-                    {projectManagerOptions.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
-                      </option>
-                    ))}
-                  </TextField>
-                ) : (
-                  <TextField
-                    {...field}
-                    label={labelWithRequired("projectManager", labelProjectManager)}
-                    fullWidth
-                    error={!!errors.projectManager}
-                    helperText={errors.projectManager?.message || "Primary owner for delivery and communication."}
-                  />
-                )
+                <TextField
+                  {...field}
+                  label={labelWithRequired("projectManager", labelProjectManager)}
+                  fullWidth
+                  select
+                  SelectProps={{ native: true }}
+                  InputLabelProps={{ shrink: true }}
+                  error={!!errors.projectManager}
+                  helperText={
+                    errors.projectManager?.message ||
+                    (projectManagerOptions.length
+                      ? "Select from active project managers."
+                      : "No project managers found — add users with the Project Manager role.")
+                  }
+                >
+                  <option value="">Select project manager</option>
+                  {projectManagerOptions.map((name) => (
+                    <option key={name} value={name}>
+                      {name}
+                    </option>
+                  ))}
+                </TextField>
               )}
             />
           </Grid>
@@ -1918,7 +1922,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
           { id: "office", name: "Office", type: "text", required: true },
           { id: "region", name: "Country/State", type: "text", required: false },
           { id: "timeZoneId", name: "Time Zone", type: "single select", required: false },
-          { id: "projectManager", name: "Project Manager", type: "text", required: false },
+          { id: "projectManager", name: "Project Manager", type: "dropdown", required: false },
           { id: "teamMembers", name: "Project Team Members", type: "multi-select", required: false },
           { id: "description", name: "Description", type: "text", required: true },
           { id: "startDate", name: "Start Date", type: "date", required: true },

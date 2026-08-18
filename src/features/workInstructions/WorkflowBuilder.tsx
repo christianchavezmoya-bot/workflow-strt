@@ -59,6 +59,7 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { usePermissions } from "../../hooks/usePermissions";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import QRUploadButton from "../../components/QRUploadButton";
+import WheelPicker from "../../components/ui/WheelPicker";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
@@ -3587,24 +3588,7 @@ function InputPreview({ inp }: { inp: StepInput }) {
     if (opts.length === 0) {
       return <Typography variant="caption" color="text.secondary">No options set</Typography>;
     }
-    return (
-      <Stack sx={{ width: 160, border: "1px solid", borderColor: "divider", borderRadius: 1, overflow: "hidden" }}>
-        {opts.slice(0, 3).map((opt, idx) => (
-          <Box
-            key={idx}
-            sx={{
-              px: 1, py: 0.5, textAlign: "center",
-              bgcolor: idx === 1 ? "action.selected" : "transparent",
-              borderTop: idx === 1 ? "1px solid" : "none",
-              borderBottom: idx === 1 ? "1px solid" : "none",
-              borderColor: "primary.main",
-            }}
-          >
-            <Typography variant="caption" fontWeight={idx === 1 ? 700 : 400}>{opt}</Typography>
-          </Box>
-        ))}
-      </Stack>
-    );
+    return <WheelPicker options={opts} value={opts[Math.min(1, opts.length - 1)] ?? opts[0]} onChange={() => {}} />;
   }
   if (inp.type === "photo") return <Button disabled size="small" startIcon={<ImageOutlined />}>Capture photo</Button>;
   if (inp.type === "video") return <Button disabled size="small" startIcon={<VideocamOutlined />}>Capture video</Button>;
