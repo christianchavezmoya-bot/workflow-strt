@@ -148,6 +148,7 @@ import {
 } from "./dashboardPageLogic";
 import { useDashboardWorkspace } from "./useDashboardWorkspace";
 import { useDashboardAttention } from "./useDashboardAttention";
+import { useDashboardQuickAction, type OpenRunnerWithPayload } from "./useDashboardQuickAction";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
@@ -156,11 +157,6 @@ const DashboardWorkloadReportDialogs = lazy(() => import("./DashboardWorkloadRep
 const DashboardQuickActionDialog = lazy(() => import("./DashboardQuickActionDialog"));
 const DashboardAutoAssignConfirmDialog = lazy(() => import("./DashboardAutoAssignConfirmDialog"));
 const DashboardAssignWorkflowDialog = lazy(() => import("./DashboardAssignWorkflowDialog"));
-
-type NativeMyJobsCardContext = {
-  asset: ProjectAsset;
-  runs: AssetWorkflowRun[];
-};
 
 const ALL_DASHBOARDS_VALUE = "__all__";
 const DASHBOARD_ASSIGNMENT_RECOVERY_KEY = "dashboard:pending-assignment-recovery";
@@ -282,6 +278,7 @@ const Dashboard = () => {
   const [photoUploadTarget, setPhotoUploadTarget] = useState<MissingMediaFlag | null>(null);
   const [closingDashboardProjectId, setClosingDashboardProjectId] = useState<string | null>(null);
   const [photoUploadMode, setPhotoUploadMode] = useState<"installer" | "pm">("installer");
+  const closeQuickActionDialogRef = useRef<() => void>(() => {});
   const [reminderSentId, setReminderSentId] = useState<string | null>(null);
   const [signatureFlowTarget, setSignatureFlowTarget] = useState<WorkflowSignatureFlowTarget | null>(null);
   const [issueDetailTarget, setIssueDetailTarget] = useState<{
@@ -1231,7 +1228,7 @@ const Dashboard = () => {
   }
 
   const openIssueRepair = useCallback(async (issue: OpenIssueRecord) => {
-    setQuickActionOpen(false);
+    closeQuickActionDialogRef.current();
 
     if (issue.source === "asset") {
       const asset = await projectAssetService.getById(issue.assetId);
@@ -1351,10 +1348,7 @@ const Dashboard = () => {
   }, [issueDetailTarget, openIssues, refreshDashboardAfterIssueUpdate]);
 
   const openSignatureRepair = useCallback(async (sig: PendingSignatureRecord) => {
-    setQuickActionOpen(false);
-    setQuickActionAsset(null);
-    setQuickActionAssignments([]);
-    setQuickActionRuns([]);
+    closeQuickActionDialogRef.current();
     try {
       const [asset, run] = await Promise.all([
         projectAssetService.getById(sig.assetId),
@@ -1461,191 +1455,9 @@ const Dashboard = () => {
     () => dashboardWorkspace.installHistory,
     [dashboardWorkspace]
   );
-  const [nativeMyJobsCardContext, setNativeMyJobsCardContext] = useState<Record<string, NativeMyJobsCardContext>>({});
-  const [dashboardAssignmentsMap, setDashboardAssignmentsMap] = useState<Record<string, WorkflowAssignment[]>>({});
-
-  const myInstallAssetIdsKey = useMemo(() => myJobsAssetIdsKey(myInstallAssets), [myInstallAssets]);
-
-  useEffect(() => {
-    if (myInstallAssets.length === 0) {
-      setNativeMyJobsCardContext({});
-      return;
-    }
-
-    let cancelled = false;
-    void (async () => {
-      const entries = await Promise.all(
-        myInstallAssets.map(async (asset) => {
-          if (isNativePlatform) {
-            const [cachedAsset, runs] = await Promise.all([
-              entityGetAsset(asset.id),
-              assetWorkflowRunService.listLocalByAsset(asset.id),
-            ]);
-            const data = cachedAsset?.data as ProjectAsset | undefined;
-            if (!data) return null;
-            return [asset.id, { asset: data, runs }] as const;
-          }
-
-          if (shouldSkipBlockingFetch()) return null;
-
-          const [fullAsset, runs] = await Promise.all([
-            projectAssetService.getById(asset.id).catch(() => null),
-            assetWorkflowRunService.listByAsset(asset.id).catch(() => [] as AssetWorkflowRun[]),
-          ]);
-          if (!fullAsset) return null;
-          return [asset.id, { asset: fullAsset, runs }] as const;
-        })
-      );
-
-      if (cancelled) return;
-      setNativeMyJobsCardContext((prev) => {
-        const fresh: Record<string, NativeMyJobsCardContext> = {};
-        for (const entry of entries) {
-          if (!entry) continue;
-          fresh[entry[0]] = entry[1];
-        }
-        const merged: Record<string, NativeMyJobsCardContext> = {};
-        for (const asset of myInstallAssets) {
-          if (fresh[asset.id]) {
-            merged[asset.id] = fresh[asset.id];
-            continue;
-          }
-          if (prev[asset.id]) {
-            merged[asset.id] = prev[asset.id];
-          }
-        }
-        return merged;
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // myInstallAssets is read for its current values only - myInstallAssetIdsKey (a
-    // stable id-set string) is the intended re-run trigger. myInstallAssets itself is a
-    // NEW array reference on every dashboardWorkspace fetch even when the id set is
-    // unchanged; including it here caused this effect to refire in a tight loop (each
-    // run's side effects fed back into another dashboardWorkspace update, which produced
-    // another new reference, ad infinitum - the "constantly fetching" bug).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNativePlatform, myInstallAssetIdsKey]);
-
-  const nativeMyJobsDisplayStateByAssetId = useMemo(() => {
-    const map = new Map<string, WorkflowDisplayState>();
-    for (const asset of myInstallAssets) {
-      const ctx = nativeMyJobsCardContext[asset.id];
-      if (!ctx) continue;
-      map.set(asset.id, getWorkflowDisplayState(ctx.asset, ctx.runs, {
-        paused: isPausedAsset(asset.runStatus),
-        inspectionMode: asset.workflowMode === "INSPECTION_ONLY",
-        hasRunnableWorkflowSource:
-          ctx.runs.length > 0
-          || !!ctx.asset.productConfigId
-          || !!ctx.asset.workflowTemplateId
-          || !!ctx.asset.workflowSummary?.hasWorkflow,
-      }));
-    }
-    return map;
-  }, [myInstallAssets, nativeMyJobsCardContext]);
-
-  useEffect(() => {
-    const handler = (event: Event) => {
-      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
-      if (!assetId) return;
-      const loadRuns = isNativePlatform
-        ? assetWorkflowRunService.listLocalByAsset(assetId)
-        : shouldSkipBlockingFetch()
-          ? Promise.resolve(null)
-          : assetWorkflowRunService.listByAsset(assetId);
-      void loadRuns.then((runs) => {
-        if (!runs) return;
-        setNativeMyJobsCardContext((prev) => {
-          const existing = prev[assetId];
-          if (!existing) return prev;
-          return { ...prev, [assetId]: { ...existing, runs } };
-        });
-      });
-    };
-    window.addEventListener("workflow-runs-cache-updated", handler as EventListener);
-    return () => window.removeEventListener("workflow-runs-cache-updated", handler as EventListener);
-  }, [isNativePlatform]);
-
-  // Prime assignment cache for My Jobs cards so offline opens don't treat empty
-  // IndexedDB as "no workflow assigned" when bootstrap hasn't filled this asset yet.
-  useEffect(() => {
-    if (!isNativePlatform || myInstallAssets.length === 0) return;
-
-    let cancelled = false;
-    void (async () => {
-      const entries = await Promise.all(
-        myInstallAssets.map(async (asset) => {
-          const local = await WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []);
-          return [asset.id, local] as const;
-        }),
-      );
-      if (cancelled) return;
-      setDashboardAssignmentsMap((prev) => {
-        const next = { ...prev };
-        for (const [assetId, local] of entries) {
-          if (local.length > 0) next[assetId] = local;
-        }
-        return next;
-      });
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-    // See the identical myInstallAssetIdsKey-vs-myInstallAssets note above.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNativePlatform, myInstallAssetIdsKey]);
-
-  // While online, refresh assignments for visible My Jobs assets in background.
-  useEffect(() => {
-    if (!isNativePlatform || myInstallAssets.length === 0 || shouldSkipBlockingFetch()) return;
-    for (const asset of myInstallAssets) {
-      void assetWorkflowAssignmentService.listByAsset(asset.id);
-    }
-    // This is the effect that was driving the request storm: listByAsset() dispatches
-    // repo:assignments:updated on native, which triggers a dashboardWorkspace refresh,
-    // which produced a new myInstallAssets reference, which (with myInstallAssets in
-    // deps) re-ran this effect immediately - a self-sustaining ~1s loop. Depend only on
-    // the id-set key, not the array reference.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isNativePlatform, myInstallAssetIdsKey]);
-
-  useEffect(() => {
-    if (!isNativePlatform) return;
-    const onAssignmentsUpdated = (event: Event) => {
-      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
-      if (!assetId) return;
-      void WorkflowAssignmentRepository.getLocalByAsset(assetId)
-        .then((local) => {
-          if (local.length === 0) return;
-          setDashboardAssignmentsMap((prev) => ({ ...prev, [assetId]: local }));
-        })
-        .catch(() => {});
-    };
-    window.addEventListener("repo:assignments:updated", onAssignmentsUpdated);
-    return () => window.removeEventListener("repo:assignments:updated", onAssignmentsUpdated);
-  }, [isNativePlatform]);
-
-  // Quick action dialog for "My Jobs Today" assets
-  type QuickActionAsset = typeof myInstallAssets[0];
-  const [quickActionAsset, setQuickActionAsset] = useState<QuickActionAsset | null>(null);
-  const [quickActionOpen, setQuickActionOpen] = useState(false);
-  const [quickActionAssignments, setQuickActionAssignments] = useState<WorkflowAssignment[]>([]);
-  const [quickActionRuns, setQuickActionRuns] = useState<AssetWorkflowRun[]>([]);
-  const [quickActionLoading, setQuickActionLoading] = useState(false);
-  const [autoAssignConfirm, setAutoAssignConfirm] = useState<{
-    asset: QuickActionAsset;
-    assignment?: WorkflowAssignment;
-    reason: "unassigned" | "other";
-    otherName?: string;
-  } | null>(null);
-  // WorkOrderRunner integration
+  // WorkOrderRunner integration (quick-action launch path)
   const [runnerOpen, setRunnerOpen] = useState(false);
-  const [runnerAsset, setRunnerAsset] = useState<QuickActionAsset | null>(null);
+  const [runnerAsset, setRunnerAsset] = useState<(typeof myInstallAssets)[0] | null>(null);
   const [runnerWorkflow, setRunnerWorkflow] = useState<Workflow | null>(null);
   const [runnerWorkflowConfigId, setRunnerWorkflowConfigId] = useState<string | undefined>();
   const [runnerExistingRunId, setRunnerExistingRunId] = useState<string | undefined>();
@@ -1659,462 +1471,8 @@ const Dashboard = () => {
       .map((item) => ({ id: item.id, fullName: item.fullName }));
   }, [projectById, runnerAsset?.projectId, users]);
   const [runnerLoading, setRunnerLoading] = useState<string | null>(null);
-  // Surfaced when a take-over/self-assign fails to persist (see
-  // confirmAutoAssignAndStartFromDashboard) — the run is deliberately NOT started in
-  // that case, so the user must be told rather than left with a silently-missing job.
-  // Inspection import dialog
-  const [importDialogAsset, setImportDialogAsset] = useState<{ id: string; assetTag?: string; assetName?: string; projectId: string } | null>(null);
-  // Inspection import dialog open state
-  const [importDialogOpen, setImportDialogOpen] = useState(false);
-  // Documents dialog for quick action
-  const [docsDialogOpen, setDocsDialogOpen] = useState(false);
-  const [docsDialogAsset, setDocsDialogAsset] = useState<QuickActionAsset | null>(null);
-  const [docsCount, setDocsCount] = useState(0);
-  const [docsLoading, setDocsLoading] = useState(false);
 
-  // Assign workflow dialog (for assets without workflow assignment)
-  const [assignDialogOpen, setAssignDialogOpen] = useState(false);
-  const [assignForm, setAssignForm] = useState({ workflowTypeId: "", workflowConfigId: "" });
-  const [assignSaving, setAssignSaving] = useState(false);
-  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
-  const [workflowConfigs, setWorkflowConfigs] = useState<WorkflowConfig[]>([]);
-  // Product-based workflow for assets without explicit assignment
-  const [productWorkflow, setProductWorkflow] = useState<{ configId: string; configName: string; workflowTypeId?: string } | null>(null);
-
-  const buildFallbackMissingMediaFlag = useCallback((asset: QuickActionAsset, latestRun: AssetWorkflowRun | null) => {
-    if (!latestRun || !runHasCompletedAllSteps(latestRun)) return null;
-    const missingCount = countMissingWorkflowItems(latestRun);
-    if (missingCount <= 0) return null;
-    return {
-      id: `run-missing-${latestRun.id}`,
-      runId: latestRun.id,
-      assetId: asset.id,
-      assetTag: asset.assetTag || asset.assetName || asset.id,
-      jobNumber: asset.jobNumber,
-      workflowName: "Workflow",
-      technicianUserId: asset.assignedUserId ?? "",
-      technicianName: user.fullName ?? "",
-      completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
-      missingSteps: [],
-      totalExpected: 0,
-      totalCaptured: 0,
-    };
-  }, [user.fullName]);
-
-  const resolveMissingMediaForAsset = useCallback((asset: QuickActionAsset, runs: AssetWorkflowRun[]) => {
-    const sortedRuns = [...runs].sort(
-      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-    );
-    const latestRun = sortedRuns[0] ?? null;
-    const latestRunFlag = latestRun
-      ? missingMediaFlags.find((flag) => flag.runId === latestRun.id) ?? null
-      : null;
-    const fallbackMissingMedia = buildFallbackMissingMediaFlag(asset, latestRun);
-    const assetLevelFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
-    return latestRunFlag ?? fallbackMissingMedia ?? assetLevelFlag;
-  }, [buildFallbackMissingMediaFlag, missingMediaFlags]);
-
-  const quickActionAttention = useMemo(() => {
-    if (!quickActionAsset) {
-      return {
-        blockingIssues: [] as OpenIssueRecord[],
-        highObservations: [] as OpenIssueRecord[],
-        pendingSignature: null as PendingSignatureRecord | null,
-        missingMedia: null as MissingMediaFlag | null,
-        activeRun: null as AssetWorkflowRun | null,
-        latestRun: null as AssetWorkflowRun | null,
-      };
-    }
-
-    const sortedRuns = [...quickActionRuns].sort(
-      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-    );
-    const latestRun = sortedRuns[0] ?? null;
-    const assetIssues = openIssues.filter((issue) => issue.assetId === quickActionAsset.id);
-
-    return {
-      blockingIssues: assetIssues.filter((issue) => issue.isBlocking),
-      highObservations: assetIssues.filter((issue) => isDashboardAttentionIssue(issue)),
-      pendingSignature:
-        pendingSigs.find(
-          (sig) => sig.assetId === quickActionAsset.id
-        ) ?? null,
-      missingMedia: resolveMissingMediaForAsset(quickActionAsset, quickActionRuns),
-      activeRun: pickActiveRunForAttention(sortedRuns),
-      latestRun,
-    };
-  }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
-
-  const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
-    const displayState = nativeMyJobsDisplayStateByAssetId.get(asset.id);
-    if (displayState) {
-      return myJobsCardActionFromDisplayState(displayState, isNativePlatform);
-    }
-
-    const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
-    const isPaused = isPausedAsset(asset.runStatus);
-    const pendingSignature = pendingSigs.find(
-      (sig) => sig.assetId === asset.id && isPendingInstallerSignature(sig.signatureStatus),
-    ) ?? null;
-    const missingMediaFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
-    const evidenceMissing = (asset.evidenceStatus ?? "").toLowerCase() === "missingdata";
-    const hasMissingMediaFallback = asset.totalSteps > 0 && asset.completedSteps >= asset.totalSteps && asset.missingItems > 0;
-    const missingCount = missingMediaFlag?.missingSteps?.length
-      ?? (missingMediaFlag ? Math.max(0, missingMediaFlag.totalExpected - missingMediaFlag.totalCaptured) : 0)
-      ?? 0;
-    const effectiveMissingCount = missingCount > 0 ? missingCount : asset.missingItems;
-    const hasMissingMedia = Boolean(missingMediaFlag) || hasMissingMediaFallback || evidenceMissing;
-
-    const widgets: MyJobsCardWidget[] = [];
-    if (hasMissingMedia) {
-      widgets.push({ kind: "missing-photo", count: Math.max(0, effectiveMissingCount), color: "warning" });
-    }
-    if (asset.hasOpenIssues === true) {
-      widgets.push({ kind: "issue", count: 0, color: "error" });
-    }
-
-    if (hasMissingMedia) {
-      return {
-        actionKind: "missing-media",
-        chipLabel: "Missing captures",
-        chipColor: "warning",
-        buttonLabel: isNativePlatform ? "Add Photos" : "Add Missing Photos",
-        buttonColor: "warning",
-        helperText: effectiveMissingCount > 0
-          ? `${effectiveMissingCount} missing photo${effectiveMissingCount === 1 ? "" : "s"}`
-          : "Required workflow captures are still missing",
-        widgets,
-      };
-    }
-
-    if (pendingSignature) {
-      return {
-        actionKind: "default",
-        chipLabel: "Pending sign",
-        chipColor: "info",
-        buttonLabel: pendingSignatureStageLabel(pendingSignature.signatureStatus),
-        buttonColor: "warning",
-        helperText: pendingSignatureStageText(pendingSignature.signatureStatus),
-        widgets,
-      };
-    }
-
-    if (isPaused) {
-      return {
-        actionKind: "default",
-        chipLabel: "Paused by user",
-        chipColor: "warning",
-        buttonLabel: "Resume Run",
-        buttonColor: "primary",
-        helperText: "Paused by user",
-        widgets,
-      };
-    }
-
-    if (isActive) {
-      const flagged = asset.hasOpenIssues === true;
-      return {
-        actionKind: "default",
-        chipLabel: "In Progress",
-        chipColor: flagged ? "error" : "primary",
-        buttonLabel: "Continue Run",
-        buttonColor: "primary",
-        helperText: flagged ? "In progress - issue flagged" : "Running",
-        widgets,
-      };
-    }
-
-    if (isAssetSignatureStatusFinalized(asset.signatureStatus)) {
-      return {
-        actionKind: "default",
-        chipLabel: "Complete",
-        chipColor: "success",
-        buttonLabel: "Run Details",
-        buttonColor: "inherit",
-        helperText: "Field work complete",
-        widgets,
-      };
-    }
-
-    return {
-      actionKind: "default",
-      chipLabel: isPendingAsset(asset.status) ? "Pending sign" : "Not Started",
-      chipColor: isPendingAsset(asset.status) ? "info" : "default",
-      buttonLabel: "Start Run",
-      buttonColor: "inherit",
-      helperText: isPendingAsset(asset.status) ? "Awaiting sign-off" : "Ready to start",
-      widgets,
-    };
-  }, [isNativePlatform, missingMediaFlags, nativeMyJobsDisplayStateByAssetId, pendingSigs]);
-
-  type DashboardProductWorkflow = { configId: string; configName: string; workflowTypeId?: string } | null;
-
-  async function resolveProductWorkflowForAsset(
-    fullAsset: Awaited<ReturnType<typeof projectAssetService.getById>>,
-    assignments: WorkflowAssignment[],
-  ): Promise<DashboardProductWorkflow> {
-    if (assignments.length > 0 || !fullAsset?.productConfigId) return null;
-    try {
-      let cfg = await workflowConfigService.getByIdLocalFirst(fullAsset.productConfigId);
-      if (!cfg && !shouldSkipBlockingFetch()) {
-        cfg = await workflowConfigService.getById(fullAsset.productConfigId);
-      }
-      if (!cfg) return null;
-      return {
-        configId: cfg.id,
-        configName: cfg.name,
-        workflowTypeId: cfg.workflowTypeId,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  async function loadQuickActionContext(asset: QuickActionAsset) {
-    const [localAssignments, runs, cachedEntity] = await Promise.all([
-      WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []),
-      assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
-      entityGetAsset(asset.id),
-    ]);
-
-    let assignments = localAssignments.length > 0
-      ? localAssignments
-      : (dashboardAssignmentsMap[asset.id] ?? []);
-
-    if (assignments.length === 0 && !shouldSkipBlockingFetch()) {
-      assignments = await assetWorkflowAssignmentService.listByAsset(asset.id);
-    }
-
-    const cachedAsset = (cachedEntity?.data as ProjectAsset | undefined)
-      ?? nativeMyJobsCardContext[asset.id]?.asset
-      ?? null;
-
-    let fullAsset: ProjectAsset | null = cachedAsset;
-    if (!fullAsset && !shouldSkipBlockingFetch()) {
-      fullAsset = await projectAssetService.getById(asset.id).catch(() => null);
-    }
-
-    const resolvedProductWorkflow = await resolveProductWorkflowForAsset(fullAsset, assignments);
-    return { assignments, runs, fullAsset, resolvedProductWorkflow };
-  }
-
-  useEffect(() => {
-    if (!isNativePlatform || !quickActionOpen || !quickActionAsset) return;
-    const asset = quickActionAsset;
-    const onAssignmentsUpdated = (event: Event) => {
-      const assetId = (event as CustomEvent<{ assetId?: string }>).detail?.assetId;
-      if (assetId !== asset.id) return;
-      void loadQuickActionContext(asset).then((ctx) => {
-        setQuickActionAssignments(ctx.assignments);
-        setQuickActionRuns(ctx.runs);
-        setProductWorkflow(ctx.resolvedProductWorkflow);
-      });
-    };
-    window.addEventListener("repo:assignments:updated", onAssignmentsUpdated);
-    return () => window.removeEventListener("repo:assignments:updated", onAssignmentsUpdated);
-  }, [isNativePlatform, quickActionAsset, quickActionOpen]);
-
-  function getQuickActionAttentionForAsset(asset: QuickActionAsset, runs: AssetWorkflowRun[]) {
-    const sortedRuns = [...runs].sort(
-      (a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime()
-    );
-    const latestRun = sortedRuns[0] ?? null;
-    const assetIssues = openIssues.filter((issue) => issue.assetId === asset.id);
-
-    return {
-      blockingIssues: assetIssues.filter((issue) => issue.isBlocking),
-      highObservations: assetIssues.filter((issue) => isDashboardAttentionIssue(issue)),
-      pendingSignature:
-        pendingSigs.find(
-          (sig) => sig.assetId === asset.id
-        ) ?? null,
-      missingMedia: resolveMissingMediaForAsset(asset, runs),
-      activeRun: pickActiveRunForAttention(sortedRuns),
-      latestRun,
-    };
-  }
-
-  function canStartDirectlyFromDashboard(params: {
-    asset: QuickActionAsset;
-    assignments: WorkflowAssignment[];
-    runs: AssetWorkflowRun[];
-    productWorkflow: DashboardProductWorkflow;
-  }) {
-    const { asset, assignments, runs, productWorkflow } = params;
-    const attention = getQuickActionAttentionForAsset(asset, runs);
-
-    if (asset.assignedUserId !== user.id) return false;
-    if (attention.blockingIssues.length > 0) return false;
-    if (attention.highObservations.length > 0) return false;
-    if (attention.missingMedia) return false;
-    if (attention.pendingSignature) return false;
-    if (attention.activeRun) return false;
-
-    if (assignments.length === 1) return true;
-    if (assignments.length > 1) return false;
-    if (runs.length > 0) return false;
-
-    return Boolean(productWorkflow);
-  }
-
-  // Quick action dialog handlers
-  async function openQuickActionDialog(asset: QuickActionAsset) {
-    setQuickActionAsset(asset);
-    setQuickActionOpen(true);
-    setQuickActionLoading(true);
-    setDocsLoading(true);
-    setProductWorkflow(null);
-    try {
-      const { assignments, runs, resolvedProductWorkflow } = await loadQuickActionContext(asset);
-      const docs = await assetDocumentLinkService.listByAsset(asset.id).catch(() => []);
-      setQuickActionAssignments(assignments);
-      setQuickActionRuns(runs);
-      setDocsCount(Array.isArray(docs) ? docs.length : 0);
-      setProductWorkflow(resolvedProductWorkflow);
-    } catch {
-      setQuickActionAssignments([]);
-      setQuickActionRuns([]);
-      setDocsCount(0);
-    } finally {
-      setQuickActionLoading(false);
-      setDocsLoading(false);
-    }
-  }
-
-  function closeQuickActionDialog() {
-    setQuickActionOpen(false);
-    setQuickActionAsset(null);
-    setQuickActionAssignments([]);
-    setQuickActionRuns([]);
-  }
-
-  async function openMissingMediaFromDashboardAsset(asset: QuickActionAsset) {
-    setRunnerLoading(asset.id);
-    try {
-      const runs = await assetWorkflowRunService.listByAsset(asset.id).catch(() => []);
-      const missingMedia = resolveMissingMediaForAsset(asset, runs);
-      if (!missingMedia) {
-        await openQuickActionOrStart(asset);
-        return;
-      }
-      setPhotoUploadMode("installer");
-      setPhotoUploadTarget(missingMedia);
-    } finally {
-      setRunnerLoading((current) => (current === asset.id ? null : current));
-    }
-  }
-
-  async function openQuickActionOrStart(asset: QuickActionAsset) {
-    setQuickActionLoading(true);
-    setRunnerLoading(asset.id);
-    setDocsLoading(true);
-    let docsLoadDeferred = false;
-    try {
-      const { assignments, runs, resolvedProductWorkflow } = await loadQuickActionContext(asset);
-
-      // Reconcile resume-vs-start in background without blocking the tap path.
-      assetWorkflowRunService.refreshByAssetInBackground(asset.id);
-
-      const attention = getQuickActionAttentionForAsset(asset, runs);
-      if (attention.pendingSignature) {
-        openSignatureRepair(attention.pendingSignature);
-        return;
-      }
-      if (attention.activeRun && !attention.activeRun.isLocked) {
-        const launched = await resumeActiveRunFromDashboard(asset, attention.activeRun);
-        if (launched) return;
-      }
-
-      if (assignments.length === 1 && canStartDirectlyFromDashboard({
-        asset,
-        assignments,
-        runs,
-        productWorkflow: null,
-      })) {
-        await startWorkflowFromDashboard(asset, assignments[0], runs);
-        return;
-      }
-
-      if (canStartDirectlyFromDashboard({
-        asset,
-        assignments,
-        runs,
-        productWorkflow: resolvedProductWorkflow,
-      })) {
-        if (assignments.length === 1) {
-          await startWorkflowFromDashboard(asset, assignments[0], runs);
-          return;
-        }
-        if (resolvedProductWorkflow) {
-          await launchProductWorkflowFromDashboard(asset, resolvedProductWorkflow);
-          return;
-        }
-      }
-
-      setQuickActionAsset(asset);
-      setQuickActionAssignments(assignments);
-      setQuickActionRuns(runs);
-      setDocsCount(0);
-      setProductWorkflow(resolvedProductWorkflow);
-      setQuickActionOpen(true);
-
-      docsLoadDeferred = true;
-      void assetDocumentLinkService.listByAsset(asset.id)
-        .then((links) => setDocsCount(links.length))
-        .catch(() => setDocsCount(0))
-        .finally(() => setDocsLoading(false));
-    } catch {
-      setQuickActionAsset(asset);
-      setQuickActionAssignments([]);
-      setQuickActionRuns([]);
-      setDocsCount(0);
-      setProductWorkflow(null);
-      setQuickActionOpen(true);
-    } finally {
-      setRunnerLoading((current) => (current === asset.id ? null : current));
-      if (!docsLoadDeferred) setDocsLoading(false);
-      setQuickActionLoading(false);
-    }
-  }
-
-  async function handleMyJobsAssetTap(asset: QuickActionAsset, cardAction?: MyJobsCardAction) {
-    const action = cardAction ?? getMyJobsCardAction(asset);
-    if (action.actionKind === "missing-media") {
-      await openMissingMediaFromDashboardAsset(asset);
-      return;
-    }
-    if (action.actionKind === "resolve-blocking") {
-      const blockingIssue = openIssues.find((issue) => issue.assetId === asset.id && issue.isBlocking);
-      if (blockingIssue) {
-        setRunnerLoading(asset.id);
-        try {
-          await openIssueRepair(blockingIssue);
-        } finally {
-          setRunnerLoading((current) => (current === asset.id ? null : current));
-        }
-        return;
-      }
-    }
-    const pendingSignature = pendingSigs.find((sig) => sig.assetId === asset.id);
-    if (action.actionKind === "signature" || pendingSignature) {
-      if (pendingSignature) {
-        openSignatureRepair(pendingSignature);
-        return;
-      }
-    }
-    await openQuickActionOrStart(asset);
-  }
-
-  async function openRunnerWithPayload(
-    asset: QuickActionAsset,
-    configId: string,
-    source: string,
-    options?: {
-      runs?: AssetWorkflowRun[];
-      existingRunId?: string;
-      onOpened?: () => void;
-    },
-  ): Promise<boolean> {
+  const openRunnerWithPayload = useCallback<OpenRunnerWithPayload>(async (asset, configId, source, options) => {
     markWorkflowOpenTap(source, configId);
     setRunnerLoading(asset.id);
     try {
@@ -2149,230 +1507,69 @@ const Dashboard = () => {
     } finally {
       setRunnerLoading(null);
     }
-  }
+  }, []);
 
-  async function launchProductWorkflowFromDashboard(asset: QuickActionAsset, workflowMeta: { configId: string; configName: string; workflowTypeId?: string }) {
-    setRunnerExistingRunId(undefined);
-    const opened = await openRunnerWithPayload(asset, workflowMeta.configId, "dashboard-product", {
-      onOpened: closeQuickActionDialog,
-    });
-    if (!opened) return;
-  }
+  const quickAction = useDashboardQuickAction({
+    myInstallAssets,
+    openIssues,
+    pendingSigs,
+    missingMediaFlags,
+    userId: user.id,
+    userFullName: user.fullName ?? "",
+    isNativePlatform,
+    setOpenAssets,
+    setDashboardError,
+    openIssueRepair,
+    openSignatureRepair,
+    setPhotoUploadMode,
+    setPhotoUploadTarget,
+    openRunnerWithPayload,
+    setRunnerLoading,
+  });
+  closeQuickActionDialogRef.current = quickAction.closeQuickActionDialog;
 
-  const quickActionPrimaryAction = useMemo(() => {
-    if (!quickActionAsset) {
-      return null as null | {
-        label: string;
-        color: "primary" | "success" | "warning" | "error" | "info";
-        onClick: () => void;
-      };
-    }
+  const {
+    nativeMyJobsCardContext,
+    quickActionOpen,
+    quickActionLoading,
+    quickActionAsset,
+    quickActionAttention,
+    quickActionAssignments,
+    quickActionRuns,
+    productWorkflow,
+    quickActionPrimaryAction,
+    autoAssignConfirm,
+    setAutoAssignConfirm,
+    docsLoading,
+    docsCount,
+    setDocsCount,
+    docsDialogOpen,
+    setDocsDialogOpen,
+    docsDialogAsset,
+    setDocsDialogAsset,
+    importDialogOpen,
+    setImportDialogOpen,
+    importDialogAsset,
+    setImportDialogAsset,
+    assignDialogOpen,
+    setAssignDialogOpen,
+    assignForm,
+    setAssignForm,
+    assignSaving,
+    workflowTypes,
+    workflowConfigs,
+    closeQuickActionDialog,
+    openQuickActionOrStart,
+    getMyJobsCardAction,
+    handleMyJobsAssetTap,
+    checkAssignmentThenStartFromDashboard,
+    launchProductWorkflowFromDashboard,
+    confirmAutoAssignAndStartFromDashboard,
+    openAssignDialogFromDashboard,
+    saveAssignmentFromDashboard,
+  } = quickAction;
 
-    const assignmentForActiveRun =
-      quickActionAttention.activeRun
-        ? quickActionAssignments.find(
-            (assignment) => assignment.workflowConfigId === quickActionAttention.activeRun?.workflowConfigId
-          ) ?? null
-        : null;
-    const primaryAssignment = quickActionAssignments[0] ?? null;
-    const hasMatchingActiveRun = primaryAssignment
-      ? quickActionRuns.some((run) => !run.isLocked && run.workflowConfigId === primaryAssignment.workflowConfigId)
-      : false;
-
-    if (quickActionAttention.missingMedia) {
-      return {
-        label: isNativePlatform ? "Add Photos" : "Add Missing Photos",
-        color: "warning" as const,
-        onClick: () => {
-          setPhotoUploadMode("installer");
-          setPhotoUploadTarget(quickActionAttention.missingMedia);
-          closeQuickActionDialog();
-        },
-      };
-    }
-
-    if (quickActionAttention.activeRun && assignmentForActiveRun) {
-      return {
-        label: "Resume Run",
-        color: "primary" as const,
-        onClick: () => checkAssignmentThenStartFromDashboard(quickActionAsset, assignmentForActiveRun),
-      };
-    }
-
-    if (quickActionAttention.blockingIssues.length > 0) {
-      return {
-        label: isNativePlatform ? "Resolve Issue" : "Resolve Blocking Issue",
-        color: "error" as const,
-        onClick: () => {
-          closeQuickActionDialog();
-          openIssueRepair(quickActionAttention.blockingIssues[0]);
-        },
-      };
-    }
-
-    if (quickActionAttention.pendingSignature) {
-      const pendingSignature = quickActionAttention.pendingSignature;
-      return {
-        label: pendingSignatureStageLabel(pendingSignature.signatureStatus),
-        color: "warning" as const,
-        onClick: () => {
-          closeQuickActionDialog();
-          openSignatureRepair(pendingSignature);
-        },
-      };
-    }
-
-    if (quickActionAttention.highObservations.length > 0) {
-      return {
-        label: "Review Observation / Scope",
-        color: "info" as const,
-        onClick: () => {
-          closeQuickActionDialog();
-          openIssueRepair(quickActionAttention.highObservations[0]);
-        },
-      };
-    }
-
-    if (primaryAssignment) {
-      return {
-        label: hasMatchingActiveRun ? "Resume Run" : "Start Run",
-        color: hasMatchingActiveRun ? ("primary" as const) : ("success" as const),
-        onClick: () => checkAssignmentThenStartFromDashboard(quickActionAsset, primaryAssignment),
-      };
-    }
-
-    if (productWorkflow) {
-      return {
-        label: "Start Run",
-        color: "success" as const,
-        onClick: () => launchProductWorkflowFromDashboard(quickActionAsset, productWorkflow),
-      };
-    }
-
-    return null;
-  }, [isNativePlatform, openIssueRepair, openSignatureRepair, productWorkflow, quickActionAsset, quickActionAssignments, quickActionAttention, quickActionRuns]);
-
-  function checkAssignmentThenStartFromDashboard(asset: QuickActionAsset, assignment?: WorkflowAssignment) {
-    if (!asset.assignedUserId) {
-      setAutoAssignConfirm({ asset, assignment, reason: "unassigned" });
-      return;
-    }
-    if (asset.assignedUserId !== user.id) {
-      const otherName = "another user";
-      setAutoAssignConfirm({ asset, assignment, reason: "other", otherName });
-      return;
-    }
-    if (assignment) {
-      void startWorkflowFromDashboard(asset, assignment);
-    }
-  }
-
-  async function startWorkflowFromDashboard(asset: QuickActionAsset, assignment: WorkflowAssignment, runsOverride?: AssetWorkflowRun[]) {
-    await openRunnerWithPayload(asset, assignment.workflowConfigId, "dashboard-start", {
-      runs: runsOverride ?? quickActionRuns,
-      onOpened: closeQuickActionDialog,
-    });
-  }
-
-  /**
-   * Resume a paused or in-progress run directly from the dashboard — no
-   * Quick Action Dialog shown. Mirrors the web assets-page
-   * `case "resume"` flow (`AssetInstallationPage.tsx:3010`). Works the same
-   * online and offline: the run is read from local cache via
-   * `assetWorkflowRunService.listByAsset`, the config via
-   * `workflowConfigService.getById` (which has an offline short-circuit),
-   * and the runner reads the run from local cache and writes back to it
-   * via `offlineStore.saveRun`. Returns true if the runner was opened,
-   * false if it fell through (caller should still open the dialog so the
-   * user at least sees the options).
-   */
-  async function resumeActiveRunFromDashboard(asset: QuickActionAsset, run: AssetWorkflowRun): Promise<boolean> {
-    return openRunnerWithPayload(asset, run.workflowConfigId, "dashboard-resume", {
-      existingRunId: run.id,
-      onOpened: closeQuickActionDialog,
-    });
-  }
-
-  async function confirmAutoAssignAndStartFromDashboard() {
-    if (!autoAssignConfirm) return;
-    const { asset, assignment } = autoAssignConfirm;
-    setAutoAssignConfirm(null);
-    // Persist the take-over / auto-assign so the asset actually changes hands.
-    //
-    // Must use patchAssignment() (narrow, installer-permitted) rather than update()
-    // (the broad PUT, which is Admin/PM-only and 403s for installers — the failure was
-    // then swallowed here, so the asset never changed hands). assignedUserId is what
-    // this very Dashboard's "My Jobs Today" query filters on
-    // (.Where(a => a.AssignedUserId == effectiveUserId)), so a failed assignment means
-    // the job never appears for the new owner and stays with the previous one.
-    try {
-      await projectAssetService.patchAssignment(asset.id, user.id);
-      projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
-    } catch {
-      // Do not start the run: an unpersisted assignment means the job would never show
-      // up in the new owner's "My Jobs Today".
-      setDashboardError("Could not assign this asset to you. The run was not started — please try again.");
-      return;
-    }
-    if (assignment) {
-      void startWorkflowFromDashboard(asset, assignment);
-    }
-  }
-
-  // Load workflow configs scoped to this asset's product when the assign
-  // dialog opens — mirrors AssetInstallationPage.openAssignDialog(). The
-  // Workflow Type is no longer a user choice: the project already fixes it,
-  // and it's derived from the chosen config (resolveConfigWorkflowTypeId).
-  async function openAssignDialogFromDashboard() {
-    if (!quickActionAsset) return;
-    setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
-    setAssignDialogOpen(true);
-    try {
-      const fullAsset = await projectAssetService.getByIdLocalFirst(quickActionAsset.id);
-      if (!fullAsset?.productId) {
-        setWorkflowConfigs([]);
-        return;
-      }
-      const [types, cfgs] = await Promise.all([
-        workflowTypeService.list(),
-        workflowConfigService.listByProduct(fullAsset.productId, "Published"),
-      ]);
-      setWorkflowTypes(types);
-      setWorkflowConfigs(cfgs);
-    } catch {
-      setWorkflowConfigs([]);
-    }
-  }
-
-  async function saveAssignmentFromDashboard() {
-    if (!quickActionAsset || !assignForm.workflowConfigId) return;
-    const cfg = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
-    const workflowTypeId = cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) || (cfg.workflowTypeId ?? "") : "";
-    if (!workflowTypeId) {
-      alert("Could not determine the workflow type for this config. Reconnect and try again.");
-      return;
-    }
-    setAssignSaving(true);
-    try {
-      await assetWorkflowAssignmentService.create(quickActionAsset.id, assignForm.workflowConfigId, workflowTypeId);
-      // Reload assignments
-      const [assignments, runs] = await Promise.all([
-        assetWorkflowAssignmentService.listByAsset(quickActionAsset.id),
-        assetWorkflowRunService.listByAsset(quickActionAsset.id),
-      ]);
-      setQuickActionAssignments(assignments);
-      setQuickActionRuns(runs);
-      setAssignDialogOpen(false);
-      setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
-    } catch (err) {
-      console.error("[Dashboard] Failed to save assignment", err);
-      alert("Failed to assign workflow. Please try again.");
-    } finally {
-      setAssignSaving(false);
-    }
-  }
-
-  const myInstallBlocking = useMemo(
+    const myInstallBlocking = useMemo(
     () => openIssues.filter((issue) => issue.isBlocking && myInstallAssets.some((asset) => asset.id === issue.assetId)),
     [openIssues, myInstallAssets]
   );
