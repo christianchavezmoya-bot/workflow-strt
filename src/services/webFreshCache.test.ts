@@ -76,3 +76,29 @@ describe("webCachedGet persistSession", () => {
     expect(peekWebSessionCache<string>(key)).toBeNull();
   });
 });
+
+describe("webCachedGet singleflight", () => {
+  beforeEach(() => _clearWebCacheForTests());
+
+  it("coalesces concurrent cache misses into one fetcher call", async () => {
+    const key = "/asset-workflow-runs/open-issues";
+    let fetchCount = 0;
+
+    const fetcher = async () => {
+      fetchCount += 1;
+      await new Promise((r) => setTimeout(r, 10));
+      return ["issue-1"];
+    };
+
+    const [a, b, c] = await Promise.all([
+      webCachedGet(key, fetcher),
+      webCachedGet(key, fetcher),
+      webCachedGet(key, fetcher),
+    ]);
+
+    expect(fetchCount).toBe(1);
+    expect(a).toEqual(["issue-1"]);
+    expect(b).toEqual(a);
+    expect(c).toEqual(a);
+  });
+});
