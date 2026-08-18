@@ -24,6 +24,7 @@ import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { StepInput } from "../../types/workflow";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { projectAssetService } from "../../services/projectAssetService";
+import { CONFIG_TYPE_LABEL } from "./assetInstallationPageLogic";
 
 export interface AssetFormValues {
   projectId: string;
@@ -228,6 +229,13 @@ function AssetAddDialogInner({
   }
 
   const selectedProject = projects.find((p) => p.id === form.projectId);
+  // Asset tag is the minimum the server accepts, and a project has to own the asset.
+  // Greying the button out beats submitting and reading an error.
+  const missingRequired = [
+    form.assetTag.trim() ? null : "asset tag",
+    form.projectId ? null : "project",
+  ].filter((label): label is string => !!label);
+  const canSave = missingRequired.length === 0;
 
   return (
     <>
@@ -264,9 +272,9 @@ function AssetAddDialogInner({
           </FormControl>
 
           <FormControl size="small" fullWidth>
-            <InputLabel shrink>Configuration Type</InputLabel>
+            <InputLabel shrink>{CONFIG_TYPE_LABEL}</InputLabel>
             <Select
-              label="Configuration Type"
+              label={CONFIG_TYPE_LABEL}
               value={form.configId}
               onChange={(e) => setForm((p) => ({ ...p, configId: e.target.value }))}
             >
@@ -401,13 +409,18 @@ function AssetAddDialogInner({
         </Stack>
       </DialogContent>
       <DialogActions>
+        {!canSave && (
+          <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", pl: 1 }}>
+            Enter {missingRequired.join(" and ")} to continue
+          </Typography>
+        )}
         <Button onClick={onClose} disabled={saving}>
           Cancel
         </Button>
         <Button
           variant="contained"
           onClick={save}
-          disabled={saving}
+          disabled={saving || !canSave}
           startIcon={saving ? <CircularProgress size={14} /> : undefined}
         >
           {saving ? "Saving..." : "Add asset"}

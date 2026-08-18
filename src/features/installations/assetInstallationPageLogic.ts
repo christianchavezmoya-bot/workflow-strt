@@ -13,6 +13,12 @@ export interface ColumnDef {
   label: string;
 }
 
+/**
+ * A config is a published workflow / work instruction, so the asset dialogs spell both
+ * out — "Configuration Type" alone left users unsure what they were picking.
+ */
+export const CONFIG_TYPE_LABEL = "Configuration Type - (Workflow / Work Instruction)";
+
 export const CONFIGURABLE_COLUMNS: ColumnDef[] = [
   { id: "assetName", label: "Asset Name" },
   { id: "serialNumber", label: "Serial #" },

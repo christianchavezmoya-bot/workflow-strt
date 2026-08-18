@@ -21,6 +21,7 @@ import type { ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset"
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { User } from "../../types/user";
 import { projectAssetService } from "../../services/projectAssetService";
+import { CONFIG_TYPE_LABEL } from "./assetInstallationPageLogic";
 import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
 
 interface AssetForm {
@@ -235,9 +236,9 @@ function AssetEditDialogInner({
             InputProps={{ readOnly: Boolean(isCancelled) }}
           />
           <FormControl size="small" fullWidth>
-            <InputLabel shrink>Configuration Type</InputLabel>
+            <InputLabel shrink>{CONFIG_TYPE_LABEL}</InputLabel>
             <Select
-              label="Configuration Type"
+              label={CONFIG_TYPE_LABEL}
               value={form.configId}
               onChange={(e) => setForm((p) => ({ ...p, configId: e.target.value }))}
               disabled={Boolean(isCancelled)}
@@ -350,13 +351,18 @@ function AssetEditDialogInner({
         </Stack>
       </DialogContent>
       <DialogActions>
+        {!form.assetTag.trim() && (
+          <Typography variant="caption" color="text.secondary" sx={{ mr: "auto", pl: 1 }}>
+            Enter asset tag to continue
+          </Typography>
+        )}
         <Button onClick={onClose} disabled={saving}>
           Close
         </Button>
         <Button
           variant="contained"
           onClick={save}
-          disabled={saving || Boolean(isCancelled)}
+          disabled={saving || Boolean(isCancelled) || !form.assetTag.trim()}
           startIcon={saving ? <CircularProgress size={14} /> : undefined}
         >
           {saving ? "Saving..." : "Save changes"}

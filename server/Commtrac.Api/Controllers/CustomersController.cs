@@ -70,7 +70,7 @@ public class CustomersController : ControllerBase
     }
 
     [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
         var customer = await _db.Customers.FirstOrDefaultAsync(c => c.Id == id);
