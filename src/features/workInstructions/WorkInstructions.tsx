@@ -879,6 +879,7 @@ const WorkInstructions = () => {
   // whichever product tab happened to be open.
   const [newConfigProductId, setNewConfigProductId] = useState("");
   const pendingBuilderConfigIdRef = useRef<string | null>(null);
+  const creatingDraftRef = useRef(false);
 
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [previewConfig, setPreviewConfig] = useState<WorkflowConfig | null>(null);
@@ -1196,6 +1197,10 @@ const WorkInstructions = () => {
   async function createDraftForSelectedProduct() {
     const product = products.find((p) => p.id === newConfigProductId);
     if (!product) { setConfigError("Select a product to continue."); return; }
+    // The disabled state alone loses the race on a slow link: a second tap before the
+    // re-render creates a second draft.
+    if (creatingDraftRef.current) return;
+    creatingDraftRef.current = true;
     setConfigSaving(true);
     try {
       const created = await workflowConfigService.create({
@@ -1214,6 +1219,7 @@ const WorkInstructions = () => {
     } catch {
       setConfigError("Failed to create workflow. Please try again.");
     } finally {
+      creatingDraftRef.current = false;
       setConfigSaving(false);
     }
   }
@@ -1280,6 +1286,10 @@ const WorkInstructions = () => {
 
   /** productIdOverride is needed right after a tab switch, when activeProduct is still stale. */
   function openBuilder(cfg: WorkflowConfig, productIdOverride?: string) {
+    // Never leave a modal mounted over the Builder: it makes the page inert and reads
+    // to the user as a freeze.
+    setConfigDialogOpen(false);
+    setEditingConfig(null);
     setSelectedConfigId(cfg.id);
     setViewMode("builder");
     const params: Record<string, string> = { view: "builder", config: cfg.id };
@@ -1770,26 +1780,32 @@ const WorkInstructions = () => {
                 Choose the product this workflow belongs to. The Builder opens for that product and
                 the draft is named after it — you can rename it when publishing (e.g. AIM-100 Rev 1).
               </Alert>
-              <FormControl fullWidth disabled={configSaving}>
-                <InputLabel shrink>Select Product</InputLabel>
-                <Select
-                  label="Select Product"
-                  value={products.some((p) => p.id === newConfigProductId) ? newConfigProductId : ""}
-                  onChange={(e) => {
-                    setNewConfigProductId(e.target.value);
-                    setConfigError(null);
-                  }}
-                  displayEmpty
-                  autoFocus
-                >
-                  <MenuItem value="" disabled>
-                    {products.length ? "Select a product" : "No products available"}
-                  </MenuItem>
-                  {products.map((product) => (
-                    <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>
-                  ))}
-                </Select>
-              </FormControl>
+              {/* Native select on purpose: a portalled MUI menu renders above the dialog and,
+                  opened over the Builder, looked like a stray floating list with the dialog
+                  hidden behind it — reported as the Builder freezing. */}
+              <TextField
+                select
+                fullWidth
+                label="Select Product"
+                value={products.some((p) => p.id === newConfigProductId) ? newConfigProductId : ""}
+                onChange={(e) => {
+                  setNewConfigProductId(e.target.value);
+                  setConfigError(null);
+                }}
+                SelectProps={{ native: true }}
+                InputLabelProps={{ shrink: true }}
+                disabled={configSaving || products.length === 0}
+                helperText={
+                  products.length
+                    ? "The Builder opens for this product."
+                    : "No products available — add one in Settings first."
+                }
+              >
+                <option value="">Select a product</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>{product.name}</option>
+                ))}
+              </TextField>
               {configError && (
                 <Typography variant="body2" color="error">{configError}</Typography>
               )}
@@ -1891,6 +1907,7 @@ const WorkInstructions = () => {
               variant="contained"
               onClick={createDraftForSelectedProduct}
               disabled={configSaving || !newConfigProductId}
+              startIcon={configSaving ? <CircularProgress size={14} /> : undefined}
             >
               {configSaving ? "Opening Builder…" : "Continue"}
             </Button>
