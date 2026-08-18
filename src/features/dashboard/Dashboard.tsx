@@ -302,6 +302,7 @@ const Dashboard = () => {
   const dashboardRefreshWhenVisibleRef = useRef(false);
   const dashboardRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const dashboardRefreshQueuedRef = useRef(false);
+  const dashboardWebAttentionBootedRef = useRef(false);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
   const [inspectionRunsDue, setInspectionRunsDue] = useState(0);
@@ -513,6 +514,25 @@ const Dashboard = () => {
         setDraftConfigs(configs.filter((c: { status?: string }) => c.status === "Draft" || c.status === "draft"));
       }).catch(() => {});
     }
+  }, [
+    products.length,
+    productsCatalogLoading,
+    projects.length,
+    projectsCatalogLoading,
+    users.length,
+    usersCatalogLoading,
+    dashboardBootPhase,
+    dispatch,
+    isAuthenticated,
+    isEngineer,
+    pmDashboardTab,
+  ]);
+
+  // Attention + workload fetches — intentionally NOT tied to catalog slice updates.
+  // Previously this effect re-ran on every projects/products/users load transition and
+  // stamped open-issues/pending-signatures dozens of times on web cold start.
+  useEffect(() => {
+    if (!isAuthenticated || dashboardBootPhase !== "full") return;
 
     if (isNativePlatform) {
       seedNativeDashboardSummariesFromLocal();
@@ -533,50 +553,45 @@ const Dashboard = () => {
             .catch(() => setProjectAssetSummary([]));
         }
       }
-    } else {
-      // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
-      // do not stampede the API on first paint (session cache still paints immediately).
-      void loadAttention().catch(() => {});
-      // Only roles that render WorkloadPanel pay for the workload query — it is the
-      // heaviest dashboard endpoint (all active assets + all their runs, blobs included).
-      const workloadTimer = needsTechnicianWorkload
-        ? window.setTimeout(() => {
-            setWorkloadLoading(true);
-            projectAssetService.technicianWorkloadSummary()
-              .then((w) => { setWorkload(w); })
-              .catch(() => {})
-              .finally(() => setWorkloadLoading(false));
-          }, 400)
-        : undefined;
-      const summaryTimer = window.setTimeout(() => {
-        projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
-        // active-summary is a GROUP BY over every ProjectAsset row and only feeds the
-        // manager project-completion cards.
-        if (needsProjectAssetSummary) {
-          projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
-        }
-      }, 800);
-      return () => {
-        if (workloadTimer !== undefined) window.clearTimeout(workloadTimer);
-        window.clearTimeout(summaryTimer);
-      };
+      return;
     }
+
+    if (dashboardWebAttentionBootedRef.current) return;
+    dashboardWebAttentionBootedRef.current = true;
+
+    // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
+    // do not stampede the API on first paint (session cache still paints immediately).
+    void loadAttention().catch(() => {});
+    // Only roles that render WorkloadPanel pay for the workload query — it is the
+    // heaviest dashboard endpoint (all active assets + all their runs, blobs included).
+    const workloadTimer = needsTechnicianWorkload
+      ? window.setTimeout(() => {
+          setWorkloadLoading(true);
+          projectAssetService.technicianWorkloadSummary()
+            .then((w) => { setWorkload(w); })
+            .catch(() => {})
+            .finally(() => setWorkloadLoading(false));
+        }, 400)
+      : undefined;
+    const summaryTimer = window.setTimeout(() => {
+      projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
+      // active-summary is a GROUP BY over every ProjectAsset row and only feeds the
+      // manager project-completion cards.
+      if (needsProjectAssetSummary) {
+        projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
+      }
+    }, 800);
+    return () => {
+      if (workloadTimer !== undefined) window.clearTimeout(workloadTimer);
+      window.clearTimeout(summaryTimer);
+    };
   }, [
-    products.length,
-    productsCatalogLoading,
-    projects.length,
-    projectsCatalogLoading,
-    users.length,
-    usersCatalogLoading,
     dashboardBootPhase,
-    dispatch,
     isAuthenticated,
-    isEngineer,
     isNativePlatform,
     loadAttention,
     needsProjectAssetSummary,
     needsTechnicianWorkload,
-    pmDashboardTab,
     seedNativeDashboardSummariesFromLocal,
   ]);
 

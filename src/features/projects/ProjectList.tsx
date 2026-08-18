@@ -468,8 +468,9 @@ const ProjectList = () => {
   }, [currentRequestKey, dispatch, reloadProjects]);
 
   useEffect(() => {
+    if (productsState.items.length || productsState.loading) return;
     dispatch(fetchProducts());
-  }, [dispatch]);
+  }, [dispatch, productsState.items.length, productsState.loading]);
 
   useEffect(() => {
     const openId = searchParams.get("open");

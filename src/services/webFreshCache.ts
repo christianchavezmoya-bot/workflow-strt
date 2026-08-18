@@ -40,6 +40,19 @@ type CacheEntry<T> = {
 
 const store = new Map<string, CacheEntry<unknown>>();
 
+/** Coalesce concurrent fetches for the same cache key (foreground + background). */
+const inFlight = new Map<string, Promise<unknown>>();
+
+function singleflight<T>(key: string, fetcher: () => Promise<T>): Promise<T> {
+  const existing = inFlight.get(key);
+  if (existing) return existing as Promise<T>;
+  const flight = fetcher().finally(() => {
+    inFlight.delete(key);
+  });
+  inFlight.set(key, flight);
+  return flight;
+}
+
 function sessionStorageKey(cacheKey: string): string {
   return `webSession:${cacheKey}`;
 }
@@ -112,11 +125,17 @@ export async function webCachedGet<T>(
   const entry = store.get(key) as CacheEntry<T> | undefined;
   const now = Date.now();
 
+  const runFetcher = () =>
+    singleflight(key, async () => {
+      const fresh = await fetcher();
+      store.set(key, { value: fresh, expiresAt: Date.now() + ttlMs });
+      if (options?.persistSession) writeSessionSnapshot(key, fresh);
+      return fresh;
+    });
+
   const scheduleBackgroundRefresh = () => {
-    fetcher()
+    void runFetcher()
       .then((fresh) => {
-        store.set(key, { value: fresh, expiresAt: Date.now() + ttlMs });
-        if (options?.persistSession) writeSessionSnapshot(key, fresh);
         options?.onFresh?.(fresh);
       })
       .catch(() => { /* background refresh failed — keep serving stale until TTL expires */ });
@@ -136,10 +155,7 @@ export async function webCachedGet<T>(
     }
   }
 
-  const fresh = await fetcher();
-  store.set(key, { value: fresh, expiresAt: Date.now() + ttlMs });
-  if (options?.persistSession) writeSessionSnapshot(key, fresh);
-  return fresh;
+  return runFetcher();
 }
 
 /** Drop one cached entry — call this right after a successful write so the
@@ -169,4 +185,5 @@ export function invalidateWebCacheByPrefix(prefix: string): void {
 /** Test/debug helper — clears everything. Not used in production code paths. */
 export function _clearWebCacheForTests(): void {
   store.clear();
+  inFlight.clear();
 }
