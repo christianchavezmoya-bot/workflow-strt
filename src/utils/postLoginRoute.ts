@@ -14,9 +14,11 @@ const ASSETS_LANDING_ROLES = new Set([
  */
 export function resolvePostLoginRoute(
   user: AuthUserLike,
-  options: { isFirstLogin?: boolean; passwordExpired?: boolean },
+  options: { isFirstLogin?: boolean; passwordExpired?: boolean; nativeApp?: boolean },
 ): string {
   if (options.isFirstLogin || options.passwordExpired) return "/profile";
+  // Native mobile opens on Home; web field roles still land on Assets for faster field access.
+  if (options.nativeApp) return "/";
   const role = user?.role ?? "";
   if (ASSETS_LANDING_ROLES.has(role)) return "/installations/assets";
   return "/";

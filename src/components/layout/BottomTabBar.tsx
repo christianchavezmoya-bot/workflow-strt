@@ -66,6 +66,7 @@ const BottomTabBar = () => {
     if (tab.path === "__more__") {
       setMoreOpen(true);
     } else {
+      setMoreOpen(false);
       navigate(tab.path);
     }
   };

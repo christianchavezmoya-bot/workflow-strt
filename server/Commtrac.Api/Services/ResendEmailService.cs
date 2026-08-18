@@ -339,7 +339,8 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
                     client.Credentials = new NetworkCredential(settings.Username, settings.Password);
                 }
 
-                using var mail = new MailMessage(fromAddress, toEmail, subject, body);
+                var fromHeader = FormatFromHeader(ResolveSmtpFromName(settings), fromAddress);
+                using var mail = new MailMessage(fromHeader, toEmail, subject, body);
                 foreach (var attachment in attachments)
                 {
                     mail.Attachments.Add(new Attachment(new MemoryStream(attachment.Content), attachment.FileName));

@@ -153,19 +153,14 @@ public sealed class NotificationSettingsService
         var fallbackFrontendBaseUrl = (_fallbackEmail.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
         var effectiveFrontendBaseUrl = (configuredUrl ?? "").Trim().TrimEnd('/');
 
+        // Prefer the value saved in notification settings (admin UI / DB). Only fall back to
+        // appsettings when the DB value is empty or localhost — never overwrite a configured LAN IP.
         if (string.IsNullOrWhiteSpace(effectiveFrontendBaseUrl) || IsLocalhostUrl(effectiveFrontendBaseUrl))
         {
             if (!string.IsNullOrWhiteSpace(fallbackFrontendBaseUrl) && !IsLocalhostUrl(fallbackFrontendBaseUrl))
             {
                 effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
             }
-        }
-        else if (!string.IsNullOrWhiteSpace(fallbackFrontendBaseUrl)
-                 && IsPrivateIpv4Url(effectiveFrontendBaseUrl)
-                 && IsPrivateIpv4Url(fallbackFrontendBaseUrl)
-                 && !string.Equals(effectiveFrontendBaseUrl, fallbackFrontendBaseUrl, StringComparison.OrdinalIgnoreCase))
-        {
-            effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
         }
 
         return effectiveFrontendBaseUrl;

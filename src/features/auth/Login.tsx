@@ -147,7 +147,11 @@ const Login = () => {
 
     const landingRoute = resolvePostLoginRoute(
       result.user as { role?: string } | undefined,
-      { isFirstLogin: result.isFirstLogin, passwordExpired: result.passwordExpired },
+      {
+        isFirstLogin: result.isFirstLogin,
+        passwordExpired: result.passwordExpired,
+        nativeApp: isMobileNativePlatform(),
+      },
     );
     console.log("[Login] Login success, navigating to:", landingRoute);
     setLoading(false);

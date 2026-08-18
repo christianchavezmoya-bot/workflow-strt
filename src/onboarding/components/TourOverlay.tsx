@@ -80,11 +80,12 @@ export default function TourOverlay({ tour, userId, role, onComplete, onSkip }: 
     setVpH(window.innerHeight);
   }, [step?.targetSelector]);
 
-  // Observe layout shifts
+  // Observe layout shifts and scroll (tooltip uses viewport coords from getBoundingClientRect)
   useEffect(() => {
     updateRect();
-    const onResize = () => updateRect();
-    window.addEventListener("resize", onResize);
+    const onLayoutChange = () => updateRect();
+    window.addEventListener("resize", onLayoutChange);
+    window.addEventListener("scroll", onLayoutChange, true);
     // Poll a few times to handle lazy renders
     let ticks = 0;
     const poll = () => {
@@ -93,7 +94,8 @@ export default function TourOverlay({ tour, userId, role, onComplete, onSkip }: 
     };
     rafRef.current = requestAnimationFrame(poll);
     return () => {
-      window.removeEventListener("resize", onResize);
+      window.removeEventListener("resize", onLayoutChange);
+      window.removeEventListener("scroll", onLayoutChange, true);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [updateRect]);
