@@ -49,6 +49,7 @@ public static class StrataNgoSeeder
     {
         db.Products.RemoveRange(db.Products.ToList());
         db.Divisions.RemoveRange(db.Divisions.ToList());
+        db.SaveChanges(); // flush before the division seed checks whether any remain
     }
 
     private static void SeedUsers(AppDbContext db, IConfiguration config)
@@ -129,26 +130,22 @@ public static class StrataNgoSeeder
 
     private static void SeedDivisions(AppDbContext db)
     {
-        db.Divisions.AddRange(
-            new DivisionEntity { Id = "div-strata-safety",  Name = "Strata Safety",  SortOrder = 1, IsActive = true },
-            new DivisionEntity { Id = "div-strata-connect", Name = "Strata Connect", SortOrder = 2, IsActive = true },
-            new DivisionEntity { Id = "div-strata-ai",      Name = "Strata AI",      SortOrder = 3, IsActive = true }
-        );
+        DefaultCatalog.SeedDivisionsIfEmpty(db);
     }
 
     private static void SeedProducts(AppDbContext db)
     {
-        var safety = "div-strata-safety";
-        var connect = "div-strata-connect";
-        var ai = "div-strata-ai";
+        var protect = DefaultCatalog.DivisionProtectId;
+        var connect = DefaultCatalog.DivisionConnectId;
+        var ai = DefaultCatalog.DivisionAiId;
 
         db.Products.AddRange(
-            new ProductEntity { Id = ProductChambersId, Name = "Chambers", DivisionId = safety, Description = "Underground refuge chambers" },
-            new ProductEntity { Id = "prod-hazard-coal", Name = "HazardAvert Coal", DivisionId = safety, Description = "HazardAvert — coal applications" },
-            new ProductEntity { Id = "prod-hazard-shr", Name = "HazardAvert SHR", DivisionId = safety, Description = "HazardAvert — SHR applications" },
+            new ProductEntity { Id = ProductChambersId, Name = "Chambers", DivisionId = protect, Description = "Underground refuge chambers" },
+            new ProductEntity { Id = "prod-hazard-coal", Name = "HazardAvert Coal", DivisionId = protect, Description = "HazardAvert — coal applications" },
+            new ProductEntity { Id = "prod-hazard-shr", Name = "HazardAvert SHR", DivisionId = protect, Description = "HazardAvert — SHR applications" },
             new ProductEntity { Id = "prod-connect-hub", Name = "Strata Connect Hub", DivisionId = connect, Description = "Strata Connect platform hub" },
             new ProductEntity { Id = "prod-ai-vision", Name = "Strata AI Vision", DivisionId = ai, Description = "Strata AI analytics module" },
-            new ProductEntity { Id = "prod-safety-beacon", Name = "Strata Safety Beacon", DivisionId = safety, Description = "Personnel safety beacon" }
+            new ProductEntity { Id = "prod-safety-beacon", Name = "Strata Safety Beacon", DivisionId = protect, Description = "Personnel safety beacon" }
         );
     }
 

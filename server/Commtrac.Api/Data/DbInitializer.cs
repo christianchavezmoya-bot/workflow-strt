@@ -73,6 +73,9 @@ public static class DbInitializer
 
         var strataNgoSeed = StrataNgoSeeder.IsEnabled(config);
         var minimalSeed = MinimalSeeder.IsEnabled(config);
+        // Demo catalog (products, JOB-4021 project, INST-01 installation) is opt-in only:
+        // a database with no SeedProfile now starts empty apart from users and divisions.
+        var demoSeed = !strataNgoSeed && !minimalSeed && IsDemoSeedEnabled(config);
 
         if (!db.Users.Any())
         {
@@ -128,11 +131,22 @@ public static class DbInitializer
         // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
         // Removed default customers to avoid conflicts
 
-        if (!strataNgoSeed && !minimalSeed)
+        if (minimalSeed)
+        {
+            MinimalSeeder.EnsureCleanCatalog(db);
+        }
+        else if (!strataNgoSeed)
         {
             CleanupSeederArtifacts(db);
-            SeedDivisions(db);
-            SeedProducts(db);
+            if (demoSeed)
+            {
+                SeedDivisions(db);
+                SeedProducts(db);
+            }
+            else
+            {
+                DefaultCatalog.SeedDivisionsIfEmpty(db);
+            }
         }
         db.SaveChanges(); // flush products before feature patch so LINQ queries can find them
 
@@ -140,7 +154,7 @@ public static class DbInitializer
         MigrateProductFeaturesToGlobalLibrary(db);
         db.SaveChanges();
 
-        if (!strataNgoSeed && !minimalSeed && !db.Projects.Any())
+        if (demoSeed && !db.Projects.Any())
         {
             var productId = db.Products.Select(p => p.Id).FirstOrDefault();
             db.Projects.Add(new ProjectEntity
@@ -163,9 +177,10 @@ public static class DbInitializer
                 ProbabilityStage = "Signed",
                 ProductIds = string.IsNullOrEmpty(productId) ? new List<string>() : new List<string> { productId }
             });
+            db.SaveChanges(); // the demo installation below reads the project id back
         }
 
-        if (!strataNgoSeed && !minimalSeed && !db.Installations.Any())
+        if (demoSeed && !db.Installations.Any())
         {
             var projectId = db.Projects.Select(p => p.Id).FirstOrDefault() ?? "P-1000";
             db.Installations.Add(new InstallationEntity
@@ -227,6 +242,14 @@ public static class DbInitializer
 
         db.SaveChanges();
     }
+
+    /// <summary>
+    /// Demo data ships only when explicitly requested with SeedProfile=Demo (or SeedDemoData=true),
+    /// so wiping the database without a profile no longer resurrects the JOB-4021 sample project.
+    /// </summary>
+    private static bool IsDemoSeedEnabled(IConfiguration config) =>
+        string.Equals(config["SeedProfile"], "Demo", StringComparison.OrdinalIgnoreCase)
+        || config.GetValue("SeedDemoData", false);
 
     private static string ResolveSeedAdminPassword(IConfiguration config)
     {
@@ -522,11 +545,12 @@ public static class DbInitializer
     // Division seeding
     // -----------------------------------------------------------------------
 
-    // These IDs are only used when the database has NO divisions at all (fresh install).
-    // If any divisions already exist, seeding is skipped entirely.
-    private const string DivMiningId    = "div-mining";
-    private const string DivSafetyId    = "div-safety";
-    private const string DivTechId      = "div-tech";
+    // The demo catalog (SeedProfile=Demo). Fresh databases without that profile get the
+    // default divisions from DefaultCatalog instead. Only used when the database has NO
+    // divisions at all; if any divisions already exist, seeding is skipped entirely.
+    private const string DivMiningId    = DefaultCatalog.DemoDivisionMiningId;
+    private const string DivSafetyId    = DefaultCatalog.DemoDivisionSafetyId;
+    private const string DivTechId      = DefaultCatalog.DemoDivisionTechId;
 
     private static readonly (string Id, string Name, string? Description, int SortOrder)[] KnownDivisions =
     [
@@ -597,6 +621,9 @@ public static class DbInitializer
         ("Hazard Avert - Gen 2",  "Hazard Avert second generation",         DivSafetyId),
         ("Ping Alert",            "Personnel alerting system",              DivSafetyId),
     ];
+
+    /// <summary>Names of the demo catalog products, used by the Minimal clean-catalog reset.</summary>
+    internal static readonly string[] DemoProductNames = KnownProducts.Select(p => p.Name).ToArray();
 
     private static void SeedProducts(AppDbContext db)
     {
