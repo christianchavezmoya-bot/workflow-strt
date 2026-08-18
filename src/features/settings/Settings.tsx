@@ -2071,7 +2071,7 @@ const Settings = () => {
               label="Frontend Base URL"
               value={String(notifySettings.frontendBaseUrl || "")}
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, frontendBaseUrl: event.target.value }))}
-              helperText="Used in invite and password-reset links (e.g. http://10.7.15.135:5173). Saved here overrides appsettings."
+              helperText="Used in invite and password-reset links (e.g. http://10.7.15.155:5173). Saved here overrides appsettings."
               fullWidth
             />
             <Stack direction="row" spacing={2} alignItems="center">
