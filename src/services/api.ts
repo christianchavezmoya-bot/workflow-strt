@@ -122,10 +122,13 @@ let nativeAuthExpiredSignaled = false;
 if (typeof window !== "undefined") {
   window.addEventListener("auth-change", () => {
     nativeAuthExpiredSignaled = false;
+    webSessionExpiredHandling = false;
   });
 }
 
-/** Native: switch App to Login via event — never hard-reload (reload loops with preserved token). Web: full redirect. */
+/** Native: switch App to Login via event — never hard-reload (reload loops with preserved token). Web: clear session and show Login without redundant reloads. */
+let webSessionExpiredHandling = false;
+
 function handleSessionExpiredOnline(): void {
   if (isMobileNativePlatform()) {
     if (nativeAuthExpiredSignaled) return;
@@ -134,10 +137,19 @@ function handleSessionExpiredOnline(): void {
     window.dispatchEvent(new Event("api-auth-error"));
     return;
   }
+  if (webSessionExpiredHandling) return;
+  webSessionExpiredHandling = true;
   window.dispatchEvent(new Event("api-auth-error"));
   secureRemove("auth_token");
   secureRemove("auth_user");
-  window.location.href = "/login";
+  const onLoginRoute = window.location.pathname === "/login" || window.location.pathname === "/reset-password";
+  if (!onLoginRoute) {
+    window.location.href = "/login";
+  } else {
+    window.setTimeout(() => {
+      webSessionExpiredHandling = false;
+    }, 500);
+  }
 }
 
 const silentRefresh = async () => {
