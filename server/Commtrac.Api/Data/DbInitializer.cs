@@ -72,12 +72,17 @@ public static class DbInitializer
         }
 
         var strataNgoSeed = StrataNgoSeeder.IsEnabled(config);
+        var minimalSeed = MinimalSeeder.IsEnabled(config);
 
         if (!db.Users.Any())
         {
             if (strataNgoSeed)
             {
                 StrataNgoSeeder.SeedFreshDatabase(db, config);
+            }
+            else if (minimalSeed)
+            {
+                MinimalSeeder.SeedFreshDatabase(db, config);
             }
             else
             {
@@ -109,7 +114,7 @@ public static class DbInitializer
                 });
             }
         }
-        else if (!strataNgoSeed)
+        else if (!strataNgoSeed && !minimalSeed)
         {
             var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
             var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
@@ -123,7 +128,7 @@ public static class DbInitializer
         // Customer seed data is now handled by migrations (SeedDemoCustomerAndSite)
         // Removed default customers to avoid conflicts
 
-        if (!strataNgoSeed)
+        if (!strataNgoSeed && !minimalSeed)
         {
             CleanupSeederArtifacts(db);
             SeedDivisions(db);
@@ -135,7 +140,7 @@ public static class DbInitializer
         MigrateProductFeaturesToGlobalLibrary(db);
         db.SaveChanges();
 
-        if (!db.Projects.Any())
+        if (!strataNgoSeed && !minimalSeed && !db.Projects.Any())
         {
             var productId = db.Products.Select(p => p.Id).FirstOrDefault();
             db.Projects.Add(new ProjectEntity
@@ -160,7 +165,7 @@ public static class DbInitializer
             });
         }
 
-        if (!db.Installations.Any())
+        if (!strataNgoSeed && !minimalSeed && !db.Installations.Any())
         {
             var projectId = db.Projects.Select(p => p.Id).FirstOrDefault() ?? "P-1000";
             db.Installations.Add(new InstallationEntity

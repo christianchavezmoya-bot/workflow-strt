@@ -2056,6 +2056,7 @@ const Settings = () => {
               label="Frontend Base URL"
               value={String(notifySettings.frontendBaseUrl || "")}
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, frontendBaseUrl: event.target.value }))}
+              helperText="Used in invite and password-reset links (e.g. http://10.7.15.135:5173). Saved here overrides appsettings."
               fullWidth
             />
             <Stack direction="row" spacing={2} alignItems="center">
@@ -2075,6 +2076,7 @@ const Settings = () => {
               label="From address"
               value={String(notifySettings.smtpFrom || "")}
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, smtpFrom: event.target.value }))}
+              helperText="Use noreply@strata-ngo.com with Resend (verified domain) or a Gmail Send mail as alias. Plain Gmail SMTP sends as the authenticated Gmail account."
               fullWidth
             />
             <Stack direction={{ xs: "column", md: "row" }} spacing={2}>
@@ -2097,6 +2099,9 @@ const Settings = () => {
               onChange={(event) => setNotifySettings((prev) => ({ ...prev, smsApiKey: event.target.value }))}
               fullWidth
             />
+            {notifyStatus === "sent" && (
+              <Alert severity="success">SMS/SMTP settings saved successfully.</Alert>
+            )}
             {notifyStatus === "error" && notifyError && (
               <Alert severity="error">{notifyError}</Alert>
             )}

@@ -28,11 +28,28 @@ import { useCallback, useEffect, useRef } from "react";
 import { initTapFeedback } from "../../services/tapFeedback";
 import { useAppHeaderOffset } from "../../hooks/useAppHeaderOffset";
 import type { User } from "../../types/user";
+import { secureGet, secureSet } from "../../services/secureStorage";
 
 /** Runs onboarding hooks only when a real user id exists (stable hook order per mount). */
 function OnboardingLayerContent({ user }: { user: User }) {
-  const handleWelcomeDone = useCallback(() => {
-    authService.updateProfile({ fullName: user.fullName, office: user.office }).catch(() => {});
+  const handleWelcomeDone = useCallback(async () => {
+    try {
+      const updated = await authService.updateProfile({ fullName: user.fullName, office: user.office });
+      await secureSet("auth_user", JSON.stringify(updated));
+      window.dispatchEvent(new Event("auth-user-updated"));
+    } catch {
+      // Still clear the welcome modal locally when offline or profile save fails.
+      const stored = secureGet("auth_user");
+      if (stored) {
+        try {
+          const parsed = JSON.parse(stored) as User;
+          await secureSet("auth_user", JSON.stringify({ ...parsed, isFirstLogin: false }));
+          window.dispatchEvent(new Event("auth-user-updated"));
+        } catch {
+          // ignore malformed cached auth_user
+        }
+      }
+    }
   }, [user.fullName, user.office]);
 
   const controls = useOnboarding({

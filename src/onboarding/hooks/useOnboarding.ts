@@ -52,7 +52,7 @@ export interface OnboardingControls {
   resetOnboarding: () => void;
 }
 
-export function useOnboarding({ userId, role, isFirstLogin, onWelcomeDone }: UseOnboardingOptions): OnboardingControls {
+export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWelcomeDone }: UseOnboardingOptions): OnboardingControls {
   const flags = useMemo(() => getOnboardingFlags(), []);
   const location = useLocation();
 
@@ -84,8 +84,9 @@ export function useOnboarding({ userId, role, isFirstLogin, onWelcomeDone }: Use
   }, [location.pathname]);
 
   // ── Welcome ────────────────────────────────────────────────────────────────
-  // Show welcome if: backend says isFirstLogin=true OR localStorage not yet completed
-  const showWelcome = flags.enabled && (!state.firstLoginCompleted || isFirstLogin === true);
+  // Show welcome until the user completes or skips it locally. Backend isFirstLogin is
+  // cleared via onWelcomeDone; do not re-open the modal when local state is already done.
+  const showWelcome = flags.enabled && !state.firstLoginCompleted;
 
   const completeWelcome = useCallback((focusArea: FocusArea) => {
     onboardingAnalytics.emit("onboarding_started", { userId, role, focusArea });

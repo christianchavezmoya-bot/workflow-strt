@@ -64,6 +64,18 @@
         "ENABLE_BOM_PROJECT_MODULE": "true"
       }
     },
+    "Minimal": {
+      "commandName": "Project",
+      "dotnetRunMessages": true,
+      "launchBrowser": true,
+      "launchUrl": "swagger",
+      "applicationUrl": "http://0.0.0.0:4000",
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "SeedProfile": "Minimal",
+        "ENABLE_BOM_PROJECT_MODULE": "true"
+      }
+    },
     "Staging": {
       "commandName": "Project",
       "dotnetRunMessages": true,
