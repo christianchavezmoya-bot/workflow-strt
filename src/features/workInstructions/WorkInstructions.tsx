@@ -873,6 +873,10 @@ const WorkInstructions = () => {
   const [configForm, setConfigForm] = useState<ConfigFormState>(emptyConfigForm());
   const [configError, setConfigError] = useState<string | null>(null);
   const [configSaving, setConfigSaving] = useState(false);
+  // Creating a workflow asks for the product first, so a draft can never land on
+  // whichever product tab happened to be open.
+  const [newConfigProductId, setNewConfigProductId] = useState("");
+  const pendingBuilderConfigIdRef = useRef<string | null>(null);
 
   const [selectedConfigId, setSelectedConfigId] = useState<string | null>(null);
   const [previewConfig, setPreviewConfig] = useState<WorkflowConfig | null>(null);
@@ -1009,6 +1013,13 @@ const WorkInstructions = () => {
   );
 
   useEffect(() => {
+    // A product switch normally means "stop editing that product's config". The exception
+    // is the product-first create flow, which switches tab *in order to* open a new draft.
+    if (pendingBuilderConfigIdRef.current) {
+      setSelectedConfigId(pendingBuilderConfigIdRef.current);
+      pendingBuilderConfigIdRef.current = null;
+      return;
+    }
     setSelectedConfigId(null);
   }, [activeProduct?.id]);
 
@@ -1112,10 +1123,8 @@ const WorkInstructions = () => {
 
   function openNewConfig() {
     setEditingConfig(null);
-    setConfigForm({
-      ...emptyConfigForm(),
-      featureSelections: inventoryFeatures.map((f) => ({ featureId: f.id, included: false, activeCount: 0 })),
-    });
+    setConfigForm(emptyConfigForm());
+    setNewConfigProductId(activeProduct?.id ?? products[0]?.id ?? "");
     setConfigError(null);
     setConfigDialogOpen(true);
   }
@@ -1150,33 +1159,54 @@ const WorkInstructions = () => {
   }
 
   async function saveConfig() {
-    if (!activeProduct) return;
+    if (!editingConfig) return;
     const name = configForm.name.trim();
     if (!name) { setConfigError("Name is required."); return; }
     setConfigSaving(true);
     try {
       const selectedWorkflowType = workflowTypes.find((type) => type.id === configForm.workflowTypeId);
-      const payload = {
+      const updated = await workflowConfigService.update(editingConfig.id, {
         name,
-        productId: activeProduct.id,
+        productId: editingConfig.productId,
         notes: configForm.notes.trim() || undefined,
         configType: (selectedWorkflowType?.name ?? configForm.configType.trim()) || undefined,
         workflowTypeId: configForm.workflowTypeId || undefined,
         featureSelectionsJson: JSON.stringify(configForm.featureSelections),
-      };
-      if (editingConfig) {
-        const updated = await workflowConfigService.update(editingConfig.id, payload);
-        setConfigs((prev) => prev.map((c) => (c.id === editingConfig.id ? updated : c)));
-      } else {
-        const created = await workflowConfigService.create(payload);
-        setConfigs((prev) => [created, ...prev]);
-        closeConfigDialog();
-        openBuilder(created);
-        return;
-      }
+      });
+      setConfigs((prev) => prev.map((c) => (c.id === editingConfig.id ? updated : c)));
       closeConfigDialog();
     } catch {
       setConfigError("Failed to save. Please try again.");
+    } finally {
+      setConfigSaving(false);
+    }
+  }
+
+  /**
+   * Product-first create: the draft is named after the product and opened straight in
+   * the Builder for that product. Name, type, description and installed features are
+   * all set when publishing.
+   */
+  async function createDraftForSelectedProduct() {
+    const product = products.find((p) => p.id === newConfigProductId);
+    if (!product) { setConfigError("Select a product to continue."); return; }
+    setConfigSaving(true);
+    try {
+      const created = await workflowConfigService.create({
+        name: product.name,
+        productId: product.id,
+        featureSelectionsJson: JSON.stringify([]),
+      });
+      const productIdx = products.findIndex((p) => p.id === product.id);
+      if (productIdx >= 0 && products[tab]?.id !== product.id) {
+        pendingBuilderConfigIdRef.current = created.id;
+        setTab(productIdx);
+      }
+      setConfigs((prev) => [created, ...prev]);
+      closeConfigDialog();
+      openBuilder(created, product.id);
+    } catch {
+      setConfigError("Failed to create workflow. Please try again.");
     } finally {
       setConfigSaving(false);
     }
@@ -1242,11 +1272,13 @@ const WorkInstructions = () => {
     }
   }
 
-  function openBuilder(cfg: WorkflowConfig) {
+  /** productIdOverride is needed right after a tab switch, when activeProduct is still stale. */
+  function openBuilder(cfg: WorkflowConfig, productIdOverride?: string) {
     setSelectedConfigId(cfg.id);
     setViewMode("builder");
     const params: Record<string, string> = { view: "builder", config: cfg.id };
-    if (activeProduct?.id) params.product = activeProduct.id;
+    const productId = productIdOverride ?? activeProduct?.id;
+    if (productId) params.product = productId;
     safeSetSearchParams(params);
   }
 
@@ -1740,12 +1772,38 @@ const WorkInstructions = () => {
       >
         <DialogTitle>{editingConfig ? "Edit Workflow" : "New Workflow"}</DialogTitle>
         <DialogContent>
-          <Stack spacing={2} sx={{ mt: 1 }}>
-            {!editingConfig && (
+          {!editingConfig ? (
+            <Stack spacing={2} sx={{ mt: 1 }}>
               <Alert severity="info" sx={{ fontSize: "0.8rem" }}>
-                New workflows are created as <strong>Draft</strong>. Use the Builder to add steps, then publish when ready.
+                Choose the product this workflow belongs to. The Builder opens for that product and
+                the draft is named after it — you can rename it when publishing (e.g. AIM-100 Rev 1).
               </Alert>
-            )}
+              <FormControl fullWidth disabled={configSaving}>
+                <InputLabel shrink>Select Product</InputLabel>
+                <Select
+                  label="Select Product"
+                  value={products.some((p) => p.id === newConfigProductId) ? newConfigProductId : ""}
+                  onChange={(e) => {
+                    setNewConfigProductId(e.target.value);
+                    setConfigError(null);
+                  }}
+                  displayEmpty
+                  autoFocus
+                >
+                  <MenuItem value="" disabled>
+                    {products.length ? "Select a product" : "No products available"}
+                  </MenuItem>
+                  {products.map((product) => (
+                    <MenuItem key={product.id} value={product.id}>{product.name}</MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+              {configError && (
+                <Typography variant="body2" color="error">{configError}</Typography>
+              )}
+            </Stack>
+          ) : (
+          <Stack spacing={2} sx={{ mt: 1 }}>
             <TextField
               label="Workflow Name"
               value={configForm.name}
@@ -1826,12 +1884,23 @@ const WorkInstructions = () => {
               <Typography variant="body2" color="error">{configError}</Typography>
             )}
           </Stack>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={closeConfigDialog} disabled={configSaving}>Cancel</Button>
-          <Button variant="contained" onClick={saveConfig} disabled={configSaving}>
-            {configSaving ? "Saving…" : editingConfig ? "Save Changes" : "Create Draft"}
-          </Button>
+          {editingConfig ? (
+            <Button variant="contained" onClick={saveConfig} disabled={configSaving}>
+              {configSaving ? "Saving…" : "Save Changes"}
+            </Button>
+          ) : (
+            <Button
+              variant="contained"
+              onClick={createDraftForSelectedProduct}
+              disabled={configSaving || !newConfigProductId}
+            >
+              {configSaving ? "Opening Builder…" : "Continue"}
+            </Button>
+          )}
         </DialogActions>
       </Dialog>
 
