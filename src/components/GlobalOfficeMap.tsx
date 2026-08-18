@@ -491,29 +491,6 @@ export default function GlobalOfficeMap({
               )}
             />
 
-            <Autocomplete
-              value={formData.state}
-              onChange={(_, newValue) => {
-                setFormData((prev) => ({ ...prev, state: newValue || "" }));
-              }}
-              inputValue={formData.state}
-              onInputChange={(_, newInputValue) => {
-                setFormData((prev) => ({ ...prev, state: newInputValue }));
-              }}
-              options={availableStates}
-              freeSolo
-              disabled={isGeocoding || !formData.country}
-              renderInput={(params) => (
-                <TextField
-                  {...params}
-                  label="State/Region"
-                  fullWidth
-                  InputLabelProps={{ sx: fieldLabelStyle }}
-                  helperText={availableStates.length > 0 ? `${availableStates.length} states available` : "Type to enter state manually"}
-                />
-              )}
-            />
-
             <Autocomplete<{ city: string; state: string; country: string; displayName: string; lat: number; lng: number }, false, false, true>
               value={null}
               onChange={(_, newValue) => {
@@ -575,6 +552,30 @@ export default function GlobalOfficeMap({
                       </>
                     ),
                   }}
+                />
+              )}
+            />
+
+            {/* State/Region sits after City: picking a city auto-fills it. */}
+            <Autocomplete
+              value={formData.state}
+              onChange={(_, newValue) => {
+                setFormData((prev) => ({ ...prev, state: newValue || "" }));
+              }}
+              inputValue={formData.state}
+              onInputChange={(_, newInputValue) => {
+                setFormData((prev) => ({ ...prev, state: newInputValue }));
+              }}
+              options={availableStates}
+              freeSolo
+              disabled={isGeocoding || !formData.country}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="State/Region"
+                  fullWidth
+                  InputLabelProps={{ sx: fieldLabelStyle }}
+                  helperText={availableStates.length > 0 ? `${availableStates.length} states available` : "Type to enter state manually"}
                 />
               )}
             />

@@ -156,7 +156,8 @@ function computeReachability(workflow: Workflow): Set<string> {
 function createDefaultWorkflow(productId: string, productName: string): Workflow {
   return {
     id: uid(),
-    name: `${productName} Workflow`,
+    // Defaults to the product name; renamed at publish time (e.g. "AIM-100 Rev 1").
+    name: productName,
     productId,
     createdAt: Date.now(),
     steps: [
@@ -983,7 +984,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     if (resolvedConfigIdRef.current) return resolvedConfigIdRef.current;
     try {
       const created = await workflowConfigService.create({
-        name: workflow.name || `${productName} Workflow`,
+        name: workflow.name || productName,
         productId,
         stepsJson: JSON.stringify(workflow),
       });
@@ -1438,6 +1439,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               fullWidth
               required
               autoFocus
+              helperText={`Defaults to the product name — add a revision if you need one (e.g. ${productName} Rev 1).`}
             />
             <FormControl fullWidth>
               <InputLabel shrink>Workflow Type</InputLabel>
