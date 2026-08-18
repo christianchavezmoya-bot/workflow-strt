@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { Box, CircularProgress, Typography } from "@mui/material";
 import AppRoutes from "./routes";
 import { brandSettingsService } from "../services/brandSettingsService";
@@ -19,7 +20,17 @@ import { isAuthTokenExpired } from "../utils/authToken";
 import { useNativeSyncLifecycle } from "../hooks/useNativeSyncLifecycle";
 import { useRouteBreadcrumbs } from "../hooks/useRouteBreadcrumbs";
 
+// Routes AppRoutes serves without requiring a session — password reset/invite
+// links, e-signature links, and shared report links all arrive as "cold" opens
+// with no stored token, so they must render through the router rather than
+// being short-circuited to the bare Login screen below.
+const isPublicDeepLinkPath = (pathname: string) =>
+  pathname === "/reset-password"
+  || pathname.startsWith("/sign/")
+  || pathname.startsWith("/share/reports/");
+
 const App = () => {
+  const location = useLocation();
   const [authState, setAuthState] = useState<BiometricCheckResult | null>(null);
   const [loading, setLoading] = useState(true);
   // Ticks when JWT expiry / connectivity should re-evaluate the render gate.
@@ -206,6 +217,12 @@ const App = () => {
     || (isMobileNativePlatform() && authState === null)
     || shouldForceLoginNow()
   ) {
+    // Reset-password/invite, e-signature, and shared-report links must open their
+    // own page even with no session — otherwise every cold-opened link lands on
+    // the plain Login screen instead of the page the link actually points to.
+    if (isPublicDeepLinkPath(location.pathname)) {
+      return <AppRoutes />;
+    }
     return <Login />;
   }
 
