@@ -29,6 +29,10 @@ It only touches rows that match the seeded demo data, leaves the catalog alone o
 project/asset/workflow exists, never resurrects a division you deleted, and never touches
 notification/SMTP settings.
 
+The script waits for `/api/health` (up to `BOOT_TIMEOUT_SEC`, default 120) instead of a fixed
+sleep, so a from-scratch wipe that has to run the full migration chain still finishes seeding
+before the temporary API is killed. Override with `BOOT_TIMEOUT_SEC=180` on a slow machine.
+
 After a reset, check **Settings → Notifications → Frontend Base URL** points at the machine
 serving the web app (e.g. `http://192.168.1.102:5173`) so invite and signature links work.
 
