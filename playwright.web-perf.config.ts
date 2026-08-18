@@ -18,7 +18,9 @@ export default defineConfig({
       url: "http://localhost:4000/api/health",
       reuseExistingServer: true,
       timeout: 180_000,
-      env: { ASPNETCORE_ENVIRONMENT: "Development" },
+      // Demo catalog keeps the measured numbers comparable to the recorded baseline,
+      // which predates the default seed becoming empty.
+      env: { ASPNETCORE_ENVIRONMENT: "Development", SeedProfile: "Demo" },
     },
     {
       command: "npm run dev",
