@@ -122,7 +122,7 @@ public class SitesController : ControllerBase
 
     // DELETE /api/sites/{id}
     [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin")]
+    [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> Delete(string id)
     {
         var site = await _db.Sites.FirstOrDefaultAsync(s => s.Id == id);

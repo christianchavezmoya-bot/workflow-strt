@@ -1989,7 +1989,7 @@ export const UserManagement: React.FC = () => {
                   const nextNumber = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 1;
                   const customerId = `CUST-${String(nextNumber).padStart(4, '0')}`;
 
-                  const newCustomerPayload = {
+                  const newCustomerPayload: Omit<Customer, "id"> = {
                     name: `customer${String(customerCount).padStart(2, '0')}`,
                     customerId: customerId,
                     office: activeOffice === "All" ? "USA" : activeOffice,
@@ -2001,15 +2001,18 @@ export const UserManagement: React.FC = () => {
                   };
 
                   try {
-                    const response = await api.post('/customers', newCustomerPayload);
-                    await dispatch(fetchCustomers());
-                    setEditingCustomerId(response.data.id);
-                    setEditCustomerName(response.data.name);
-                    setEditCustomerIndustry(response.data.industry || 'General');
-                    setEditCustomerLogo(response.data.logo);
-                    setEditCustomerLogoShape(response.data.logoShape || 'round');
-                    setEditCustomerLogoSize(response.data.logoSize || 70);
-                    setEditCustomerPhotoScale(response.data.photoScale || 100);
+                    // Go through the slice, not raw api.post: it adds the customer to state
+                    // immediately and invalidates the 60s /customers web cache. A refetch on
+                    // its own returned the cached list, so the new card only appeared a minute
+                    // later and users pressed "New Client" again.
+                    const created = await dispatch(createCustomer(newCustomerPayload)).unwrap();
+                    setEditingCustomerId(created.id);
+                    setEditCustomerName(created.name);
+                    setEditCustomerIndustry(created.industry || 'General');
+                    setEditCustomerLogo(created.logo ?? null);
+                    setEditCustomerLogoShape(created.logoShape || 'round');
+                    setEditCustomerLogoSize(created.logoSize || 70);
+                    setEditCustomerPhotoScale(created.photoScale || 100);
                   } catch (err) {
                     console.error("Failed to create customer", err);
                     alert("Failed to create customer");
@@ -2385,19 +2388,8 @@ export const UserManagement: React.FC = () => {
                             }
                           }}
                         />
-                        <TextField
-                          size="small"
-                          value={customer.office}
-                          label="Office"
-                          disabled
-                          fullWidth
-                          sx={{
-                            '& .MuiInputBase-root': {
-                              height: 26,
-                              fontSize: '0.75rem'
-                            }
-                          }}
-                        />
+                        {/* Office is deliberately not shown: a customer's location comes from
+                            its sites, not from the office that happened to create the record. */}
                         <TextField
                           size="small"
                           value={editCustomerIndustry}
@@ -2418,11 +2410,13 @@ export const UserManagement: React.FC = () => {
                           size="small"
                           onClick={async () => {
                             try {
-                              // Save to API with all fields including industry
+                              // Keep the customer's own id/office: rewriting them from the
+                              // sidebar office filter renamed CUST-0001 to CUST-<guid> and
+                              // moved the record to whatever office was selected.
                               const customerPayload = {
                                 name: editCustomerName,
-                                customerId: `CUST-${customer.id}`,
-                                office: activeOffice === "All" ? "USA" : activeOffice,
+                                customerId: customer.customerId,
+                                office: customer.office,
                                 industry: editCustomerIndustry,
                                 logo: editCustomerLogo,
                                 logoShape: editCustomerLogoShape,
@@ -2430,11 +2424,7 @@ export const UserManagement: React.FC = () => {
                                 logoSize: editCustomerLogoSize
                               };
 
-                              // Update existing customer
-                              await api.put(`/customers/${customer.id}`, customerPayload);
-
-                              // Refresh from API
-                              await dispatch(fetchCustomers());
+                              await dispatch(updateCustomer({ id: customer.id, payload: customerPayload })).unwrap();
                             } catch (err) {
                               console.error("Failed to save customer", err);
                               alert("Failed to save customer");
