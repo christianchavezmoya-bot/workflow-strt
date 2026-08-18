@@ -17,6 +17,7 @@ import { isDashboardAttentionIssue } from "../../utils/issueAttention";
 import { Link, useNavigate } from "react-router-dom";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { useCatalogPrefetch } from "../../hooks/useCatalogPrefetch";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProjects, setProjects, updateProjectStatus } from "../../store/projectSlice";
@@ -200,10 +201,6 @@ const Dashboard = () => {
   const projects      = useAppSelector((s) => s.projects.items);
   const products      = useAppSelector((s) => s.products.items);
   const users         = useAppSelector((s) => s.users.items);
-  // Used only to mirror useShellCatalogBootstrap's "fetch once if empty" guard below.
-  const projectsCatalogLoading = useAppSelector((s) => s.projects.loading);
-  const productsCatalogLoading = useAppSelector((s) => s.products.loading);
-  const usersCatalogLoading    = useAppSelector((s) => s.users.loading);
 
   const [globalOffices,      setGlobalOffices]      = useState<Office[]>([]);
   const [availableCountries, setAvailableCountries] = useState<string[]>([]);
@@ -495,15 +492,12 @@ const Dashboard = () => {
     analyticsObserverRef.current = null;
   }, []);
 
+  // AppShell's useShellCatalogBootstrap already warms these three catalogs after auth;
+  // this covers the case where that fetch failed (e.g. offline at launch).
+  useCatalogPrefetch(isAuthenticated && dashboardBootPhase === "full");
+
   useEffect(() => {
     if (!isAuthenticated || dashboardBootPhase !== "full") return;
-    // AppShell's useShellCatalogBootstrap already warms these three catalogs after auth.
-    // Dispatching unconditionally here raced it and double-fetched every catalog on a
-    // cold dashboard load (measured: 4x /users for Admin). Mirror the shell's guard so
-    // whichever runs first wins and the other is a no-op.
-    if (!projects.length && !projectsCatalogLoading) dispatch(fetchProjects());
-    if (!products.length && !productsCatalogLoading) dispatch(fetchProducts());
-    if (!users.length && !usersCatalogLoading) dispatch(fetchUsers());
 
     // Must run BEFORE the platform branches below: the web branch returns a cleanup
     // function, which previously made a trailing `if (isEngineer)` block unreachable on
@@ -515,14 +509,7 @@ const Dashboard = () => {
       }).catch(() => {});
     }
   }, [
-    products.length,
-    productsCatalogLoading,
-    projects.length,
-    projectsCatalogLoading,
-    users.length,
-    usersCatalogLoading,
     dashboardBootPhase,
-    dispatch,
     isAuthenticated,
     isEngineer,
     pmDashboardTab,
