@@ -18,6 +18,7 @@ public static class StrataNgoSeeder
     public const string OfficePerthId = "office-strata-perth";
     public const string CustomerBhpId = "cust-bhp-mining";
     public const string CustomerSecondId = "cust-strata-demo-mining";
+    public const string DivisionHazardAvertCoalId = "div-hazard-avert-coal";
     public const string ProductAim100Id = "prod-aim-100";
     public const string WorkflowChambersDefaultId = "wf-chambers-default";
 
@@ -131,6 +132,16 @@ public static class StrataNgoSeeder
     private static void SeedDivisions(AppDbContext db)
     {
         DefaultCatalog.SeedDivisionsIfEmpty(db);
+        if (db.Divisions.Any(d => d.Id == DivisionHazardAvertCoalId)) return;
+
+        db.Divisions.Add(new DivisionEntity
+        {
+            Id = DivisionHazardAvertCoalId,
+            Name = "HazardAvert-Coal",
+            Description = "HazardAvert coal applications",
+            SortOrder = 4,
+            IsActive = true,
+        });
     }
 
     private static void SeedProducts(AppDbContext db)
@@ -139,8 +150,8 @@ public static class StrataNgoSeeder
         {
             Id = ProductAim100Id,
             Name = "AIM-100",
-            DivisionId = DefaultCatalog.DivisionConnectId,
-            Description = "HazardAvert AIM-100 — coal applications",
+            DivisionId = DefaultCatalog.DivisionAiId,
+            Description = "AI Proximity Detection",
         });
     }
 
