@@ -137,7 +137,7 @@ public static class StrataNgoSeeder
         db.Divisions.Add(new DivisionEntity
         {
             Id = DivisionHazardAvertCoalId,
-            Name = "Hazard Avert - Coal",
+            Name = "HazardAvert-Coal",
             Description = "HazardAvert coal applications",
             SortOrder = 4,
             IsActive = true,
@@ -150,8 +150,8 @@ public static class StrataNgoSeeder
         {
             Id = ProductAim100Id,
             Name = "AIM-100",
-            DivisionId = DivisionHazardAvertCoalId,
-            Description = "HazardAvert AIM-100 — coal applications",
+            DivisionId = DefaultCatalog.DivisionAiId,
+            Description = "AI Proximity Detection",
         });
     }
 

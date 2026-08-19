@@ -51,7 +51,7 @@ chmod +x scripts/standup-staging.sh
 
 **Login:** `admin@StrataNgo.local` / `Admin123!` (PM: `project.manager@StrataNgo.local` / `Pm123!`)
 
-Fresh Docker volume seeds: 2 offices, 2 customers (BHP/Mining), 4 divisions (3 Strata + Hazard Avert - Coal), **1 product (AIM-100)**, `Chambers_default` workflow. No tips/documents. No starter project. Admin/PM require password change on first login.
+Fresh Docker volume seeds: 2 offices, 2 customers (BHP/Mining), 4 divisions (3 Strata + HazardAvert-Coal), **1 product (AIM-100 under Strata AI, description “AI Proximity Detection”)**, `Chambers_default` workflow. No tips/documents. No starter project. Admin/PM require password change on first login.
 
 **If standup fails on Postgres migrations** (e.g. `InvalidCastException`, `relation "lowercase" does not exist`): pull latest `main`, discard local migration edits, then `docker compose -f docker-compose.staging.yml down -v` and re-run standup — partial migration state requires a fresh volume.
 

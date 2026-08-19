@@ -619,8 +619,8 @@ public static class DbInitializer
         ("AIM-100",               "AIM-100 field device",                  DivMiningId),
         ("Commtrac",              "Commtrac core platform",                 DivTechId),
         ("EDGE AI",               "EDGE AI processing module",              DivTechId),
-        ("Hazard Avert",          "Hazard detection and avoidance",         DivSafetyId),
-        ("Hazard Avert - Gen 2",  "Hazard Avert second generation",         DivSafetyId),
+        ("HazardAvert",           "Hazard detection and avoidance",         DivSafetyId),
+        ("HazardAvert - Gen 2",   "HazardAvert second generation",          DivSafetyId),
         ("Ping Alert",            "Personnel alerting system",              DivSafetyId),
     ];
 

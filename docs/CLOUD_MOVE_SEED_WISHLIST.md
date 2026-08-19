@@ -46,7 +46,7 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 | ✓ | Strata Connect |
 | ✓ | Strata Protect |
 | ✓ | Strata AI |
-| ✓ | Hazard Avert - Coal | *(product catalog)* |
+| ✓ | HazardAvert-Coal | *(product catalog)* |
 
 ---
 
@@ -54,7 +54,7 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 
 | Product name | Division | Workflow config | Notes |
 |--------------|----------|-----------------|-------|
-| **AIM-100** | Hazard Avert - Coal | Chambers_default | **Only product** on fresh seed (replaces previous 6) |
+| **AIM-100** | Strata AI | Chambers_default | **Only product** on fresh seed. Description: AI Proximity Detection |
 
 ---
 
