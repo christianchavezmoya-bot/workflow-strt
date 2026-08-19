@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using BCrypt.Net;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
@@ -152,6 +153,7 @@ public static class DbInitializer
 
         EnsureAim100Features(db);
         MigrateProductFeaturesToGlobalLibrary(db);
+        BackfillRequiredMediaInputsOnce(db);
         db.SaveChanges();
 
         if (demoSeed && !db.Projects.Any())
@@ -682,6 +684,67 @@ public static class DbInitializer
         var aim100 = db.Products.FirstOrDefault(p => p.Name == "AIM-100");
         if (aim100 is null || aim100.FeaturesJson != "[]") return;
         aim100.FeaturesJson = Aim100FeaturesJson;
+    }
+
+    private const string RequiredMediaBackfillKey = "migration:workflow-media-required-backfill";
+
+    /// <summary>
+    /// Photo/video inputs used to be mandatory no matter what the author ticked, so a config's
+    /// "required" flag on media is not trustworthy history. Now that the flag is enforced, tick
+    /// it on existing media inputs once, so nothing silently becomes optional on live jobs —
+    /// authors then untick the ones they genuinely want optional.
+    ///
+    /// Runs exactly once, tracked by a BrandSettings marker: re-running it every boot would
+    /// undo those deliberate unticks. Frozen run snapshots are left alone; rewriting captured
+    /// evidence is worse than letting an in-flight run follow the new rule.
+    /// </summary>
+    private static void BackfillRequiredMediaInputsOnce(AppDbContext db)
+    {
+        if (db.BrandSettings.Any(s => s.Key == RequiredMediaBackfillKey)) return;
+
+        var patched = 0;
+        foreach (var config in db.WorkflowConfigs.ToList())
+        {
+            if (string.IsNullOrWhiteSpace(config.StepsJson)) continue;
+            try
+            {
+                var root = JsonNode.Parse(config.StepsJson);
+                var steps = root as JsonArray ?? root?["steps"] as JsonArray;
+                if (steps is null) continue;
+
+                var changed = false;
+                foreach (var step in steps)
+                {
+                    if (step?["inputs"] is not JsonArray inputs) continue;
+                    foreach (var input in inputs)
+                    {
+                        if (input is null) continue;
+                        var type = input["type"]?.GetValue<string>();
+                        if (!string.Equals(type, "photo", StringComparison.OrdinalIgnoreCase)
+                            && !string.Equals(type, "video", StringComparison.OrdinalIgnoreCase))
+                        {
+                            continue;
+                        }
+                        if (input["required"]?.GetValue<bool>() == true) continue;
+                        input["required"] = true;
+                        changed = true;
+                    }
+                }
+
+                if (!changed) continue;
+                config.StepsJson = root!.ToJsonString();
+                patched++;
+            }
+            catch
+            {
+                // A config with unparseable steps is left as-is; the service treats a missing
+                // "required" flag as required anyway.
+            }
+        }
+
+        db.BrandSettings.Add(new BrandSettingEntity { Key = RequiredMediaBackfillKey, Value = DateTime.UtcNow.ToString("O") });
+        if (patched > 0)
+            Console.WriteLine($"[DB] Marked photo/video inputs as required in {patched} workflow config(s) (one-time).");
     }
 
     /// <summary>

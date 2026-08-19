@@ -1130,6 +1130,21 @@ public class AssetWorkflowRunsController : ControllerBase
                 blockingCount = blockingOpen
             });
 
+        // Required photos/videos must be captured before the run locks — the same rule the
+        // runner's Lock button enforces. Without it, callers that bypass the UI could lock a
+        // run that installer sign-off would then refuse, stranding it until an amendment.
+        // Offline force-sync is exempt: rejecting a synced run would discard captured work.
+        if (!IsFieldSyncForce())
+        {
+            var missingRequiredMedia = _completeness.GetMissingRequiredMediaLabels(run.WorkflowSnapshotJson, req.StepResultsJson);
+            if (missingRequiredMedia.Count > 0)
+                return UnprocessableEntity(new
+                {
+                    message = "Cannot complete: required photos or videos are missing.",
+                    missingItems = missingRequiredMedia,
+                });
+        }
+
         var now = DateTime.UtcNow;
         // Close the final time segment at the REAL completion moment, not sync time. Offline
         // runs pass completedAtUtc (when the installer finished); online callers omit it and

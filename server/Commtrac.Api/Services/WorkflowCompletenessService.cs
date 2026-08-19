@@ -51,11 +51,7 @@ public sealed class WorkflowCompletenessService
 
                 foreach (var input in step.Inputs ?? [])
                 {
-                    if (!string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(input.Type, "video", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
+                    if (!IsRequiredMediaInput(input)) continue;
 
                     var raw = values.GetValueOrDefault(input.Id);
                     if (GetMediaCaptureCount(raw) <= 0)
@@ -72,11 +68,7 @@ public sealed class WorkflowCompletenessService
 
                 foreach (var input in step.Inputs ?? [])
                 {
-                    if (!string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase)
-                        && !string.Equals(input.Type, "video", StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
+                    if (!IsRequiredMediaInput(input)) continue;
                     missing.Add(input.Label ?? input.Id);
                 }
             }
@@ -87,6 +79,18 @@ public sealed class WorkflowCompletenessService
         }
 
         return missing;
+    }
+
+    /// <summary>
+    /// Media the author marked Required. A snapshot written before the flag was honored has
+    /// no "required" property at all; those are treated as required so an older run's
+    /// evidence rules are never silently relaxed.
+    /// </summary>
+    private static bool IsRequiredMediaInput(WorkflowInputSummary input)
+    {
+        var isMedia = string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(input.Type, "video", StringComparison.OrdinalIgnoreCase);
+        return isMedia && (input.Required ?? true);
     }
 
     private static bool IsImportedStepResult(Dictionary<string, string> values, List<WorkflowInputSummary>? inputDefs)
@@ -200,6 +204,9 @@ public sealed class WorkflowCompletenessService
         public string Type { get; set; } = string.Empty;
         [JsonPropertyName("label")]
         public string? Label { get; set; }
+        /// <summary>Null when the snapshot predates the flag being enforced — see IsRequiredMediaInput.</summary>
+        [JsonPropertyName("required")]
+        public bool? Required { get; set; }
     }
 
     private sealed class WorkflowStepResultSummary

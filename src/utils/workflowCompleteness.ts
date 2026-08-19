@@ -3,11 +3,33 @@ import type { CaptureField, StepInput, WorkflowStep } from "../types/workflow";
 
 export type MissingWorkflowItemKind = "photo" | "video" | "input" | "capture";
 
+/**
+ * Only items the author marked Required ever appear here, for every kind including
+ * photo/video. The gates differ by kind, not by strictness:
+ *   - "input"/"capture": must be filled before the runner advances to the next step.
+ *   - "photo"/"video": the runner warns but lets the step advance; they block Lock run
+ *     and installer sign-off instead.
+ */
 export interface MissingWorkflowItem {
   id: string;
   label: string;
   kind: MissingWorkflowItemKind;
   required: boolean;
+}
+
+/**
+ * Which missing items stop the runner leaving a step, and which only warn.
+ * Required data has to be entered now; required media can be added later but blocks
+ * Lock run and installer sign-off. Optional media never reaches here at all.
+ */
+export function splitMissingItemsByGate(items: MissingWorkflowItem[]): {
+  blocking: MissingWorkflowItem[];
+  warning: MissingWorkflowItem[];
+} {
+  return {
+    blocking: items.filter((item) => item.kind === "input" || item.kind === "capture"),
+    warning: items.filter((item) => item.kind === "photo" || item.kind === "video"),
+  };
 }
 
 function hasTextValue(val: string | undefined): boolean {
@@ -103,6 +125,7 @@ function getMissingItemsForUncapturedStep(step: WorkflowStep | undefined): Missi
   const missingInputs: MissingWorkflowItem[] = [];
   for (const input of step.inputs ?? []) {
     if (input.type === "photo" || input.type === "video") {
+      if (!input.required) continue;
       missingInputs.push({
         id: input.id,
         label: input.label || (input.type === "video" ? "Video" : "Photo"),
@@ -160,7 +183,9 @@ export function getMissingWorkflowItems(
   for (const input of step.inputs ?? []) {
     const raw = values?.[input.id];
     if (input.type === "photo" || input.type === "video") {
-      if (!hasInputValue(input, raw)) {
+      // Optional media is genuinely optional: it never counts as missing, so it cannot
+      // hold up Lock run, sign-off, or the evidence badges.
+      if (input.required && !hasInputValue(input, raw)) {
         missingInputs.push({
           id: input.id,
           label: input.label || (input.type === "video" ? "Video" : "Photo"),

@@ -66,7 +66,12 @@ import { useAuth } from "../../hooks/useAuth";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
-import { getMissingWorkflowItems, getRunMissingWorkflowItems, type MissingWorkflowItem } from "../../utils/workflowCompleteness";
+import {
+  getMissingWorkflowItems,
+  getRunMissingWorkflowItems,
+  splitMissingItemsByGate,
+  type MissingWorkflowItem,
+} from "../../utils/workflowCompleteness";
 import { measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
@@ -895,12 +900,7 @@ export default function WorkOrderRunner({
     setCurrentStepId(prev);
   }
 
-  function splitMissingItems(items: MissingWorkflowItem[]) {
-    return {
-      blocking: items.filter((item) => item.kind === "input"),
-      warning: items.filter((item) => item.kind === "capture" || item.kind === "photo" || item.kind === "video"),
-    };
-  }
+  const splitMissingItems = splitMissingItemsByGate;
 
   function openValidationDialog(mode: ValidationDialogMode, items: MissingWorkflowItem[], pendingAction: PendingStepAction | null) {
     setValidationDialogMode(mode);
