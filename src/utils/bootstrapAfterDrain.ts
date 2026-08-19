@@ -10,7 +10,7 @@ import offlineBootstrapService, {
 import {
   getNativeNetworkConnected,
   getServerReachable,
-  shouldSkipRunMutation,
+  shouldDeferBackgroundSync,
   subscribeServerReachable,
 } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "./platform";
@@ -48,7 +48,7 @@ function canScheduleBootstrap(): boolean {
   if (!hasNetworkSignal()) return false;
   if (isMobileNativePlatform()) {
     if (getServerReachable() !== true) return false;
-    if (shouldSkipRunMutation()) return false;
+    if (shouldDeferBackgroundSync()) return false;
   }
   return true;
 }

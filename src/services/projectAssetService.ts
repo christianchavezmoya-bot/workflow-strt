@@ -23,7 +23,6 @@ import type { PaginatedResult, ProjectAssetPageQuery } from "../types/paginatedL
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
 function isOfflineNetworkError(error: unknown): boolean {
-  if (shouldSkipRunMutation()) return true;
   return isOfflineNetworkErrorShape(error);
 }
 

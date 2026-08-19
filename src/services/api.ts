@@ -2,7 +2,10 @@ import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from "axio
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
-import { shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
+import {
+  shouldSkipBlockingFetch,
+  shouldDeferBackgroundSync,
+} from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
@@ -221,20 +224,15 @@ api.interceptors.request.use(async (config) => {
   //
   // IMPORTANT — this guard is deliberately conservative. It bails ONLY when the
   // device truly has no radio, or the user forced manual offline mode. It must
-  // NOT bail merely because the health monitor's /health ping failed.
+  // NOT bail merely because the health monitor's /health ping failed or the
+  // circuit is open.
   //
-  // A previous version used shouldSkipRunMutation() here (which also bails on
-  // getServerReachable() === false) to speed up offline reads. That was a
-  // mistake and caused a total app blackout: a single failing /health ping (bad
-  // base URL, a 5xx, a 5s timeout) flipped serverReachable to false, which made
-  // EVERY non-auth native read fast-bail. Login still worked — /auth/ is exempt
-  // below — so the app opened normally and then every page came up empty while
-  // the server was in fact perfectly reachable.
-  //
-  // Reads must fail OPEN: if we're unsure, attempt the request. A slow read is
-  // recoverable; a blanket refusal to read is not. WRITES keep the stricter
-  // shouldSkipRunMutation() guard, because they have an offline queue to fall
-  // into and losing a write is worse than delaying one.
+  // A previous version used shouldSkipRunMutation() here (which also bailed on
+  // getServerReachable() === false / circuit-open). That caused online phones to
+  // queue workflow pause/save/complete as "pending sync" while the offline
+  // banner stayed hidden. Interactive traffic must fail OPEN: if the radio is
+  // up, attempt the request. Background sync-engine uploads keep the stricter
+  // shouldDeferBackgroundSync() gate (health + circuit).
   //
   // The thrown error keeps the same shape as a real network error so every
   // service's isOfflineNetworkError() (see utils/offlineNetworkError.ts) still
@@ -263,8 +261,8 @@ api.interceptors.request.use(async (config) => {
     !url.includes("/auth/")
     && isMobileNativePlatform()
     && (
-      (!isSyncEngineWrite && (shouldSkipBlockingFetch() || isCircuitOpen()))
-      || (isSyncEngineWrite && shouldSkipRunMutation())
+      (!isSyncEngineWrite && shouldSkipBlockingFetch())
+      || (isSyncEngineWrite && shouldDeferBackgroundSync())
     );
 
   if (skipBlocking) {

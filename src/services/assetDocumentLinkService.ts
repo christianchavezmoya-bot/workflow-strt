@@ -11,6 +11,7 @@ import { mediaStore } from "./mediaStore";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { getServerReachable, shouldSkipBlockingFetch, shouldSkipRunMutation } from "./connectivityMonitor";
+import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 
 export interface AssetDocumentLink {
   id: string;        // link record id
@@ -45,16 +46,7 @@ function linksCacheKey(assetId: string): string {
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
-  if (shouldSkipRunMutation()) return true;
-  if (!error || typeof error !== "object") return typeof navigator !== "undefined" && navigator.onLine === false;
-  const candidate = error as { response?: unknown; code?: string; message?: string };
-  if (candidate.response) return false;
-  return (
-    (typeof navigator !== "undefined" && navigator.onLine === false) ||
-    candidate.code === "ECONNABORTED" ||
-    candidate.code === "ERR_NETWORK" ||
-    candidate.message === "Network Error"
-  );
+  return isOfflineNetworkErrorShape(error);
 }
 
 function shouldSkipNativeAssetDocumentFetch(): boolean {

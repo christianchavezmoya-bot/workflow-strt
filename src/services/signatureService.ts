@@ -7,6 +7,7 @@ import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
 import { shouldSkipRunMutation } from "./connectivityMonitor";
+import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 import { applyOfflineAssetStatusUpdate, syncOfflineAssetWorkflowStateFromRun, applyWebRunMutationCache } from "./assetWorkflowRunService";
 import { webCachedGet, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 
@@ -32,21 +33,10 @@ export interface CreateTokenPayload {
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
-  // Mirrors assetWorkflowRunService.isOfflineNetworkError: trust the
-  // connectivity state FIRST. Otherwise a synthetic "skip-network-offline"
-  // throw (or a stale-but-offline condition) would not be recognized and the
-  // catch handler would re-throw as a non-offline error, surfacing as
-  // "failed to submit signature" in the UI.
-  if (shouldSkipRunMutation()) return true;
-  if (!error || typeof error !== "object") return !navigator.onLine;
-  const candidate = error as { response?: unknown; code?: string; message?: string };
-  if (candidate.response) return false;
-  return (
-    !navigator.onLine ||
-    candidate.code === "ECONNABORTED" ||
-    candidate.code === "ERR_NETWORK" ||
-    candidate.message === "Network Error"
-  );
+  // Queue only on real network / intentional radio-off skips (message
+  // skip-network-offline). Do not treat "health/circuit said maybe down"
+  // as offline while the radio is still up.
+  return isOfflineNetworkErrorShape(error);
 }
 
 export const signatureService = {
