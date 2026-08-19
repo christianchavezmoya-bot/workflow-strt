@@ -145,6 +145,9 @@ public class AppDbContext : DbContext
             .Property(p => p.ProductFeatureValuesJson)
             .HasDefaultValue("{}");
 
+        modelBuilder.Entity<ProjectEntity>()
+            .HasIndex(p => p.WorkflowTypeId);
+
         modelBuilder.Entity<InstallationEntity>()
             .Property(i => i.AssignedUsers)
             .HasConversion(listConverter)

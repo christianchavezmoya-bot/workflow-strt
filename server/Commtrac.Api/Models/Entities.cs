@@ -245,9 +245,16 @@ public class ProjectEntity
     /// <summary>
     /// INSTALLATION_ONLY | INSPECTION_ONLY | MIXED.
     /// Null means legacy row — treated as INSTALLATION_ONLY when IsInstallationProject=true, else INSPECTION_ONLY.
+    /// Derived from <see cref="WorkflowTypeId"/> when set; kept for tabs/dashboard legacy consumers.
     /// </summary>
     [MaxLength(40)]
     public string? WorkflowMode { get; set; }
+    /// <summary>
+    /// Single catalog workflow type for this project (Settings → Workflow Types).
+    /// Null on legacy MIXED rows until a PM picks one type on edit.
+    /// </summary>
+    [MaxLength(100)]
+    public string? WorkflowTypeId { get; set; }
     [MaxLength(200)]
     public string? ProjectManager { get; set; }
     public decimal? ContractValue { get; set; }

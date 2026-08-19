@@ -79,6 +79,21 @@ public class WorkflowTypesController : ControllerBase
         // Prevent deleting seeded types
         if (id.StartsWith("wftype-"))
             return BadRequest(new { message = "Default workflow types cannot be deleted. You can add custom types." });
+
+        var usedByProject = await _db.Projects.AnyAsync(p => p.WorkflowTypeId == id);
+        var usedByConfig = await _db.WorkflowConfigs.AnyAsync(c => c.WorkflowTypeId == id);
+        var usedByAssignment = await _db.AssetWorkflowAssignments.AnyAsync(a => a.WorkflowTypeId == id && a.Active);
+        if (usedByProject || usedByConfig || usedByAssignment)
+        {
+            return Conflict(new
+            {
+                message = "This workflow type is in use by a project, workflow configuration, or asset assignment and cannot be deleted.",
+                usedByProject,
+                usedByConfig,
+                usedByAssignment,
+            });
+        }
+
         entity.IsActive = false;
         await _db.SaveChangesAsync();
         return NoContent();

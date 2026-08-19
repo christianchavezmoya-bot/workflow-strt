@@ -77,6 +77,32 @@ public class AssetWorkflowAssignmentsController : ControllerBase
         if (config.Status != "Published")
             return BadRequest(new { message = "Only Published configurations can be assigned." });
 
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
+        if (asset is null) return BadRequest(new { message = "Asset not found." });
+
+        var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var workflowTypes = await _db.WorkflowTypes.ToListAsync();
+        var effectiveConfigTypeId = WorkflowTypeRules.ResolveConfigWorkflowTypeId(config, workflowTypes);
+        if (string.IsNullOrWhiteSpace(effectiveConfigTypeId))
+            return BadRequest(new { message = "Workflow config has no resolvable workflow type." });
+
+        if (project is not null &&
+            !WorkflowTypeRules.AssignmentAllowedForProject(project.WorkflowTypeId, project.WorkflowMode, effectiveConfigTypeId))
+        {
+            return Conflict(new
+            {
+                message = "This workflow configuration does not match the project's workflow type.",
+                projectWorkflowTypeId = project.WorkflowTypeId,
+                configWorkflowTypeId = effectiveConfigTypeId,
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(req.WorkflowTypeId) &&
+            !string.Equals(req.WorkflowTypeId, effectiveConfigTypeId, StringComparison.Ordinal))
+        {
+            return BadRequest(new { message = "Assignment workflow type must match the configuration's workflow type." });
+        }
+
         var currentUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         var currentUserRole = User.FindFirst(System.Security.Claims.ClaimTypes.Role)?.Value ?? "";
         var isManager = currentUserRole == "Admin" || currentUserRole == "Project Manager";
@@ -87,16 +113,12 @@ public class AssetWorkflowAssignmentsController : ControllerBase
             Id               = Guid.NewGuid().ToString(),
             AssetId          = req.AssetId,
             WorkflowConfigId = req.WorkflowConfigId,
-            WorkflowTypeId   = req.WorkflowTypeId,
+            WorkflowTypeId   = string.IsNullOrWhiteSpace(req.WorkflowTypeId) ? effectiveConfigTypeId : req.WorkflowTypeId,
             Active           = true,
             AssignedBy       = assignedBy,
             AssignedAt       = DateTime.UtcNow,
         };
         _db.AssetWorkflowAssignments.Add(entity);
-        
-        // Get asset and project info
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == req.AssetId);
-        var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
         
         // For non-managers, auto-assign the asset to themselves if not already assigned
         if (!isManager && asset is not null && string.IsNullOrWhiteSpace(asset.AssignedUserId))
@@ -107,7 +129,7 @@ public class AssetWorkflowAssignmentsController : ControllerBase
         
         await _db.SaveChangesAsync();
 
-        var typeName   = (await _db.WorkflowTypes.FirstOrDefaultAsync(t => t.Id == req.WorkflowTypeId))?.Name ?? req.WorkflowTypeId;
+        var typeName   = workflowTypes.FirstOrDefault(t => t.Id == entity.WorkflowTypeId)?.Name ?? entity.WorkflowTypeId;
         var configName = config.Name;
 
         // Notify Admins and PMs about the workflow assignment
