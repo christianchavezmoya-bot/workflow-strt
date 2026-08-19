@@ -1,10 +1,20 @@
 import { Paper, type PaperProps } from "@mui/material";
 import { Dispatch, SetStateAction, useEffect, useState, MouseEvent as ReactMouseEvent } from "react";
 
-export const fieldLabelStyle = {
-  color: "#FFD700",
-  fontWeight: "bold" as const,
+/** MUI `sx` prop — matches standard secondary body text. */
+export const fieldLabelSx = {
+  color: "text.secondary",
+  fontWeight: 600,
+} as const;
+
+/** Plain HTML `style=` — theme palette keys are invalid here. */
+export const fieldLabelInlineStyle: React.CSSProperties = {
+  color: "var(--text-2)",
+  fontWeight: 600,
 };
+
+/** @deprecated Use fieldLabelSx (sx) or fieldLabelInlineStyle (style). */
+export const fieldLabelStyle = fieldLabelSx;
 
 export const defaultCustomColumns = ["ID", "Name", "Created Date"];
 

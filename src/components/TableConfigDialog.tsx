@@ -20,12 +20,7 @@ import { ArrowDownward, ArrowUpward, DeleteOutline, EditOutlined } from "@mui/ic
 import { useEffect, useMemo, useState } from "react";
 import { TableConfig, TableField } from "../hooks/useTableConfig";
 import type { FieldDefinition } from "../services/fieldService";
-
-// Style for field definition labels (yellow bold)
-const fieldLabelStyle = {
-  color: '#FFD700',
-  fontWeight: 'bold'
-};
+import { fieldLabelSx } from "../features/admin/adminShared";
 
 type Props = {
   open: boolean;
@@ -524,7 +519,7 @@ const TableConfigDialog = ({
       <DialogContent>
         <Stack spacing={2} sx={{ marginTop: 1 }}>
           <Box>
-            <Typography variant="subtitle2" sx={fieldLabelStyle}>Add field</Typography>
+            <Typography variant="subtitle2" sx={fieldLabelSx}>Add field</Typography>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ marginTop: 1 }}>
               <FormControl size="small" fullWidth>
                 <Select
@@ -559,7 +554,7 @@ const TableConfigDialog = ({
             </Stack>
           </Box>
           <Box>
-            <Typography variant="subtitle2" sx={fieldLabelStyle}>Create new field</Typography>
+            <Typography variant="subtitle2" sx={fieldLabelSx}>Create new field</Typography>
             <Stack direction={{ xs: "column", sm: "row" }} spacing={1} sx={{ marginTop: 1 }}>
               <TextField
                 size="small"
@@ -567,7 +562,7 @@ const TableConfigDialog = ({
                 value={newFieldName}
                 onChange={(event) => setNewFieldName(event.target.value)}
                 fullWidth
-                InputLabelProps={{ sx: fieldLabelStyle }}
+                InputLabelProps={{ sx: fieldLabelSx }}
               />
               <FormControl size="small" fullWidth>
                 <Select
@@ -690,7 +685,7 @@ const TableConfigDialog = ({
               >
                 <Checkbox checked={!isHidden} onChange={() => toggleHidden(column.id)} />
                 <Box sx={{ flex: 1 }}>
-                  <Typography variant="body2" sx={fieldLabelStyle}>
+                  <Typography variant="body2" sx={fieldLabelSx}>
                     {column.name}{isRequired ? " *" : ""}
                     {isBuiltIn && <Typography component="span" variant="caption" sx={{ ml: 1, color: "rgba(255, 159, 69, 0.8)" }}>(Base)</Typography>}
                   </Typography>
@@ -972,7 +967,7 @@ const TableConfigDialog = ({
                   {...params}
                   label="Field name"
                   fullWidth
-                  InputLabelProps={{ sx: fieldLabelStyle }}
+                  InputLabelProps={{ sx: fieldLabelSx }}
                 />
               )}
             />

@@ -1,26 +1,14 @@
 type AuthUserLike = { role?: string | null } | null | undefined;
 
-const ASSETS_LANDING_ROLES = new Set([
-  "Project Manager",
-  "Installer",
-  "Technician",
-  "QA Inspector",
-]);
-
 /**
  * Where to send the user immediately after a successful login.
- * PM and field roles skip the Dashboard boot (dashboard-workspace, inspection
- * imports, open-issues scans) and land on Assets instead.
+ * Always opens on the Dashboard unless password/profile setup is required.
  */
 export function resolvePostLoginRoute(
-  user: AuthUserLike,
+  _user: AuthUserLike,
   options: { isFirstLogin?: boolean; passwordExpired?: boolean; nativeApp?: boolean },
 ): string {
   if (options.isFirstLogin || options.passwordExpired) return "/profile";
-  // Native mobile opens on Home; web field roles still land on Assets for faster field access.
-  if (options.nativeApp) return "/";
-  const role = user?.role ?? "";
-  if (ASSETS_LANDING_ROLES.has(role)) return "/installations/assets";
   return "/";
 }
 

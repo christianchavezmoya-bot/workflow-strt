@@ -63,6 +63,7 @@ import PasswordField from "../../components/ui/PasswordField";
 import { secureGet, secureRemove } from "../../services/secureStorage";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import RecoveryCenter from "./RecoveryCenter";
+import { fieldLabelSx } from "../admin/adminShared";
 
 async function loadXlsx() {
   return import("xlsx");
@@ -255,12 +256,6 @@ function BusinessLogoTab() {
     </Stack>
   );
 }
-
-// Style for field definition labels (yellow bold)
-const fieldLabelStyle = {
-  color: '#FFD700',
-  fontWeight: 'bold'
-};
 
 const defaultSettings: QuickbaseSettingsForm = {
   enabled: false,
@@ -1452,7 +1447,7 @@ const Settings = () => {
           th, td { border: 1px solid #ddd; padding: 8px; text-align: left; font-size: 12px; }
           th { background-color: #f5f5f5; font-weight: bold; }
           tr:nth-child(even) { background-color: #f9f9f9; }
-          .field-name { color: #FFD700; font-weight: bold; }
+          .field-name { color: var(--text-2); font-weight: 600; }
           .field-type { color: #666; font-size: 11px; }
           @media print { button { display: none; } }
         </style>
@@ -1616,7 +1611,7 @@ const Settings = () => {
               return `
                 <tr>
                   <td>
-                    <div style="color: #FFD700; font-weight: bold;">${field.name}</div>
+                    <div style="color: var(--text-2); font-weight: 600;">${field.name}</div>
                     <div style="color: #666; font-size: 11px;">${field.fieldType}</div>
                   </td>
                   ${slots.map(slot => `<td>${slot}</td>`).join('')}
@@ -2851,7 +2846,7 @@ const Settings = () => {
                   value={fieldName}
                   onChange={(event) => setFieldName(event.target.value)}
                   fullWidth
-                  InputLabelProps={{ sx: fieldLabelStyle }}
+                  InputLabelProps={{ sx: fieldLabelSx }}
                 />
                 <FormControl fullWidth>
                   <Select
@@ -3051,7 +3046,7 @@ const Settings = () => {
                 <Table sx={{ marginTop: 1, minWidth: 900 }}>
                   <TableHead>
                     <TableRow>
-                      <TableCell sx={fieldLabelStyle}>Created field</TableCell>
+                      <TableCell sx={fieldLabelSx}>Created field</TableCell>
                       <TableCell>Backend Tag</TableCell>
                       <TableCell>UI Field Name</TableCell>
                       {Array.from({ length: tableColumnSlots }).map((_, index) => (
@@ -3070,7 +3065,7 @@ const Settings = () => {
                         <TableRow key={field.id}>
                           <TableCell>
                             <Stack spacing={0.5}>
-                              <Typography variant="subtitle2" sx={fieldLabelStyle}>{field.name}</Typography>
+                              <Typography variant="subtitle2" sx={fieldLabelSx}>{field.name}</Typography>
                               <Typography variant="caption" color="text.secondary">
                                 {field.fieldType}
                               </Typography>
@@ -3239,7 +3234,7 @@ const Settings = () => {
                 setEditField((prev) => (prev ? { ...prev, name: event.target.value } : prev))
               }
               fullWidth
-              InputLabelProps={{ sx: fieldLabelStyle }}
+              InputLabelProps={{ sx: fieldLabelSx }}
             />
             <FormControl fullWidth>
               <Select

@@ -138,11 +138,11 @@ const Sidebar = () => {
               ))}
             </Select>
           </FormControl>
-          <Typography variant="caption" color="text.secondary" sx={{ marginTop: 1, display: "block" }}>
+          <Typography variant="caption" sx={{ marginTop: 1, display: "block", color: "var(--text-2)" }}>
             Signed in as {user?.fullName || "Local User"}
           </Typography>
           {appName && (
-            <Typography variant="caption" color="text.disabled" sx={{ display: "block", fontSize: "0.65rem" }}>
+            <Typography variant="caption" sx={{ display: "block", fontSize: "0.65rem", color: "var(--text-2)" }}>
               {appName}
             </Typography>
           )}

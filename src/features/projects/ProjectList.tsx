@@ -67,12 +67,7 @@ import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platf
 import { CACHE_SOFT_LIMIT_MS, syncMetaGet } from "../../services/localDB";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { useStaleOnResume } from "../../hooks/useStaleOnResume";
-
-// Style for field definition labels (yellow bold)
-const fieldLabelStyle = {
-  color: '#FFD700',
-  fontWeight: 'bold'
-};
+import { fieldLabelInlineStyle } from "../admin/adminShared";
 
 const normalize = (value: string | number | undefined | null) => String(value ?? "");
 
@@ -946,7 +941,7 @@ const ProjectList = () => {
                   }}
                 >
                   <Stack direction="row" alignItems="center" spacing={0.5}>
-                    <span style={fieldLabelStyle}>{column.name}{column.required ? " *" : ""}</span>
+                    <span style={fieldLabelInlineStyle}>{column.name}{column.required ? " *" : ""}</span>
                     <IconButton
                       size="small"
                       onClick={(event) => setAutoMenu({ anchorEl: event.currentTarget, key: column.id })}
