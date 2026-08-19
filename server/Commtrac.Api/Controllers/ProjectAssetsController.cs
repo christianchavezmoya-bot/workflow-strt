@@ -17,14 +17,21 @@ public class ProjectAssetsController : ControllerBase
     private readonly NotificationFeedService _feed;
     private readonly SseHub _sse;
     private readonly ProjectLifecycleService _projectLifecycle;
+    private readonly PaperCompletionService _paperCompletion;
     private static readonly JsonSerializerOptions _json = new() { PropertyNameCaseInsensitive = true };
 
-    public ProjectAssetsController(AppDbContext db, NotificationFeedService feed, SseHub sse, ProjectLifecycleService projectLifecycle)
+    public ProjectAssetsController(
+        AppDbContext db,
+        NotificationFeedService feed,
+        SseHub sse,
+        ProjectLifecycleService projectLifecycle,
+        PaperCompletionService paperCompletion)
     {
         _db   = db;
         _feed = feed;
         _sse  = sse;
         _projectLifecycle = projectLifecycle;
+        _paperCompletion = paperCompletion;
     }
 
     // GET api/project-assets/my-project-ids
@@ -57,6 +64,64 @@ public class ProjectAssetsController : ControllerBase
                 g.Count()))
             .ToListAsync();
         return Ok(counts);
+    }
+
+    // POST api/project-assets/{id}/record-paper-completion
+    // Web-only PM/Admin escape hatch: upload a signed PDF or JSON completion record and close the asset.
+    [HttpPost("{id}/record-paper-completion")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    [RequestSizeLimit(50_000_000)]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<PaperCompletionResultDto>> RecordPaperCompletion(
+        string id,
+        [FromForm] RecordPaperCompletionRequest request)
+    {
+        var actorUserId = User.FindFirst("sub")?.Value
+            ?? User.FindFirst("nameid")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        var actorName = User.Identity?.Name
+            ?? User.FindFirst("email")?.Value
+            ?? User.FindFirst(System.Security.Claims.ClaimTypes.Name)?.Value
+            ?? "Unknown user";
+
+        if (request.File is null)
+        {
+            return BadRequest(new { message = "File is required." });
+        }
+
+        var result = await _paperCompletion.RecordAsync(
+            id,
+            request.File,
+            request.Format ?? string.Empty,
+            request.Acknowledged,
+            request.WaiveCustomerSignature,
+            request.CustomerSignedOnPaper,
+            request.InstallerSignedOnPaper,
+            request.Notes,
+            actorUserId,
+            actorName);
+
+        if (!result.Success || result.Result is null)
+        {
+            return UnprocessableEntity(new { message = result.Error ?? "Unable to record paper completion." });
+        }
+
+        var asset = await _db.ProjectAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+        if (asset is not null)
+        {
+            var patchUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            await _sse.BroadcastExceptAsync(patchUserId, "assets:updated",
+                new { assetId = asset.Id, productId = asset.ProductId, projectId = asset.ProjectId });
+        }
+
+        var dto = result.Result;
+        return Ok(new PaperCompletionResultDto(
+            dto.AssetId,
+            dto.AssetStatus,
+            dto.RunId,
+            dto.SignatureStatus,
+            dto.DocumentId,
+            dto.DocumentName));
     }
 
     // GET api/project-assets/open  - all assets not yet Complete, joined with parent project info
@@ -1703,4 +1768,15 @@ public class ProjectAssetsController : ControllerBase
         [System.Text.Json.Serialization.JsonPropertyName("values")]
         public Dictionary<string, string>? Values { get; set; }
     }
+}
+
+public class RecordPaperCompletionRequest
+{
+    public IFormFile? File { get; set; }
+    public string? Format { get; set; }
+    public bool Acknowledged { get; set; }
+    public bool WaiveCustomerSignature { get; set; }
+    public bool CustomerSignedOnPaper { get; set; } = true;
+    public bool InstallerSignedOnPaper { get; set; } = true;
+    public string? Notes { get; set; }
 }

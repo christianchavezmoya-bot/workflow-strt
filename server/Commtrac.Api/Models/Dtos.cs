@@ -1557,6 +1557,14 @@ public record TechnicianWorkloadSummaryDto(
 /// <summary>Per-project asset status counts for the Dashboard regional snapshot.</summary>
 public record ProjectAssetSummaryDto(string ProjectId, int NotStarted, int InProgress, int Complete, int Total);
 
+public record PaperCompletionResultDto(
+    string AssetId,
+    string AssetStatus,
+    string RunId,
+    string SignatureStatus,
+    string DocumentId,
+    string DocumentName);
+
 /// <summary>Open (not-yet-complete) asset with parent project context for the Dashboard Active Installations panel.</summary>
 public record OpenAssetDto(
     string Id,

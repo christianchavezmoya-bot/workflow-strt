@@ -1,4 +1,4 @@
-import { ArchiveOutlined, ArticleOutlined, FileDownloadOutlined, PrintOutlined } from "@mui/icons-material";
+import { ArchiveOutlined, ArticleOutlined, FileDownloadOutlined, PrintOutlined, UploadFileOutlined } from "@mui/icons-material";
 import { Box, Button, Stack, Tooltip, Typography } from "@mui/material";
 import type { Project } from "../../types/project";
 import { INSPECTION_INBOX_UI_ENABLED } from "../../config/productFeatureFlags";
@@ -16,6 +16,9 @@ type Props = {
   onOpenBulkReports: () => void;
   onOpenExportDialog: () => void;
   onNavigateInspectionInbox: () => void;
+  canRecordPaperCompletion?: boolean;
+  paperCompletionEnabled?: boolean;
+  onOpenPaperCompletion?: () => void;
 };
 
 export default function AssetInstallationTableToolbar({
@@ -31,6 +34,9 @@ export default function AssetInstallationTableToolbar({
   onOpenBulkReports,
   onOpenExportDialog,
   onNavigateInspectionInbox,
+  canRecordPaperCompletion = false,
+  paperCompletionEnabled = false,
+  onOpenPaperCompletion,
 }: Props) {
   const visible =
     showAdvancedAssetActions
@@ -96,6 +102,33 @@ export default function AssetInstallationTableToolbar({
               </Button>
             </span>
           </Tooltip>
+          {canRecordPaperCompletion && (
+            <Tooltip
+              title={
+                selectedCount === 0
+                  ? "Select exactly one asset first"
+                  : selectedCount > 1
+                    ? "Select exactly one asset to record paper completion"
+                    : paperCompletionEnabled
+                      ? "Upload a signed PDF or JSON and close this asset workflow"
+                      : "Selected asset is already closed or cancelled"
+              }
+            >
+              <span>
+                <Button
+                  size="small"
+                  variant="outlined"
+                  color="secondary"
+                  startIcon={<UploadFileOutlined fontSize="small" />}
+                  disabled={!paperCompletionEnabled}
+                  onClick={onOpenPaperCompletion}
+                  sx={{ fontSize: 12 }}
+                >
+                  Close with document
+                </Button>
+              </span>
+            </Tooltip>
+          )}
         </Stack>
       )}
       <Stack direction="row" spacing={1} alignItems="center">
