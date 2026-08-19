@@ -41,6 +41,7 @@ export interface OnboardingControls {
   showWhatsNew: boolean;
   whatsNewEntries: ReturnType<typeof getUnseenWhatsNew>;
   dismissWhatsNew: () => void;
+  openWhatsNew: () => void;
 
   // Help center / replay
   openHelp: () => void;
@@ -52,7 +53,7 @@ export interface OnboardingControls {
   resetOnboarding: () => void;
 }
 
-export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWelcomeDone }: UseOnboardingOptions): OnboardingControls {
+export function useOnboarding({ userId, role, isFirstLogin = false, onWelcomeDone }: UseOnboardingOptions): OnboardingControls {
   const flags = useMemo(() => getOnboardingFlags(), []);
   const location = useLocation();
 
@@ -61,7 +62,13 @@ export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWel
   );
   const [activeTour, setActiveTour] = useState<TourDefinition | null>(null);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [firstLoginFlowActive, setFirstLoginFlowActive] = useState(isFirstLogin);
+  const [whatsNewManualOpen, setWhatsNewManualOpen] = useState(false);
   const initialized = useRef(false);
+
+  useEffect(() => {
+    if (isFirstLogin) setFirstLoginFlowActive(true);
+  }, [isFirstLogin]);
 
   // Persist whenever state changes
   useEffect(() => {
@@ -84,9 +91,9 @@ export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWel
   }, [location.pathname]);
 
   // ── Welcome ────────────────────────────────────────────────────────────────
-  // Show welcome until the user completes or skips it locally. Backend isFirstLogin is
-  // cleared via onWelcomeDone; do not re-open the modal when local state is already done.
-  const showWelcome = flags.enabled && !state.firstLoginCompleted;
+  // Welcome + auto What's New only during the backend first-login flow (IsFirstLogin).
+  // After that, tours and release notes are opened from the Help widget only.
+  const showWelcome = flags.enabled && firstLoginFlowActive && !state.firstLoginCompleted;
 
   const completeWelcome = useCallback((focusArea: FocusArea) => {
     onboardingAnalytics.emit("onboarding_started", { userId, role, focusArea });
@@ -108,6 +115,7 @@ export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWel
       firstLoginCompleted: true,
       quickTourSkipped: true,
     }));
+    setFirstLoginFlowActive(false);
     onWelcomeDone?.();
   }, [userId, role, onWelcomeDone]);
 
@@ -177,12 +185,15 @@ export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWel
     [flags.whatsNew, state.whatsNewSeenVersions]
   );
 
-  // Show What's New only after onboarding is complete and there are unseen entries
-  const showWhatsNew = flags.enabled && flags.whatsNew
+  // Auto What's New once during first-login onboarding (after welcome), not on every release.
+  const showWhatsNewAuto = flags.enabled && flags.whatsNew
+    && firstLoginFlowActive
     && state.firstLoginCompleted
     && whatsNewEntries.length > 0
     && !activeTour
     && !showWelcome;
+
+  const showWhatsNew = showWhatsNewAuto || whatsNewManualOpen;
 
   const dismissWhatsNew = useCallback(() => {
     const versions = whatsNewEntries.map((e) => e.version);
@@ -192,7 +203,13 @@ export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWel
       lastSeenAppVersion: APP_VERSION,
       whatsNewSeenVersions: [...new Set([...prev.whatsNewSeenVersions, ...versions])],
     }));
+    setWhatsNewManualOpen(false);
+    setFirstLoginFlowActive(false);
   }, [userId, whatsNewEntries]);
+
+  const openWhatsNew = useCallback(() => {
+    setWhatsNewManualOpen(true);
+  }, []);
 
   // ── Help center ───────────────────────────────────────────────────────────
   const openHelp = useCallback(() => {
@@ -233,6 +250,7 @@ export function useOnboarding({ userId, role, isFirstLogin: _isFirstLogin, onWel
     showWhatsNew,
     whatsNewEntries,
     dismissWhatsNew,
+    openWhatsNew,
     openHelp,
     helpOpen,
     closeHelp,

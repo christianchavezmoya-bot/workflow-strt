@@ -726,7 +726,7 @@ const Topbar = () => {
             </Stack>
           </MenuItem>
           <Divider />
-          {!isMobileNativePlatform() && (
+          {!isMobileNativePlatform() && isAdminUser && (
             <>
           <MenuItem onClick={openTestUserDialog} sx={{ justifyContent: "space-between" }}>
             <Stack direction="row" spacing={1} alignItems="center">
@@ -821,8 +821,8 @@ const Topbar = () => {
           )}
         </Menu>
       </Stack>
-      {/* Test mode banner */}
-      {isTestMode && (
+      {/* Test mode banner (Admin dev tool only) */}
+      {isAdminUser && isTestMode && (
         <Box sx={{
           position: "fixed", top: 0, left: 0, right: 0, zIndex: 9999,
           bgcolor: "warning.main", color: "warning.contrastText",

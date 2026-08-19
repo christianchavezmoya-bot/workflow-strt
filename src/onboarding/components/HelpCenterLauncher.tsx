@@ -87,7 +87,7 @@ export default function HelpCenterLauncher({ controls }: Props) {
               variant="outlined"
               size="small"
               startIcon={<AutoAwesomeOutlinedIcon />}
-              onClick={() => { closeHelp(); controls.dismissWhatsNew(); }}
+              onClick={() => { closeHelp(); controls.openWhatsNew(); }}
               sx={{ justifyContent: "flex-start" }}
             >
               View What's New
