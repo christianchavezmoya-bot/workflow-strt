@@ -234,7 +234,7 @@ public static class PostgresSchemaEnsurer
             ALTER TABLE "Projects" ADD COLUMN IF NOT EXISTS "WorkflowTypeId" TEXT;
             CREATE INDEX IF NOT EXISTS "IX_Projects_WorkflowTypeId" ON "Projects" ("WorkflowTypeId");
             UPDATE "Projects"
-            SET "WorkflowTypeId" = CASE COALESCE("WorkflowMode", CASE WHEN "IsInstallationProject" THEN 'INSTALLATION_ONLY' ELSE 'INSPECTION_ONLY' END)
+            SET "WorkflowTypeId" = CASE COALESCE("WorkflowMode", CASE WHEN "IsInstallationProject" = 1 THEN 'INSTALLATION_ONLY' ELSE 'INSPECTION_ONLY' END)
                 WHEN 'INSPECTION_ONLY' THEN 'wftype-inspection'
                 WHEN 'MIXED' THEN NULL
                 ELSE 'wftype-installation'
