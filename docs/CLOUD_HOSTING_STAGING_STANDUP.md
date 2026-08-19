@@ -1,5 +1,7 @@
 # Staging standup — local Docker + AWS
 
+**Execution plan (phases, gates, seed): [`CLOUD_MOVE_EXECUTION_PLAN.md`](./CLOUD_MOVE_EXECUTION_PLAN.md)** · Seed wishlist: [`CLOUD_MOVE_SEED_WISHLIST.md`](./CLOUD_MOVE_SEED_WISHLIST.md)
+
 Two paths to staging. **Run local Docker first** to validate cloud profiles before paying for AWS.
 
 | Path | When | Command / doc |
