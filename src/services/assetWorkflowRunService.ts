@@ -2189,7 +2189,9 @@ export const assetWorkflowRunService = {
     };
 
     if (!isMobileNativePlatform()) {
-      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, body);
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/time-entry`, body, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       invalidateWebRunMutationCaches(runId, res.data.assetId, "detail");
       return res.data;
     }
@@ -2197,7 +2199,9 @@ export const assetWorkflowRunService = {
     const resolvedRunId = await resolveRunId(runId);
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
-      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body);
+      const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${resolvedRunId}/time-entry`, body, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
       await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));

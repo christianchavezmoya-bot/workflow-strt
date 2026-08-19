@@ -13,6 +13,7 @@ import {
   Tooltip,
   Typography,
 } from "@mui/material";
+import { INSPECTION_ASSETS_UI_ENABLED } from "../../config/productFeatureFlags";
 
 type Props = {
   activeProductName?: string;
@@ -64,7 +65,7 @@ export default function AssetInstallationPageHeader({
         </Tooltip>
       </Stack>
       <Stack direction="row" spacing={1} alignItems="center">
-        {selectedProjectHasInspection && selectedProjectJobNumber && (
+        {INSPECTION_ASSETS_UI_ENABLED && selectedProjectHasInspection && selectedProjectJobNumber && (
           <Button size="small" variant="outlined" onClick={onNavigateInspectionAssets}>
             Inspection Assets
           </Button>

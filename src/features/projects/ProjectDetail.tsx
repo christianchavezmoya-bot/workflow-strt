@@ -13,6 +13,7 @@ import type { Project, WorkflowMode } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import ProjectEditDialog from "./ProjectEditDialog";
 import ProjectInspectionInboxPage from "./ProjectInspectionInboxPage";
+import { INSPECTION_INBOX_UI_ENABLED } from "../../config/productFeatureFlags";
 import {
   executeProjectWorkflowAction,
   getProjectWorkflowActions,
@@ -23,7 +24,8 @@ import {
 type DetailTab = "overview" | "inbox";
 
 const inspectionEnabled = (workflowMode?: WorkflowMode) =>
-  workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED";
+  INSPECTION_INBOX_UI_ENABLED
+  && (workflowMode === "INSPECTION_ONLY" || workflowMode === "MIXED");
 
 const ProjectDetail = () => {
   const { id } = useParams();

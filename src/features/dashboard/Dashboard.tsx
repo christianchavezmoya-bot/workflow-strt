@@ -77,6 +77,7 @@ import DashboardManagerMobileHome from "./DashboardManagerMobileHome";
 import DashboardAdminInspectionWorkspace from "./DashboardAdminInspectionWorkspace";
 import DashboardAdminInstallWorkspace, { type AdminInstallFilter } from "./DashboardAdminInstallWorkspace";
 import DashboardInspectionInboxSection from "./DashboardInspectionInboxSection";
+import { INSPECTION_INBOX_UI_ENABLED } from "../../config/productFeatureFlags";
 import DashboardMyInspectionJobsToday from "./DashboardMyInspectionJobsToday";
 import DashboardMyInspectionJobHistory from "./DashboardMyInspectionJobHistory";
 import DashboardInstallHistoryCard from "./DashboardInstallHistoryCard";
@@ -2478,7 +2479,8 @@ const Dashboard = () => {
 
   // Show My Inspections tab for managers always; for others only if assigned to inspection assets
   const hasInspectionsTab = isManager || myInspectionAssets.length > 0 || myInspectionHistory.length > 0 || inspectionRunsDue > 0;
-  const showInspectionInbox = inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0;
+  const showInspectionInbox = INSPECTION_INBOX_UI_ENABLED
+    && (inspectionRunsDue > 0 || inspectionImportsWaiting > 0 || inspectionImportsFailed > 0);
   const myInspectionPausedCount = useMemo(
     () => myInspectionAssets.filter((asset) => isPausedAsset(asset.runStatus)).length,
     [myInspectionAssets]

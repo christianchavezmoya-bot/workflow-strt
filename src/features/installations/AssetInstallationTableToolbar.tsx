@@ -1,6 +1,7 @@
 import { ArchiveOutlined, ArticleOutlined, FileDownloadOutlined, PrintOutlined } from "@mui/icons-material";
 import { Box, Button, Stack, Tooltip, Typography } from "@mui/material";
 import type { Project } from "../../types/project";
+import { INSPECTION_INBOX_UI_ENABLED } from "../../config/productFeatureFlags";
 
 type Props = {
   showAdvancedAssetActions: boolean;
@@ -33,7 +34,7 @@ export default function AssetInstallationTableToolbar({
 }: Props) {
   const visible =
     showAdvancedAssetActions
-    || (selectedProjectHasInspection && selectedProject && !archiveMode)
+    || (INSPECTION_INBOX_UI_ENABLED && selectedProjectHasInspection && selectedProject && !archiveMode)
     || archiveMode;
 
   if (!visible) return null;
@@ -98,7 +99,7 @@ export default function AssetInstallationTableToolbar({
         </Stack>
       )}
       <Stack direction="row" spacing={1} alignItems="center">
-        {selectedProjectHasInspection && selectedProject && !archiveMode && (
+        {INSPECTION_INBOX_UI_ENABLED && selectedProjectHasInspection && selectedProject && !archiveMode && (
           <Button
             size="small"
             variant="outlined"
