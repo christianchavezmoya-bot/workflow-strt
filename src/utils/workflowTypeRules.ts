@@ -43,3 +43,31 @@ export function findWorkflowType(types: WorkflowType[], id?: string | null): Wor
   if (!id) return undefined;
   return types.find((type) => type.id === id);
 }
+
+/** True when legacy MIXED project has not yet been assigned a single catalog type. */
+export function isLegacyMixedProjectWithoutType(
+  project: Pick<Project, "workflowTypeId" | "workflowMode"> | null | undefined,
+): boolean {
+  if (!project) return false;
+  return !project.workflowTypeId && project.workflowMode === "MIXED";
+}
+
+/** Whether a config's effective type may be assigned on this project (mirrors server guard). */
+export function assignmentAllowedForProject(
+  projectWorkflowTypeId: string | null | undefined,
+  projectWorkflowMode: WorkflowMode | null | undefined,
+  effectiveConfigTypeId: string,
+): boolean {
+  if (!projectWorkflowTypeId?.trim()) {
+    return projectWorkflowMode === "MIXED";
+  }
+  return projectWorkflowTypeId === effectiveConfigTypeId;
+}
+
+/** True when the project restricts assignments to one catalog type (not legacy MIXED). */
+export function projectScopesWorkflowType(
+  project: Pick<Project, "workflowTypeId" | "workflowMode" | "isInstallationProject"> | null | undefined,
+): boolean {
+  if (!project) return false;
+  return Boolean(resolveProjectWorkflowTypeId(project));
+}

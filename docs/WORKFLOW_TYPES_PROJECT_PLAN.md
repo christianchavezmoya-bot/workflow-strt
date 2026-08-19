@@ -34,19 +34,20 @@ Shared server rules live in `server/Commtrac.Api/Services/WorkflowTypeRules.cs`.
 
 ### PR B — Frontend types + helpers
 
-- Add `workflowTypeId` to TS `Project` type and API mappers
-- Mirror `WorkflowTypeRules` helpers in `src/` (derive mode, install-style check)
+- [x] Add `workflowTypeId` to TS `Project` type and API mappers
+- [x] Mirror `WorkflowTypeRules` helpers in `src/utils/workflowTypeRules.ts`
 
 ### PR C — Project form
 
-- Replace Installation / Inspection / Mixed radios with **single-select** from Settings → Workflow Types (active catalog)
-- On edit of legacy MIXED: force PM to pick one type (no Mixed option)
-- Send `workflowTypeId` on save; stop sending raw `workflowMode` once wired
+- [x] Replace Installation / Inspection / Mixed radios with **single-select** from Settings → Workflow Types (active catalog)
+- [x] On edit of legacy MIXED: warn PM to pick one type (no Mixed option)
+- [x] Send `workflowTypeId` on save; derive `workflowMode` client-side for payload consistency
 
 ### PR D — Asset assignment filtering
 
-- Filter assign-workflow dialogs to configs whose effective type matches `project.workflowTypeId`
-- Legacy MIXED: keep current “show all” until type is set
+- [x] Filter assign-workflow dialogs to configs whose effective type matches `project.workflowTypeId`
+- [x] Legacy MIXED: keep current “show all” until type is set; bulk type picker stays enabled
+- [x] Typed projects: lock bulk workflow type to project type
 
 ### PR E — Builder publish
 

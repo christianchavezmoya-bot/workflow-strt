@@ -20,6 +20,7 @@ type Props = {
   saving: boolean;
   assetCount: number;
   workflowTypes: WorkflowType[];
+  projectWorkflowTypeLocked?: boolean;
   filteredConfigs: WorkflowConfig[];
   latestPublishedConfigs: WorkflowConfig[];
   workflowTypeId: string;
@@ -35,6 +36,7 @@ export default function AssetInstallationBulkWorkflowAssignDialog({
   saving,
   assetCount,
   workflowTypes,
+  projectWorkflowTypeLocked = false,
   filteredConfigs,
   latestPublishedConfigs,
   workflowTypeId,
@@ -63,6 +65,7 @@ export default function AssetInstallationBulkWorkflowAssignDialog({
             <Select
               label="Workflow type"
               value={workflowTypeId}
+              disabled={projectWorkflowTypeLocked}
               onChange={(e) => onWorkflowTypeChange(e.target.value)}
             >
               {workflowTypes.map((wt) => (

@@ -4,6 +4,7 @@ import {
   deriveWorkflowMode,
   isInspectionWorkflowType,
   isInstallationProjectMode,
+  assignmentAllowedForProject,
   resolveProjectWorkflowTypeId,
 } from "./workflowTypeRules";
 
@@ -54,5 +55,11 @@ describe("workflowTypeRules", () => {
     expect(isInstallationProjectMode("INSTALLATION_ONLY")).toBe(true);
     expect(isInstallationProjectMode("MIXED")).toBe(true);
     expect(isInstallationProjectMode("INSPECTION_ONLY")).toBe(false);
+  });
+
+  it("assignment guard mirrors server rules", () => {
+    expect(assignmentAllowedForProject("wftype-installation", "INSTALLATION_ONLY", "wftype-inspection")).toBe(false);
+    expect(assignmentAllowedForProject(null, "MIXED", "wftype-inspection")).toBe(true);
+    expect(assignmentAllowedForProject("wftype-repair", "INSTALLATION_ONLY", "wftype-repair")).toBe(true);
   });
 });

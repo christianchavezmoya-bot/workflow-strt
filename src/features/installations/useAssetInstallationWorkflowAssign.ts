@@ -2,12 +2,14 @@ import { useCallback, useState } from "react";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { workflowTypeService } from "../../services/workflowTypeService";
+import type { Project } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
 import {
   assignFormFromConfigSelection,
   buildAssignFormPreselection,
+  filterPublishedConfigsForProject,
   resolveAssignmentWorkflowTypeId,
   resolveRequestedWorkflowTypeId,
   type AssignFormState,
@@ -15,6 +17,10 @@ import {
 
 type UseAssetInstallationWorkflowAssignOptions = {
   requestedWorkflowType: string | null;
+  resolveProjectForAsset?: (asset: ProjectAsset) => Pick<
+    Project,
+    "workflowTypeId" | "workflowMode" | "isInstallationProject"
+  > | null;
   onWorkflowTypesLoaded?: (types: WorkflowType[]) => void;
   onWorkflowConfigsLoaded?: (configs: WorkflowConfig[]) => void;
   onAssignmentSaved: (assetId: string) => void | Promise<void>;
@@ -23,6 +29,7 @@ type UseAssetInstallationWorkflowAssignOptions = {
 
 export function useAssetInstallationWorkflowAssign({
   requestedWorkflowType,
+  resolveProjectForAsset,
   onWorkflowTypesLoaded,
   onWorkflowConfigsLoaded,
   onAssignmentSaved,
@@ -57,15 +64,19 @@ export function useAssetInstallationWorkflowAssign({
         onWorkflowTypesLoaded?.(types);
         onWorkflowConfigsLoaded?.(cfgs);
 
+        const project = resolveProjectForAsset?.(asset) ?? null;
+        const scopedConfigs = filterPublishedConfigsForProject(cfgs, types, project);
+        setWorkflowConfigs(scopedConfigs);
+
         const requestedWorkflowTypeId = resolveRequestedWorkflowTypeId(requestedWorkflowType, types);
         setAssignForm(
-          buildAssignFormPreselection(cfgs, types, requestedWorkflowTypeId, requestedWorkflowType),
+          buildAssignFormPreselection(scopedConfigs, types, requestedWorkflowTypeId, requestedWorkflowType),
         );
       } catch {
         console.warn("[useAssetInstallationWorkflowAssign] failed to load workflow types/configs");
       }
     },
-    [onWorkflowConfigsLoaded, onWorkflowTypesLoaded, requestedWorkflowType],
+    [onWorkflowConfigsLoaded, onWorkflowTypesLoaded, requestedWorkflowType, resolveProjectForAsset],
   );
 
   const selectAssignConfig = useCallback(

@@ -57,7 +57,7 @@ export default function AssetInstallationWorkflowAssignDialog({
             >
               {workflowConfigs.length === 0 && (
                 <MenuItem value="" disabled>
-                  No published configs available
+                  No published configs match this project&apos;s workflow type
                 </MenuItem>
               )}
               {workflowConfigs.map((c) => (

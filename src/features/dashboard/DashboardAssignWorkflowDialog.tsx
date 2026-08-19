@@ -28,6 +28,7 @@ type Props = {
   saving: boolean;
   assetLabel?: string;
   workflowMode?: string | null;
+  projectWorkflowTypeName?: string | null;
   workflowConfigs: WorkflowConfig[];
   workflowTypes: WorkflowType[];
   assignForm: AssignForm;
@@ -41,6 +42,7 @@ export default function DashboardAssignWorkflowDialog({
   saving,
   assetLabel,
   workflowMode,
+  projectWorkflowTypeName,
   workflowConfigs,
   workflowTypes,
   assignForm,
@@ -59,7 +61,8 @@ export default function DashboardAssignWorkflowDialog({
       <DialogContent>
         <Stack spacing={2} sx={{ pt: 1 }}>
           <Typography variant="caption" color="text.secondary">
-            Workflow Type: <strong>{workflowModeLabel(workflowMode)}</strong> (set by the project)
+            Project workflow type:{" "}
+            <strong>{projectWorkflowTypeName || workflowModeLabel(workflowMode)}</strong>
           </Typography>
           <FormControl size="small" fullWidth required>
             <InputLabel shrink>Workflow Config (Published) *</InputLabel>
@@ -76,7 +79,7 @@ export default function DashboardAssignWorkflowDialog({
             >
               {workflowConfigs.length === 0 && (
                 <MenuItem value="" disabled>
-                  No published configs available for this product
+                  No published configs match this project&apos;s workflow type
                 </MenuItem>
               )}
               {workflowConfigs.map((config) => (
