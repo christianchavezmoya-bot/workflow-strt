@@ -78,7 +78,8 @@ import {
   createDefaultCustomRow,
   defaultCustomColumns,
   DraggablePaper,
-  fieldLabelStyle,
+  fieldLabelInlineStyle,
+  fieldLabelSx,
   getDefaultColumnType,
   normalize,
   resolveErrorMessage,
@@ -1577,7 +1578,7 @@ export const UserManagement: React.FC = () => {
                       }}
                     >
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>{field.id === "field-role" ? "Role name" : field.name}</span>
+                        <span style={fieldLabelInlineStyle}>{field.id === "field-role" ? "Role name" : field.name}</span>
                         <IconButton
                           size="small"
                           onClick={(event) => setUserMenu({ anchorEl: event.currentTarget, key: accessorKey })}
@@ -2459,7 +2460,7 @@ export const UserManagement: React.FC = () => {
                     <TableCell width="80">Logo</TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>Customer name</span>
+                        <span style={fieldLabelInlineStyle}>Customer name</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "customer" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -2467,7 +2468,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>Site Name</span>
+                        <span style={fieldLabelInlineStyle}>Site Name</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "siteName" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -2475,7 +2476,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>City</span>
+                        <span style={fieldLabelInlineStyle}>City</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "city" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -2483,7 +2484,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>State</span>
+                        <span style={fieldLabelInlineStyle}>State</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "state" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -2491,7 +2492,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>Country</span>
+                        <span style={fieldLabelInlineStyle}>Country</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "country" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -2499,7 +2500,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>Industry</span>
+                        <span style={fieldLabelInlineStyle}>Industry</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "industry" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -2507,7 +2508,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                     <TableCell>
                       <Stack direction="row" alignItems="center" spacing={0.5}>
-                        <span style={fieldLabelStyle}>Comments</span>
+                        <span style={fieldLabelInlineStyle}>Comments</span>
                         <IconButton size="small" onClick={(event) => setCustomerMenu({ anchorEl: event.currentTarget, key: "notes" })}>
                           <ArrowDropDown fontSize="small" />
                         </IconButton>
@@ -3156,7 +3157,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setFormData((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl>
-              <InputLabel shrink sx={fieldLabelStyle}>Role name</InputLabel>
+              <InputLabel shrink sx={fieldLabelSx}>Role name</InputLabel>
               <Select
                 value={formData.role}
                 label="Role name"
@@ -3170,7 +3171,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <FormControl>
-              <InputLabel shrink sx={fieldLabelStyle}>Global Office</InputLabel>
+              <InputLabel shrink sx={fieldLabelSx}>Global Office</InputLabel>
               <Select
                 value={formData.office}
                 label="Global Office"
@@ -4096,7 +4097,7 @@ export const UserManagement: React.FC = () => {
               onChange={(event) => setEditUserForm((prev) => ({ ...prev, email: event.target.value }))}
             />
             <FormControl fullWidth>
-              <InputLabel shrink sx={fieldLabelStyle}>Role name</InputLabel>
+              <InputLabel shrink sx={fieldLabelSx}>Role name</InputLabel>
               <Select
                 value={editUserForm.role}
                 label="Role name"
@@ -4112,7 +4113,7 @@ export const UserManagement: React.FC = () => {
               </Select>
             </FormControl>
             <FormControl fullWidth>
-              <InputLabel shrink sx={fieldLabelStyle}>Office / City</InputLabel>
+              <InputLabel shrink sx={fieldLabelSx}>Office / City</InputLabel>
               <Select
                 value={editUserForm.office}
                 label="Office / City"
@@ -4405,7 +4406,7 @@ export const UserManagement: React.FC = () => {
                   label={field.name}
                   type={inputType}
                   value={value}
-                  InputLabelProps={inputType === "date" ? { shrink: true, sx: fieldLabelStyle } : { sx: fieldLabelStyle }}
+                  InputLabelProps={inputType === "date" ? { shrink: true, sx: fieldLabelSx } : { sx: fieldLabelSx }}
                   disabled={isCreatedDate}
                   helperText={isCreatedDate ? "Auto-populated on creation" : undefined}
                   onChange={(event) =>

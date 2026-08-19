@@ -31,8 +31,7 @@ import { geocodingService } from "../services/geocodingService";
 import { countries } from "../data/countries";
 import { getStatesForCountry } from "../data/states";
 import { usePermissions } from "../hooks/usePermissions";
-
-// Fix default marker icon in Leaflet
+import { fieldLabelSx } from "../features/admin/adminShared";
 import L from "leaflet";
 import icon from "leaflet/dist/images/marker-icon.png";
 import iconShadow from "leaflet/dist/images/marker-shadow.png";
@@ -45,12 +44,6 @@ const DefaultIcon = L.icon({
 });
 
 L.Marker.prototype.options.icon = DefaultIcon;
-
-// Style for field labels (yellow bold)
-const fieldLabelStyle = {
-  color: '#FFD700',
-  fontWeight: 'bold'
-};
 
 export interface Office {
   id: string;
@@ -408,9 +401,9 @@ export default function GlobalOfficeMap({
             <TableHead>
               <TableRow>
                 <TableCell>#</TableCell>
-                <TableCell sx={fieldLabelStyle}>Country</TableCell>
-                <TableCell sx={fieldLabelStyle}>State/Region</TableCell>
-                <TableCell sx={fieldLabelStyle}>City</TableCell>
+                <TableCell sx={fieldLabelSx}>Country</TableCell>
+                <TableCell sx={fieldLabelSx}>State/Region</TableCell>
+                <TableCell sx={fieldLabelSx}>City</TableCell>
                 {can.modifyData && <TableCell>Actions</TableCell>}
               </TableRow>
             </TableHead>
@@ -487,7 +480,7 @@ export default function GlobalOfficeMap({
               freeSolo
               disabled={isGeocoding}
               renderInput={(params) => (
-                <TextField {...params} label="Country *" fullWidth InputLabelProps={{ sx: fieldLabelStyle }} />
+                <TextField {...params} label="Country *" fullWidth InputLabelProps={{ sx: fieldLabelSx }} />
               )}
             />
 
@@ -540,7 +533,7 @@ export default function GlobalOfficeMap({
                   {...params}
                   label="City *"
                   fullWidth
-                  InputLabelProps={{ shrink: true, sx: fieldLabelStyle }}
+                  InputLabelProps={{ shrink: true, sx: fieldLabelSx }}
                   placeholder="Start typing city name..."
                   helperText={citySuggestions.length > 0 ? `${citySuggestions.length} cities found - select one to auto-populate` : "Type at least 2 characters to search cities"}
                   InputProps={{
@@ -574,7 +567,7 @@ export default function GlobalOfficeMap({
                   {...params}
                   label="State/Region"
                   fullWidth
-                  InputLabelProps={{ sx: fieldLabelStyle }}
+                  InputLabelProps={{ sx: fieldLabelSx }}
                   helperText={availableStates.length > 0 ? `${availableStates.length} states available` : "Type to enter state manually"}
                 />
               )}
