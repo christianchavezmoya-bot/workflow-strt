@@ -37,6 +37,7 @@ import {
   Divider,
   FormControl,
   FormControlLabel,
+  FormHelperText,
   Grid,
   IconButton,
   InputLabel,
@@ -1019,6 +1020,10 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   }
 
   async function handleConfirmPublish() {
+    if (!publishForm.workflowTypeId.trim()) {
+      alert("Select a workflow type before publishing.");
+      return;
+    }
     let cfgId = resolvedConfigIdRef.current ?? initialConfigId;
     if (!cfgId) {
       cfgId = await ensureConfigId();
@@ -1442,10 +1447,10 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               autoFocus
               helperText={`Defaults to the product name — add a revision if you need one (e.g. ${productName} Rev 1).`}
             />
-            <FormControl fullWidth>
-              <InputLabel shrink>Workflow Type</InputLabel>
+            <FormControl fullWidth required>
+              <InputLabel shrink>Workflow Type *</InputLabel>
               <Select
-                label="Workflow Type"
+                label="Workflow Type *"
                 value={publishForm.workflowTypeId}
                 onChange={(e) => {
                   const workflowTypeId = e.target.value;
@@ -1457,11 +1462,14 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                   }));
                 }}
               >
-                <MenuItem value="">Unspecified</MenuItem>
-                {workflowTypes.map((type) => (
+                <MenuItem value="" disabled>
+                  Select type…
+                </MenuItem>
+                {workflowTypes.filter((type) => type.isActive).map((type) => (
                   <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
                 ))}
               </Select>
+              <FormHelperText>Required — must match project scope when assigning to assets.</FormHelperText>
             </FormControl>
             <Box>
               <Typography variant="body2" color="text.secondary">
@@ -1494,7 +1502,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             color="primary"
             startIcon={publishSaving ? <CircularProgress size={14} /> : <PublishOutlined />}
             onClick={handleConfirmPublish}
-            disabled={publishSaving || !publishForm.name.trim()}
+            disabled={publishSaving || !publishForm.name.trim() || !publishForm.workflowTypeId.trim()}
           >
             {publishSaving ? "Publishing…" : "Confirm & Publish"}
           </Button>

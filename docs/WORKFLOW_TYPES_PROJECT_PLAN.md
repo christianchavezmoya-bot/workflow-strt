@@ -51,11 +51,13 @@ Shared server rules live in `server/Commtrac.Api/Services/WorkflowTypeRules.cs`.
 
 ### PR E — Builder publish
 
-- Require workflow type on publish (already partially supported on configs)
+- [x] Require workflow type on publish (backend 400 + builder dialog required select)
+- [x] Work Instructions edit dialog requires type on metadata save
 
 ### PR F — Settings delete UX
 
-- Surface 409 from delete API with “in use by project/config/assignment” messaging
+- [x] Surface 409/400 from delete API with in-use details
+- [x] Hide delete for seeded default types; accurate confirm copy
 
 ## Migration / backfill
 

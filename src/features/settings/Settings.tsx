@@ -42,6 +42,7 @@ import { useSearchParams } from "react-router-dom";
 import { fieldService, FieldDefinition } from "../../services/fieldService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import type { WorkflowType } from "../../types/workflowType";
+import axios from "axios";
 import { divisionService } from "../../services/divisionService";
 import type { Division } from "../../types/division";
 import { featureService } from "../../services/featureService";
@@ -1063,6 +1064,7 @@ const Settings = () => {
   const [wfTypeForm, setWfTypeForm] = useState({ name: "", icon: "", sortOrder: "99" });
   const [wfTypeSaving, setWfTypeSaving] = useState(false);
   const [wfTypeError, setWfTypeError] = useState<string | null>(null);
+  const [wfTypeDeleteError, setWfTypeDeleteError] = useState<string | null>(null);
 
   async function loadWfTypes() {
     setWfTypesLoading(true);
@@ -1092,12 +1094,45 @@ const Settings = () => {
     }
   }
 
-  async function removeWfType(id: string) {
-    if (!confirm("Delete this workflow type? Existing assignments using it will be unaffected.")) return;
+  function formatWorkflowTypeDeleteError(err: unknown): string {
+    if (axios.isAxiosError(err)) {
+      const data = err.response?.data as {
+        message?: string;
+        usedByProject?: boolean;
+        usedByConfig?: boolean;
+        usedByAssignment?: boolean;
+      } | undefined;
+      if (data?.message) {
+        const parts: string[] = [data.message];
+        const refs: string[] = [];
+        if (data.usedByProject) refs.push("projects");
+        if (data.usedByConfig) refs.push("workflow configs");
+        if (data.usedByAssignment) refs.push("asset assignments");
+        if (refs.length) parts.push(`In use by: ${refs.join(", ")}.`);
+        return parts.join(" ");
+      }
+      if (err.response?.status === 400) {
+        return "Default workflow types cannot be deleted.";
+      }
+    }
+    return "Failed to delete workflow type.";
+  }
+
+  async function removeWfType(type: WorkflowType) {
+    if (type.id.startsWith("wftype-")) {
+      setWfTypeDeleteError("Default workflow types cannot be deleted.");
+      return;
+    }
+    if (!confirm(`Delete workflow type "${type.name}"? This is blocked if any project, published config, or active assignment still references it.`)) {
+      return;
+    }
+    setWfTypeDeleteError(null);
     try {
-      await workflowTypeService.remove(id);
-      setWfTypes((prev) => prev.filter((t) => t.id !== id));
-    } catch { alert("Failed to delete workflow type."); }
+      await workflowTypeService.remove(type.id);
+      setWfTypes((prev) => prev.filter((t) => t.id !== type.id));
+    } catch (err: unknown) {
+      setWfTypeDeleteError(formatWorkflowTypeDeleteError(err));
+    }
   }
   const localUser = useMemo(() => {
     const raw = secureGet("local_auth_user");
@@ -2683,6 +2718,11 @@ const Settings = () => {
               </Button>
             </Stack>
             <Divider sx={{ borderColor: "rgba(255,255,255,0.08)" }} />
+            {wfTypeDeleteError && (
+              <Alert severity="error" onClose={() => setWfTypeDeleteError(null)}>
+                {wfTypeDeleteError}
+              </Alert>
+            )}
             {wfTypesLoading ? (
               <Stack alignItems="center" sx={{ py: 3 }}>
                 <CircularProgress size={28} />
@@ -2730,11 +2770,13 @@ const Settings = () => {
                               <EditOutlined fontSize="small" />
                             </IconButton>
                           </Tooltip>
-                          <Tooltip title="Delete (soft)">
-                            <IconButton size="small" color="error" onClick={() => removeWfType(t.id)}>
-                              <DeleteOutline fontSize="small" />
-                            </IconButton>
-                          </Tooltip>
+                          {!t.id.startsWith("wftype-") && (
+                            <Tooltip title="Delete (soft)">
+                              <IconButton size="small" color="error" onClick={() => removeWfType(t)}>
+                                <DeleteOutline fontSize="small" />
+                              </IconButton>
+                            </Tooltip>
+                          )}
                         </Stack>
                       </TableCell>
                     </TableRow>

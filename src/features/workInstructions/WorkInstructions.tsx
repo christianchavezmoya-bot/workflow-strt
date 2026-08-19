@@ -1162,6 +1162,10 @@ const WorkInstructions = () => {
     if (!editingConfig) return;
     const name = configForm.name.trim();
     if (!name) { setConfigError("Name is required."); return; }
+    if (!configForm.workflowTypeId.trim()) {
+      setConfigError("Workflow type is required.");
+      return;
+    }
     setConfigSaving(true);
     try {
       const selectedWorkflowType = workflowTypes.find((type) => type.id === configForm.workflowTypeId);
@@ -1800,10 +1804,10 @@ const WorkInstructions = () => {
               placeholder="e.g. AIM-100 Front Camera Install"
               InputLabelProps={{ shrink: true }}
             />
-            <FormControl fullWidth>
-              <InputLabel shrink>Workflow Type</InputLabel>
+            <FormControl fullWidth required>
+              <InputLabel shrink>Workflow Type *</InputLabel>
               <Select
-                label="Workflow Type"
+                label="Workflow Type *"
                 value={configForm.workflowTypeId}
                 onChange={(e) => {
                   const workflowTypeId = e.target.value;
@@ -1815,8 +1819,10 @@ const WorkInstructions = () => {
                   }));
                 }}
               >
-                <MenuItem value="">Unspecified</MenuItem>
-                {workflowTypes.map((type) => (
+                <MenuItem value="" disabled>
+                  Select type…
+                </MenuItem>
+                {workflowTypes.filter((type) => type.isActive).map((type) => (
                   <MenuItem key={type.id} value={type.id}>{type.name}</MenuItem>
                 ))}
               </Select>
@@ -1875,7 +1881,7 @@ const WorkInstructions = () => {
         <DialogActions>
           <Button onClick={closeConfigDialog} disabled={configSaving}>Cancel</Button>
           {editingConfig ? (
-            <Button variant="contained" onClick={saveConfig} disabled={configSaving}>
+            <Button variant="contained" onClick={saveConfig} disabled={configSaving || !configForm.workflowTypeId.trim()}>
               {configSaving ? "Saving…" : "Save Changes"}
             </Button>
           ) : (
