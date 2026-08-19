@@ -446,6 +446,8 @@ public record ProjectDto(
     int AssetCount = 0,
     /// <summary>INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Null on legacy rows.</summary>
     string? WorkflowMode = null,
+    /// <summary>Single Settings workflow type id. Null on legacy MIXED until PM picks one.</summary>
+    string? WorkflowTypeId = null,
     List<string>? TeamMemberIds = null,
     bool IsDeleted = false,
     DateTime? DeletedAtUtc = null,

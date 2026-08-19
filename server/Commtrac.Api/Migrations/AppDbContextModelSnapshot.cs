@@ -2609,7 +2609,13 @@ namespace Commtrac.Api.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<string>("WorkflowTypeId")
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
                     b.HasKey("Id");
+
+                    b.HasIndex("WorkflowTypeId");
 
                     b.ToTable("Projects");
                 });

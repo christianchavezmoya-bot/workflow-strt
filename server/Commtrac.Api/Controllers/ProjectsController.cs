@@ -187,7 +187,9 @@ public class ProjectsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<ActionResult<ProjectDto>> Create([FromBody] ProjectDto request)
     {
-        var resolvedMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        var resolved = await ResolveProjectWorkflowFieldsAsync(request);
+        if (resolved.Error is not null) return resolved.Error;
+
         var project = new ProjectEntity
         {
             Id = string.IsNullOrWhiteSpace(request.Id) ? Guid.NewGuid().ToString() : request.Id,
@@ -206,9 +208,10 @@ public class ProjectsController : ControllerBase
             ProjectType = request.ProjectType,
             Status = request.Status,
             ApprovalDecision = request.ApprovalDecision,
-            IsInstallationProject = resolvedMode is "INSTALLATION_ONLY" or "MIXED",
+            IsInstallationProject = resolved.IsInstallationProject,
             InstallationMode = request.InstallationMode,
-            WorkflowMode = resolvedMode,
+            WorkflowMode = resolved.WorkflowMode,
+            WorkflowTypeId = resolved.WorkflowTypeId,
             ProjectManager = request.ProjectManager,
             ContractValue = request.ContractValue,
             ProbabilityStage = request.ProbabilityStage,
@@ -244,7 +247,9 @@ public class ProjectsController : ControllerBase
             return NotFound();
         }
 
-        var resolvedMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        var resolved = await ResolveProjectWorkflowFieldsAsync(request, project);
+        if (resolved.Error is not null) return resolved.Error;
+
         project.CustomerName = request.CustomerName;
         project.CustomerId = request.CustomerId;
         project.SiteId = request.SiteId;
@@ -260,9 +265,10 @@ public class ProjectsController : ControllerBase
         project.ProjectType = request.ProjectType;
         project.Status = request.Status;
         project.ApprovalDecision = request.ApprovalDecision;
-        project.IsInstallationProject = resolvedMode is "INSTALLATION_ONLY" or "MIXED";
+        project.IsInstallationProject = resolved.IsInstallationProject;
         project.InstallationMode = request.InstallationMode;
-        project.WorkflowMode = resolvedMode;
+        project.WorkflowMode = resolved.WorkflowMode;
+        project.WorkflowTypeId = resolved.WorkflowTypeId;
         project.ProjectManager = request.ProjectManager;
         project.ContractValue = request.ContractValue;
         project.ProbabilityStage = request.ProbabilityStage;
@@ -631,6 +637,7 @@ public class ProjectsController : ControllerBase
             project.OfficeId,
             assetCount,
             effectiveMode,
+            project.WorkflowTypeId,
             string.IsNullOrWhiteSpace(project.TeamMemberIdsJson)
                 ? new List<string>()
                 : JsonSerializer.Deserialize<List<string>>(project.TeamMemberIdsJson, JsonOptions) ?? new List<string>(),
@@ -643,6 +650,48 @@ public class ProjectsController : ControllerBase
                 ? null
                 : JsonSerializer.Deserialize<ProjectScheduledReportDto>(project.ScheduledReportJson, JsonOptions)
         );
+    }
+
+    /// <summary>
+    /// Resolves WorkflowTypeId (single catalog type), derived WorkflowMode, and install-style flag.
+    /// Client may send WorkflowTypeId (preferred) or legacy WorkflowMode / IsInstallationProject.
+    /// </summary>
+    private async Task<(string? WorkflowTypeId, string WorkflowMode, bool IsInstallationProject, ActionResult? Error)>
+        ResolveProjectWorkflowFieldsAsync(ProjectDto request, ProjectEntity? existing = null)
+    {
+        if (!string.IsNullOrWhiteSpace(request.WorkflowTypeId))
+        {
+            var type = await _db.WorkflowTypes.FirstOrDefaultAsync(t => t.Id == request.WorkflowTypeId);
+            if (type is null)
+                return (null, "", false, BadRequest(new { message = "Workflow type not found." }));
+            if (!type.IsActive)
+                return (null, "", false, BadRequest(new { message = "Workflow type is inactive." }));
+
+            var mode = WorkflowTypeRules.DeriveWorkflowMode(type);
+            return (type.Id, mode, WorkflowTypeRules.IsInstallationProjectMode(mode), null);
+        }
+
+        if (!string.IsNullOrWhiteSpace(request.WorkflowMode) &&
+            request.WorkflowMode is "INSTALLATION_ONLY" or "INSPECTION_ONLY" or "MIXED")
+        {
+            var mode = request.WorkflowMode;
+            var typeId = WorkflowTypeRules.DefaultTypeIdForLegacyMode(mode);
+            return (typeId, mode, WorkflowTypeRules.IsInstallationProjectMode(mode), null);
+        }
+
+        if (existing is not null)
+        {
+            var mode = existing.WorkflowMode
+                ?? (existing.IsInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY");
+            return (existing.WorkflowTypeId, mode, WorkflowTypeRules.IsInstallationProjectMode(mode), null);
+        }
+
+        var legacyMode = ResolveWorkflowMode(request.WorkflowMode, request.IsInstallationProject);
+        return (
+            WorkflowTypeRules.DefaultTypeIdForLegacyMode(legacyMode),
+            legacyMode,
+            WorkflowTypeRules.IsInstallationProjectMode(legacyMode),
+            null);
     }
 
     /// <summary>

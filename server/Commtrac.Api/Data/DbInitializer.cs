@@ -813,6 +813,9 @@ public static class DbInitializer
             // and WorkflowTemplates before the migration was discoverable.
             EnsureRecorded("20260521120000_WorkflowTypeIdsForTemplatesAndConfigs",
                 "SELECT COUNT(*) FROM pragma_table_info('WorkflowConfigs') WHERE name='WorkflowTypeId'");
+
+            EnsureRecorded("20260819100000_ProjectWorkflowTypeId",
+                "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='WorkflowTypeId'");
         }
         finally
         {
