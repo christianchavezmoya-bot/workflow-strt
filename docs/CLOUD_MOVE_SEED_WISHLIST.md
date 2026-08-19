@@ -4,6 +4,8 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 
 **Today (baseline):** see [`CLEAN_DATA_RESET.md`](./CLEAN_DATA_RESET.md) and `server/Commtrac.Api/Data/StrataNgoSeeder.cs`.
 
+**Status:** Signed off — implemented in `StrataNgoSeeder` (Phase 1B).
+
 ---
 
 ## Users
@@ -12,11 +14,10 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 |------|-----------------|----------|-------|
 | Admin | `admin@StrataNgo.local` | `Admin123!` | Change for AWS via secrets |
 | Project Manager | `project.manager@StrataNgo.local` | `Pm123!` | |
-| Installer | _none today_ | | Add? Y/N: |
-| Engineer | | | Add? Y/N: |
-| Other | | | |
+| Installer | — | — | **Do not add** |
+| Engineer | — | — | **Do not add** |
 
-**First-login / force password change on staging?** Y/N:
+**First-login / force password change on staging?** **Yes** — `IsFirstLogin=true` for Admin and PM.
 
 ---
 
@@ -26,7 +27,6 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 |-------|--------|------------------|
 | ✓ | Newcastle | Australia / NSW |
 | ✓ | Perth | Australia / WA |
-| | _add/remove rows_ | |
 
 ---
 
@@ -34,9 +34,8 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 
 | Keep? | Customer name | Notes |
 |-------|---------------|-------|
-| ✓ | BHP Mining (example) | |
-| ✓ | Second demo customer | Rename to: |
-| | | |
+| ✓ | BHP/Mining | unchanged |
+| ✓ | Strata Demo Mining | unchanged (second demo customer) |
 
 ---
 
@@ -47,17 +46,15 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 | ✓ | Strata Connect |
 | ✓ | Strata Protect |
 | ✓ | Strata AI |
-| | _changes_ |
+| ✓ | Hazard Avert - Coal | *(product catalog)* |
 
 ---
 
 ## Products
 
-List each product that should exist on **fresh** staging (name, division, linked workflow config):
-
-| Product name | Division | Workflow config | Keep/remove/change |
-|--------------|----------|-----------------|-------------------|
-| _(current: 6 products — list what you want)_ | | | |
+| Product name | Division | Workflow config | Notes |
+|--------------|----------|-----------------|-------|
+| **AIM-100** | Hazard Avert - Coal | Chambers_default | **Only product** on fresh seed (replaces previous 6) |
 
 ---
 
@@ -65,23 +62,20 @@ List each product that should exist on **fresh** staging (name, division, linked
 
 | Config | Source file | Published? | Notes |
 |--------|-------------|------------|-------|
-| Chambers_default | `SeedData/chambers-default-workflow.json` | Yes | Update steps? Y/N |
+| Chambers_default | `SeedData/chambers-default-workflow.json` | Yes | **Do not** change steps JSON |
 
-**Additional published workflows needed?**
+**Additional published workflows:** None.
 
 ---
 
 ## Sample project (optional)
 
-Fresh staging currently has **no** project/assets.
-
 | Question | Your answer |
 |----------|-------------|
-| Include a starter project? | Y/N |
-| Job number | |
-| # of assets | |
-| Assigned workflow | |
-| Purpose (demo only / training) | |
+| Include a starter project? | **No** |
+| Job number | — |
+| # of assets | None |
+| Assigned workflow | None |
 
 ---
 
@@ -89,8 +83,8 @@ Fresh staging currently has **no** project/assets.
 
 | Setting | Desired value |
 |---------|---------------|
-| Company name | |
-| Logo | default / upload path |
+| Company name | Strata N-Go (default) |
+| Logo | default |
 | Frontend base URL | set in Settings after deploy |
 | Email / SMTP | Resend keys in secrets only |
 
@@ -98,18 +92,14 @@ Fresh staging currently has **no** project/assets.
 
 ## Explicitly exclude from fresh seed
 
-Things that must **not** appear on wipe + standup:
-
-- [ ] Legacy Demo profile data (`JOB-4021`, etc.)
-- [ ] Tips library documents
-- [ ] Pre-loaded document library files
-- [ ] _other:_
+- [x] Legacy Demo profile data (`JOB-4021`, etc.)
+- [x] Tips library documents
+- [x] Pre-loaded document library files
+- [x] Starter project / assets
 
 ---
 
 ## Sign-off
 
-When this wishlist is complete, ping the agent/dev to implement Phase 1B in [`CLOUD_MOVE_EXECUTION_PLAN.md`](./CLOUD_MOVE_EXECUTION_PLAN.md).
-
-**Completed by:** _______________  
-**Date:** _______________
+**Completed by:** Product owner  
+**Date:** 2026-08-19
