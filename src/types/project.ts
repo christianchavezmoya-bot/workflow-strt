@@ -55,8 +55,10 @@ export interface Project {
   approvalDecision?: ApprovalDecision;
   isInstallationProject: boolean;
   installationMode?: InstallationMode;
-  /** INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Derived server-side for legacy rows. */
+  /** INSTALLATION_ONLY | INSPECTION_ONLY | MIXED. Derived server-side from workflowTypeId. */
   workflowMode?: WorkflowMode;
+  /** Single Settings workflow type id. Required for new projects; null on legacy MIXED until edited. */
+  workflowTypeId?: string | null;
   projectManager?: string;
   assignedPmUserId?: string | null;
   contractValue?: number;
