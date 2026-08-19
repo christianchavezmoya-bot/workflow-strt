@@ -421,6 +421,30 @@ public class DocumentEntity
     public string? DeletedByUserId { get; set; }
     [MaxLength(500)]
     public string? DeleteReason { get; set; }
+    /// <summary>Opens counted for pruning decisions. Incremented by POST documents/{id}/view.</summary>
+    public int ViewCount { get; set; }
+    public DateTime? LastViewedAtUtc { get; set; }
+    /// <summary>Aggregates of <see cref="DocumentRatingEntity"/>, kept denormalised for list reads.</summary>
+    public int RatingSum { get; set; }
+    public int RatingCount { get; set; }
+}
+
+/// <summary>
+/// One row per user per document so a rating can be changed rather than double-counted.
+/// The aggregate lives on <see cref="DocumentEntity"/> to keep library reads a single query.
+/// </summary>
+public class DocumentRatingEntity
+{
+    [Key]
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    [MaxLength(100)]
+    public string DocumentId { get; set; } = string.Empty;
+    [MaxLength(100)]
+    public string UserId { get; set; } = string.Empty;
+    /// <summary>1–5.</summary>
+    public int Stars { get; set; }
+    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }
 
 public class DocumentConfigEntity

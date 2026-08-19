@@ -642,7 +642,26 @@ public record DocumentDto(
     bool IsDeleted = false,
     DateTime? DeletedAtUtc = null,
     string? DeletedByUserId = null,
-    string? DeleteReason = null
+    string? DeleteReason = null,
+    /// <summary>Opens recorded for this document — drives "unused for N months" pruning.</summary>
+    int ViewCount = 0,
+    DateTime? LastViewedAtUtc = null,
+    /// <summary>Mean of all user ratings, 0 when nobody has rated yet.</summary>
+    double RatingAverage = 0,
+    int RatingCount = 0,
+    /// <summary>The calling user's own rating, null when they have not rated.</summary>
+    int? MyRating = null
+);
+
+public record RateDocumentRequest(int Stars);
+
+public record DocumentUsageDto(
+    string Id,
+    int ViewCount,
+    DateTime? LastViewedAtUtc,
+    double RatingAverage,
+    int RatingCount,
+    int? MyRating
 );
 
 public record RecycleBinItemDto(

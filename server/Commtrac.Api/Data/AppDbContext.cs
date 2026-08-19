@@ -29,6 +29,7 @@ public class AppDbContext : DbContext
     public DbSet<InspectionPhotoEntity> InspectionPhotos => Set<InspectionPhotoEntity>();
     public DbSet<IssueEntity> Issues => Set<IssueEntity>();
     public DbSet<DocumentEntity> Documents => Set<DocumentEntity>();
+    public DbSet<DocumentRatingEntity> DocumentRatings => Set<DocumentRatingEntity>();
     public DbSet<DocumentConfigEntity> DocumentConfigs => Set<DocumentConfigEntity>();
     public DbSet<QuickbaseSettingsEntity> QuickbaseSettings => Set<QuickbaseSettingsEntity>();
     public DbSet<NotificationSettingsEntity> NotificationSettings => Set<NotificationSettingsEntity>();
@@ -109,6 +110,10 @@ public class AppDbContext : DbContext
 
         modelBuilder.Entity<DocumentEntity>()
             .HasQueryFilter(d => !d.IsDeleted);
+
+        modelBuilder.Entity<DocumentRatingEntity>()
+            .HasIndex(r => new { r.DocumentId, r.UserId })
+            .IsUnique();
 
         modelBuilder.Entity<ProjectAssetEntity>()
             .HasQueryFilter(a => !a.IsDeleted);

@@ -39,6 +39,7 @@ public static class PostgresSchemaEnsurer
             EnsureSignatureTokenSignerRoleColumn(conn);
             EnsureFaultReportsTable(conn);
             EnsureFaultReportUpdatesTable(conn);
+            EnsureDocumentUsageAndRatings(conn);
             EnsureDecimalColumnTypes(conn);
         }
         finally
@@ -225,6 +226,26 @@ public static class PostgresSchemaEnsurer
     {
         ExecuteNonQuery(conn, """
             ALTER TABLE "Projects" ADD COLUMN IF NOT EXISTS "TimeZoneId" TEXT;
+            """);
+    }
+
+    private static void EnsureDocumentUsageAndRatings(DbConnection conn)
+    {
+        ExecuteNonQuery(conn, """
+            ALTER TABLE "Documents" ADD COLUMN IF NOT EXISTS "ViewCount" INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE "Documents" ADD COLUMN IF NOT EXISTS "LastViewedAtUtc" TEXT;
+            ALTER TABLE "Documents" ADD COLUMN IF NOT EXISTS "RatingSum" INTEGER NOT NULL DEFAULT 0;
+            ALTER TABLE "Documents" ADD COLUMN IF NOT EXISTS "RatingCount" INTEGER NOT NULL DEFAULT 0;
+            CREATE TABLE IF NOT EXISTS "DocumentRatings" (
+                "Id" TEXT PRIMARY KEY NOT NULL,
+                "DocumentId" TEXT NOT NULL DEFAULT '',
+                "UserId" TEXT NOT NULL DEFAULT '',
+                "Stars" INTEGER NOT NULL DEFAULT 0,
+                "CreatedAtUtc" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00',
+                "UpdatedAtUtc" TEXT NOT NULL DEFAULT '0001-01-01T00:00:00'
+            );
+            CREATE UNIQUE INDEX IF NOT EXISTS "IX_DocumentRatings_DocumentId_UserId"
+                ON "DocumentRatings" ("DocumentId", "UserId");
             """);
     }
 

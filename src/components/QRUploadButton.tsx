@@ -6,7 +6,9 @@ import {
 import PhoneAndroidOutlinedIcon from "@mui/icons-material/PhoneAndroidOutlined";
 import CloseOutlinedIcon from "@mui/icons-material/CloseOutlined";
 import { QRCodeSVG } from "qrcode.react";
+import axios from "axios";
 import api from "../services/api";
+import { describeUploadTokenError } from "./qrUploadErrors";
 import { documentService, type DocumentRecord } from "../services/documentService";
 import { getFallbackPublicFrontendBaseUrl, resolvePublicFrontendBaseUrl } from "../services/publicFrontendBase";
 import { invalidateWebCache } from "../services/webFreshCache";
@@ -81,8 +83,14 @@ export default function QRUploadButton({
       });
       setToken(res.data.token);
       setExpiresAt(new Date(res.data.expiresAt));
-    } catch {
-      setError("Could not generate upload token. Is the server running?");
+    } catch (err: unknown) {
+      // A single "is the server running?" string hid auth expiry and server
+      // faults, which look identical to the user but need different fixes.
+      setError(describeUploadTokenError(
+        axios.isAxiosError(err)
+          ? { status: err.response?.status, data: err.response?.data, code: err.code }
+          : {},
+      ));
     } finally {
       setLoading(false);
     }

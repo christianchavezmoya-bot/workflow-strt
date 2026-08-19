@@ -952,6 +952,9 @@ namespace Commtrac.Api.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("INTEGER");
 
+                    b.Property<DateTime?>("LastViewedAtUtc")
+                        .HasColumnType("TEXT");
+
                     b.Property<string>("LinkedTo")
                         .IsRequired()
                         .HasMaxLength(200)
@@ -966,6 +969,12 @@ namespace Commtrac.Api.Migrations
                         .HasMaxLength(2000)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("RatingCount")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<int>("RatingSum")
+                        .HasColumnType("INTEGER");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(80)
@@ -976,9 +985,44 @@ namespace Commtrac.Api.Migrations
                         .HasMaxLength(40)
                         .HasColumnType("TEXT");
 
+                    b.Property<int>("ViewCount")
+                        .HasColumnType("INTEGER");
+
                     b.HasKey("Id");
 
                     b.ToTable("Documents");
+                });
+
+            modelBuilder.Entity("Commtrac.Api.Models.DocumentRatingEntity", b =>
+                {
+                    b.Property<string>("Id")
+                        .HasColumnType("TEXT");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("DocumentId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.Property<int>("Stars")
+                        .HasColumnType("INTEGER");
+
+                    b.Property<DateTime>("UpdatedAtUtc")
+                        .HasColumnType("TEXT");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("TEXT");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("DocumentId", "UserId")
+                        .IsUnique();
+
+                    b.ToTable("DocumentRatings");
                 });
 
             modelBuilder.Entity("Commtrac.Api.Models.FeatureDependencyEntity", b =>

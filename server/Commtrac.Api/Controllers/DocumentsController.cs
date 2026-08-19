@@ -38,7 +38,16 @@ public class DocumentsController : ControllerBase
     {
         var docsQuery = includeDeleted ? _db.Documents.IgnoreQueryFilters() : _db.Documents;
         var docs = await docsQuery.OrderByDescending(d => d.UploadedAt).ToListAsync();
-        return Ok(docs.Select(doc => ToDto(doc, Request)));
+
+        var userId = CurrentUserId();
+        var myRatings = string.IsNullOrWhiteSpace(userId)
+            ? new Dictionary<string, int>()
+            : await _db.DocumentRatings
+                .AsNoTracking()
+                .Where(r => r.UserId == userId)
+                .ToDictionaryAsync(r => r.DocumentId, r => r.Stars);
+
+        return Ok(docs.Select(doc => ToDto(doc, Request, myRatings.TryGetValue(doc.Id, out var mine) ? mine : null)));
     }
 
     [HttpPost]
@@ -220,6 +229,168 @@ public class DocumentsController : ControllerBase
         return Ok(ToDto(doc, Request));
     }
 
+    /// <summary>
+    /// Replaces the stored file while keeping the same document id, so views,
+    /// ratings and any links to this tip survive a re-upload.
+    /// </summary>
+    [HttpPost("{id}/file")]
+    [RequestSizeLimit(50_000_000)]
+    public async Task<ActionResult<DocumentDto>> ReplaceFile(string id, [FromForm] ReplaceDocumentFileRequest request)
+    {
+        if (!await CanUploadDocumentsAsync())
+        {
+            return Forbid();
+        }
+
+        if (request.File is null || request.File.Length == 0)
+        {
+            return BadRequest(new { message = "File is required." });
+        }
+
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        var previousPath = doc.FilePath;
+        var extension = Path.GetExtension(request.File.FileName);
+        var storedName = $"{Guid.NewGuid()}{extension}";
+        var relativePath = _files.BuildRelativePath("Storage", "Documents", storedName);
+
+        await _files.SaveAsync(relativePath, request.File.OpenReadStream());
+
+        doc.FilePath = relativePath;
+        doc.ContentType = request.File.ContentType;
+        doc.FileSize = request.File.Length;
+        doc.UploadedAt = DateTime.UtcNow.ToString("s");
+        // A URL-linked document becomes a stored file once a file is attached.
+        doc.DownloadUrl = null;
+        if (request.KeepName != true)
+        {
+            doc.Name = request.File.FileName;
+        }
+
+        await _db.SaveChangesAsync();
+
+        // Only drop the old blob after the row points at the new one, so a failed
+        // save never leaves the document without a readable file.
+        if (!string.IsNullOrWhiteSpace(previousPath) && previousPath != relativePath)
+        {
+            try { _files.Delete(previousPath); } catch { /* orphan blob is harmless */ }
+        }
+
+        _searchIndexQueue.EnqueueLibraryDocument(doc.Id);
+        return Ok(ToDto(doc, Request, await MyRatingAsync(doc.Id)));
+    }
+
+    // ── Usage tracking and ratings ───────────────────────────────────────────
+
+    /// <summary>
+    /// Records that the document was opened. Any authenticated reader may call it —
+    /// the count is what tells an admin a tip has gone unused.
+    /// </summary>
+    [HttpPost("{id}/view")]
+    public async Task<ActionResult<DocumentUsageDto>> RecordView(string id)
+    {
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        doc.ViewCount += 1;
+        doc.LastViewedAtUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(ToUsageDto(doc, await MyRatingAsync(id)));
+    }
+
+    [HttpPut("{id}/rating")]
+    public async Task<ActionResult<DocumentUsageDto>> Rate(string id, [FromBody] RateDocumentRequest request)
+    {
+        if (request.Stars is < 1 or > 5)
+        {
+            return BadRequest(new { message = "Stars must be between 1 and 5." });
+        }
+
+        var userId = CurrentUserId();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return BadRequest(new { message = "Could not resolve the current user." });
+        }
+
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        var existing = await _db.DocumentRatings.FirstOrDefaultAsync(r => r.DocumentId == id && r.UserId == userId);
+        if (existing is null)
+        {
+            _db.DocumentRatings.Add(new DocumentRatingEntity
+            {
+                DocumentId = id,
+                UserId = userId,
+                Stars = request.Stars,
+            });
+        }
+        else
+        {
+            existing.Stars = request.Stars;
+            existing.UpdatedAtUtc = DateTime.UtcNow;
+        }
+
+        await _db.SaveChangesAsync();
+        await RecalculateRatingAsync(doc);
+
+        return Ok(ToUsageDto(doc, request.Stars));
+    }
+
+    [HttpDelete("{id}/rating")]
+    public async Task<ActionResult<DocumentUsageDto>> ClearRating(string id)
+    {
+        var userId = CurrentUserId();
+        if (string.IsNullOrWhiteSpace(userId))
+        {
+            return BadRequest(new { message = "Could not resolve the current user." });
+        }
+
+        var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        var existing = await _db.DocumentRatings.FirstOrDefaultAsync(r => r.DocumentId == id && r.UserId == userId);
+        if (existing is not null)
+        {
+            _db.DocumentRatings.Remove(existing);
+            await _db.SaveChangesAsync();
+            await RecalculateRatingAsync(doc);
+        }
+
+        return Ok(ToUsageDto(doc, null));
+    }
+
+    /// <summary>Rebuilds the denormalised aggregate from the per-user rows.</summary>
+    private async Task RecalculateRatingAsync(DocumentEntity doc)
+    {
+        var rows = await _db.DocumentRatings
+            .AsNoTracking()
+            .Where(r => r.DocumentId == doc.Id)
+            .Select(r => r.Stars)
+            .ToListAsync();
+
+        doc.RatingCount = rows.Count;
+        doc.RatingSum = rows.Sum();
+        await _db.SaveChangesAsync();
+    }
+
+    private async Task<int?> MyRatingAsync(string documentId)
+    {
+        var userId = CurrentUserId();
+        if (string.IsNullOrWhiteSpace(userId)) return null;
+        var row = await _db.DocumentRatings
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.DocumentId == documentId && r.UserId == userId);
+        return row?.Stars;
+    }
+
+    private string? CurrentUserId() =>
+        User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? User.FindFirstValue("sub")
+        ?? User.FindFirstValue("nameid");
+
     // ── Document UI Config (tabs + custom fields) ────────────────────────────
 
     [HttpGet("config")]
@@ -315,7 +486,7 @@ public class DocumentsController : ControllerBase
             : new DocumentsDomainPermissions(true, "all", false, false);
     }
 
-    private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request)
+    private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request, int? myRating = null)
         => new(
             doc.Id,
             doc.Name,
@@ -333,8 +504,28 @@ public class DocumentsController : ControllerBase
             doc.IsDeleted,
             doc.DeletedAtUtc,
             doc.DeletedByUserId,
-            doc.DeleteReason
+            doc.DeleteReason,
+            doc.ViewCount,
+            doc.LastViewedAtUtc,
+            RatingAverage(doc),
+            doc.RatingCount,
+            myRating
         );
+
+    private static DocumentUsageDto ToUsageDto(DocumentEntity doc, int? myRating)
+        => new(doc.Id, doc.ViewCount, doc.LastViewedAtUtc, RatingAverage(doc), doc.RatingCount, myRating);
+
+    private static double RatingAverage(DocumentEntity doc)
+        => doc.RatingCount <= 0 ? 0 : Math.Round((double)doc.RatingSum / doc.RatingCount, 2);
+}
+
+public class ReplaceDocumentFileRequest
+{
+    [FromForm(Name = "file")]
+    public IFormFile? File { get; set; }
+    /// <summary>Keeps the existing document name instead of taking the new file's name.</summary>
+    [FromForm(Name = "keepName")]
+    public bool? KeepName { get; set; }
 }
 
 public class UploadDocumentRequest
