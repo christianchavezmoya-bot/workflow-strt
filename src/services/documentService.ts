@@ -21,6 +21,23 @@ export interface DocumentRecord {
   customValuesJson?: string | null;
   /** Parsed from customValuesJson — used in the UI */
   customValues?: Record<string, string>;
+  /** Times this document was opened — drives the "unused" pruning view. */
+  viewCount?: number | null;
+  lastViewedAtUtc?: string | null;
+  /** Mean of all user ratings; 0 when unrated. */
+  ratingAverage?: number | null;
+  ratingCount?: number | null;
+  /** The signed-in user's own rating, null when they have not rated. */
+  myRating?: number | null;
+}
+
+export interface DocumentUsage {
+  id: string;
+  viewCount: number;
+  lastViewedAtUtc?: string | null;
+  ratingAverage: number;
+  ratingCount: number;
+  myRating?: number | null;
 }
 
 export interface DocumentConfig {
@@ -528,9 +545,54 @@ export const documentService = {
     return hydrateCustomValues(response.data);
   },
 
+  /**
+   * Swaps the stored file without creating a new document, so the tip keeps its
+   * id, view count and ratings.
+   */
+  async replaceDocumentFile(id: string, file: File, options?: { keepName?: boolean }) {
+    const formData = new FormData();
+    formData.append("file", file);
+    if (options?.keepName) formData.append("keepName", "true");
+    const response = await api.post<DocumentRecord>(`/documents/${id}/file`, formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      timeout: 0,
+    });
+    invalidateWebCache("/documents");
+    return hydrateCustomValues(response.data);
+  },
+
   async deleteDocument(id: string): Promise<void> {
     await api.delete(`/documents/${id}`);
     invalidateWebCache("/documents");
+  },
+
+  // ── Usage tracking and ratings ────────────────────────────────────────────
+
+  /**
+   * Records an open. Best-effort by design: a failed count must never block the
+   * preview the user asked for, and offline opens are simply not counted.
+   */
+  async recordDocumentView(id: string): Promise<DocumentUsage | null> {
+    if (shouldSkipBlockingFetch()) return null;
+    try {
+      const response = await api.post<DocumentUsage>(`/documents/${id}/view`);
+      invalidateWebCache("/documents");
+      return response.data;
+    } catch {
+      return null;
+    }
+  },
+
+  async rateDocument(id: string, stars: number): Promise<DocumentUsage> {
+    const response = await api.put<DocumentUsage>(`/documents/${id}/rating`, { stars });
+    invalidateWebCache("/documents");
+    return response.data;
+  },
+
+  async clearDocumentRating(id: string): Promise<DocumentUsage> {
+    const response = await api.delete<DocumentUsage>(`/documents/${id}/rating`);
+    invalidateWebCache("/documents");
+    return response.data;
   },
 
   // ── Document UI config (tabs + custom fields) ─────────────────────────────

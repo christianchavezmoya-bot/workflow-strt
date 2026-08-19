@@ -18,6 +18,7 @@ import {
   IconButton,
   InputAdornment,
   MenuItem,
+  Rating,
   Select,
   Stack,
   Table,
@@ -35,6 +36,7 @@ import {
   CloseOutlined,
   DeleteOutline,
   DownloadOutlined,
+  EditOutlined,
   FilterListOutlined,
   GridViewOutlined,
   InsertDriveFileOutlined,
@@ -43,6 +45,7 @@ import {
   SearchOutlined,
   TableRowsOutlined,
   UploadFileOutlined,
+  VisibilityOutlined,
 } from "@mui/icons-material";
 import { documentService, type DocumentRecord } from "../../services/documentService";
 import { productService } from "../../services/productService";
@@ -55,6 +58,17 @@ import QRUploadButton from "../../components/QRUploadButton";
 import DocThumbnail from "../../components/ui/DocThumbnail";
 import { TIPS_UPLOAD_ACCEPT } from "../../utils/documentFileTypes";
 import type { Product } from "../../types/product";
+import {
+  buildTipCustomValues,
+  formatRatingSummary,
+  isStaleTip,
+  resolveTipLinkedTo,
+  sortTips,
+  STALE_TIP_MONTHS,
+  TIP_SORT_LABELS,
+  viewCountOf,
+  type TipSort,
+} from "./tipsLibrary";
 
 const MobileDocumentPreviewDialog = lazy(() => import("../../components/ui/MobileDocumentPreviewDialog"));
 
@@ -119,6 +133,9 @@ export default function TipsAndTricksPage() {
   const canViewTips = can.tips.view;
   const canUploadTips = can.tips.create;
   const canDeleteTips = can.tips.delete;
+  // tips.edit existed in the permission model but had no UI behind it until now.
+  const canEditTips = can.tips.edit;
+  const canReviewUsage = user?.role === "Admin" || user?.role === "Project Manager";
 
   const [docs, setDocs] = useState<DocumentRecord[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -130,6 +147,8 @@ export default function TipsAndTricksPage() {
   const [filterDivision, setFilterDivision] = useState("");
   const [filterProduct, setFilterProduct] = useState("");
   const [filterContentType, setFilterContentType] = useState<ContentTypeLabel | "All">("All");
+  const [sort, setSort] = useState<TipSort>("newest");
+  const [staleOnly, setStaleOnly] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>("grid");
   const [previewDoc, setPreviewDoc] = useState<DocumentRecord | null>(null);
 
@@ -143,6 +162,16 @@ export default function TipsAndTricksPage() {
   const [addDragOver, setAddDragOver] = useState(false);
   const [saving, setSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const [editDoc, setEditDoc] = useState<DocumentRecord | null>(null);
+  const [editTitle, setEditTitle] = useState("");
+  const [editContentType, setEditContentType] = useState<ContentTypeLabel>("Photo");
+  const [editDivision, setEditDivision] = useState("");
+  const [editProductId, setEditProductId] = useState("");
+  const [editNotes, setEditNotes] = useState("");
+  const [editFile, setEditFile] = useState<File | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const editFileInputRef = useRef<HTMLInputElement>(null);
 
   const loadDocs = async () => {
     setLoading(true);
@@ -229,6 +258,28 @@ export default function TipsAndTricksPage() {
     [addDivision, products]
   );
 
+  const editProductsForDivision = useMemo(
+    () => (editDivision ? products.filter((p) => p.divisionName === editDivision) : products),
+    [editDivision, products]
+  );
+
+  // Phone uploads used to land as untyped tips linked to "General". Passing the
+  // active division/product filters through the token means a QR upload arrives
+  // already classified when the user has narrowed the view.
+  const qrUploadMetadata = useMemo(() => {
+    const product = products.find((p) => p.id === filterProduct);
+    const metadata = {
+      contentType: filterContentType === "All" ? "Photo" : filterContentType,
+      division: filterDivision,
+      productId: product?.id,
+      productName: product?.name,
+    };
+    return {
+      linkedTo: resolveTipLinkedTo(metadata),
+      customValuesJson: JSON.stringify(buildTipCustomValues(metadata)),
+    };
+  }, [filterContentType, filterDivision, filterProduct, products]);
+
   const filteredDocs = useMemo(() => {
     let result = docs;
 
@@ -268,8 +319,14 @@ export default function TipsAndTricksPage() {
       result = result.filter((doc) => (doc.customValues?.contentType ?? "") === filterContentType);
     }
 
-    return result;
-  }, [docs, filterContentType, filterDivision, filterProduct, myProductIds, myProductNameSet, productFilter, productNameById, search]);
+    if (staleOnly) {
+      result = result.filter((doc) => isStaleTip(doc));
+    }
+
+    return sortTips(result, sort);
+  }, [docs, filterContentType, filterDivision, filterProduct, myProductIds, myProductNameSet, productFilter, productNameById, search, sort, staleOnly]);
+
+  const staleCount = useMemo(() => docs.filter((doc) => isStaleTip(doc)).length, [docs]);
 
   const myMatches = useMemo(
     () =>
@@ -315,17 +372,17 @@ export default function TipsAndTricksPage() {
     setSaving(true);
     try {
       const selectedProduct = products.find((product) => product.id === addProductId);
-      const linkedTo = selectedProduct?.id || addDivision || "General";
-      const customValues: Record<string, string> = {
+      const metadata = {
         contentType: addContentType,
         division: addDivision,
-        productId: selectedProduct?.id ?? "",
-        productLabel: selectedProduct?.name ?? "",
-        product: selectedProduct?.name ?? "",
+        productId: selectedProduct?.id,
+        productName: selectedProduct?.name,
       };
+      const linkedTo = resolveTipLinkedTo(metadata);
+      const customValues = buildTipCustomValues(metadata);
 
       if (addFile) {
-        await documentService.uploadDocument(
+        const uploaded = await documentService.uploadDocument(
           addFile,
           "tips",
           linkedTo,
@@ -333,6 +390,11 @@ export default function TipsAndTricksPage() {
           addNotes || undefined,
           customValues
         );
+        // Upload stores the file name; the Title the user typed was discarded.
+        const title = addTitle.trim();
+        if (title && title !== uploaded.name) {
+          await documentService.updateDocument(uploaded.id, { ...uploaded, name: title });
+        }
       } else {
         await documentService.createDocument({
           id: "",
@@ -357,6 +419,110 @@ export default function TipsAndTricksPage() {
     if (!canDeleteTips) return;
     await documentService.deleteDocument(id);
     await loadDocs();
+  };
+
+  /**
+   * Opening the preview is what counts as a "view". The counter is patched into
+   * local state from the response so the card updates without a full reload.
+   */
+  const handleOpenPreview = (doc: DocumentRecord) => {
+    setPreviewDoc(doc);
+    void documentService.recordDocumentView(doc.id).then((usage) => {
+      if (!usage) return;
+      setDocs((prev) =>
+        prev.map((item) =>
+          item.id === doc.id
+            ? { ...item, viewCount: usage.viewCount, lastViewedAtUtc: usage.lastViewedAtUtc }
+            : item,
+        ),
+      );
+    });
+  };
+
+  const handleRate = async (doc: DocumentRecord, stars: number | null) => {
+    try {
+      const usage = stars === null
+        ? await documentService.clearDocumentRating(doc.id)
+        : await documentService.rateDocument(doc.id, stars);
+      setDocs((prev) =>
+        prev.map((item) =>
+          item.id === doc.id
+            ? {
+                ...item,
+                ratingAverage: usage.ratingAverage,
+                ratingCount: usage.ratingCount,
+                myRating: usage.myRating ?? null,
+              }
+            : item,
+        ),
+      );
+    } catch {
+      setError("Could not save your rating. Check the connection and try again.");
+    }
+  };
+
+  const handleEditOpen = (doc: DocumentRecord) => {
+    setEditDoc(doc);
+    setEditTitle(doc.name ?? "");
+    setEditContentType((doc.customValues?.contentType as ContentTypeLabel) || "Tip");
+    setEditDivision(doc.customValues?.division ?? "");
+    setEditProductId(getDocProductId(doc));
+    setEditNotes(doc.notes ?? "");
+    setEditFile(null);
+    setEditError(null);
+  };
+
+  const handleEditClose = () => {
+    setEditDoc(null);
+    setEditFile(null);
+    setEditError(null);
+  };
+
+  const handleEditSave = async () => {
+    if (!editDoc || !canEditTips) return;
+    const title = editTitle.trim();
+    if (!title) {
+      setEditError("Title is required.");
+      return;
+    }
+
+    setSaving(true);
+    setEditError(null);
+    try {
+      const selectedProduct = products.find((product) => product.id === editProductId);
+      const metadata = {
+        contentType: editContentType,
+        division: editDivision,
+        productId: selectedProduct?.id,
+        productName: selectedProduct?.name,
+      };
+
+      // Replace the blob first: it also rewrites contentType/fileSize, which the
+      // metadata update below would otherwise overwrite with the old values.
+      if (editFile) {
+        await documentService.replaceDocumentFile(editDoc.id, editFile, { keepName: true });
+      }
+
+      await documentService.updateDocument(editDoc.id, {
+        ...editDoc,
+        name: title,
+        type: "tips",
+        linkedTo: resolveTipLinkedTo(metadata),
+        uploadedAt: editDoc.uploadedAt,
+        contentType: editFile ? editFile.type : editDoc.contentType,
+        fileSize: editFile ? editFile.size : editDoc.fileSize,
+        notes: editNotes || null,
+        customValues: buildTipCustomValues(metadata),
+        customValuesJson: undefined,
+      });
+
+      await loadDocs();
+      handleEditClose();
+    } catch {
+      setEditError("Could not save changes. Check the connection and try again.");
+    } finally {
+      setSaving(false);
+    }
   };
 
   const renderAddDialog = () => (
@@ -499,6 +665,150 @@ export default function TipsAndTricksPage() {
     </Dialog>
   );
 
+  const renderEditDialog = () => (
+    <Dialog open={Boolean(editDoc)} maxWidth="sm" fullWidth onClose={handleEditClose}>
+      <DialogTitle>Edit Tip</DialogTitle>
+      <DialogContent>
+        <Stack spacing={2} sx={{ mt: 1 }}>
+          {editError && <Alert severity="error">{editError}</Alert>}
+
+          <TextField
+            label="Title"
+            required
+            fullWidth
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+          />
+
+          <FormControl fullWidth>
+            <Typography variant="caption" color="text.secondary" mb={0.5}>
+              Content Type
+            </Typography>
+            <Select
+              value={editContentType}
+              onChange={(e) => setEditContentType(e.target.value as ContentTypeLabel)}
+              size="small"
+            >
+              {CONTENT_TYPES.map((ct) => (
+                <MenuItem key={ct} value={ct}>
+                  {ct}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <FormControl fullWidth>
+            <Typography variant="caption" color="text.secondary" mb={0.5}>
+              Division
+            </Typography>
+            <Select
+              value={editDivision}
+              onChange={(e) => {
+                setEditDivision(e.target.value);
+                setEditProductId("");
+              }}
+              size="small"
+              displayEmpty
+            >
+              <MenuItem value="">All Divisions</MenuItem>
+              {divisions.map((division) => (
+                <MenuItem key={division} value={division}>
+                  {division}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+
+          <Autocomplete
+            options={editProductsForDivision}
+            getOptionLabel={(product) => product.name}
+            value={editProductsForDivision.find((product) => product.id === editProductId) ?? null}
+            onChange={(_, next) => setEditProductId(next?.id ?? "")}
+            renderInput={(params) => <TextField {...params} label="Product" size="small" />}
+          />
+
+          <TextField
+            label="Notes"
+            fullWidth
+            multiline
+            rows={3}
+            value={editNotes}
+            onChange={(e) => setEditNotes(e.target.value)}
+          />
+
+          <Box>
+            <Typography variant="caption" color="text.secondary" mb={0.5} display="block">
+              Replace file (optional)
+            </Typography>
+            <Box
+              onClick={() => editFileInputRef.current?.click()}
+              sx={{
+                border: "2px dashed",
+                borderColor: "divider",
+                borderRadius: 1,
+                p: 2,
+                textAlign: "center",
+                cursor: "pointer",
+              }}
+            >
+              <input
+                ref={editFileInputRef}
+                type="file"
+                accept={TIPS_UPLOAD_ACCEPT}
+                style={{ display: "none" }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) setEditFile(file);
+                }}
+              />
+              {editFile ? (
+                <Stack alignItems="center" spacing={0.5}>
+                  <InsertDriveFileOutlined color="primary" />
+                  <Typography variant="body2" fontWeight={600}>
+                    {editFile.name}
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    {fmtSize(editFile.size)} — replaces the current file
+                  </Typography>
+                </Stack>
+              ) : (
+                <Stack alignItems="center" spacing={0.5}>
+                  <UploadFileOutlined color="action" sx={{ fontSize: 28 }} />
+                  <Typography variant="body2" color="text.secondary">
+                    {editDoc?.downloadUrl ? "Click to upload a new version" : "Click to attach a file"}
+                  </Typography>
+                  <Typography variant="caption" color="text.disabled">
+                    Views and ratings are kept when the file is replaced
+                  </Typography>
+                </Stack>
+              )}
+            </Box>
+          </Box>
+
+          {editDoc && (
+            <Typography variant="caption" color="text.disabled">
+              {viewCountOf(editDoc)} view{viewCountOf(editDoc) === 1 ? "" : "s"} · Rating {formatRatingSummary(editDoc)}
+              {editDoc.createdBy ? ` · Added by ${editDoc.createdBy}` : ""}
+            </Typography>
+          )}
+        </Stack>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={handleEditClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button
+          variant="contained"
+          onClick={handleEditSave}
+          disabled={saving || !editTitle.trim()}
+          startIcon={saving ? <CircularProgress size={16} /> : undefined}
+        >
+          Save Changes
+        </Button>
+      </DialogActions>
+    </Dialog>
+  );
+
   const renderGrid = () => (
     <Box
       sx={{
@@ -535,7 +845,7 @@ export default function TipsAndTricksPage() {
             }}
           >
             <CardActionArea
-              onClick={() => setPreviewDoc(doc)}
+              onClick={() => handleOpenPreview(doc)}
               sx={{ flexGrow: 1, display: "flex", flexDirection: "column", alignItems: "flex-start" }}
             >
               {doc.downloadUrl && (
@@ -594,12 +904,34 @@ export default function TipsAndTricksPage() {
                 since these are no longer inside the click target, the previous
                 e.stopPropagation() guards are no longer needed. */}
             <Box sx={{ px: 1.5, pb: 1.5 }}>
+              <Stack direction="row" alignItems="center" spacing={0.75} sx={{ mb: 0.5, minWidth: 0 }}>
+                <Rating
+                  size="small"
+                  value={doc.myRating ?? doc.ratingAverage ?? 0}
+                  precision={doc.myRating ? 1 : 0.5}
+                  onChange={(_, next) => void handleRate(doc, next)}
+                  sx={{ fontSize: "0.9rem" }}
+                />
+                <Typography variant="caption" sx={{ color: "text.disabled", whiteSpace: "nowrap" }}>
+                  {formatRatingSummary(doc)}
+                </Typography>
+              </Stack>
               <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.5}>
-                {fmtSize(doc.fileSize) && (
-                  <Typography variant="caption" sx={{ color: "text.disabled", minWidth: 0 }}>
-                    {fmtSize(doc.fileSize)}
-                  </Typography>
-                )}
+                <Stack direction="row" alignItems="center" spacing={0.75} sx={{ minWidth: 0 }}>
+                  <Tooltip title={`${viewCountOf(doc)} view${viewCountOf(doc) === 1 ? "" : "s"}`}>
+                    <Stack direction="row" alignItems="center" spacing={0.25}>
+                      <VisibilityOutlined sx={{ fontSize: 13, color: "text.disabled" }} />
+                      <Typography variant="caption" sx={{ color: "text.disabled" }}>
+                        {viewCountOf(doc)}
+                      </Typography>
+                    </Stack>
+                  </Tooltip>
+                  {fmtSize(doc.fileSize) && (
+                    <Typography variant="caption" sx={{ color: "text.disabled", minWidth: 0 }}>
+                      {fmtSize(doc.fileSize)}
+                    </Typography>
+                  )}
+                </Stack>
                 <Stack direction="row" spacing={0.25} sx={{ ml: "auto" }}>
                   {doc.downloadUrl && canViewTips && (
                     <IconButton
@@ -608,6 +940,11 @@ export default function TipsAndTricksPage() {
                       sx={{ p: 0.25 }}
                     >
                       <DownloadOutlined sx={{ fontSize: 14, color: "text.disabled" }} />
+                    </IconButton>
+                  )}
+                  {canEditTips && (
+                    <IconButton size="small" onClick={() => handleEditOpen(doc)} sx={{ p: 0.25 }}>
+                      <EditOutlined sx={{ fontSize: 15, color: "text.disabled" }} />
                     </IconButton>
                   )}
                   {canDeleteTips && (
@@ -620,7 +957,7 @@ export default function TipsAndTricksPage() {
                       <DeleteOutline sx={{ fontSize: 16 }} />
                     </IconButton>
                   )}
-                  {!((doc.downloadUrl && canViewTips) || canDeleteTips) && (
+                  {!((doc.downloadUrl && canViewTips) || canEditTips || canDeleteTips) && (
                     <Typography variant="caption" color="text.disabled">
                       No actions
                     </Typography>
@@ -646,6 +983,8 @@ export default function TipsAndTricksPage() {
               <TableCell>Linked To</TableCell>
               <TableCell>Posted By</TableCell>
               <TableCell>Date</TableCell>
+              <TableCell align="right">Views</TableCell>
+              <TableCell>Rating</TableCell>
               <TableCell align="right">Actions</TableCell>
             </TableRow>
           </TableHead>
@@ -671,9 +1010,33 @@ export default function TipsAndTricksPage() {
                 <TableCell>{doc.createdBy || "-"}</TableCell>
                 <TableCell>{fmtDate(doc.uploadedAt) || "-"}</TableCell>
                 <TableCell align="right">
+                  <Stack direction="row" spacing={0.5} justifyContent="flex-end" alignItems="center">
+                    <Typography variant="body2">{viewCountOf(doc)}</Typography>
+                    {isStaleTip(doc) && (
+                      <Tooltip title={`No opens in ${STALE_TIP_MONTHS} months`}>
+                        <Chip label="Unused" size="small" color="warning" variant="outlined" sx={{ height: 18, fontSize: "0.6rem" }} />
+                      </Tooltip>
+                    )}
+                  </Stack>
+                </TableCell>
+                <TableCell>
+                  <Stack direction="row" spacing={0.5} alignItems="center">
+                    <Rating
+                      size="small"
+                      value={doc.myRating ?? doc.ratingAverage ?? 0}
+                      precision={doc.myRating ? 1 : 0.5}
+                      onChange={(_, next) => void handleRate(doc, next)}
+                      sx={{ fontSize: "0.85rem" }}
+                    />
+                    <Typography variant="caption" color="text.disabled" sx={{ whiteSpace: "nowrap" }}>
+                      {formatRatingSummary(doc)}
+                    </Typography>
+                  </Stack>
+                </TableCell>
+                <TableCell align="right">
                   <Stack direction="row" spacing={0.5} justifyContent="flex-end">
                     {canViewTips && (
-                      <Button size="small" onClick={() => setPreviewDoc(doc)}>
+                      <Button size="small" onClick={() => handleOpenPreview(doc)}>
                         Open
                       </Button>
                     )}
@@ -682,12 +1045,17 @@ export default function TipsAndTricksPage() {
                         Download
                       </Button>
                     )}
+                    {canEditTips && (
+                      <Button size="small" onClick={() => handleEditOpen(doc)}>
+                        Edit
+                      </Button>
+                    )}
                     {canDeleteTips && (
                       <Button size="small" color="error" onClick={() => void handleDelete(doc.id)}>
                         Delete
                       </Button>
                     )}
-                    {!((canViewTips) || canDeleteTips) && (
+                    {!(canViewTips || canEditTips || canDeleteTips) && (
                       <Typography variant="caption" color="text.disabled">
                         No actions
                       </Typography>
@@ -746,7 +1114,8 @@ export default function TipsAndTricksPage() {
               <>
                 <QRUploadButton
                   docType="tips"
-                  linkedTo="General"
+                  linkedTo={qrUploadMetadata.linkedTo}
+                  customValuesJson={qrUploadMetadata.customValuesJson}
                   onUploaded={() => void loadDocs()}
                 />
                 <Button variant="contained" startIcon={<AddOutlined />} onClick={() => setAddOpen(true)}>
@@ -797,7 +1166,7 @@ export default function TipsAndTricksPage() {
               <Button
                 key={doc.id}
                 variant="outlined"
-                onClick={() => setPreviewDoc(doc)}
+                onClick={() => handleOpenPreview(doc)}
                 sx={{
                   justifyContent: "flex-start",
                   minWidth: 180,
@@ -932,9 +1301,34 @@ export default function TipsAndTricksPage() {
             </Box>
           </Box>
 
-          <Typography variant="caption" color="text.secondary">
-            {filteredDocs.length} of {docs.length} tips
-          </Typography>
+          <Stack direction="row" spacing={1} alignItems="center" flexWrap="wrap" useFlexGap>
+            <Select
+              value={sort}
+              onChange={(e) => setSort(e.target.value as TipSort)}
+              size="small"
+              sx={{ minWidth: 170 }}
+            >
+              {(Object.keys(TIP_SORT_LABELS) as TipSort[]).map((option) => (
+                <MenuItem key={option} value={option}>
+                  {TIP_SORT_LABELS[option]}
+                </MenuItem>
+              ))}
+            </Select>
+            {canReviewUsage && staleCount > 0 && (
+              <Tooltip title={`Tips with no opens in the last ${STALE_TIP_MONTHS} months — candidates for removal`}>
+                <Chip
+                  label={`Unused ${STALE_TIP_MONTHS}m (${staleCount})`}
+                  size="small"
+                  color={staleOnly ? "warning" : "default"}
+                  variant={staleOnly ? "filled" : "outlined"}
+                  onClick={() => setStaleOnly((prev) => !prev)}
+                />
+              </Tooltip>
+            )}
+            <Typography variant="caption" color="text.secondary" sx={{ ml: "auto" }}>
+              {filteredDocs.length} of {docs.length} tips
+            </Typography>
+          </Stack>
         </Stack>
       </Box>
 
@@ -966,6 +1360,7 @@ export default function TipsAndTricksPage() {
       )}
 
       {renderAddDialog()}
+      {renderEditDialog()}
       <Suspense fallback={null}>
         <MobileDocumentPreviewDialog doc={previewDoc} open={Boolean(previewDoc)} onClose={() => setPreviewDoc(null)} />
       </Suspense>
