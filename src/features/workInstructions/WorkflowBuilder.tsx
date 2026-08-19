@@ -86,6 +86,7 @@ function deepCopy<T>(obj: T): T {
 
 const IMAGE_MAX_DIM = 1920;
 const IMAGE_JPEG_QUALITY = 0.85;
+/** Builder template library upload — multipart path, not stepResultsJson data URLs. */
 const VIDEO_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
 
 function resizeImage(file: File, maxDim: number, quality: number): Promise<File> {

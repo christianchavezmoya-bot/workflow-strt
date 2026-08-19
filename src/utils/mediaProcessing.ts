@@ -1,6 +1,65 @@
 export const WORKFLOW_IMAGE_MAX_DIM = 1600;
 export const WORKFLOW_IMAGE_JPEG_QUALITY = 0.82;
 
+/**
+ * Hard cap for workflow-run video captures (phone library + camera).
+ *
+ * Videos are still embedded as base64 data URLs inside stepResultsJson and
+ * POSTed via saveProgress, which uses the default ~30 MB Kestrel body limit
+ * (unlike /step-media which allows 250 MB). Base64 expands size by ~33%, so
+ * a 15 MB file becomes ~20 MB of JSON payload — leaving headroom for other
+ * step fields. Larger library clips commonly OOM the native WebView on Continue.
+ *
+ * Builder template media uses a separate 100 MB multipart path; do not raise
+ * this runner limit without also switching runner uploads off the data-URL path.
+ */
+export const WORKFLOW_VIDEO_MAX_BYTES = 15 * 1024 * 1024;
+
+export class WorkflowMediaTooLargeError extends Error {
+  readonly fileName: string;
+  readonly fileBytes: number;
+  readonly maxBytes: number;
+
+  constructor(fileName: string, fileBytes: number, maxBytes = WORKFLOW_VIDEO_MAX_BYTES) {
+    super(formatWorkflowVideoTooLargeMessage(fileName, fileBytes, maxBytes));
+    this.name = "WorkflowMediaTooLargeError";
+    this.fileName = fileName;
+    this.fileBytes = fileBytes;
+    this.maxBytes = maxBytes;
+  }
+}
+
+export function formatBytesLabel(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function formatWorkflowVideoTooLargeMessage(
+  fileName: string,
+  fileBytes: number,
+  maxBytes = WORKFLOW_VIDEO_MAX_BYTES,
+): string {
+  const name = fileName?.trim() || "Video";
+  return `${name} is ${formatBytesLabel(fileBytes)} — max ${formatBytesLabel(maxBytes)}. Record a shorter clip, or compress/crop the video and try again.`;
+}
+
+/** Returns an error message when the file is a video over the runner limit; otherwise null. */
+export function getWorkflowVideoSizeError(file: File, maxBytes = WORKFLOW_VIDEO_MAX_BYTES): string | null {
+  const isVideo = file.type.startsWith("video/")
+    || /\.(mp4|mov|m4v|webm|avi|mkv)$/i.test(file.name);
+  if (!isVideo) return null;
+  if (file.size <= maxBytes) return null;
+  return formatWorkflowVideoTooLargeMessage(file.name, file.size, maxBytes);
+}
+
+export function assertWorkflowVideoAllowed(file: File, maxBytes = WORKFLOW_VIDEO_MAX_BYTES): void {
+  const message = getWorkflowVideoSizeError(file, maxBytes);
+  if (message) {
+    throw new WorkflowMediaTooLargeError(file.name, file.size, maxBytes);
+  }
+}
+
 export function fileToDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -63,5 +122,6 @@ export async function compressWorkflowImage(file: File): Promise<File> {
 }
 
 export async function prepareWorkflowMediaFile(file: File): Promise<File> {
+  assertWorkflowVideoAllowed(file);
   return file.type.startsWith("image/") ? await compressWorkflowImage(file) : file;
 }

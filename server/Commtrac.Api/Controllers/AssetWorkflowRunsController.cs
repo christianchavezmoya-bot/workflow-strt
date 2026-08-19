@@ -1023,7 +1023,12 @@ public class AssetWorkflowRunsController : ControllerBase
     }
 
     // PUT api/asset-workflow-runs/{id}  — save progress (blocked if locked)
+    // Client embeds photo/video captures as base64 in stepResultsJson; raise the
+    // default ~30 MB Kestrel body limit so a few compressed images (or one short
+    // video under the 15 MB client cap) can save. Oversized library videos are
+    // rejected on the phone before they reach this endpoint.
     [HttpPut("{id}")]
+    [RequestSizeLimit(100_000_000)]
     public async Task<IActionResult> SaveProgress(string id, [FromBody] SaveRunProgressRequest req)
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);

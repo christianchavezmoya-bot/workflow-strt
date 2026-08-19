@@ -11,6 +11,7 @@ import {
   PauseOutlined,
   PhotoCameraOutlined,
   PlayArrowOutlined,
+  PlayCircleOutlineOutlined,
   QrCodeScannerOutlined,
   ReportProblemOutlined,
   SyncOutlined,
@@ -73,7 +74,12 @@ import {
   type MissingWorkflowItem,
 } from "../../utils/workflowCompleteness";
 import { measurePayload } from "../../utils/syncDiagnostics";
-import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
+import {
+  fileToDataUrl,
+  prepareWorkflowMediaFile,
+  WORKFLOW_VIDEO_MAX_BYTES,
+  formatBytesLabel,
+} from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { randomId } from "../../utils/randomId";
@@ -208,6 +214,7 @@ export default function WorkOrderRunner({
   const sheetDragOffsetRef = useRef(0);
   const [sheetDragOffset, setSheetDragOffset] = useState(0);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [mediaError, setMediaError] = useState<string | null>(null);
   const [validationDialogOpen, setValidationDialogOpen] = useState(false);
   const [validationDialogMode, setValidationDialogMode] = useState<ValidationDialogMode>("blocking");
   const [validationDialogItems, setValidationDialogItems] = useState<MissingWorkflowItem[]>([]);
@@ -1568,13 +1575,24 @@ export default function WorkOrderRunner({
                 const files = Array.from(e.target.files ?? []);
                 if (files.length === 0) return;
                 void (async () => {
+                  setMediaError(null);
                   const nextMedia: string[] = [];
+                  const errors: string[] = [];
                   for (const file of files) {
-                    const prepared = await prepareWorkflowMediaFile(file);
-                    const dataUrl = await fileToDataUrl(prepared);
-                    nextMedia.push(dataUrl);
+                    try {
+                      const prepared = await prepareWorkflowMediaFile(file);
+                      const dataUrl = await fileToDataUrl(prepared);
+                      nextMedia.push(dataUrl);
+                    } catch (err) {
+                      errors.push(err instanceof Error ? err.message : "Could not add media.");
+                    }
                   }
-                  onChange(JSON.stringify([...media, ...nextMedia]));
+                  if (nextMedia.length > 0) {
+                    onChange(JSON.stringify([...media, ...nextMedia]));
+                  }
+                  if (errors.length > 0) {
+                    setMediaError(errors[0]);
+                  }
                 })();
                 e.target.value = "";
               }}
@@ -1588,12 +1606,43 @@ export default function WorkOrderRunner({
             onUploadedAllWithData={(dataUrls) => appendMediaUrls(sid, inp.id, dataUrls)}
           />
           </Stack>
+          {isVideo && (
+            <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
+              Max video size {formatBytesLabel(WORKFLOW_VIDEO_MAX_BYTES)}. Library clips are often larger — record a short clip, or compress/crop before adding.
+            </Typography>
+          )}
+          {mediaError && (
+            <Alert severity="warning" onClose={() => setMediaError(null)} sx={{ mt: 1, fontSize: 12 }}>
+              {mediaError}
+            </Alert>
+          )}
           {media.length > 0 && (
             <Box sx={{ display: "flex", flexWrap: "wrap", gap: 1, mt: 1 }}>
               {media.map((src, idx) => (
                 <Box key={idx} sx={{ position: "relative" }}>
                   {isVideo
-                    ? <Box component="video" src={src} controls sx={{ width: 160, height: 90, borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
+                    ? (
+                      // Avoid binding huge base64 data URLs into a <video> element —
+                      // that alone can OOM the native WebView after a library pick.
+                      <Box
+                        sx={{
+                          width: 160,
+                          height: 90,
+                          borderRadius: 1,
+                          border: "1px solid rgba(255,255,255,0.12)",
+                          bgcolor: "grey.900",
+                          color: "grey.400",
+                          display: "flex",
+                          flexDirection: "column",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 0.25,
+                        }}
+                      >
+                        <PlayCircleOutlineOutlined sx={{ fontSize: 28 }} />
+                        <Typography variant="caption" sx={{ fontSize: 10 }}>Video attached</Typography>
+                      </Box>
+                    )
                     : <Box component="img" src={src} sx={{ width: 80, height: 60, objectFit: "cover", borderRadius: 1, border: "1px solid rgba(255,255,255,0.12)" }} />
                   }
                   <IconButton
