@@ -18,7 +18,8 @@ public static class StrataNgoSeeder
     public const string OfficePerthId = "office-strata-perth";
     public const string CustomerBhpId = "cust-bhp-mining";
     public const string CustomerSecondId = "cust-strata-demo-mining";
-    public const string ProductChambersId = "prod-chambers";
+    public const string DivisionHazardAvertCoalId = "div-hazard-avert-coal";
+    public const string ProductAim100Id = "prod-aim-100";
     public const string WorkflowChambersDefaultId = "wf-chambers-default";
 
     public static bool IsEnabled(IConfiguration config) =>
@@ -68,7 +69,7 @@ public static class StrataNgoSeeder
             Role = "Admin",
             Office = "Australia",
             IsActive = true,
-            IsFirstLogin = false,
+            IsFirstLogin = true,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword),
         });
 
@@ -79,7 +80,7 @@ public static class StrataNgoSeeder
             Role = "Project Manager",
             Office = "Australia",
             IsActive = true,
-            IsFirstLogin = false,
+            IsFirstLogin = true,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(pmPassword),
         });
     }
@@ -131,22 +132,27 @@ public static class StrataNgoSeeder
     private static void SeedDivisions(AppDbContext db)
     {
         DefaultCatalog.SeedDivisionsIfEmpty(db);
+        if (db.Divisions.Any(d => d.Id == DivisionHazardAvertCoalId)) return;
+
+        db.Divisions.Add(new DivisionEntity
+        {
+            Id = DivisionHazardAvertCoalId,
+            Name = "Hazard Avert - Coal",
+            Description = "HazardAvert coal applications",
+            SortOrder = 4,
+            IsActive = true,
+        });
     }
 
     private static void SeedProducts(AppDbContext db)
     {
-        var protect = DefaultCatalog.DivisionProtectId;
-        var connect = DefaultCatalog.DivisionConnectId;
-        var ai = DefaultCatalog.DivisionAiId;
-
-        db.Products.AddRange(
-            new ProductEntity { Id = ProductChambersId, Name = "Chambers", DivisionId = protect, Description = "Underground refuge chambers" },
-            new ProductEntity { Id = "prod-hazard-coal", Name = "HazardAvert Coal", DivisionId = protect, Description = "HazardAvert — coal applications" },
-            new ProductEntity { Id = "prod-hazard-shr", Name = "HazardAvert SHR", DivisionId = protect, Description = "HazardAvert — SHR applications" },
-            new ProductEntity { Id = "prod-connect-hub", Name = "Strata Connect Hub", DivisionId = connect, Description = "Strata Connect platform hub" },
-            new ProductEntity { Id = "prod-ai-vision", Name = "Strata AI Vision", DivisionId = ai, Description = "Strata AI analytics module" },
-            new ProductEntity { Id = "prod-safety-beacon", Name = "Strata Safety Beacon", DivisionId = protect, Description = "Personnel safety beacon" }
-        );
+        db.Products.Add(new ProductEntity
+        {
+            Id = ProductAim100Id,
+            Name = "AIM-100",
+            DivisionId = DivisionHazardAvertCoalId,
+            Description = "HazardAvert AIM-100 — coal applications",
+        });
     }
 
     private static void SeedChambersWorkflow(AppDbContext db)
@@ -163,12 +169,12 @@ public static class StrataNgoSeeder
         using var doc = JsonDocument.Parse(File.ReadAllText(seedPath));
         var root = doc.RootElement;
         var stepsJson = root.TryGetProperty("stepsJson", out var stepsEl) ? stepsEl.GetString() ?? "[]" : "[]";
-        stepsJson = stepsJson.Replace("323c7777-7af1-49ec-96f4-8b1d4fb7aa5a", ProductChambersId, StringComparison.Ordinal);
+        stepsJson = stepsJson.Replace("323c7777-7af1-49ec-96f4-8b1d4fb7aa5a", ProductAim100Id, StringComparison.Ordinal);
 
         db.WorkflowConfigs.Add(new WorkflowConfigEntity
         {
             Id = WorkflowChambersDefaultId,
-            ProductId = ProductChambersId,
+            ProductId = ProductAim100Id,
             Name = "Chambers_default",
             DisplayName = "Chambers 10 steps",
             ConfigType = root.TryGetProperty("configType", out var ct) ? ct.GetString() : "Inspection",
