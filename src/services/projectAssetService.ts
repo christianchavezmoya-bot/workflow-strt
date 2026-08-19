@@ -1001,6 +1001,38 @@ export const projectAssetService = {
       window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { assetId: id } }));
     }
   },
+
+  async recordPaperCompletion(
+    assetId: string,
+    payload: {
+      file: File;
+      format: "pdf" | "json";
+      acknowledged: boolean;
+      waiveCustomerSignature: boolean;
+      customerSignedOnPaper: boolean;
+      installerSignedOnPaper: boolean;
+      notes?: string;
+    },
+  ): Promise<PaperCompletionResult> {
+    const formData = new FormData();
+    formData.append("file", payload.file);
+    formData.append("format", payload.format);
+    formData.append("acknowledged", String(payload.acknowledged));
+    formData.append("waiveCustomerSignature", String(payload.waiveCustomerSignature));
+    formData.append("customerSignedOnPaper", String(payload.customerSignedOnPaper));
+    formData.append("installerSignedOnPaper", String(payload.installerSignedOnPaper));
+    if (payload.notes) formData.append("notes", payload.notes);
+
+    const response = await api.post<PaperCompletionResult>(
+      `/project-assets/${assetId}/record-paper-completion`,
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } },
+    );
+    invalidateWebCacheByPrefix("/project-assets/");
+    invalidateWebCache("/documents");
+    window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { assetId } }));
+    return response.data;
+  },
 };
 
 export interface OpenAssetItem {
@@ -1058,6 +1090,15 @@ export interface ProjectAssetSummaryItem {
   inProgress: number;
   complete: number;
   total: number;
+}
+
+export interface PaperCompletionResult {
+  assetId: string;
+  assetStatus: string;
+  runId: string;
+  signatureStatus: string;
+  documentId: string;
+  documentName: string;
 }
 
 export interface DashboardWorkspaceAssetItem {

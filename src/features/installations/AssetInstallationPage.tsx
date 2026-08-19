@@ -154,6 +154,7 @@ import AssetInstallationWorkflowAssignDialog from "./AssetInstallationWorkflowAs
 import AssetInstallationBulkToolbar from "./AssetInstallationBulkToolbar";
 import AssetInstallationTableToolbar from "./AssetInstallationTableToolbar";
 import AssetInstallationExportDialog from "./AssetInstallationExportDialog";
+import RecordPaperCompletionDialog from "./RecordPaperCompletionDialog";
 import AssetInstallationPrintDialog from "./AssetInstallationPrintDialog";
 import AssetInstallationReportExportDialog from "./AssetInstallationReportExportDialog";
 import AssetInstallationAssetSearchDialog from "./AssetInstallationAssetSearchDialog";
@@ -551,6 +552,9 @@ const AssetInstallationPage = () => {
   // PDF report — state in useAssetInstallationReportExport (after wfConfigMap)
   // Asset export — state in useAssetInstallationAssetExport (after column options)
   const [bulkWorkflowReportsOpen, setBulkWorkflowReportsOpen] = useState(false);
+  const [paperCompletionOpen, setPaperCompletionOpen] = useState(false);
+  const [paperCompletionSaving, setPaperCompletionSaving] = useState(false);
+  const [paperCompletionError, setPaperCompletionError] = useState<string | null>(null);
   // Extra context passed into WorkflowRunHistoryDialog for the PDF download
   const [runHistoryProject, setRunHistoryProject] = useState<{ customerName: string; jobNumber: string; siteName?: string; timeZoneId?: string } | null>(null);
   const [runHistoryCustomerLogo, setRunHistoryCustomerLogo] = useState<string | null>(null);
@@ -1804,6 +1808,23 @@ const AssetInstallationPage = () => {
     const stamp = new Date().toISOString().slice(0, 10);
     return job ? `${job}-workflow-reports-${stamp}` : `workflow-reports-${stamp}`;
   }, [selectedProject?.jobNumber]);
+
+  const canRecordPaperCompletion = !isNativePlatform
+    && (currentUser.role === "Admin" || currentUser.role === "Project Manager");
+
+  const selectedPaperCompletionAsset = useMemo(() => {
+    if (selectedAssetIds.size !== 1) return null;
+    const [assetId] = Array.from(selectedAssetIds);
+    return visibleAssets.find((asset) => asset.id === assetId)
+      ?? assets.find((asset) => asset.id === assetId)
+      ?? null;
+  }, [assets, selectedAssetIds, visibleAssets]);
+
+  const paperCompletionEnabled = Boolean(
+    selectedPaperCompletionAsset
+    && selectedPaperCompletionAsset.status !== "Closed"
+    && selectedPaperCompletionAsset.status !== "Cancelled",
+  );
 
   // Projects linked to the active product (used in add/edit dialogs and the project selector).
   const productProjects = useMemo(
@@ -3416,6 +3437,12 @@ const AssetInstallationPage = () => {
         onOpenBulkReports={() => setBulkWorkflowReportsOpen(true)}
         onOpenExportDialog={() => openAssetExportDialog(assetExportColumnOptions, Boolean(assetExportSingleProject?.customerId))}
         onNavigateInspectionInbox={() => navigate(`/projects/${selectedProject!.id}/inspections/inbox`)}
+        canRecordPaperCompletion={canRecordPaperCompletion}
+        paperCompletionEnabled={paperCompletionEnabled}
+        onOpenPaperCompletion={() => {
+          setPaperCompletionError(null);
+          setPaperCompletionOpen(true);
+        }}
       />
 
       <AssetInstallationExportDialog
@@ -4094,6 +4121,36 @@ const AssetInstallationPage = () => {
         asset={inspectionDialogAsset}
         open={!!inspectionDialogAsset}
         onClose={() => setInspectionDialogAsset(null)}
+      />
+
+      <RecordPaperCompletionDialog
+        open={paperCompletionOpen}
+        asset={selectedPaperCompletionAsset}
+        saving={paperCompletionSaving}
+        error={paperCompletionError}
+        onClose={() => {
+          if (paperCompletionSaving) return;
+          setPaperCompletionOpen(false);
+          setPaperCompletionError(null);
+        }}
+        onSave={async (payload) => {
+          if (!selectedPaperCompletionAsset?.id) return;
+          setPaperCompletionSaving(true);
+          setPaperCompletionError(null);
+          try {
+            await projectAssetService.recordPaperCompletion(selectedPaperCompletionAsset.id, payload);
+            setPaperCompletionOpen(false);
+            setSelectedAssetIds(new Set());
+            await refreshAssets();
+          } catch (err) {
+            const message = err instanceof Error
+              ? err.message
+              : "Unable to record paper completion right now.";
+            setPaperCompletionError(message);
+          } finally {
+            setPaperCompletionSaving(false);
+          }
+        }}
       />
 
       {isNativePlatform && (
