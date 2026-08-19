@@ -1787,7 +1787,9 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                     >
                       <FormControlLabel value="INSTALLATION_ONLY" control={<Radio />} label="Installation only" />
                       <FormControlLabel value="INSPECTION_ONLY"  control={<Radio />} label="Inspection only"  />
-                      <FormControlLabel value="MIXED"            control={<Radio />} label="Both (mixed)"     />
+                      {field.value === "MIXED" && (
+                        <FormControlLabel value="MIXED" control={<Radio />} label="Both (mixed)" />
+                      )}
                     </RadioGroup>
                   )}
                 />
