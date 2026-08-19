@@ -1351,7 +1351,9 @@ export const assetWorkflowRunService = {
         return lockedForConfig;
       }
 
-      const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body);
+      const res = await api.post<AssetWorkflowRun>("/asset-workflow-runs", body, {
+        timeout: RUN_MUTATION_TIMEOUT_MS,
+      });
       const updatedRun = await cacheServerRun(res.data);
       signalLocalRunUpdate(updatedRun);
       await syncOfflineAssetWorkflowStateFromRun(updatedRun, deriveOfflineAssetStatusFromRun(updatedRun));

@@ -797,6 +797,18 @@ export default function WorkOrderRunner({
     setStartingRun(true);
     setStartError(null);
 
+    /** Resume productive time without blocking the first step paint. */
+    function deferResumeProductiveTimeEntry(runId: string) {
+      void (async () => {
+        try {
+          const resumed = await assetWorkflowRunService.trackTimeEntry(runId, "ResumeProductive", "Continued");
+          if (resumed) syncRunTimeState(resumed);
+        } catch { /* non-fatal — reconcileRunWithServer may retry */ }
+      })();
+    }
+
+    let resumeTimeRunId: string | null = null;
+
     try {
       if (activeRunId && isMobileNativePlatform()) {
         const localRun = await assetWorkflowRunService.getByIdLocalFirst(activeRunId);
@@ -808,21 +820,13 @@ export default function WorkOrderRunner({
         if (localRun && !localRun.isLocked) {
           applyRunProgressFromRun(localRun);
 
-          // Start productive tracking synchronously here instead of relying solely on the
-          // fire-and-forget reconcileRunWithServer() below — that call isn't on the critical
-          // path and nothing guarantees it resolves before the user starts working, which left
-          // offline-resumed runs with no time recorded at all.
           const timeEntries = parseRunTimeEntries(localRun.timeTrackingJson ?? "[]");
           const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
-          if (!hasOpenEntry && localRun.id) {
-            try {
-              const resumed = await assetWorkflowRunService.trackTimeEntry(localRun.id, "ResumeProductive", "Continued");
-              if (resumed) syncRunTimeState(resumed);
-            } catch { /* non-fatal — reconcileRunWithServer below will retry */ }
-          }
-
           markOfflinePerf("interactive_ready", "runner-local");
           setStage("running");
+          if (!hasOpenEntry && localRun.id) {
+            deferResumeProductiveTimeEntry(localRun.id);
+          }
           void reconcileRunWithServer();
           return;
         }
@@ -852,10 +856,7 @@ export default function WorkOrderRunner({
       const timeEntries = parseRunTimeEntries(run.timeTrackingJson ?? "[]");
       const hasOpenEntry = timeEntries.some((e) => !e.endedAtUtc);
       if (!hasOpenEntry && run.id) {
-        try {
-          const resumed = await assetWorkflowRunService.trackTimeEntry(run.id, "ResumeProductive", "Continued");
-          if (resumed) syncRunTimeState(resumed);
-        } catch { /* non-fatal */ }
+        resumeTimeRunId = run.id;
       }
 
       markOfflinePerf("interactive_ready", "runner-network");
@@ -867,6 +868,9 @@ export default function WorkOrderRunner({
     }
 
     setStage("running");
+    if (resumeTimeRunId) {
+      deferResumeProductiveTimeEntry(resumeTimeRunId);
+    }
   }
 
   function setInputValue(stepId: string, inputId: string, val: string) {

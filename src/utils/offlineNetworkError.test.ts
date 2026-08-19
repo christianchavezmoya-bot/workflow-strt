@@ -20,4 +20,8 @@ describe("isOfflineNetworkError", () => {
     const err = new axios.AxiosError("Network Error", "ERR_NETWORK");
     expect(isOfflineNetworkError(err)).toBe(true);
   });
+
+  it("returns true for service-layer skip-network-offline fast bail", () => {
+    expect(isOfflineNetworkError(new Error("skip-network-offline"))).toBe(true);
+  });
 });

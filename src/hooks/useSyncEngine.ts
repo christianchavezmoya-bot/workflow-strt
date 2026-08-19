@@ -1370,6 +1370,13 @@ export function useSyncEngine(): SyncState {
       setLastSyncAt(new Date());
       void reconnectAndFlush();
     };
+    /** Amber banner cleared — flush immediately instead of waiting on debounce + ping cycle. */
+    const handleBackOnline = () => {
+      pingNow();
+      setConnectivityState("online");
+      setLastSyncAt(new Date());
+      void reconnectAndFlushNow();
+    };
     const handleAuthError = () => setConnectivityState("token-expired");
     const handleAuthRecovered = () => {
       // Fresh login must unblock sync even if a prior 401 left token-expired set.
@@ -1380,7 +1387,7 @@ export function useSyncEngine(): SyncState {
     };
 
     window.addEventListener("api-serving-cache",        handleUnreachable);
-    window.addEventListener("offline-mode-online",      handleReachable);
+    window.addEventListener("offline-mode-online",      handleBackOnline);
     window.addEventListener("api-server-reachable",     handleReachable);
     window.addEventListener("api-auth-error",           handleAuthError);
     window.addEventListener("auth-change",              handleAuthRecovered);
@@ -1418,7 +1425,7 @@ export function useSyncEngine(): SyncState {
         setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
       } else {
         setConnectivityUnlessTokenExpired("online");
-        void reconnectAndFlush();
+        void reconnectAndFlushNow();
       }
     });
   }, [setConnectivityState, setConnectivityUnlessTokenExpired]);

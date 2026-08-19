@@ -248,31 +248,35 @@ export function shouldSkipBlockingFetch(): boolean {
 export { isCircuitOpen, shouldSkipBlockingNetworkRead } from "../utils/circuitBreaker";
 
 /**
- * Fast-bail for interactive native writes (pause/save/complete run, signatures).
+ * Interactive native writes (start/save/complete run, signatures, pause time-entry).
  *
- * Radio-off or manual offline only. Do NOT skip merely because a /health ping
- * failed or the circuit is open — that left online phones queueing RUN_UPDATE /
- * TIME_ENTRY after pause/close while the offline banner stayed hidden.
+ * Skip when the device has no radio, manual offline is on, OR the amber-banner
+ * already knows the server is unreachable (confirmed false / open circuit).
  *
- * True offline-first is preserved: when the radio is down, callers still throw
- * skip-network-offline and enqueue. Real network failures still queue via
- * isOfflineNetworkError after an attempted request.
+ * Fail OPEN when reachability is unknown (null) — try the network once rather
+ * than queueing on a cold start before the first /health ping.
  *
- * Background upload flush / bootstrap use shouldDeferBackgroundSync() instead.
+ * Aligns with OfflineModeContext's offline banner so run actions do not wait
+ * 10–60s for axios timeouts while the UI already shows offline. True online
+ * phones (reachable === true, circuit closed) still send immediately (#246).
  */
+export function shouldSkipInteractiveWrite(): boolean {
+  if (shouldSkipBlockingFetch()) return true;
+  if (getServerReachable() === false) return true;
+  return isCircuitOpen();
+}
+
+/** @deprecated Prefer shouldSkipInteractiveWrite — kept for existing call sites. */
 export function shouldSkipRunMutation(): boolean {
-  return shouldSkipBlockingFetch();
+  return shouldSkipInteractiveWrite();
 }
 
 /**
  * Gate for background sync flush and sync-engine uploads.
- * Keeps health + circuit so we do not burn timeouts when the server is known
- * down, without blocking interactive writes while the radio is up.
+ * Same criteria as interactive writes — server confirmed down or circuit open.
  */
 export function shouldDeferBackgroundSync(): boolean {
-  if (shouldSkipBlockingFetch()) return true;
-  if (getServerReachable() === false) return true;
-  return isCircuitOpen();
+  return shouldSkipInteractiveWrite();
 }
 
 /**
@@ -301,4 +305,9 @@ export function _resetConnectivityStateForTests(): void {
   unreachableSignals = 0;
   nativeNetworkConnected = true;
   resetCircuitBreaker();
+}
+
+/** Test hook — set confirmed server reachability without starting the monitor. */
+export function _setServerReachableForTests(value: boolean | null): void {
+  currentValue = value;
 }

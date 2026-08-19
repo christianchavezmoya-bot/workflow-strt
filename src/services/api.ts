@@ -5,6 +5,7 @@ import { getApiBaseUrl } from "./apiBase";
 import {
   shouldSkipBlockingFetch,
   shouldDeferBackgroundSync,
+  shouldSkipInteractiveWrite,
 } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
@@ -222,24 +223,13 @@ api.interceptors.request.use(async (config) => {
   // fall through to their local-first cache immediately instead of burning a
   // full timeout first.
   //
-  // IMPORTANT — this guard is deliberately conservative. It bails ONLY when the
-  // device truly has no radio, or the user forced manual offline mode. It must
-  // NOT bail merely because the health monitor's /health ping failed or the
-  // circuit is open.
-  //
-  // A previous version used shouldSkipRunMutation() here (which also bailed on
-  // getServerReachable() === false / circuit-open). That caused online phones to
-  // queue workflow pause/save/complete as "pending sync" while the offline
-  // banner stayed hidden. Interactive traffic must fail OPEN: if the radio is
-  // up, attempt the request. Background sync-engine uploads keep the stricter
-  // shouldDeferBackgroundSync() gate (health + circuit).
-  //
-  // The thrown error keeps the same shape as a real network error so every
-  // service's isOfflineNetworkError() (see utils/offlineNetworkError.ts) still
-  // routes to the offline path.
-  // Auth calls are exempt — login must keep working to recover.
+  // Reads fail open on radio/manual only. Interactive mutations (POST/PUT/PATCH/DELETE)
+  // also fast-bail when the amber banner already knows the server is unreachable,
+  // so callers queue instantly instead of waiting for axios timeouts. Sync-engine
+  // flush uploads use the same defer gate.
   const method = (config.method ?? "get").toLowerCase();
   const isSyncEngineWrite = config.syncMeta?.source === "sync-engine";
+  const isMutation = method !== "get" && method !== "head" && method !== "options";
 
   // While the upload queue is flushing, defer non-critical GETs on native so a
   // large POST (e.g. RUN_COMPLETE with embedded photos) is not competing with
@@ -261,8 +251,9 @@ api.interceptors.request.use(async (config) => {
     !url.includes("/auth/")
     && isMobileNativePlatform()
     && (
-      (!isSyncEngineWrite && shouldSkipBlockingFetch())
-      || (isSyncEngineWrite && shouldDeferBackgroundSync())
+      isSyncEngineWrite
+        ? shouldDeferBackgroundSync()
+        : (isMutation ? shouldSkipInteractiveWrite() : shouldSkipBlockingFetch())
     );
 
   if (skipBlocking) {
