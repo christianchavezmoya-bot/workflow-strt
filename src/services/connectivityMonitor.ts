@@ -31,7 +31,13 @@ const PING_INTERVAL_MS = 30_000;
 const UNREACHABLE_SIGNAL_THRESHOLD = 2;
 const RETRY_PING_DELAY_MS = 1500;
 
-type Listener = (reachable: boolean) => void;
+type Listener = (reachable: boolean | null) => void;
+
+/** True when the device still has a radio link (native Capacitor or browser). */
+function hasNetworkSignal(): boolean {
+  if (isMobileNativePlatform()) return nativeNetworkConnected !== false;
+  return typeof navigator === "undefined" || navigator.onLine;
+}
 
 let started = false;
 let currentValue: boolean | null = null; // null = no successful check yet
@@ -64,7 +70,7 @@ function startNativeNetworkTracking(): void {
       // first write after reconnect can still be skipped even though the radio is
       // back and the server may be reachable.
       resetCircuitBreaker();
-      if (currentValue === false) currentValue = null;
+      if (currentValue === false) notify(null);
       pingNow();
       return;
     }
@@ -91,7 +97,7 @@ function startNativeNetworkTracking(): void {
   });
 }
 
-function notify(value: boolean) {
+function notify(value: boolean | null) {
   currentValue = value;
   listeners.forEach((fn) => fn(value));
 }
@@ -130,7 +136,7 @@ async function runPingIfForeground() {
 export function prepareForegroundConnectivityResume(): void {
   resetCircuitBreaker();
   unreachableSignals = 0;
-  if (currentValue === false) currentValue = null;
+  if (currentValue === false) notify(null);
 }
 
 function startForegroundTracking() {
@@ -163,16 +169,19 @@ export function startConnectivityMonitor(): void {
   void runPingIfForeground();
   intervalId = setInterval(() => { void runPingIfForeground(); }, PING_INTERVAL_MS);
 
-  // Clear the false-offline flag on any successful API response, not just on
-  // the next 30 s ping. `api.ts:228-232` dispatches `api-server-reachable`
-  // on every real server response; reset the circuit breaker so reads can flow
-  // again, but do NOT notify(true) here — only a successful /health ping may
-  // mark the server confirmed-reachable for sync flush and bootstrap download.
-  // A lone dashboard GET succeeding on a flaky link must not start upload/sync.
+  // Clear false-offline / open-circuit state on any successful API response.
+  // When the UI was stuck on serverReachable=false, a real server response is
+  // strong evidence the link is back — recover without waiting for /health.
+  // Background sync flush still requires isServerConfirmedReachable() / health
+  // for first confirmation after a cold start (null), so a lone GET on a flaky
+  // link does not start uploads from never-confirmed.
   if (typeof window !== "undefined") {
     window.addEventListener("api-server-reachable", () => {
       unreachableSignals = 0;
       resetCircuitBreaker();
+      if (currentValue === false && hadRecentApiSuccess()) {
+        notify(true);
+      }
     });
 
     // Only a real request failing with a genuine network error may mark the
@@ -188,6 +197,10 @@ export function startConnectivityMonitor(): void {
       // During an active upload burst, timeouts usually mean a busy LAN server —
       // suppress the offline UI flip, but still trip the circuit so flush stops.
       if (shouldSuppressUnreachableOffline()) return;
+      // GET timeouts on a connected phone usually mean a saturated LAN server,
+      // not a dead link. Pause background sync via the circuit, but do not show
+      // offline — interactive writes still attempt (radio is up).
+      if (detail?.isTimeout && hasNetworkSignal()) return;
       if (currentValue !== false) notify(false);
     });
   }
@@ -235,20 +248,28 @@ export function shouldSkipBlockingFetch(): boolean {
 export { isCircuitOpen, shouldSkipBlockingNetworkRead } from "../utils/circuitBreaker";
 
 /**
- * Fast-bail guard for NATIVE write paths (runs, signatures, document links).
+ * Fast-bail for interactive native writes (pause/save/complete run, signatures).
  *
- * Same as shouldSkipBlockingFetch(), plus: also skip when the health monitor has
- * positively confirmed the server unreachable. This stops the phone burning a
- * full timeout on a call we already know will fail before falling into the
- * offline queue.
+ * Radio-off or manual offline only. Do NOT skip merely because a /health ping
+ * failed or the circuit is open — that left online phones queueing RUN_UPDATE /
+ * TIME_ENTRY after pause/close while the offline banner stayed hidden.
  *
- * Deliberately NOT used by shouldSkipBlockingFetch() callers — that guard stays
- * untouched so web behavior does not change.
+ * True offline-first is preserved: when the radio is down, callers still throw
+ * skip-network-offline and enqueue. Real network failures still queue via
+ * isOfflineNetworkError after an attempted request.
  *
- * SAFETY: only a confirmed false skips. null (never checked yet, e.g. cold
- * start) must NOT skip.
+ * Background upload flush / bootstrap use shouldDeferBackgroundSync() instead.
  */
 export function shouldSkipRunMutation(): boolean {
+  return shouldSkipBlockingFetch();
+}
+
+/**
+ * Gate for background sync flush and sync-engine uploads.
+ * Keeps health + circuit so we do not burn timeouts when the server is known
+ * down, without blocking interactive writes while the radio is up.
+ */
+export function shouldDeferBackgroundSync(): boolean {
   if (shouldSkipBlockingFetch()) return true;
   if (getServerReachable() === false) return true;
   return isCircuitOpen();
@@ -272,4 +293,12 @@ export function _resetConnectivityMonitorForTests(): void {
   if (intervalId) clearInterval(intervalId);
   intervalId = null;
   listeners.clear();
+}
+
+/** Reset reachability state without unregistering the singleton monitor. */
+export function _resetConnectivityStateForTests(): void {
+  currentValue = null;
+  unreachableSignals = 0;
+  nativeNetworkConnected = true;
+  resetCircuitBreaker();
 }

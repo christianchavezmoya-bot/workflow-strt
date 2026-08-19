@@ -20,6 +20,7 @@ import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
+import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
 import { webCachedGet, webCacheKey, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
 import { RUN_MUTATION_TIMEOUT_MS } from "../utils/syncPolicy";
@@ -267,16 +268,10 @@ async function resolvePendingRunCreateOpId(runId: string): Promise<string | unde
 }
 
 function isOfflineNetworkError(error: unknown): boolean {
-  if (shouldSkipRunMutation()) return true;
-  if (!error || typeof error !== "object") return !navigator.onLine;
-  const candidate = error as { code?: string; message?: string; response?: unknown };
-  if (candidate.response) return false;
-  return (
-    candidate.code === "ECONNABORTED" ||
-    candidate.code === "ERR_NETWORK" ||
-    candidate.message === "Network Error" ||
-    !navigator.onLine
-  );
+  // Queue only on real network / intentional radio-off skips — not merely
+  // because a health ping or circuit said "maybe unreachable" while the radio
+  // is still up (that was queuing pause/save on online phones).
+  return isOfflineNetworkErrorShape(error);
 }
 
 async function resolveProjectId(assetId: string, runId?: string): Promise<string> {

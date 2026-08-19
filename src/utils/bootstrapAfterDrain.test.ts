@@ -7,7 +7,7 @@ vi.mock("../utils/platform", () => ({
 vi.mock("../services/connectivityMonitor", () => ({
   getNativeNetworkConnected: vi.fn(() => true),
   getServerReachable: vi.fn(() => null),
-  shouldSkipRunMutation: vi.fn(() => false),
+  shouldDeferBackgroundSync: vi.fn(() => false),
   subscribeServerReachable: vi.fn(() => () => {}),
 }));
 

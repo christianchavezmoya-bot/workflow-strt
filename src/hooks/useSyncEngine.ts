@@ -70,7 +70,7 @@ import {
   getNativeNetworkConnected,
   getServerReachable,
   shouldSkipBlockingFetch,
-  shouldSkipRunMutation,
+  shouldDeferBackgroundSync,
 } from "../services/connectivityMonitor";
 import {
   buildSyncAttemptDiagnostics,
@@ -247,7 +247,7 @@ function canAttemptSyncFlush(): boolean {
   if (isMobileNativePlatform()) {
     // Unknown (null) means ping has not confirmed the server yet — wait.
     if (getServerReachable() !== true) return false;
-    if (shouldSkipRunMutation()) return false;
+    if (shouldDeferBackgroundSync()) return false;
   }
   return true;
 }
