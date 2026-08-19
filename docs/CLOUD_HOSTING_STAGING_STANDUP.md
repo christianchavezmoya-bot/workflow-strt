@@ -15,6 +15,8 @@ Pre-deploy gate (web + phone): [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD
 
 **Mac field agent:** copy [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) (**PROMPT START → PROMPT END**) into Cursor on your Mac. The agent runs all terminal steps itself, including `git pull --no-rebase origin main` when branches diverge.
 
+**Fresh seed verification (after PR #255):** copy [`MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md`](./MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md) — includes **disk cleanup** steps (Mac is often low on space).
+
 ---
 
 ## 1 — Local Docker staging (recommended first)
