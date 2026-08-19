@@ -120,6 +120,8 @@ import { entityGetAsset } from "../../services/localDB";
 import { signatureService } from "../../services/signatureService";
 import { notificationService } from "../../services/notificationService";
 import { resolveConfigWorkflowTypeId } from "../installations/assetInstallationPageLogic";
+import { filterPublishedConfigsForProject } from "../installations/assetInstallationWorkflowAssign";
+import { findWorkflowType, resolveProjectWorkflowTypeId } from "../../utils/workflowTypeRules";
 import {
   assetLikelyHasWorkflow,
   dashboardStatusChip,
@@ -2341,7 +2343,8 @@ const Dashboard = () => {
         workflowConfigService.listByProduct(fullAsset.productId, "Published"),
       ]);
       setWorkflowTypes(types);
-      setWorkflowConfigs(cfgs);
+      const project = dashboardProjects.find((item) => item.id === quickActionAsset.projectId) ?? null;
+      setWorkflowConfigs(filterPublishedConfigsForProject(cfgs, types, project));
     } catch {
       setWorkflowConfigs([]);
     }
@@ -3437,6 +3440,15 @@ const Dashboard = () => {
           saving={assignSaving}
           assetLabel={quickActionAsset?.assetTag || quickActionAsset?.assetName}
           workflowMode={quickActionAsset?.workflowMode}
+          projectWorkflowTypeName={
+            quickActionAsset
+              ? (() => {
+                  const project = dashboardProjects.find((item) => item.id === quickActionAsset.projectId);
+                  if (!project) return undefined;
+                  return findWorkflowType(workflowTypes, resolveProjectWorkflowTypeId(project))?.name;
+                })()
+              : undefined
+          }
           workflowConfigs={workflowConfigs}
           workflowTypes={workflowTypes}
           assignForm={assignForm}

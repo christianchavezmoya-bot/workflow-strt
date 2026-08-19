@@ -9,7 +9,9 @@ import {
   buildBulkAssignWarnRows,
   dedupeLatestPublishedWorkflowConfigs,
   filterBulkWorkflowConfigs,
+  filterPublishedConfigsForProject,
   filterPublishedConfigsForRequestedType,
+  filterWorkflowTypesForProject,
   findAssetsNeedingBulkAssignWarning,
   resolveAssignmentWorkflowTypeId,
   resolveRequestedWorkflowTypeId,
@@ -144,6 +146,77 @@ describe("dedupeLatestPublishedWorkflowConfigs", () => {
   });
 });
 
+describe("filterPublishedConfigsForProject", () => {
+  const configs = [
+    config({ id: "c1", workflowTypeId: "type-install", configType: "Installation" }),
+    config({ id: "c2", workflowTypeId: "type-inspection", configType: "Inspection" }),
+  ];
+
+  it("returns all configs for legacy MIXED without project type", () => {
+    expect(
+      filterPublishedConfigsForProject(configs, types, {
+        workflowTypeId: undefined,
+        workflowMode: "MIXED",
+        isInstallationProject: true,
+      }),
+    ).toEqual(configs);
+  });
+
+  it("filters to project workflow type", () => {
+    expect(
+      filterPublishedConfigsForProject(configs, types, {
+        workflowTypeId: "type-install",
+        workflowMode: "INSTALLATION_ONLY",
+        isInstallationProject: true,
+      }).map((c) => c.id),
+    ).toEqual(["c1"]);
+  });
+});
+
+describe("filterWorkflowTypesForProject", () => {
+  it("locks to project type when set", () => {
+    expect(
+      filterWorkflowTypesForProject(types, {
+        workflowTypeId: "type-inspection",
+        workflowMode: "INSPECTION_ONLY",
+        isInstallationProject: false,
+      }).map((t) => t.id),
+    ).toEqual(["type-inspection"]);
+  });
+
+  it("returns all active types for legacy MIXED", () => {
+    expect(
+      filterWorkflowTypesForProject(types, {
+        workflowTypeId: undefined,
+        workflowMode: "MIXED",
+        isInstallationProject: true,
+      }),
+    ).toEqual(types);
+  });
+});
+
+describe("buildBulkAssignOpenForm", () => {
+  it("prefers project workflow type over URL param", () => {
+    expect(
+      buildBulkAssignOpenForm("inspection", types, {
+        workflowTypeId: "type-install",
+        workflowMode: "INSTALLATION_ONLY",
+        isInstallationProject: true,
+      }),
+    ).toEqual({
+      workflowTypeId: "type-install",
+      workflowConfigId: "",
+    });
+  });
+
+  it("preselects workflow type from URL param and clears config", () => {
+    expect(buildBulkAssignOpenForm("installation", types)).toEqual({
+      workflowTypeId: "type-install",
+      workflowConfigId: "",
+    });
+  });
+});
+
 describe("filterBulkWorkflowConfigs", () => {
   const configs = [
     config({ id: "c1", name: "A", workflowTypeId: "type-install", configType: "Installation" }),
@@ -193,14 +266,5 @@ describe("bulk assign warning helpers", () => {
       { assetTag: "TAG-2", current: "InProgress" },
       { assetTag: "TAG-3", current: "Installation" },
     ]);
-  });
-});
-
-describe("buildBulkAssignOpenForm", () => {
-  it("preselects workflow type from URL param and clears config", () => {
-    expect(buildBulkAssignOpenForm("installation", types)).toEqual({
-      workflowTypeId: "type-install",
-      workflowConfigId: "",
-    });
   });
 });

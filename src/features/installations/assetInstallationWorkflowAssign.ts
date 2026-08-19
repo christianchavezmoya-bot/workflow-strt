@@ -1,6 +1,12 @@
+import type { Project } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowAssignment, WorkflowType } from "../../types/workflowType";
+import {
+  assignmentAllowedForProject,
+  isLegacyMixedProjectWithoutType,
+  resolveProjectWorkflowTypeId,
+} from "../../utils/workflowTypeRules";
 import { resolveConfigWorkflowTypeId } from "./assetInstallationPageLogic";
 
 export type AssignFormState = {
@@ -22,6 +28,42 @@ export function resolveRequestedWorkflowTypeId(
         type.name.trim().toLowerCase() === normalized,
     )?.id ?? ""
   );
+}
+
+/** Published configs allowed for a project's single workflow type (legacy MIXED shows all). */
+export function filterPublishedConfigsForProject(
+  configs: WorkflowConfig[],
+  types: WorkflowType[],
+  project: Pick<Project, "workflowTypeId" | "workflowMode" | "isInstallationProject"> | null | undefined,
+): WorkflowConfig[] {
+  if (!project || isLegacyMixedProjectWithoutType(project)) {
+    return configs;
+  }
+
+  const projectTypeId = resolveProjectWorkflowTypeId(project);
+  if (!projectTypeId) return configs;
+
+  return configs.filter((config) => {
+    const effectiveTypeId = resolveConfigWorkflowTypeId(config, types);
+    if (!effectiveTypeId) return false;
+    return assignmentAllowedForProject(projectTypeId, project.workflowMode, effectiveTypeId);
+  });
+}
+
+/** Active workflow types selectable for bulk assign on this project. */
+export function filterWorkflowTypesForProject(
+  types: WorkflowType[],
+  project: Pick<Project, "workflowTypeId" | "workflowMode" | "isInstallationProject"> | null | undefined,
+): WorkflowType[] {
+  const active = types.filter((type) => type.isActive);
+  if (!project || isLegacyMixedProjectWithoutType(project)) {
+    return active;
+  }
+
+  const projectTypeId = resolveProjectWorkflowTypeId(project);
+  if (!projectTypeId) return active;
+
+  return active.filter((type) => type.id === projectTypeId);
 }
 
 /** Published configs that match the requested workflow type (by FK or configType label). */
@@ -149,9 +191,12 @@ export type BulkAssignFormState = {
 export function buildBulkAssignOpenForm(
   requestedWorkflowType: string | null | undefined,
   workflowTypes: WorkflowType[],
+  project?: Pick<Project, "workflowTypeId" | "workflowMode" | "isInstallationProject"> | null,
 ): BulkAssignFormState {
+  const projectTypeId = project ? resolveProjectWorkflowTypeId(project) : "";
+  const requestedTypeId = resolveRequestedWorkflowTypeId(requestedWorkflowType, workflowTypes);
   return {
-    workflowTypeId: resolveRequestedWorkflowTypeId(requestedWorkflowType, workflowTypes),
+    workflowTypeId: projectTypeId || requestedTypeId,
     workflowConfigId: "",
   };
 }

@@ -472,6 +472,11 @@ const AssetInstallationPage = () => {
     }
   }, []);
 
+  const resolveProjectForAsset = useCallback(
+    (asset: ProjectAsset) => projects.find((project) => project.id === asset.projectId) ?? null,
+    [projects],
+  );
+
   const {
     assignDialogOpen,
     assignDialogAsset,
@@ -484,6 +489,7 @@ const AssetInstallationPage = () => {
     saveAssignment,
   } = useAssetInstallationWorkflowAssign({
     requestedWorkflowType,
+    resolveProjectForAsset,
     onWorkflowTypesLoaded: setWorkflowTypes,
     onWorkflowConfigsLoaded: setWorkflowConfigs,
     onAssignmentSaved: loadAssignmentsForAsset,
@@ -1878,6 +1884,8 @@ const AssetInstallationPage = () => {
     bulkWfOpen,
     bulkWfForm,
     bulkWfSaving,
+    scopedWorkflowTypes,
+    projectWorkflowTypeLocked,
     filteredBulkWorkflowConfigs,
     openBulkAssignDialog,
     closeBulkAssignDialog,
@@ -1888,6 +1896,7 @@ const AssetInstallationPage = () => {
     requestedWorkflowType,
     workflowTypes,
     latestPublishedConfigs: latestPublishedWfConfigs,
+    project: selectedProject,
   });
   const userMap = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
 
@@ -4038,7 +4047,8 @@ const AssetInstallationPage = () => {
         open={bulkWfOpen}
         saving={bulkWfSaving}
         assetCount={selectedAssetIds.size}
-        workflowTypes={workflowTypes}
+        workflowTypes={scopedWorkflowTypes}
+        projectWorkflowTypeLocked={projectWorkflowTypeLocked}
         filteredConfigs={filteredBulkWorkflowConfigs}
         latestPublishedConfigs={latestPublishedWfConfigs}
         workflowTypeId={bulkWfForm.workflowTypeId}
