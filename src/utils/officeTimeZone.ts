@@ -39,6 +39,7 @@ export function inferTimeZoneFromLocation(
   if (c.includes("new zealand")) return "Pacific/Auckland";
   if (c.includes("brazil")) return "America/Sao_Paulo";
   if (c.includes("mexico")) return "America/Mexico_City";
+  if (c.includes("chile")) return "America/Santiago";
   if (c.includes("spain")) return "Europe/Madrid";
   if (c.includes("france")) return "Europe/Paris";
   if (c.includes("germany")) return "Europe/Berlin";

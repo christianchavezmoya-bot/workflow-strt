@@ -1353,15 +1353,6 @@ const WorkInstructions = () => {
               </ToggleButton>
             )}
           </ToggleButtonGroup>
-          {wiCan.build && (
-            <IconButton
-              size="small"
-              onMouseEnter={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
-              onClick={(e) => { setSettingsMenu(e.currentTarget); setSettingsMenuOpen(true); }}
-            >
-              <SettingsOutlined fontSize="small" />
-            </IconButton>
-          )}
         </Stack>
       </Stack>
       <Box
@@ -1719,11 +1710,6 @@ const WorkInstructions = () => {
           </Suspense>
         </Stack>
       )}
-
-      {/* Settings menu */}
-      <Menu anchorEl={settingsMenu} open={settingsMenuOpen} onClose={() => setSettingsMenuOpen(false)}>
-        <MenuItem onClick={() => setSettingsMenuOpen(false)}>Workflows</MenuItem>
-      </Menu>
 
       {/* Export dropdown */}
       <Menu
