@@ -163,6 +163,7 @@ import {
   type MyJobsCardAction,
   type MyJobsCardWidget,
 } from "./dashboardPageLogic";
+import { isProjectReadyToCloseFromSummary } from "../projects/projectCloseReadiness";
 import { useDashboardWorkspace } from "./useDashboardWorkspace";
 import { useDashboardAttention } from "./useDashboardAttention";
 
@@ -1173,12 +1174,15 @@ const Dashboard = () => {
     const inProgress = summary?.inProgress ?? projectAssets.filter((asset) => isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status)).length;
     const complete = summary?.complete ?? Math.max(0, totalAssets - notStarted - inProgress - issueCount);
     const completionPct = totalAssets > 0 ? Math.round((complete / totalAssets) * 100) : 0;
-    return { projectAssets, issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct };
+    const pendingSignature = summary?.pendingSignature ?? 0;
+    const closed = summary?.closed ?? 0;
+    return { projectAssets, issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct, pendingSignature, closed };
   }, [openAssets, projectSummaryById]);
 
-  const isReadyToCloseProject = useCallback((project: { status?: string | null; completedAtUtc?: string | null }, completionPct: number) => {
-    return String(project.status ?? "") === "Completed" && completionPct >= 100;
-  }, []);
+  const isReadyToCloseProject = useCallback((project: { id: string; status?: string | null; completedAtUtc?: string | null }, _completionPct: number) => {
+    const summary = projectSummaryById.get(project.id);
+    return isProjectReadyToCloseFromSummary(project, summary);
+  }, [projectSummaryById]);
 
   const closeProjectFromDashboard = useCallback(async (projectId: string) => {
     setClosingDashboardProjectId(projectId);

@@ -2,6 +2,8 @@ import type { NavigateFunction } from "react-router-dom";
 import type { AppDispatch } from "../../store/index";
 import { updateProjectStatus } from "../../store/projectSlice";
 import type { Project, WorkflowMode } from "../../types/project";
+import type { ProjectAssetSummaryItem } from "../../services/projectAssetService";
+import { isProjectReadyToCloseFromSummary } from "./projectCloseReadiness";
 
 export type ProjectWorkflowAction =
   | "Submit for Approval"
@@ -19,6 +21,10 @@ export type ProjectActionOptions = {
   canEditProject: boolean;
   installationEnabled?: boolean;
   surface: ProjectActionSurface;
+  /** When provided, gates "Mark as Closed" on signatures as well as field completion. */
+  assetSummary?: Pick<ProjectAssetSummaryItem, "complete" | "total" | "pendingSignature"> | null;
+  /** Per-asset fallback when summary is unavailable (e.g. project detail). */
+  readyToClose?: boolean;
 };
 
 export const installationEnabledForProject = (workflowMode?: WorkflowMode) =>
@@ -29,7 +35,7 @@ export function getProjectWorkflowActions(
   options: ProjectActionOptions
 ): ProjectWorkflowAction[] {
   const actions: ProjectWorkflowAction[] = [];
-  const { userRole, canApprove, canEditProject, installationEnabled = true, surface } = options;
+  const { userRole, canApprove, canEditProject, installationEnabled = true, surface, assetSummary, readyToClose } = options;
   const isPm = userRole === "Project Manager";
 
   if (project.status === "Draft" && isPm && canEditProject) {
@@ -47,7 +53,12 @@ export function getProjectWorkflowActions(
   }
 
   if (project.status === "Completed" && canEditProject) {
-    actions.push("Mark as Closed");
+    const canClose = typeof readyToClose === "boolean"
+      ? readyToClose
+      : isProjectReadyToCloseFromSummary(project, assetSummary);
+    if (canClose) {
+      actions.push("Mark as Closed");
+    }
   }
 
   return actions;

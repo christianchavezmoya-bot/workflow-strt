@@ -23,6 +23,8 @@ export type ProjectCompletionMetrics = {
   inProgress: number;
   complete: number;
   completionPct: number;
+  pendingSignature: number;
+  closed: number;
 };
 
 type Props = {
@@ -109,9 +111,12 @@ export default function DashboardProjectStatusGrid({
       ) : (
         <Stack spacing={1.25}>
           {dashboardProjects.map((project) => {
-            const { issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct } =
+            const { issueCount, noWorkflowCount, totalAssets, notStarted, inProgress, complete, completionPct, pendingSignature } =
               getProjectCompletionMetrics(project);
             const readyToClose = isReadyToCloseProject(project, completionPct);
+            const awaitingSignatures = String(project.status ?? "") === "Completed"
+              && completionPct >= 100
+              && pendingSignature > 0;
             const productNames = (project.productIds ?? [])
               .map((id) => productNameById.get(id) ?? id)
               .filter(Boolean)
@@ -160,6 +165,14 @@ export default function DashboardProjectStatusGrid({
                       >
                         {totalAssets} assets
                       </Typography>
+                      {awaitingSignatures && (
+                        <Chip
+                          label={`${pendingSignature} Awaiting Signatures`}
+                          size="small"
+                          color="warning"
+                          sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700 }}
+                        />
+                      )}
                       {readyToClose && (
                         <Chip label="Ready to Close" size="small" color="info" sx={{ height: 20, fontSize: "0.68rem", fontWeight: 700 }} />
                       )}
@@ -205,8 +218,13 @@ export default function DashboardProjectStatusGrid({
                   {readyToClose && (
                     <Typography variant="caption" color="info.main">
                       {project.completedAtUtc
-                        ? `Completed ${new Date(project.completedAtUtc).toLocaleString()}${project.completedBy ? ` by ${project.completedBy}` : ""}`
-                        : "This project is complete and waiting for PM/Admin closure."}
+                        ? `Completed ${new Date(project.completedAtUtc).toLocaleString()}${project.completedBy ? ` by ${project.completedBy}` : ""} — all signatures finalized.`
+                        : "Field work and signatures are complete — ready for PM/Admin closure."}
+                    </Typography>
+                  )}
+                  {awaitingSignatures && (
+                    <Typography variant="caption" color="warning.main">
+                      Field work is 100% but {pendingSignature} asset(s) still need installer/customer sign-off (or customer waiver) before this project can be closed.
                     </Typography>
                   )}
                   <Stack direction="row" spacing={1} alignItems="center" justifyContent="space-between" flexWrap="wrap" useFlexGap>
