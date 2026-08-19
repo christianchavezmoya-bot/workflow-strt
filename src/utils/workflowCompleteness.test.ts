@@ -4,6 +4,7 @@ import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import {
   countMissingWorkflowItems,
   getMissingWorkflowItems,
+  splitMissingItemsByGate,
 } from "./workflowCompleteness";
 
 const input = (over: Partial<StepInput> & Pick<StepInput, "id" | "type">): StepInput => ({
@@ -87,6 +88,35 @@ describe("getMissingWorkflowItems — media follows the Required toggle", () => 
       ["t1", "input"],
       ["c1", "capture"],
     ]);
+  });
+});
+
+describe("splitMissingItemsByGate — what stops the technician", () => {
+  it("blocks the next step on required data, warns on required media", () => {
+    const missing = getMissingWorkflowItems(
+      step(
+        [
+          input({ id: "t1", type: "text", label: "Serial", required: true }),
+          input({ id: "p1", type: "photo", label: "Install photo", required: true }),
+          input({ id: "p2", type: "photo", label: "Extra photo", required: false }),
+        ],
+        { captureFields: [{ id: "c1", key: "torque", label: "Torque", type: "number", required: true }] },
+      ),
+      {},
+    );
+    const { blocking, warning } = splitMissingItemsByGate(missing);
+    expect(blocking.map((b) => b.id)).toEqual(["t1", "c1"]);
+    expect(warning.map((w) => w.id)).toEqual(["p1"]);
+  });
+
+  it("has nothing to report when only optional media is empty", () => {
+    const missing = getMissingWorkflowItems(
+      step([input({ id: "p1", type: "photo", required: false })]),
+      {},
+    );
+    const { blocking, warning } = splitMissingItemsByGate(missing);
+    expect(blocking).toEqual([]);
+    expect(warning).toEqual([]);
   });
 });
 

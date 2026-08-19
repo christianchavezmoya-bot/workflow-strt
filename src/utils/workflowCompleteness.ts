@@ -17,6 +17,21 @@ export interface MissingWorkflowItem {
   required: boolean;
 }
 
+/**
+ * Which missing items stop the runner leaving a step, and which only warn.
+ * Required data has to be entered now; required media can be added later but blocks
+ * Lock run and installer sign-off. Optional media never reaches here at all.
+ */
+export function splitMissingItemsByGate(items: MissingWorkflowItem[]): {
+  blocking: MissingWorkflowItem[];
+  warning: MissingWorkflowItem[];
+} {
+  return {
+    blocking: items.filter((item) => item.kind === "input" || item.kind === "capture"),
+    warning: items.filter((item) => item.kind === "photo" || item.kind === "video"),
+  };
+}
+
 function hasTextValue(val: string | undefined): boolean {
   if (!val) return false;
   return val.trim().length > 0;
