@@ -2,7 +2,9 @@
 
 **Copy everything below the line into your Mac Cursor agent.**
 
-**Branch:** `main` — must include **PR #185** (Postgres boolean migration fix + valid MinIO `mc` tag). Step 0 verifies this by content, not by hash.  
+**Branch:** `main` — must include **PR #255** (AIM-100 seed: Strata AI, HazardAvert-Coal). Step 0 verifies by content, not hash.  
+**Seed (PR #255):** single product **AIM-100** (`prod-aim-100`) — division **Strata AI**, description **AI Proximity Detection**; fourth division **HazardAvert-Coal**.  
+**Low-disk Mac runs:** use [`MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md`](./MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md) for a shorter fresh-standup + cleanup flow.  
 **Guide:** [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md)  
 **Pre-deploy (after this passes):** [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)  
 
@@ -62,6 +64,7 @@ Report: the **exact migration name**, the **Postgres error code** (e.g. `42804`)
 
 ### Rules
 
+- **Mac disk space:** before standup and after any failed build, run the cleanup block in [`MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md`](./MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md) (Step 0). Target **≥ 8 GB free** on `/`.
 - Do **not** commit `.env.staging.local`, `.env.production.local`, or LAN IPs
 - Do **not** modify migrations, `docker-compose.staging.yml`, or `src/services/apiBase.ts` locally — report instead
 - Prefer `git pull --no-rebase` over `reset --hard` unless local commits are clearly disposable WIP
@@ -267,7 +270,7 @@ ADMIN_EMAIL="admin@StrataNgo.local"
 ADMIN_PASS="Admin123!"
 PM_EMAIL="project.manager@StrataNgo.local"
 PM_PASS="Pm123!"
-CHAMBERS_PRODUCT_ID="prod-chambers"
+CHAMBERS_PRODUCT_ID="prod-aim-100"
 
 fail=0
 pass() { echo "PASS: $1"; }
@@ -306,6 +309,23 @@ echo "$CUSTOMERS" | grep -qi "BHP/Mining" && pass "customer BHP/Mining" || fail_
 USERS=$(auth "$API/users")
 echo "$USERS" | grep -qi "admin@StrataNgo.local" && pass "user admin seeded" || fail_msg "user admin seeded"
 echo "$USERS" | grep -qi "project.manager@StrataNgo.local" && pass "user PM seeded" || fail_msg "user PM seeded"
+
+# --- Products / divisions (PR #255 seed) ---
+PRODUCTS=$(auth "$API/products")
+echo "$PRODUCTS" | grep -qi '"name":"AIM-100"' && pass "product AIM-100 seeded" || fail_msg "product AIM-100 seeded"
+AIM100=$(echo "$PRODUCTS" | python3 -c "
+import sys,json
+for p in json.load(sys.stdin):
+  if p.get('name')=='AIM-100':
+    print(p.get('divisionId',''), p.get('description',''))
+    break
+" 2>/dev/null)
+echo "$AIM100" | grep -q 'div-strata-ai' && pass "AIM-100 division Strata AI" || fail_msg "AIM-100 division Strata AI (got $AIM100)"
+echo "$AIM100" | grep -q 'AI Proximity Detection' && pass "AIM-100 description" || fail_msg "AIM-100 description (got $AIM100)"
+
+DIVS=$(auth "$API/divisions")
+echo "$DIVS" | grep -qi 'HazardAvert-Coal' && pass "division HazardAvert-Coal" || fail_msg "division HazardAvert-Coal"
+echo "$DIVS" | grep -qi 'Hazard Avert - Coal' && fail_msg "old division name Hazard Avert - Coal still present" || pass "no old Hazard Avert - Coal name"
 
 # --- Chambers workflow ---
 WFS=$(auth "$API/workflow-configs/by-product/$CHAMBERS_PRODUCT_ID?status=Published")
