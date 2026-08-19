@@ -54,8 +54,16 @@ import {
   ProjectScheduledReport,
   ProjectScheduledReportFrequency,
   ProjectStatus,
-  WorkflowMode,
 } from "../../types/project";
+import type { WorkflowType } from "../../types/workflowType";
+import { workflowTypeService } from "../../services/workflowTypeService";
+import {
+  deriveWorkflowMode,
+  findWorkflowType,
+  isInspectionWorkflowType,
+  isInstallationProjectMode,
+  resolveProjectWorkflowTypeId,
+} from "../../utils/workflowTypeRules";
 import { useAuth } from "../../hooks/useAuth";
 import { usePermissions } from "../../hooks/usePermissions";
 import type { ProductFeatureDefinition } from "../../types/product";
@@ -69,7 +77,7 @@ import type { Site } from "../../types/site";
 import type { FieldDefinition } from "../../services/fieldService";
 
 const getLocalDateString = (offsetDays = 0) => dayjs().add(offsetDays, "day").format("YYYY-MM-DD");
-const INSTALLATION_ENABLED_MODES: WorkflowMode[] = ["INSTALLATION_ONLY", "MIXED"];
+const DEFAULT_WORKFLOW_TYPE_ID = "wftype-installation";
 const SCHEDULE_DAY_OPTIONS = [
   { value: "M", label: "M" },
   { value: "T", label: "T" },
@@ -133,8 +141,7 @@ const schema = z
         z.literal("")
       ])
       .optional(),
-    workflowMode: z.enum(["INSTALLATION_ONLY", "INSPECTION_ONLY", "MIXED"]).default("INSTALLATION_ONLY"),
-    isInstallationProject: z.boolean(),
+    workflowTypeId: z.string().min(1, "Select a workflow type"),
     productIds: z.array(z.string()).optional(),
     teamMemberIds: z.array(z.string()).optional()
   });
@@ -197,6 +204,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   }, [projectsTableConfig.config.baseFieldNames]);
   const [projectDynamicValues, setProjectDynamicValues] = useState<Record<string, string>>({});
   const [globalOffices, setGlobalOffices] = useState<GlobalOffice[]>([]);
+  const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const sortedGlobalOffices = useMemo(
     () =>
       [...globalOffices].sort((a, b) =>
@@ -247,8 +255,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       projectType: "Internal",
       status: "Draft",
       approvalDecision: "",
-      workflowMode: "INSTALLATION_ONLY",
-      isInstallationProject: false,
+      workflowTypeId: DEFAULT_WORKFLOW_TYPE_ID,
       productIds: [],
       teamMemberIds: []
     }
@@ -270,6 +277,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
 
   useEffect(() => {
     officesService.getAll().then(setGlobalOffices);
+    workflowTypeService.list().then(setWorkflowTypes).catch(() => setWorkflowTypes([]));
   }, []);
 
   useEffect(() => {
@@ -292,8 +300,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         projectType: "Internal",
         status: "Draft",
         approvalDecision: "",
-        workflowMode: "INSTALLATION_ONLY",
-        isInstallationProject: false,
+        workflowTypeId: DEFAULT_WORKFLOW_TYPE_ID,
         productIds: [],
         teamMemberIds: []
       });
@@ -318,8 +325,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         projectType: localProject.projectType,
         status: localProject.status,
         approvalDecision: localProject.approvalDecision || "",
-        workflowMode: localProject.workflowMode || (localProject.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
-        isInstallationProject: localProject.isInstallationProject,
+        workflowTypeId: resolveProjectWorkflowTypeId(localProject),
         productIds: localProject.productIds ?? [],
         teamMemberIds: localProject.teamMemberIds ?? []
       });
@@ -347,8 +353,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
         projectType: project.projectType,
         status: project.status,
         approvalDecision: project.approvalDecision || "",
-        workflowMode: project.workflowMode || (project.isInstallationProject ? "INSTALLATION_ONLY" : "INSPECTION_ONLY"),
-        isInstallationProject: project.isInstallationProject,
+        workflowTypeId: resolveProjectWorkflowTypeId(project),
         productIds: project.productIds ?? [],
         teamMemberIds: project.teamMemberIds ?? []
       });
@@ -388,8 +393,14 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
 
 
   const projectType = watch("projectType");
-  const workflowMode = watch("workflowMode");
-  const isInstallationProject = watch("isInstallationProject");
+  const workflowTypeId = watch("workflowTypeId");
+  const selectedWorkflowType = useMemo(
+    () => findWorkflowType(workflowTypes, workflowTypeId),
+    [workflowTypeId, workflowTypes],
+  );
+  const isLegacyMixedProject = Boolean(
+    id && items.find((item) => item.id === id)?.workflowMode === "MIXED" && !resolveProjectWorkflowTypeId(items.find((item) => item.id === id)!),
+  );
   const customerId = watch("customerId");
   const siteId = watch("siteId");
   const office = watch("office");
@@ -403,13 +414,6 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const [productFeatureValues, setProductFeatureValues] = useState<Record<string, string>>({});
   const [scheduledReport, setScheduledReport] = useState<ProjectScheduledReport>(defaultScheduledReport);
   const [scheduledRecipientsInput, setScheduledRecipientsInput] = useState("");
-
-  useEffect(() => {
-    const nextIsInstallationProject = INSTALLATION_ENABLED_MODES.includes((workflowMode || "INSTALLATION_ONLY") as WorkflowMode);
-    if (isInstallationProject !== nextIsInstallationProject) {
-      setValue("isInstallationProject", nextIsInstallationProject, { shouldValidate: false, shouldDirty: true });
-    }
-  }, [isInstallationProject, setValue, workflowMode]);
 
   useEffect(() => {
     setSitesLoading(true);
@@ -628,6 +632,11 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       missing.push(labelProducts);
     }
 
+    if (shouldEnforceRequiredFields && isBlank(data.workflowTypeId)) {
+      setError("workflowTypeId", { type: "required", message: "Workflow type is required" });
+      missing.push("Workflow type");
+    }
+
     const dynamicValueForValidation = (def: FieldDefinition) => {
       const type = (def.fieldType || "").toLowerCase();
       if (type === "lookup field" && def.linkToFieldId) {
@@ -685,6 +694,9 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       }
     });
 
+    const selectedType = findWorkflowType(workflowTypes, data.workflowTypeId);
+    const derivedMode = selectedType ? deriveWorkflowMode(selectedType) : "INSTALLATION_ONLY";
+
     const payload: Project = {
       id: id || `P-${Math.floor(Math.random() * 10000)}`,
       customerName: selected?.name || "",
@@ -702,8 +714,9 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       projectType: (data.projectType as any) || "Internal",
       status: derivedStatus,
       approvalDecision: requestedDecision,
-      workflowMode: data.workflowMode,
-      isInstallationProject: INSTALLATION_ENABLED_MODES.includes(data.workflowMode as WorkflowMode),
+      workflowTypeId: data.workflowTypeId,
+      workflowMode: derivedMode,
+      isInstallationProject: isInstallationProjectMode(derivedMode),
       projectManager: data.projectManager,
       productIds: data.productIds ?? [],
       teamMemberIds: data.teamMemberIds ?? [],
@@ -779,7 +792,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       teamMemberIds: labelTeamMembers,
       projectType: labelProjectType,
       status: labelStatus,
-      workflowMode: "Workflow mode",
+      workflowTypeId: "Workflow type",
       productIds: labelProducts,
       approvalDecision: "Approval Decision"
     };
@@ -1774,31 +1787,45 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
             <Grid item xs={12} md={6} />
 
             <Grid item xs={12} md={6}>
-              <FormControl component="fieldset">
-                <FormLabel component="legend">Workflow Mode</FormLabel>
+              <FormControl fullWidth required>
+                <FormLabel component="legend">Workflow Type</FormLabel>
                 <Controller
-                  name="workflowMode"
+                  name="workflowTypeId"
                   control={control}
                   render={({ field }) => (
-                    <RadioGroup
-                      row
-                      value={field.value ?? "INSTALLATION_ONLY"}
-                      onChange={(_, val) => field.onChange(val as WorkflowMode)}
+                    <Select
+                      {...field}
+                      displayEmpty
+                      value={field.value ?? ""}
+                      onChange={(event) => field.onChange(event.target.value)}
                     >
-                      <FormControlLabel value="INSTALLATION_ONLY" control={<Radio />} label="Installation only" />
-                      <FormControlLabel value="INSPECTION_ONLY"  control={<Radio />} label="Inspection only"  />
-                      {field.value === "MIXED" && (
-                        <FormControlLabel value="MIXED" control={<Radio />} label="Both (mixed)" />
-                      )}
-                    </RadioGroup>
+                      <MenuItem value="" disabled>
+                        Select type…
+                      </MenuItem>
+                      {workflowTypes
+                        .filter((type) => type.isActive)
+                        .map((type) => (
+                          <MenuItem key={type.id} value={type.id}>
+                            {type.name}
+                          </MenuItem>
+                        ))}
+                    </Select>
                   )}
                 />
                 <FormHelperText>
-                  Controls which modules are visible on the project detail page.
+                  One workflow type per project. Controls installation vs inspection modules.
                 </FormHelperText>
               </FormControl>
             </Grid>
             <Grid item xs={12} md={6} />
+
+            {isLegacyMixedProject && !workflowTypeId && (
+              <Grid item xs={12}>
+                <Alert severity="warning">
+                  This legacy mixed project must be assigned a single workflow type before saving.
+                </Alert>
+              </Grid>
+            )}
 
             {extraDynamicIds.map((fieldId) => renderFormField(fieldId))}
             {projectType === "External" && (
@@ -1809,7 +1836,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
               </Grid>
             )}
 
-            {workflowMode === "INSPECTION_ONLY" && (
+            {selectedWorkflowType && isInspectionWorkflowType(selectedWorkflowType) && (
               <Grid item xs={12}>
                 <Alert severity="info">
                   Inspection-only projects use project assets and inspection runs without exposing installation workspace sections.
