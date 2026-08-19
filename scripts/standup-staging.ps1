@@ -41,7 +41,26 @@ if ($BuildWeb) {
     Write-Host "[standup-staging] Building web bundle…"
     npm run build:cloud-web:staging
     Write-Host "[standup-staging] Starting nginx on :5174…"
-    docker compose -f docker-compose.staging.yml --profile with-web up -d web
+    # Force-recreate so bind-mounted ./dist is picked up when an old web container
+    # was left running from a prior session (otherwise nginx can serve an empty dir → 403).
+    docker compose -f docker-compose.staging.yml --profile with-web up -d --force-recreate web
+    Write-Host "[standup-staging] Verifying web on :5174…"
+    $webOk = $false
+    for ($i = 1; $i -le 15; $i++) {
+        try {
+            $r = Invoke-WebRequest -Uri "http://localhost:5174/" -UseBasicParsing -TimeoutSec 5
+            if ($r.StatusCode -eq 200) {
+                $webOk = $true
+                Write-Host "[standup-staging] Web healthy (HTTP 200)."
+                break
+            }
+        } catch {
+            Start-Sleep -Seconds 1
+        }
+    }
+    if (-not $webOk) {
+        Write-Error "[standup-staging] Web did not return HTTP 200. Logs: docker compose -f docker-compose.staging.yml logs web"
+    }
 }
 
 Write-Host @"

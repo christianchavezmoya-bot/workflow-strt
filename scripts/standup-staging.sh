@@ -49,7 +49,23 @@ if [[ "$BUILD_WEB" == true ]]; then
   echo "[standup-staging] Building web bundle…"
   npm run build:cloud-web:staging
   echo "[standup-staging] Starting nginx web on :5174…"
-  docker compose -f docker-compose.staging.yml --profile with-web up -d web
+  # Force-recreate so bind-mounted ./dist is picked up when an old web container
+  # was left running from a prior session (otherwise nginx can serve an empty dir → 403).
+  docker compose -f docker-compose.staging.yml --profile with-web up -d --force-recreate web
+  echo "[standup-staging] Verifying web on :5174…"
+  for i in $(seq 1 15); do
+    code=$(curl -sf -o /dev/null -w '%{http_code}' http://localhost:5174/ 2>/dev/null || echo "000")
+    if [[ "$code" == "200" ]]; then
+      echo "[standup-staging] Web healthy (HTTP 200)."
+      break
+    fi
+    if [[ "$i" -eq 15 ]]; then
+      echo "[standup-staging] ERROR: web returned HTTP $code (expected 200). Try: docker compose -f docker-compose.staging.yml --profile with-web up -d --force-recreate web"
+      docker compose -f docker-compose.staging.yml logs web --tail 20
+      exit 1
+    fi
+    sleep 1
+  done
 fi
 
 cat <<EOF
