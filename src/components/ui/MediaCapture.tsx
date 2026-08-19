@@ -37,15 +37,19 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     const results: string[] = [];
+    const errors: string[] = [];
     for (const file of Array.from(files)) {
       try {
         const prepared = await prepareWorkflowMediaFile(file);
         results.push(await fileToDataUrl(prepared));
-      } catch {
-        // skip unreadable files
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : "Could not add media.");
       }
     }
     if (results.length > 0) onChange([...media, ...results]);
+    if (errors.length > 0) {
+      window.alert(errors[0]);
+    }
   }
 
   function remove(idx: number) {

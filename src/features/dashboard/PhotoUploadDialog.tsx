@@ -536,13 +536,28 @@ export default function PhotoUploadDialog({
   ) {
     if (!files || files.length === 0) return;
     const key = buildCaptureKey(stepId, inputId);
-    const preparedFiles = await Promise.all(Array.from(files).map((file) => prepareWorkflowMediaFile(file)));
-    const dataUrls = await Promise.all(preparedFiles.map((file) => fileToDataUrl(file)));
-    setEditedCaptures((prev) => {
-      const current = prev[key] ?? getExistingCaptures(stepId, inputId);
-      return { ...prev, [key]: [...current, ...dataUrls] };
-    });
-    setStagedFiles((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...preparedFiles] }));
+    const preparedFiles: File[] = [];
+    const dataUrls: string[] = [];
+    const errors: string[] = [];
+    for (const file of Array.from(files)) {
+      try {
+        const prepared = await prepareWorkflowMediaFile(file);
+        preparedFiles.push(prepared);
+        dataUrls.push(await fileToDataUrl(prepared));
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : "Could not add media.");
+      }
+    }
+    if (dataUrls.length > 0) {
+      setEditedCaptures((prev) => {
+        const current = prev[key] ?? getExistingCaptures(stepId, inputId);
+        return { ...prev, [key]: [...current, ...dataUrls] };
+      });
+      setStagedFiles((prev) => ({ ...prev, [key]: [...(prev[key] ?? []), ...preparedFiles] }));
+    }
+    if (errors.length > 0) {
+      setError(errors[0]);
+    }
   }
 
   function handleRemoveCapture(stepId: string, inputId: string, index: number) {
