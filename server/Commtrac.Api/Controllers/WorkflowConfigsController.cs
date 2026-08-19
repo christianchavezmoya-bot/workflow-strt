@@ -117,6 +117,29 @@ public class WorkflowConfigsController : ControllerBase
         if (entity.Status == "Archived")
             return BadRequest(new { message = "Archived configurations cannot be published." });
 
+        if (string.IsNullOrWhiteSpace(entity.WorkflowTypeId) && !string.IsNullOrWhiteSpace(entity.ConfigType))
+        {
+            var configType = entity.ConfigType.Trim();
+            entity.WorkflowTypeId = await _db.WorkflowTypes
+                .Where(t => t.IsActive && t.Name == configType)
+                .Select(t => t.Id)
+                .FirstOrDefaultAsync();
+        }
+
+        if (string.IsNullOrWhiteSpace(entity.WorkflowTypeId))
+        {
+            return BadRequest(new
+            {
+                message = "A workflow type is required before publishing. Select one in the publish dialog.",
+            });
+        }
+
+        var workflowTypeActive = await _db.WorkflowTypes.AnyAsync(t => t.Id == entity.WorkflowTypeId && t.IsActive);
+        if (!workflowTypeActive)
+        {
+            return BadRequest(new { message = "The selected workflow type is inactive or does not exist." });
+        }
+
         // ── Inject BOM steps from WorkflowConfigFeatures ──────────────────────
         var configFeatures = await _db.WorkflowConfigFeatures
             .Where(f => f.WorkflowConfigId == id)
