@@ -71,6 +71,7 @@ export default function SyncBusyOverlay() {
           aria-label="Strata N-go"
           sx={{
             filter: "drop-shadow(0 12px 22px rgba(15, 23, 42, 0.5))",
+            bgcolor: "transparent",
           }}
         >
           <StrataNgoSpinLogo3D />
