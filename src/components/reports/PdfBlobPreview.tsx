@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import * as pdfjsLib from "pdfjs-dist";
-import { isMobileNativePlatform } from "../../utils/platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -24,14 +23,11 @@ type Props = {
 };
 
 /**
- * Scrollable PDF preview.
- *
- * Web uses the browser's native PDF viewer (iframe) — stable on LAN/dev links and
- * avoids pdf.js standard-font URL issues in Vite dev. Native mobile uses pdf.js canvas
- * rendering because embedded iframe/blob viewers are less reliable in Capacitor.
+ * Scrollable multi-page PDF preview.
+ * Always renders every page as stacked canvases so customer-sign, share, and
+ * in-app report dialogs show the full document — not just page 1.
  */
 export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
-  const isNativeMobile = isMobileNativePlatform();
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -48,26 +44,19 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   }, [blob]);
 
   useEffect(() => {
-    if (!isNativeMobile) {
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setPdfData(null);
     void blob.arrayBuffer().then((data) => {
       if (!cancelled) setPdfData(data);
     }).catch(() => {
       if (!cancelled) setError("Could not read PDF data.");
     });
     return () => { cancelled = true; };
-  }, [blob, isNativeMobile]);
+  }, [blob]);
 
   useEffect(() => {
-    if (!isNativeMobile) return;
-
     const node = viewportRef.current;
     if (!node) return;
     let frame = 0;
@@ -83,11 +72,9 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [isNativeMobile]);
+  }, []);
 
   useEffect(() => {
-    if (!isNativeMobile) return;
-
     let cancelled = false;
 
     async function renderPdf() {
@@ -146,7 +133,10 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
           host.appendChild(shell);
 
           await page.render({ canvas, canvasContext: context, viewport } as never).promise;
+          if (index === 1 && !cancelled) setLoading(false);
         }
+
+        await loadingTask.destroy();
       } catch (err) {
         if (!cancelled) {
           host.innerHTML = "";
@@ -159,41 +149,7 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
 
     void renderPdf();
     return () => { cancelled = true; };
-  }, [pdfData, containerWidth, isNativeMobile, zoom]);
-
-  if (!isNativeMobile && blobUrl) {
-    return (
-      <Box
-        sx={{
-          height: "100%",
-          overflow: "auto",
-          WebkitOverflowScrolling: "touch",
-          bgcolor: "#525659",
-          px: 1,
-          py: 1.5,
-        }}
-      >
-        {scrollHint && (
-          <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
-            {scrollHint}
-          </Typography>
-        )}
-        <Box
-          component="iframe"
-          src={`${blobUrl}#view=FitH`}
-          title="PDF preview"
-          sx={{
-            width: "100%",
-            height: "100%",
-            minHeight: 640,
-            border: "none",
-            borderRadius: 2,
-            bgcolor: "#fff",
-          }}
-        />
-      </Box>
-    );
-  }
+  }, [pdfData, containerWidth, zoom]);
 
   return (
     <Box
@@ -207,15 +163,17 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
         py: 1.5,
       }}
     >
-      {scrollHint && pageCount > 1 && (
+      {(scrollHint || pageCount > 1) && (
         <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
-          {scrollHint}
+          {scrollHint || `Scroll to view all ${pageCount} pages`}
         </Typography>
       )}
       {loading && (
         <Stack alignItems="center" justifyContent="center" spacing={1} sx={{ py: 4 }}>
           <CircularProgress size={28} sx={{ color: "#fff" }} />
-          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)" }}>Rendering report...</Typography>
+          <Typography variant="body2" sx={{ color: "rgba(255,255,255,0.8)" }}>
+            {pageCount > 1 ? `Rendering ${pageCount} pages…` : "Rendering report…"}
+          </Typography>
         </Stack>
       )}
       {error && (
@@ -231,6 +189,7 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
           sx={{
             width: "100%",
             minHeight: 640,
+            height: "calc(100% - 24px)",
             border: "none",
             borderRadius: 2,
             bgcolor: "#fff",

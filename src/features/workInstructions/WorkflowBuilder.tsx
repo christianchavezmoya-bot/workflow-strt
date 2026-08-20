@@ -1094,19 +1094,22 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       {/* Toolbar */}
       <Stack direction={{ xs: "column", sm: "row" }} alignItems={{ sm: "center" }} justifyContent="space-between" spacing={1.5}>
         <Stack spacing={0.5}>
-          {configName && (
-            <Typography variant="caption" color="primary.main" fontWeight={600}>
-              Config: {configName}
+          <Stack direction="row" alignItems="center" spacing={1} flexWrap="wrap" useFlexGap>
+            <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.25 }}>
+              {currentConfig?.name || configName || workflow.name || "Untitled workflow"}
             </Typography>
-          )}
-          <TextField
-            size="small"
-            label="Workflow name"
-            value={workflow.name}
-            onChange={(e) => updateWorkflow((wf) => { wf.name = e.target.value; return wf; })}
-            sx={{ minWidth: 280 }}
-            disabled={isReadOnly}
-          />
+            {(currentConfig?.configType || workflow.workflowTypeId) && (
+              <Chip
+                size="small"
+                variant="outlined"
+                label={
+                  currentConfig?.configType
+                  || workflowTypes.find((type) => type.id === workflow.workflowTypeId)?.name
+                  || "Workflow"
+                }
+              />
+            )}
+          </Stack>
           <Stack direction="row" alignItems="center" spacing={0.75}>
             {saveStatus === "saving" && <CircularProgress size={11} />}
             {saveStatus === "saved" && <CheckCircleOutlined sx={{ fontSize: 13, color: "success.main" }} />}
@@ -2153,9 +2156,6 @@ function StepEditorPanel({
             />
           </TabPanel>
         </Box>
-
-        {/* Inline report preview */}
-        <ReportPreviewInline step={step} />
       </Stack>
     </Paper>
   );
@@ -2796,45 +2796,6 @@ function CaptureFieldsSection({
         </Stack>
       )}
     </Stack>
-  );
-}
-
-// ------------------------------------------------------------------
-// ReportPreviewInline
-// ------------------------------------------------------------------
-
-function ReportPreviewInline({ step }: { step: WorkflowStep }) {
-  const [open, setOpen] = useState(false);
-
-  const desc = step.overrideInReport
-    ? step.overrideReportText
-    : step.includeDescriptionInReport
-    ? step.description
-    : "";
-
-  return (
-    <Box>
-      <Button size="small" variant="text" startIcon={<DescriptionOutlined />} onClick={() => setOpen((p) => !p)}>
-        {open ? "Hide report preview" : "Show report preview"}
-      </Button>
-      {open && (
-        <Paper variant="outlined" sx={{ p: 1.5, mt: 1 }}>
-          <Typography variant="caption" color="text.secondary" display="block" mb={0.5}>
-            Report output for this step:
-          </Typography>
-          <Typography variant="body2" fontWeight={600}>
-            {String(step.order).padStart(2, "0")} · {step.title || "(Untitled step)"}
-          </Typography>
-          {desc && <Typography variant="body2" sx={{ mt: 0.5 }}>{desc}</Typography>}
-          {step.overrideInReport && (
-            <Chip label="Report override active" size="small" color="primary" sx={{ mt: 0.75 }} />
-          )}
-          <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
-            Inputs: {(step.inputs || []).length} · Media: {(step.mediaIds || []).length}
-          </Typography>
-        </Paper>
-      )}
-    </Box>
   );
 }
 
