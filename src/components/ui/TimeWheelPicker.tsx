@@ -3,6 +3,8 @@ import { Box, Typography } from "@mui/material";
 import { datetimeLocalInZoneToUtc } from "../../utils/datetime";
 
 const ITEM_HEIGHT = 36;
+const VISIBLE_ROWS = 3;
+const PAD_ROWS = 1;
 
 interface Props {
   label: string;
@@ -37,45 +39,80 @@ export default function TimeWheelPicker({ label, valueMinutes, onChange }: Props
         {label}
       </Typography>
       <Box
-        ref={ref}
-        onScroll={() => {
-          const el = ref.current;
-          if (!el) return;
-          const idx = Math.round(el.scrollTop / ITEM_HEIGHT);
-          const clamped = steps[Math.min(Math.max(idx, 0), steps.length - 1)];
-          if (clamped !== valueMinutes) onChange(clamped);
-        }}
         sx={{
-          height: ITEM_HEIGHT * 5,
-          overflowY: "auto",
-          scrollSnapType: "y mandatory",
+          position: "relative",
+          height: ITEM_HEIGHT * VISIBLE_ROWS,
+          overflow: "hidden",
           border: "1px solid",
           borderColor: "divider",
           borderRadius: 1,
           bgcolor: "background.default",
-          "&::-webkit-scrollbar": { width: 4 },
         }}
       >
-        <Box sx={{ height: ITEM_HEIGHT * 2 }} />
-        {steps.map((m) => (
-          <Box
-            key={m}
-            sx={{
-              height: ITEM_HEIGHT,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              scrollSnapAlign: "center",
-              bgcolor: m === Math.round(valueMinutes / 15) * 15 ? "action.selected" : "transparent",
-              borderRadius: 1,
-            }}
-          >
-            <Typography variant="body2" fontWeight={m === Math.round(valueMinutes / 15) * 15 ? 700 : 400}>
-              {formatMinutes(m)}
-            </Typography>
-          </Box>
-        ))}
-        <Box sx={{ height: ITEM_HEIGHT * 2 }} />
+        <Box
+          aria-hidden
+          sx={{
+            pointerEvents: "none",
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            background:
+              "linear-gradient(180deg, rgba(15,23,42,0.88) 0%, rgba(15,23,42,0.4) 22%, transparent 36%, transparent 64%, rgba(15,23,42,0.4) 78%, rgba(15,23,42,0.88) 100%)",
+          }}
+        />
+        <Box
+          aria-hidden
+          sx={{
+            pointerEvents: "none",
+            position: "absolute",
+            left: 6,
+            right: 6,
+            top: "50%",
+            height: ITEM_HEIGHT,
+            mt: `${-ITEM_HEIGHT / 2}px`,
+            borderRadius: 1,
+            border: "1px solid",
+            borderColor: "divider",
+            zIndex: 1,
+          }}
+        />
+        <Box
+          ref={ref}
+          onScroll={() => {
+            const el = ref.current;
+            if (!el) return;
+            const idx = Math.round(el.scrollTop / ITEM_HEIGHT);
+            const clamped = steps[Math.min(Math.max(idx, 0), steps.length - 1)];
+            if (clamped !== valueMinutes) onChange(clamped);
+          }}
+          sx={{
+            height: "100%",
+            overflowY: "auto",
+            scrollSnapType: "y mandatory",
+            "&::-webkit-scrollbar": { width: 4 },
+          }}
+        >
+          <Box sx={{ height: ITEM_HEIGHT * PAD_ROWS }} />
+          {steps.map((m) => (
+            <Box
+              key={m}
+              sx={{
+                height: ITEM_HEIGHT,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                scrollSnapAlign: "center",
+                bgcolor: m === Math.round(valueMinutes / 15) * 15 ? "action.selected" : "transparent",
+                borderRadius: 1,
+              }}
+            >
+              <Typography variant="body2" fontWeight={m === Math.round(valueMinutes / 15) * 15 ? 700 : 400}>
+                {formatMinutes(m)}
+              </Typography>
+            </Box>
+          ))}
+          <Box sx={{ height: ITEM_HEIGHT * PAD_ROWS }} />
+        </Box>
       </Box>
     </Box>
   );

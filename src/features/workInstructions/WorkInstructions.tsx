@@ -867,6 +867,7 @@ const WorkInstructions = () => {
   const [configs, setConfigs] = useState<WorkflowConfig[]>([]);
   const [workflowTypes, setWorkflowTypes] = useState<WorkflowType[]>([]);
   const [configSearch, setConfigSearch] = useState("");
+  const [configTypeFilter, setConfigTypeFilter] = useState("");
   const [sortBy, setSortBy] = useState<WorkInstructionSortKey>("dateCreated");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
 
@@ -1082,6 +1083,17 @@ const WorkInstructions = () => {
     [configs],
   );
 
+  const configTypeOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const type of workflowTypes) {
+      if (type.name?.trim()) names.add(type.name.trim());
+    }
+    for (const config of configs) {
+      if (config.configType?.trim()) names.add(config.configType.trim());
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [configs, workflowTypes]);
+
   const filteredConfigs = useMemo(() => {
     const q = configSearch.trim().toLowerCase();
     const scopeFiltered = canViewAllWI ? configs : configs.filter((c) => c.status === "Published");
@@ -1091,7 +1103,10 @@ const WorkInstructions = () => {
     const archiveFiltered = showArchived
       ? scopeFiltered
       : scopeFiltered.filter((c) => c.status !== "Archived");
-    const filtered = !q ? archiveFiltered : archiveFiltered.filter(
+    const typeFiltered = !configTypeFilter
+      ? archiveFiltered
+      : archiveFiltered.filter((c) => (c.configType ?? "") === configTypeFilter);
+    const filtered = !q ? typeFiltered : typeFiltered.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         (c.configType ?? "").toLowerCase().includes(q) ||
@@ -1119,7 +1134,7 @@ const WorkInstructions = () => {
       if (aVal > bVal) return 1 * multiplier;
       return 0;
     });
-  }, [canViewAllWI, configs, configSearch, sortBy, sortDir, showArchived]);
+  }, [canViewAllWI, configs, configSearch, configTypeFilter, sortBy, sortDir, showArchived]);
 
   // â”€â”€â”€ Config CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -1439,6 +1454,19 @@ const WorkInstructions = () => {
                     }}
                     sx={{ maxWidth: 360, width: "100%" }}
                   />
+                  <FormControl size="small" sx={{ minWidth: 190 }}>
+                    <InputLabel shrink>Configuration type</InputLabel>
+                    <Select
+                      label="Configuration type"
+                      value={configTypeFilter}
+                      onChange={(e) => setConfigTypeFilter(e.target.value)}
+                    >
+                      <MenuItem value="">All types</MenuItem>
+                      {configTypeOptions.map((type) => (
+                        <MenuItem key={type} value={type}>{type}</MenuItem>
+                      ))}
+                    </Select>
+                  </FormControl>
                   <FormControl size="small" sx={{ minWidth: 170 }}>
                     <InputLabel shrink>Sort By</InputLabel>
                     <Select label="Sort By" value={sortBy} onChange={(e) => setSortBy(e.target.value as WorkInstructionSortKey)}>
@@ -1483,7 +1511,7 @@ const WorkInstructions = () => {
                 <Alert severity="info">
                   {configs.length === 0
                     ? `No workflows yet for ${activeProduct.name}. Click "+ New Workflow" to create one.`
-                    : "No workflows match the search."}
+                    : "No workflows match the search or type filter."}
                 </Alert>
               ) : isPhone ? (
                 <Stack spacing={1.25}>

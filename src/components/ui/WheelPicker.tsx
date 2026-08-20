@@ -2,9 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Box, Typography } from "@mui/material";
 
 const ITEM_HEIGHT = 44;
-const VISIBLE_ROWS = 5;
-/** How many spacer rows above/below so first/last can sit in the lens. */
-const PAD_ROWS = 2;
+const VISIBLE_ROWS = 3;
+/** One spacer row above/below so first/last can sit in the centre lens. */
+const PAD_ROWS = 1;
 
 interface Props {
   options: string[];
@@ -104,7 +104,7 @@ export default function WheelPicker({ options, value, onChange, error = false }:
           inset: 0,
           zIndex: 3,
           background:
-            "linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(15,23,42,0.35) 28%, transparent 42%, transparent 58%, rgba(15,23,42,0.35) 72%, rgba(15,23,42,0.92) 100%)",
+            "linear-gradient(180deg, rgba(15,23,42,0.92) 0%, rgba(15,23,42,0.55) 18%, transparent 34%, transparent 66%, rgba(15,23,42,0.55) 82%, rgba(15,23,42,0.92) 100%)",
         }}
       />
 
@@ -129,8 +129,8 @@ export default function WheelPicker({ options, value, onChange, error = false }:
         {options.map((opt, idx) => {
           const offset = (idx * ITEM_HEIGHT - scrollTop) / ITEM_HEIGHT;
           const abs = Math.abs(offset);
-          const opacity = Math.max(0.18, 1 - abs * 0.38);
-          const scale = Math.max(0.72, 1 - abs * 0.14);
+          const opacity = Math.max(0.22, 1 - abs * 0.62);
+          const scale = Math.max(0.82, 1 - abs * 0.16);
           const rotateX = Math.max(-55, Math.min(55, offset * 22));
           const selected = abs < 0.45;
 
