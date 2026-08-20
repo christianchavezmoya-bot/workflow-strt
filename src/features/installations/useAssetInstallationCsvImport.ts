@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { projectAssetService } from "../../services/projectAssetService";
 import type { Product } from "../../types/product";
 import type { Project } from "../../types/project";
@@ -29,6 +30,7 @@ type ImportCsvParams = {
 };
 
 export function useAssetInstallationCsvImport() {
+  const toast = useAppToast();
   const [csvImportOpen, setCsvImportOpen] = useState(false);
   const [csvRows, setCsvRows] = useState<AssetInstallationCsvRow[]>([]);
   const [csvImporting, setCsvImporting] = useState(false);
@@ -73,11 +75,11 @@ export function useAssetInstallationCsvImport() {
       closeCsvImport();
       onRefresh?.();
     } catch {
-      alert("Import failed. Check your CSV and try again.");
+      toast.error("Import failed. Check your CSV and try again.");
     } finally {
       setCsvImporting(false);
     }
-  }, [closeCsvImport, csvRows]);
+  }, [closeCsvImport, csvRows, toast]);
 
   return {
     csvImportOpen,

@@ -58,6 +58,8 @@ import AdminOfficesTab from "./AdminOfficesTab";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppToast } from "../../contexts/AppToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useTableConfig } from "../../hooks/useTableConfig";
 import { useFieldDefinitions } from "../../hooks/useFieldDefinitions";
@@ -97,6 +99,8 @@ export const UserManagement: React.FC = () => {
   const VIRTUAL_SITE_PREFIX = "virtual-site-for-customer:";
   const { user } = useAuth();
   const can = usePermissions();
+  const toast = useAppToast();
+  const confirmAction = useConfirm();
   const { activeOffice } = useActiveOffice();
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
@@ -4671,7 +4675,14 @@ export const UserManagement: React.FC = () => {
 
                     if (file.size > maxFileSize) {
                       const sizeMB = (file.size / (1024 * 1024)).toFixed(2);
-                      if (!confirm(`This image is ${sizeMB}MB, which is quite large. It will be automatically resized to optimize performance. Continue?`)) {
+                      const proceed = await confirmAction({
+                        title: "Large image",
+                        message: `This image is ${sizeMB}MB, which is quite large. It will be automatically resized to optimize performance. Continue?`,
+                        confirmLabel: "Continue",
+                        severity: "warning",
+                      });
+                      if (!proceed) {
+                        e.target.value = "";
                         return;
                       }
                     }
@@ -4708,7 +4719,7 @@ export const UserManagement: React.FC = () => {
                             const resizedDataUrl = canvas.toDataURL('image/jpeg', 0.9);
                             setEditCustomerLogo(resizedDataUrl);
                             setEditCustomerPhotoScale(100);
-                            alert(`Image resized from ${img.width}x${img.height} to ${Math.round(newWidth)}x${Math.round(newHeight)} for optimal display.`);
+                            toast.info(`Image resized from ${img.width}x${img.height} to ${Math.round(newWidth)}x${Math.round(newHeight)} for optimal display.`);
                           }
                         } else {
                           // Image is within size limits, use as-is

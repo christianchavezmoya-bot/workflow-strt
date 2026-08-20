@@ -7,6 +7,8 @@ import App from "./app/App";
 import { store } from "./store";
 import theme from "./theme/theme";
 import { FieldNotificationProvider } from "./contexts/FieldNotificationContext";
+import { AppToastProvider } from "./contexts/AppToastContext";
+import { ConfirmProvider } from "./contexts/ConfirmContext";
 import { ViewModeProvider } from "./contexts/ViewModeContext";
 import { AccessModeProvider } from "./contexts/AccessModeContext";
 import { NotificationInboxProvider } from "./contexts/NotificationInboxContext";
@@ -42,13 +44,17 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
             <ComplexViewProvider>
               <AccessModeProvider>
                 <NotificationInboxProvider>
-                  <ViewModeProvider>
-                    <OfflineModeProvider>
-                      <FieldNotificationProvider>
-                        <App />
-                      </FieldNotificationProvider>
-                    </OfflineModeProvider>
-                  </ViewModeProvider>
+                  <AppToastProvider>
+                    <ConfirmProvider>
+                      <ViewModeProvider>
+                        <OfflineModeProvider>
+                          <FieldNotificationProvider>
+                            <App />
+                          </FieldNotificationProvider>
+                        </OfflineModeProvider>
+                      </ViewModeProvider>
+                    </ConfirmProvider>
+                  </AppToastProvider>
                 </NotificationInboxProvider>
               </AccessModeProvider>
             </ComplexViewProvider>

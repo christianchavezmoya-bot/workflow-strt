@@ -11,6 +11,7 @@ import VideocamOutlinedIcon from "@mui/icons-material/VideocamOutlined";
 import DeleteOutlineOutlinedIcon from "@mui/icons-material/DeleteOutlineOutlined";
 import PlayCircleOutlineOutlinedIcon from "@mui/icons-material/PlayCircleOutlineOutlined";
 import QRUploadButton from "../QRUploadButton";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 
 interface Props {
@@ -33,6 +34,7 @@ function isVideo(dataUrl: string) {
 export default function MediaCapture({ media, onChange, label, disabled = false, qrDocType, qrLinkedTo }: Props) {
   const photoInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
+  const toast = useAppToast();
 
   async function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
@@ -48,7 +50,7 @@ export default function MediaCapture({ media, onChange, label, disabled = false,
     }
     if (results.length > 0) onChange([...media, ...results]);
     if (errors.length > 0) {
-      window.alert(errors[0]);
+      toast.error(errors[0]!);
     }
   }
 

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
 import {
@@ -266,6 +267,7 @@ export default function WorkflowRunHistoryDialog({
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
+  const toast = useAppToast();
   const fetchedTimeZone = useProjectTimeZone(asset.projectId);
   const resolvedTimeZone = fetchedTimeZone ?? resolveReportTimeZone(project);
   const [runs, setRuns] = useState<AssetWorkflowRun[]>([]);
@@ -493,7 +495,7 @@ export default function WorkflowRunHistoryDialog({
       });
     } catch (err) {
       console.error("[WorkflowRunHistoryDialog] Report generation failed", err);
-      alert("Failed to generate PDF report.");
+      toast.error("Failed to generate PDF report.");
     } finally {
       setReportGenerating(null);
     }

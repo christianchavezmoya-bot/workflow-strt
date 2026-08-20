@@ -62,6 +62,7 @@ import {
 } from "../../utils/workflowReportSignatureFilter";
 import { AssetReportShareDialog } from "./AssetReportShareDialog";
 import PdfBlobPreview from "./PdfBlobPreview";
+import { useAppToast } from "../../contexts/AppToastContext";
 
 type LoadedReportEntry = {
   asset: ProjectAsset;
@@ -131,6 +132,7 @@ export function BulkWorkflowReportDialog({
   users = [],
   canShareReports = false,
 }: BulkWorkflowReportDialogProps) {
+  const toast = useAppToast();
   const [loading, setLoading] = useState(false);
   const [loadProgress, setLoadProgress] = useState({ done: 0, total: 0 });
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -325,7 +327,7 @@ export function BulkWorkflowReportDialog({
       await downloadWorkflowReportsAsSeparateFiles(filteredDownloadItems);
     } catch (err) {
       console.error("[BulkWorkflowReportDialog] Separate download failed", err);
-      alert("Failed to download reports.");
+      toast.error("Failed to download reports.");
     } finally {
       setDownloading(null);
     }
@@ -338,7 +340,7 @@ export function BulkWorkflowReportDialog({
       await downloadWorkflowReportsAsZip(filteredDownloadItems, zipFileName);
     } catch (err) {
       console.error("[BulkWorkflowReportDialog] ZIP download failed", err);
-      alert("Failed to create ZIP archive.");
+      toast.error("Failed to create ZIP archive.");
     } finally {
       setDownloading(null);
     }
