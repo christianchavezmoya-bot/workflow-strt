@@ -74,7 +74,7 @@ const Sidebar = () => {
     if (!can.permissionsReady) return true;
     switch (item.to) {
       case "/settings":            return can.settings.view;
-      case "/admin":               return can.createUsers || can.settings.view;
+      case "/admin":               return can.admin.view;
       case "/tips":                return can.tips.view;
       case "/time-analytics":      return can.analytics.view;
       case "/admin/bom-project":   return can.bomProject.view;

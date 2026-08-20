@@ -20,6 +20,10 @@ export interface DomainPermissions {
   workInstructionsBuilder: { view: boolean; viewScope: ViewScope; build: boolean; publish: boolean; archive: boolean; delete?: boolean };
   documents:            { view: boolean; viewScope: ViewScope; upload: boolean; delete: boolean };
   settings:             { view: boolean; edit: boolean };
+  // Admin page (/admin) — separate from app Settings (/settings). Previously admin access
+  // leaked in via settings.view derived from createDeleteTables, which let PMs open User
+  // Management without an explicit admin permission.
+  admin:                { view: boolean; manageUsers: boolean; manageRoles: boolean; manageCustomers: boolean; manageTabs: boolean; tableConfig: boolean };
   // Mirrors the BOM module's real stages, so a role can be allowed to prepare an import
   // without being allowed to commit it into a project.
   bomProject:           { view: boolean; upload: boolean; map: boolean; commit: boolean; delete: boolean };
@@ -61,6 +65,7 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
       workInstructionsBuilder: { view: true,  viewScope: "all", build: false, publish: false,   archive: false, delete: false },
       documents:               { view: true,  viewScope: "all", upload: false, delete: false },
       settings:                { view: false, edit: false },
+      admin:                   { view: false, manageUsers: false, manageRoles: false, manageCustomers: false, manageTabs: false, tableConfig: false },
       bomProject:              { view: false, upload: false, map: false, commit: false, delete: false },
       tips:                    { view: true,  create: false, edit: false, delete: false },
       analytics:               { view: false, viewScope: "own", export: false },
@@ -68,6 +73,9 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
   }
   const canEdit   = p.editFields || p.modifyData;
   const canDelete = p.createDeleteTables;
+  // Tier 1 createUsers is the admin gate — Project Manager keeps createDeleteTables for
+  // workflow/BOM/table rights but must not inherit Admin page access by default.
+  const isAdminOperator = p.createUsers;
   // Authoring a workflow config (build/publish/archive/delete) is Admin + Project Manager
   // on the server — every mutating endpoint on WorkflowConfigsController carries
   // [Authorize(Roles = "Admin,Project Manager")]. createDeleteTables is the flag those two
@@ -101,7 +109,15 @@ export function defaultDomains(p: Omit<RolePermissions, "domains">): DomainPermi
       delete: canAuthorWorkflow,
     },
     documents:               { view: true, viewScope: viewAll, upload: canEdit, delete: canDelete },
-    settings:                { view: p.createDeleteTables, edit: p.createDeleteTables },
+    settings:                { view: isAdminOperator, edit: isAdminOperator },
+    admin: {
+      view: isAdminOperator,
+      manageUsers: isAdminOperator,
+      manageRoles: isAdminOperator && p.createDeleteTables,
+      manageCustomers: isAdminOperator,
+      manageTabs: isAdminOperator && p.createDeleteTables,
+      tableConfig: isAdminOperator && p.createDeleteTables,
+    },
     // BOM is an office/planning function, not a field one — default it to the same roles
     // that administer tables (Admin, Project Manager) and let admins widen it per role.
     bomProject: {
