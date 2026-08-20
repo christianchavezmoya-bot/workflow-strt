@@ -222,6 +222,82 @@ export function getMissingWorkflowItems(
   return [...missingInputs, ...missingCaptureFields];
 }
 
+export interface RunMissingMediaStep {
+  stepId: string;
+  stepOrder: number;
+  stepTitle: string;
+  inputId: string;
+  inputLabel: string;
+  inputType: "photo" | "video";
+  captured: number;
+}
+
+/** Required photo/video slots on a run, with capture counts (optional media excluded). */
+export function getRunRequiredMediaSteps(run: AssetWorkflowRun): RunMissingMediaStep[] {
+  const steps = parseWorkflowStepsFromSnapshot(run.workflowSnapshotJson);
+  const stepMap = new Map(steps.map((step) => [step.id, step]));
+  const results = parseWorkflowStepResults(run.stepResultsJson);
+  const visitedStepIds = parseVisitedStepIds(run.stepResultsJson);
+  const resultStepIds = new Set(results.map((result) => result.stepId));
+  const seen = new Set<string>();
+  const refs: RunMissingMediaStep[] = [];
+
+  const addFromStep = (stepId: string, values: Record<string, string> | undefined) => {
+    const step = stepMap.get(stepId);
+    if (!step) return;
+    for (const input of step.inputs ?? []) {
+      if (input.type !== "photo" && input.type !== "video") continue;
+      if (!input.required) continue;
+      const key = `${stepId}:${input.id}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      refs.push({
+        stepId,
+        stepOrder: step.order ?? refs.length + 1,
+        stepTitle: step.title ?? stepId,
+        inputId: input.id,
+        inputLabel: input.label || (input.type === "video" ? "Video" : "Photo"),
+        inputType: input.type,
+        captured: parseMediaCaptureCount(values?.[input.id]),
+      });
+    }
+  };
+
+  for (const result of results) {
+    addFromStep(result.stepId, result.values);
+  }
+
+  for (const stepId of visitedStepIds) {
+    if (resultStepIds.has(stepId)) continue;
+    addFromStep(stepId, undefined);
+  }
+
+  return refs;
+}
+
+export function getRunMissingMediaSteps(run: AssetWorkflowRun): {
+  allRequired: RunMissingMediaStep[];
+  missing: RunMissingMediaStep[];
+} {
+  const allRequired = getRunRequiredMediaSteps(run);
+  return {
+    allRequired,
+    missing: allRequired.filter((step) => step.captured === 0),
+  };
+}
+
+/** Drop stale localStorage flags when the run no longer has missing required media. */
+export function sanitizeMissingMediaFlags<T extends { runId: string }>(
+  flags: T[],
+  runsById: Map<string, AssetWorkflowRun>,
+): T[] {
+  return flags.filter((flag) => {
+    const run = runsById.get(flag.runId);
+    if (!run) return true;
+    return getRunMissingMediaSteps(run).missing.length > 0;
+  });
+}
+
 export function countMissingWorkflowItems(run: AssetWorkflowRun): number {
   return getRunMissingWorkflowItems(run).length;
 }

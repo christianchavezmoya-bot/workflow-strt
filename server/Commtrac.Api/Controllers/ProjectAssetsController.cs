@@ -1538,6 +1538,7 @@ public class ProjectAssetsController : ControllerBase
                     if (string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase) ||
                         string.Equals(input.Type, "video", StringComparison.OrdinalIgnoreCase))
                     {
+                        if (!input.Required) continue;
                         requiredItems++;
                         if (GetMediaCaptureCount(raw) > 0) completedItems++;
                         continue;
@@ -1568,10 +1569,7 @@ public class ProjectAssetsController : ControllerBase
                 if (string.IsNullOrWhiteSpace(stepId) || resultStepIds.Contains(stepId) || !stepsById.TryGetValue(stepId, out var step))
                     continue;
 
-                requiredItems += (step.Inputs ?? []).Count(input =>
-                    string.Equals(input.Type, "photo", StringComparison.OrdinalIgnoreCase) ||
-                    string.Equals(input.Type, "video", StringComparison.OrdinalIgnoreCase) ||
-                    input.Required);
+                requiredItems += (step.Inputs ?? []).Count(input => input.Required);
                 requiredItems += (step.CaptureFields ?? []).Count(field => field.Required);
             }
 

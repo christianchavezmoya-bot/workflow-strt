@@ -163,7 +163,7 @@ function parseSnapshotSteps(workflowSnapshotJson: string): Array<{
   order?: number;
   title?: string;
   description?: string;
-  inputs?: { id: string; label?: string; type?: string }[];
+  inputs?: { id: string; label?: string; type?: string; required?: boolean }[];
 }> {
   try {
     const snapshot = JSON.parse(workflowSnapshotJson ?? "{}");
@@ -219,7 +219,7 @@ function derivePhotoSteps(
     for (const step of steps) {
       stepIndex++;
       for (const inp of step.inputs ?? []) {
-        if (inp.type === "photo" || inp.type === "video") {
+        if ((inp.type === "photo" || inp.type === "video") && inp.required) {
           const captured = parseCaptures(values[step.id]?.[inp.id]).length;
           allSteps.push({
             stepId: step.id,

@@ -53,7 +53,7 @@ import {
   shouldFetchProjectAssetSummary,
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
-import { countMissingWorkflowItems, runHasCompletedAllSteps } from "../../utils/workflowCompleteness";
+import { countMissingWorkflowItems, getRunMissingMediaSteps, runHasCompletedAllSteps, sanitizeMissingMediaFlags } from "../../utils/workflowCompleteness";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
 import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
 import type { Office } from "../../components/GlobalOfficeMap";
@@ -709,6 +709,28 @@ const Dashboard = () => {
     window.addEventListener("missing-media-flags-changed", reload);
     return () => window.removeEventListener("missing-media-flags-changed", reload);
   }, []);
+
+  // Drop stale flags written before required/optional media was respected.
+  useEffect(() => {
+    if (dashboardBootPhase !== "full" || missingMediaFlags.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const runs = await Promise.all(
+        missingMediaFlags.map((flag) => assetWorkflowRunService.getByIdLocalFirst(flag.runId)),
+      );
+      if (cancelled) return;
+      const runsById = new Map(
+        runs.filter((run): run is AssetWorkflowRun => Boolean(run)).map((run) => [run.id, run]),
+      );
+      const sanitized = sanitizeMissingMediaFlags(missingMediaFlags, runsById);
+      if (sanitized.length === missingMediaFlags.length) return;
+      localStorage.setItem("pm_missing_media_flags", JSON.stringify(sanitized));
+      setMissingMediaFlags(sanitized);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [dashboardBootPhase, missingMediaFlags]);
 
   // Listen for photo update notifications after installers upload missing media.
   useEffect(() => {
@@ -1676,8 +1698,10 @@ const Dashboard = () => {
 
   const buildFallbackMissingMediaFlag = useCallback((asset: QuickActionAsset, latestRun: AssetWorkflowRun | null) => {
     if (!latestRun || !runHasCompletedAllSteps(latestRun)) return null;
-    const missingCount = countMissingWorkflowItems(latestRun);
-    if (missingCount <= 0) return null;
+    const { missing, allRequired } = getRunMissingMediaSteps(latestRun);
+    if (missing.length <= 0) return null;
+    const totalExpected = allRequired.length;
+    const totalCaptured = allRequired.filter((step) => step.captured > 0).length;
     return {
       id: `run-missing-${latestRun.id}`,
       runId: latestRun.id,
@@ -1688,11 +1712,25 @@ const Dashboard = () => {
       technicianUserId: asset.assignedUserId ?? "",
       technicianName: user.fullName ?? "",
       completedAt: latestRun.completedAt ?? latestRun.updatedAt ?? latestRun.startedAt,
-      missingSteps: [],
-      totalExpected: 0,
-      totalCaptured: 0,
+      missingSteps: missing.map(({ stepId, stepOrder, stepTitle, inputId, inputLabel, inputType, captured }) => ({
+        stepId,
+        stepOrder,
+        stepTitle,
+        inputId,
+        inputLabel,
+        inputType,
+        captured,
+      })),
+      totalExpected,
+      totalCaptured,
     };
   }, [user.fullName]);
+
+  const validateMissingMediaFlag = useCallback((flag: MissingMediaFlag | null, run: AssetWorkflowRun | null) => {
+    if (!flag) return null;
+    if (!run || flag.runId !== run.id) return flag;
+    return getRunMissingMediaSteps(run).missing.length > 0 ? flag : null;
+  }, []);
 
   const resolveMissingMediaForAsset = useCallback((asset: QuickActionAsset, runs: AssetWorkflowRun[]) => {
     const sortedRuns = [...runs].sort(
@@ -1704,8 +1742,10 @@ const Dashboard = () => {
       : null;
     const fallbackMissingMedia = buildFallbackMissingMediaFlag(asset, latestRun);
     const assetLevelFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
-    return latestRunFlag ?? fallbackMissingMedia ?? assetLevelFlag;
-  }, [buildFallbackMissingMediaFlag, missingMediaFlags]);
+    return validateMissingMediaFlag(latestRunFlag, latestRun)
+      ?? fallbackMissingMedia
+      ?? validateMissingMediaFlag(assetLevelFlag, latestRun);
+  }, [buildFallbackMissingMediaFlag, missingMediaFlags, validateMissingMediaFlag]);
 
   const quickActionAttention = useMemo(() => {
     if (!quickActionAsset) {
@@ -1756,7 +1796,9 @@ const Dashboard = () => {
       ?? (missingMediaFlag ? Math.max(0, missingMediaFlag.totalExpected - missingMediaFlag.totalCaptured) : 0)
       ?? 0;
     const effectiveMissingCount = missingCount > 0 ? missingCount : asset.missingItems;
-    const hasMissingMedia = Boolean(missingMediaFlag) || hasMissingMediaFallback || evidenceMissing;
+    const hasMissingMedia = hasMissingMediaFallback || evidenceMissing || (
+      Boolean(missingMediaFlag) && effectiveMissingCount > 0
+    );
 
     const widgets: MyJobsCardWidget[] = [];
     if (hasMissingMedia) {
