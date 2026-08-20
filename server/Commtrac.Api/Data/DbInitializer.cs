@@ -816,6 +816,9 @@ public static class DbInitializer
 
             EnsureRecorded("20260819100000_ProjectWorkflowTypeId",
                 "SELECT COUNT(*) FROM pragma_table_info('Projects') WHERE name='WorkflowTypeId'");
+
+            EnsureRecorded("20260819230000_DocumentUsageAndRatings",
+                "SELECT COUNT(*) FROM pragma_table_info('Documents') WHERE name='ViewCount'");
         }
         finally
         {

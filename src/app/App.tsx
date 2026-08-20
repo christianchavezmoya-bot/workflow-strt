@@ -21,11 +21,15 @@ import { useNativeSyncLifecycle } from "../hooks/useNativeSyncLifecycle";
 import { useRouteBreadcrumbs } from "../hooks/useRouteBreadcrumbs";
 
 // Routes AppRoutes serves without requiring a session — password reset/invite
-// links, e-signature links, and shared report links all arrive as "cold" opens
-// with no stored token, so they must render through the router rather than
-// being short-circuited to the bare Login screen below.
+// links, e-signature links, shared report links, and QR upload links all arrive
+// as "cold" opens with no stored token, so they must render through the router
+// rather than being short-circuited to the bare Login screen below.
+// /mobile-upload is scanned from a phone that has never logged in; its token in
+// the query string is the credential, and the API endpoints it calls are
+// [AllowAnonymous].
 const isPublicDeepLinkPath = (pathname: string) =>
   pathname === "/reset-password"
+  || pathname === "/mobile-upload"
   || pathname.startsWith("/sign/")
   || pathname.startsWith("/share/reports/");
 
