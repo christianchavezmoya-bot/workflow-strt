@@ -84,6 +84,7 @@ import {
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx } from "../../utils/nativeDialogInsets";
+import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
 import { formatInstant } from "../../utils/datetime";
@@ -635,14 +636,30 @@ export default function WorkOrderRunner({
     scheduleAutosave();
   }
 
-  async function handleClose() {
-    // When closing during an active run (backdrop tap, Escape key, or most close buttons),
-    // save the current step state before unmounting. autosaveProgress is offline-safe -
-    // it queues to IndexedDB if the network is unavailable.
-    // Only autosave during "running" stage - other stages (setup, summary, sign flows)
-    // have their own save paths or nothing to save.
+  function handleClose() {
+    // Close immediately; persist progress in the background so Pause/backdrop
+    // are not blocked by slow online PUTs (offline path queues locally either way).
     if (activeRunId && isRealRun && stage === "running") {
-      await flushAutosave();
+      clearTimeout(autosaveTimerRef.current);
+      const runId = activeRunId;
+      const stepsJson = JSON.stringify(buildStepsData());
+      const issuesJson = JSON.stringify(issues);
+      onClose();
+      void (async () => {
+        try {
+          if (autosaveInFlightRef.current) {
+            try {
+              await autosaveInFlightRef.current;
+            } catch {
+              // ignore — snapshot save below is authoritative
+            }
+          }
+          await assetWorkflowRunService.saveProgress(runId, stepsJson, issuesJson);
+        } catch {
+          // silent — not critical for dismiss
+        }
+      })();
+      return;
     }
     onClose();
   }
@@ -682,21 +699,38 @@ export default function WorkOrderRunner({
     void handleClose();
   }
 
-  async function handlePause() {
-    if (activeRunId && isRealRun) {
-      const updated = await queueOrSend("StopAll");
-      if (updated) {
-        syncRunTimeState(updated);
-      }
-    }
-    await flushAutosave(undefined, undefined, "Paused");
+  function handlePause() {
+    clearTimeout(autosaveTimerRef.current);
+    const runId = activeRunId;
+    const realRun = isRealRun;
+    const stepsJson = runId ? JSON.stringify(buildStepsData()) : null;
+    const issuesJson = JSON.stringify(issues);
     const completedTitles = history
       .map((id) => stepsSorted.find((s) => s.id === id)?.title ?? "")
       .filter(Boolean);
     const partialFeatureValues = extractFeatureValues();
+
     onPause?.({ done: history.length, total: stepsSorted.length, completedTitles, partialFeatureValues });
     reset();
     onClose();
+
+    if (!runId || !realRun || !stepsJson) return;
+
+    void (async () => {
+      try {
+        if (autosaveInFlightRef.current) {
+          try {
+            await autosaveInFlightRef.current;
+          } catch {
+            // ignore
+          }
+        }
+        await assetWorkflowRunService.trackTimeEntry(runId, "StopAll");
+        await assetWorkflowRunService.saveProgress(runId, stepsJson, issuesJson, "Paused");
+      } catch {
+        // silent — offline queue handles persistence inside saveProgress
+      }
+    })();
   }
 
   function applyRunProgressFromRun(run: AssetWorkflowRun): void {
@@ -1508,7 +1542,7 @@ export default function WorkOrderRunner({
     if (inp.type === "scan") {
       return (
         <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title="Scan barcode / QR (type manually in browser)">
+          <Tooltip title="Scan barcode / QR (type manually in browser)" {...nativeTooltipTouchProps()}>
             <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
           </Tooltip>
           <TextField size="small" fullWidth error={isReq} placeholder="Scan or enter value"
@@ -1704,7 +1738,7 @@ export default function WorkOrderRunner({
     if (field.type === "scan") {
       return (
         <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title="Scan barcode / QR (or type manually)">
+          <Tooltip title="Scan barcode / QR (or type manually)" {...nativeTooltipTouchProps()}>
             <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
           </Tooltip>
           <TextField size="small" fullWidth error={isReq}
@@ -1799,7 +1833,7 @@ export default function WorkOrderRunner({
             </Typography>
             <Stack direction="row" spacing={0.75} alignItems="flex-start" flexWrap="wrap" useFlexGap>
               {issues.length > 0 && (
-                <Tooltip title="Right-click for details">
+                <Tooltip title="Right-click for details" {...nativeTooltipTouchProps()}>
                   <Chip
                     size="small"
                     label={`${issues.length} issue${issues.length === 1 ? "" : "s"}${blockingCount > 0 ? ` (${blockingCount} blocking)` : ""}`}
@@ -2139,7 +2173,7 @@ export default function WorkOrderRunner({
                 {attachedMedia.length > 0 && (
                   <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
                     {attachedMedia.map((m) => (
-                      <Tooltip key={m.id} title={m.name}>
+                      <Tooltip key={m.id} title={m.name} {...nativeTooltipTouchProps()}>
                         <Box
                           component="a"
                           href={m.url}
@@ -2373,13 +2407,13 @@ export default function WorkOrderRunner({
                                 <Chip size="small" label={issue.severity.toUpperCase()} variant="outlined" sx={{ height: 18, fontSize: 10 }} />
                               </Stack>
                               <Stack direction="row" spacing={0}>
-                                <Tooltip title="Add comments or close issue">
+                                <Tooltip title="Add comments or close issue" {...nativeTooltipTouchProps()}>
                                   <IconButton size="small" onClick={() => setIssueDetailId(issue.id)} sx={{ p: 0.25 }}>
                                     <CommentOutlined sx={{ fontSize: 14 }} />
                                   </IconButton>
                                 </Tooltip>
-                                <Tooltip title="Edit issue"><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                                <Tooltip title="Delete issue"><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                                <Tooltip title="Edit issue" {...nativeTooltipTouchProps()}><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                                <Tooltip title="Delete issue" {...nativeTooltipTouchProps()}><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
                               </Stack>
                             </Stack>
                             <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
@@ -2498,7 +2532,7 @@ export default function WorkOrderRunner({
                 {!flagOpen && (() => {
                   const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
                   return (
-                    <Tooltip title="Flag an issue on this step">
+                    <Tooltip title="Flag an issue on this step" {...nativeTooltipTouchProps()}>
                       <Button
                         size="small"
                         variant="outlined"
@@ -2513,7 +2547,7 @@ export default function WorkOrderRunner({
                 })()}
               </Stack>
               <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
-                <Tooltip title="Save progress and close - resume later from where you left off">
+                <Tooltip title="Save progress and close - resume later from where you left off" {...nativeTooltipTouchProps()}>
                   <Button
                     size="small"
                     variant="outlined"
@@ -2524,7 +2558,7 @@ export default function WorkOrderRunner({
                     Pause
                   </Button>
                 </Tooltip>
-                <Tooltip title="Discard all captured data, photos, and reset the time tracker">
+                <Tooltip title="Discard all captured data, photos, and reset the time tracker" {...nativeTooltipTouchProps()}>
                   <Button size="small" color="inherit" onClick={requestDiscardRun}>
                     Cancel
                   </Button>

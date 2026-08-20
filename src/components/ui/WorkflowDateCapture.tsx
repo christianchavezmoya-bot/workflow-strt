@@ -6,6 +6,7 @@ import TimeWheelPicker, {
   applyMinutesInZoneToUtcIso,
   utcIsoToMinutesInZone,
 } from "./TimeWheelPicker";
+import { nativeDatePickerPopperSlotProps } from "../../utils/nativeDialogInsets";
 
 function fieldWantsTime(...parts: Array<string | undefined>): boolean {
   const combined = parts.filter(Boolean).join(" ").toLowerCase();
@@ -75,6 +76,7 @@ export default function WorkflowDateCapture({
               InputLabelProps: { shrink: true },
             },
             field: { clearable: true },
+            popper: nativeDatePickerPopperSlotProps(),
           }}
         />
         {wantsTime && (
