@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { projectAssetService } from "../../services/projectAssetService";
 import {
@@ -69,6 +70,7 @@ export type UseAssetInstallationWorkflowLaunchResult = {
 export function useAssetInstallationWorkflowLaunch(
   deps: UseAssetInstallationWorkflowLaunchDeps,
 ): UseAssetInstallationWorkflowLaunchResult {
+  const toast = useAppToast();
   const {
     runsMap,
     wfConfigMap,
@@ -127,7 +129,7 @@ export function useAssetInstallationWorkflowLaunch(
         workflowConfigIdForRun: assignment.workflowConfigId,
         mergeMedia: true,
       });
-      if (!payload) { alert("Workflow config not found."); return; }
+      if (!payload) { toast.error("Workflow config not found."); return; }
 
       setRunnerExistingRunId(payload.existingRunId);
       setRunnerAsset(asset);
@@ -136,7 +138,7 @@ export function useAssetInstallationWorkflowLaunch(
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(assignment.workflowConfigId));
       setRunnerOpen(true);
       refreshWorkflowOpenDataInBackground(asset.id, assignment.workflowConfigId);
-    } catch { alert("Failed to load workflow."); } finally {
+    } catch { toast.error("Failed to load workflow."); } finally {
       setRunnerLoading(null);
     }
   }, [
@@ -150,6 +152,7 @@ export function useAssetInstallationWorkflowLaunch(
     setRunnerOpen,
     setRunnerWorkflow,
     setRunnerWorkflowConfigId,
+    toast,
     wfConfigMap,
   ]);
 
