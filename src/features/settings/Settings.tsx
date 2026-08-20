@@ -57,6 +57,8 @@ import { settingsService } from "../../services/settingsService";
 import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import { QuickbaseSettingsForm, QuickbaseSettingsPayload } from "../../types/settings";
 import { useFieldNotifications } from "../../contexts/FieldNotificationContext";
+import { useAppToast } from "../../contexts/AppToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { useAuth } from "../../hooks/useAuth";
 import { brandSettingsService } from "../../services/brandSettingsService";
 import { APP_NAME } from "../../constants/branding";
@@ -72,6 +74,7 @@ async function loadXlsx() {
 
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
+  const confirmAction = useConfirm();
   const [logo, setLogo] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -120,7 +123,13 @@ function BusinessLogoTab() {
   }
 
   async function handleDelete() {
-    if (!confirm("Remove the business logo?")) return;
+    const proceed = await confirmAction({
+      title: "Remove logo",
+      message: "Remove the business logo?",
+      confirmLabel: "Remove",
+      severity: "warning",
+    });
+    if (!proceed) return;
     setDeleting(true);
     setError(null);
     try {
@@ -323,6 +332,8 @@ function resolveSettingsTabKey(isAdmin: boolean, search: string) {
 const Settings = () => {
   const { addNotification } = useFieldNotifications();
   const { user } = useAuth();
+  const toast = useAppToast();
+  const confirmAction = useConfirm();
   const [searchParams, setSearchParams] = useSearchParams();
   // Read synchronously from secure storage so isAdmin is correct on the first render,
   // before useAuth has loaded the real user from storage into component state.
@@ -439,14 +450,14 @@ const Settings = () => {
       await divisionService.remove(deleteDivisionConfirm.id);
       setDivisions((prev) => prev.filter((d) => d.id !== deleteDivisionConfirm.id));
       setDeleteDivisionConfirm(null);
-    } catch { setDeleteDivisionConfirm(null); alert("Failed to delete division."); }
+    } catch { setDeleteDivisionConfirm(null); toast.error("Failed to delete division."); }
   }
 
   async function toggleDivisionActive(id: string, currentIsActive: boolean) {
     try {
       await divisionService.update(id, { isActive: !currentIsActive });
       setDivisions((prev) => prev.map((d) => d.id === id ? { ...d, isActive: !currentIsActive } : d));
-    } catch { alert("Failed to update division status."); }
+    } catch { toast.error("Failed to update division status."); }
   }
 
   // Product catalog manager
@@ -636,7 +647,7 @@ const Settings = () => {
       await loadProducts();
       setFeaturePickerAnchor(null);
       setFeaturePickerProductId(null);
-    } catch { alert("Failed to link feature."); }
+    } catch { toast.error("Failed to link feature."); }
   }
 
   function closeFeaturePicker() {
@@ -653,16 +664,22 @@ const Settings = () => {
       await Promise.all(featurePickerSelected.map((fid) => featureService.linkToProduct(featurePickerProductId!, fid)));
       await loadProducts();
       closeFeaturePicker();
-    } catch { alert("Failed to link some features."); }
+    } catch { toast.error("Failed to link some features."); }
     finally { setFeaturePickerLinking(false); }
   }
 
   async function unlinkFeatureFromProduct(productId: string, featureId: string) {
-    if (!confirm("Remove this feature from the product?")) return;
+    const proceed = await confirmAction({
+      title: "Remove feature",
+      message: "Remove this feature from the product?",
+      confirmLabel: "Remove",
+      severity: "warning",
+    });
+    if (!proceed) return;
     try {
       await featureService.unlinkFromProduct(productId, featureId);
       await loadProducts();
-    } catch { alert("Failed to unlink feature."); }
+    } catch { toast.error("Failed to unlink feature."); }
   }
 
   // Feature library manager
@@ -754,7 +771,7 @@ const Settings = () => {
       XLSX.utils.book_append_sheet(wb, ws, "Features");
       XLSX.writeFile(wb, "features.xlsx");
     } catch {
-      alert("Failed to export Excel file. Check console for details.");
+      toast.error("Failed to export Excel file. Check console for details.");
     }
   }
 
@@ -797,7 +814,7 @@ const Settings = () => {
       XLSX.utils.book_append_sheet(wb, ws, "Features");
       XLSX.writeFile(wb, "features-template.xlsx");
     } catch {
-      alert("Failed to download template. Check console for details.");
+      toast.error("Failed to download template. Check console for details.");
     }
   }
 
@@ -957,12 +974,18 @@ const Settings = () => {
   }
 
   async function removeFeature(id: string) {
-    if (!confirm("Delete this feature? It will be unlinked from all products.")) return;
+    const proceed = await confirmAction({
+      title: "Delete feature",
+      message: "Delete this feature? It will be unlinked from all products.",
+      confirmLabel: "Delete",
+      severity: "error",
+    });
+    if (!proceed) return;
     try {
       await featureService.remove(id);
       setFeatures((prev) => prev.filter((f) => f.id !== id));
       if (expandedFeatureId === id) setExpandedFeatureId(null);
-    } catch { alert("Failed to delete feature."); }
+    } catch { toast.error("Failed to delete feature."); }
   }
 
   // Feature dependencies
@@ -1046,14 +1069,20 @@ const Settings = () => {
   }
 
   async function removeDep(featureId: string, depId: string) {
-    if (!confirm("Delete this dependency?")) return;
+    const proceed = await confirmAction({
+      title: "Delete dependency",
+      message: "Delete this dependency?",
+      confirmLabel: "Delete",
+      severity: "error",
+    });
+    if (!proceed) return;
     try {
       await featureDependencyService.remove(depId);
       setDependencies((prev) => ({
         ...prev,
         [featureId]: (prev[featureId] ?? []).filter((d) => d.id !== depId),
       }));
-    } catch { alert("Failed to delete dependency."); }
+    } catch { toast.error("Failed to delete dependency."); }
   }
 
   // Workflow types manager
@@ -1123,7 +1152,13 @@ const Settings = () => {
       setWfTypeDeleteError("Default workflow types cannot be deleted.");
       return;
     }
-    if (!confirm(`Delete workflow type "${type.name}"? This is blocked if any project, published config, or active assignment still references it.`)) {
+    const proceed = await confirmAction({
+      title: "Delete workflow type",
+      message: `Delete workflow type "${type.name}"? This is blocked if any project, published config, or active assignment still references it.`,
+      confirmLabel: "Delete",
+      severity: "error",
+    });
+    if (!proceed) {
       return;
     }
     setWfTypeDeleteError(null);
@@ -1408,7 +1443,7 @@ const Settings = () => {
       await reloadFieldDefinitions();
     } catch (error) {
       console.error("Failed to save assigned fields:", error);
-      alert("Failed to save assigned fields. Check console for details.");
+      toast.error("Failed to save assigned fields. Check console for details.");
     } finally {
       setAssignedFieldsSaving(false);
     }
@@ -1458,7 +1493,7 @@ const Settings = () => {
       setTimeout(() => setTablesSuccess(false), 3000);
     } catch (error) {
       console.error("Failed to fetch tables:", error);
-      alert("Failed to refresh tables. Check console for details.");
+      toast.error("Failed to refresh tables. Check console for details.");
     } finally {
       setTablesLoading(false);
     }
@@ -2987,7 +3022,7 @@ const Settings = () => {
                         setTimeout(() => setSeedSuccess(false), 3000);
                       } catch (error) {
                         console.error("Failed to seed fields:", error);
-                        alert("Failed to seed default fields. Check console for details.");
+                        toast.error("Failed to seed default fields. Check console for details.");
                       } finally {
                         setSeedLoading(false);
                       }
@@ -3035,7 +3070,7 @@ const Settings = () => {
                         setTimeout(() => setMigrateResult(null), 5000);
                       } catch (error) {
                         console.error("Failed to migrate IDs:", error);
-                        alert("Failed to migrate field IDs. Check console for details.");
+                        toast.error("Failed to migrate field IDs. Check console for details.");
                       } finally {
                         setMigrateLoading(false);
                       }

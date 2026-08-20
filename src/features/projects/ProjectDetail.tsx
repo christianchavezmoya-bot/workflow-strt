@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import StatusStepper from "../../components/ui/StatusStepper";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { usePermissions } from "../../hooks/usePermissions";
 import { projectAssetService } from "../../services/projectAssetService";
 import { projectService } from "../../services/projectService";
@@ -33,6 +34,7 @@ const ProjectDetail = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
   const can = usePermissions();
+  const toast = useAppToast();
   const dispatch = useAppDispatch();
   const { items } = useAppSelector((state) => state.projects);
   const productsState = useAppSelector((state) => state.products);
@@ -128,7 +130,7 @@ const ProjectDetail = () => {
   const handleAction = async (label: ProjectWorkflowAction) => {
     if (!project) return;
     const updated = await executeProjectWorkflowAction(dispatch, navigate, project, label, {
-      onError: (message) => window.alert(message),
+      onError: (message) => toast.error(message),
     });
     if (updated) setProject(updated);
   };

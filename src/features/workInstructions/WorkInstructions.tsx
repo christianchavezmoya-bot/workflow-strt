@@ -59,6 +59,7 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { featureService } from "../../services/featureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import { usePermissions } from "../../hooks/usePermissions";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import type { Feature } from "../../types/feature";
@@ -841,6 +842,7 @@ const WorkInstructions = () => {
   const theme = useTheme();
   const isPhone = useMediaQuery(theme.breakpoints.down("sm"));
   const can = usePermissions();
+  const toast = useAppToast();
   const dispatch = useAppDispatch();
   const productsState = useAppSelector((state) => state.products);
   const location = useLocation();
@@ -1226,7 +1228,7 @@ const WorkInstructions = () => {
       setDeleteConfig(null);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      alert(msg ?? "Delete failed. If this workflow has existing runs, archive it instead of deleting.");
+      toast.error(msg ?? "Delete failed. If this workflow has existing runs, archive it instead of deleting.");
     } finally {
       setDeleting(false);
     }
@@ -1244,7 +1246,7 @@ const WorkInstructions = () => {
       setArchiveConfig(null);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      alert(msg ?? "Archive failed. Please try again.");
+      toast.error(msg ?? "Archive failed. Please try again.");
     } finally {
       setArchiving(false);
     }
@@ -1257,7 +1259,7 @@ const WorkInstructions = () => {
       setConfigs((prev) => prev.map((c) => (c.id === cfg.id ? updated : c)));
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      alert(msg ?? "Publish failed. Please try again.");
+      toast.error(msg ?? "Publish failed. Please try again.");
     } finally {
       setPublishingId(null);
     }
@@ -1270,7 +1272,7 @@ const WorkInstructions = () => {
       setConfigs((prev) => [cloned, ...prev]);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      alert(msg ?? "Clone failed. Please try again.");
+      toast.error(msg ?? "Clone failed. Please try again.");
     } finally {
       setCloningId(null);
     }

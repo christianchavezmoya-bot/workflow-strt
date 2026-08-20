@@ -18,6 +18,7 @@ import {
   Typography,
 } from "@mui/material";
 import api from "../../services/api";
+import { useConfirm } from "../../contexts/ConfirmContext";
 
 interface BackupEntry {
   fileName: string;
@@ -66,6 +67,7 @@ const entityLabel = {
 } as const;
 
 export default function RecoveryCenter() {
+  const confirmAction = useConfirm();
   const [message, setMessage] = useState<{ severity: "success" | "error" | "info"; text: string } | null>(null);
 
   const [recycleType, setRecycleType] = useState<"all" | "project" | "installation" | "asset" | "document" | "bomImportRun">("all");
@@ -173,7 +175,13 @@ export default function RecoveryCenter() {
   };
 
   const purgeRecycleItem = async (item: RecycleBinItem) => {
-    if (!window.confirm(`Permanently delete ${item.title}? This cannot be undone.`)) return;
+    const proceed = await confirmAction({
+      title: "Permanently delete",
+      message: `Permanently delete ${item.title}? This cannot be undone.`,
+      confirmLabel: "Delete permanently",
+      severity: "error",
+    });
+    if (!proceed) return;
 
     setRecycleBusyId(item.id);
     try {
@@ -211,7 +219,13 @@ export default function RecoveryCenter() {
   };
 
   const restoreDatabase = async (fileName: string) => {
-    if (!window.confirm(`Restore the full database from ${fileName}? This rolls the database back to that snapshot.`)) return;
+    const proceed = await confirmAction({
+      title: "Restore database",
+      message: `Restore the full database from ${fileName}? This rolls the database back to that snapshot.`,
+      confirmLabel: "Restore",
+      severity: "error",
+    });
+    if (!proceed) return;
 
     setBackupRestoringFile(fileName);
     try {
