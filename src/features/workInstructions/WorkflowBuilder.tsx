@@ -58,6 +58,8 @@ import type { ProductFeatureDefinition } from "../../types/product";
 import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { usePermissions } from "../../hooks/usePermissions";
+import { useAppToast } from "../../contexts/AppToastContext";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import QRUploadButton from "../../components/QRUploadButton";
 import WheelPicker from "../../components/ui/WheelPicker";
@@ -307,6 +309,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // workflow without being allowed to release it to the field. Entry into the builder is
   // gated on `build` by WorkInstructions; this gates the release action itself.
   const can = usePermissions();
+  const toast = useAppToast();
   const canPublishWorkflow = !!can.workInstructionsBuilder?.publish;
   const [workflow, setWorkflow] = useState<Workflow>(() => createDefaultWorkflow(productId, productName));
   const [runnerOpen, setRunnerOpen] = useState(false);
@@ -1021,7 +1024,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   async function handleConfirmPublish() {
     if (!publishForm.workflowTypeId.trim()) {
-      alert("Select a workflow type before publishing.");
+      toast.warning("Select a workflow type before publishing.");
       return;
     }
     let cfgId = resolvedConfigIdRef.current ?? initialConfigId;
@@ -1046,7 +1049,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       onConfigPublished?.(updated);
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      alert(msg ?? "Publish failed. Please try again.");
+      toast.error(msg ?? "Publish failed. Please try again.");
     } finally {
       setPublishSaving(false);
     }
@@ -1155,7 +1158,7 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             onChange={async (e) => {
               const f = e.target.files?.[0];
               if (!f) return;
-              try { await importJSON(f); } catch (err) { alert(String((err as Error)?.message || err)); } finally { e.target.value = ""; }
+              try { await importJSON(f); } catch (err) { toast.error(String((err as Error)?.message || err)); } finally { e.target.value = ""; }
             }}
           />
           <Button size="small" variant="outlined" startIcon={<UploadOutlined />} onClick={() => importRef.current?.click()}>
@@ -1596,6 +1599,7 @@ interface StepListPanelProps {
 }
 
 function StepListPanel({ stepsSorted, selectedStepId, reachable, onSelect, onAdd, onDelete, onDuplicate, onMove }: StepListPanelProps) {
+  const confirmAction = useConfirm();
   return (
     <Paper className="glass-card" sx={{ p: 2 }}>
       <Stack spacing={2}>
@@ -1674,7 +1678,14 @@ function StepListPanel({ stepsSorted, selectedStepId, reachable, onSelect, onAdd
                       <IconButton
                         size="small"
                         onClick={() => {
-                          if (confirm("Delete this step? Links pointing to it will be cleared.")) onDelete(s.id);
+                          void confirmAction({
+                            title: "Delete step",
+                            message: "Delete this step? Links pointing to it will be cleared.",
+                            confirmLabel: "Delete",
+                            severity: "error",
+                          }).then((proceed) => {
+                            if (proceed) onDelete(s.id);
+                          });
                         }}
                         sx={{ color: isSelected ? "error.light" : "error.main", opacity: 0.8 }}
                       >

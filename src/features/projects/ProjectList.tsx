@@ -38,6 +38,7 @@ import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
 import TableConfigDialog from "../../components/TableConfigDialog";
 import { useActiveOffice } from "../../hooks/useActiveOffice";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useDynamicFields } from "../../hooks/useDynamicFields";
 import { useTableConfig } from "../../hooks/useTableConfig";
@@ -292,6 +293,7 @@ const ProjectList = () => {
   const isMobile = useMediaQuery(theme.breakpoints.down("sm"));
   const { user } = useAuth();
   const can = usePermissions();
+  const toast = useAppToast();
   const { activeOffice } = useActiveOffice();
   const { isMyWork, canUseOfficeView } = useWorkScope();
   const navigate = useNavigate();
@@ -526,7 +528,7 @@ const ProjectList = () => {
     await executeProjectWorkflowAction(dispatch, navigate, project, label, {
       onBeforeClose: () => setClosingProjectId(project.id ?? null),
       onAfterClose: () => setClosingProjectId(null),
-      onError: (message) => window.alert(message),
+      onError: (message) => toast.error(message),
     });
   };
 
@@ -1184,7 +1186,7 @@ const ProjectList = () => {
             setDeleteTarget(null);
           } catch (e) {
             console.error("Archive project failed:", e);
-            alert("Unable to archive project. Check your permissions and API availability.");
+            toast.error("Unable to archive project. Check your permissions and API availability.");
           } finally {
             setDeleteSavingId(null);
           }
@@ -1212,7 +1214,7 @@ const ProjectList = () => {
             await dispatch(fetchProjects(listFilters));
           } catch (e) {
             console.error("Purge project failed:", e);
-            alert("Unable to permanently delete project. Check your permissions and API availability.");
+            toast.error("Unable to permanently delete project. Check your permissions and API availability.");
           } finally {
             setDeleteSavingId(null);
           }
