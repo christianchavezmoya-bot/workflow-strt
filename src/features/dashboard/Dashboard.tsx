@@ -1915,7 +1915,10 @@ const Dashboard = () => {
   async function loadQuickActionContext(asset: QuickActionAsset) {
     const [localAssignments, runs, cachedEntity] = await Promise.all([
       WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []),
-      assetWorkflowRunService.listByAsset(asset.id).catch(() => []),
+      (isNativePlatform
+        ? assetWorkflowRunService.listLocalByAsset(asset.id)
+        : assetWorkflowRunService.listByAsset(asset.id)
+      ).catch(() => [] as AssetWorkflowRun[]),
       entityGetAsset(asset.id),
     ]);
 
@@ -2802,7 +2805,7 @@ const Dashboard = () => {
       if (assetIds.size > 0) {
         if (isNativePlatform) {
           const perAsset = await Promise.all(
-            techAssets.map((a) => assetWorkflowRunService.listByAsset(a.id).catch(() => [])),
+            techAssets.map((a) => assetWorkflowRunService.listLocalByAsset(a.id).catch(() => [])),
           );
           runs = perAsset.flat();
         } else {

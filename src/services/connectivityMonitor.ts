@@ -125,10 +125,12 @@ async function runPingIfForeground() {
       window.dispatchEvent(new Event("api-server-reachable"));
     }
   } else if (typeof window !== "undefined") {
-    // Route through the same event real request failures use, so the existing
-    // consecutive-signal threshold below still guards against one slow ping
-    // false-flagging the app offline.
-    window.dispatchEvent(new Event("api-server-unreachable"));
+    // Health ping uses a 4s hard timeout on a different transport than axios.
+    // Tag as timeout so a busy LAN (dashboard GET storm) cannot flip the app
+    // to amber-offline while the radio is up — same rule as axios ECONNABORTED.
+    window.dispatchEvent(new CustomEvent("api-server-unreachable", {
+      detail: { isTimeout: true, source: "health-ping" },
+    }));
   }
 }
 

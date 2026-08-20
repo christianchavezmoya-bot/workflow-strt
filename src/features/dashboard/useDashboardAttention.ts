@@ -43,8 +43,19 @@ export function useDashboardAttention({
       const showLoading = !(options?.silent && attentionLoadedOnceRef.current);
       if (showLoading) setAttentionLoading(true);
       const attentionUserId = isManager ? undefined : userId;
-      const applyAttention = (iss: OpenIssueRecord[], sigs: PendingSignatureRecord[]) => {
+      const applyAttention = (
+        iss: OpenIssueRecord[],
+        sigs: PendingSignatureRecord[],
+        mode: "merge" | "replace" = "replace",
+      ) => {
         if (requestSeq !== attentionRequestSeqRef.current) return;
+        if (mode === "merge") {
+          // Local/IDB probes can be empty while dashboardCache still has rows.
+          // Do not wipe Needs Attention — wait for a confirmed replace.
+          setOpenIssues((prev) => (iss.length > 0 ? iss : prev));
+          setPendingSigs((prev) => (sigs.length > 0 ? sigs : prev));
+          return;
+        }
         setOpenIssues(iss);
         setPendingSigs(sigs);
       };
@@ -62,7 +73,7 @@ export function useDashboardAttention({
             assetWorkflowRunService.listOpenIssues(attentionUserId),
             assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
           ]);
-          applyAttention(cachedIssues, cachedSigs);
+          applyAttention(cachedIssues, cachedSigs, "merge");
         } catch {
           // Keep the current attention widgets if local cache probing fails.
         }
@@ -74,7 +85,9 @@ export function useDashboardAttention({
         // first listOpenIssues call — skip a redundant blocking fetch here.
         try {
           const sigs = await assetWorkflowRunService.listPendingSignatures(attentionUserId);
-          applyAttention(cachedIssues, sigs);
+          if (requestSeq !== attentionRequestSeqRef.current) return;
+          setPendingSigs(sigs);
+          if (cachedIssues.length > 0) setOpenIssues(cachedIssues);
         } catch {
           // Keep local attention widgets on timeout or server errors.
         } finally {
