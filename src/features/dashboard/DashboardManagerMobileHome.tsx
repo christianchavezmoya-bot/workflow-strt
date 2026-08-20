@@ -6,13 +6,13 @@ import {
   IconButton,
   InputLabel,
   MenuItem,
-  Paper,
   Select,
   Stack,
   Tooltip,
   Typography,
 } from "@mui/material";
 import type { ReactNode } from "react";
+import type { DashboardTabSignal } from "./dashboardPageLogic";
 
 export type ManagerMobileTab = "projects" | "inspections" | "installs";
 
@@ -27,11 +27,6 @@ type Props = {
   userRole: string;
   userId: string;
   activeOffice: string;
-  canViewAllProjects: boolean;
-  managedProjectsCount: number;
-  managedOverdueCount: number;
-  managedInspectionCount: number;
-  managedOpenAssetsCount: number;
   overviewActiveCount: number;
   overviewPausedCount: number;
   overviewQueuedCount: number;
@@ -45,6 +40,10 @@ type Props = {
   onSelectedDashboardIdChange: (userId: string) => void;
   mobileManagerTab: ManagerMobileTab;
   onMobileManagerTabChange: (tab: ManagerMobileTab) => void;
+  projectTabSignal: DashboardTabSignal;
+  inspectionTabSignal: DashboardTabSignal;
+  installTabSignal: DashboardTabSignal;
+  renderTabLabel: (title: string, signal: DashboardTabSignal) => ReactNode;
   projectsTab: ReactNode;
   inspectionsTab: ReactNode;
   installsTab: ReactNode;
@@ -55,11 +54,6 @@ export default function DashboardManagerMobileHome({
   userRole,
   userId,
   activeOffice,
-  canViewAllProjects,
-  managedProjectsCount,
-  managedOverdueCount,
-  managedInspectionCount,
-  managedOpenAssetsCount,
   overviewActiveCount,
   overviewPausedCount,
   overviewQueuedCount,
@@ -73,10 +67,20 @@ export default function DashboardManagerMobileHome({
   onSelectedDashboardIdChange,
   mobileManagerTab,
   onMobileManagerTabChange,
+  projectTabSignal,
+  inspectionTabSignal,
+  installTabSignal,
+  renderTabLabel,
   projectsTab,
   inspectionsTab,
   installsTab,
 }: Props) {
+  const mobileTabs = [
+    { key: "projects" as const, label: isAdmin ? "Projects" : "My Projects", signal: projectTabSignal },
+    { key: "inspections" as const, label: isAdmin ? "Inspections" : "My Inspections", signal: inspectionTabSignal },
+    { key: "installs" as const, label: isAdmin ? "Installs" : "My Installs", signal: installTabSignal },
+  ] as const;
+
   return (
     <Stack spacing={2}>
       <Box className="glass-card" sx={{ p: 2 }}>
@@ -89,40 +93,6 @@ export default function DashboardManagerMobileHome({
               {userRole} · {activeOffice === "All" ? "All offices" : activeOffice}
             </Typography>
           </Box>
-          <Stack direction="row" spacing={1}>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>
-                {canViewAllProjects ? "All Projects" : "My Projects"}
-              </Typography>
-              <Typography variant="h6" fontWeight={700}>
-                {managedProjectsCount}
-              </Typography>
-            </Paper>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>
-                Overdue
-              </Typography>
-              <Typography variant="h6" fontWeight={700} color={managedOverdueCount > 0 ? "error.main" : "inherit"}>
-                {managedOverdueCount}
-              </Typography>
-            </Paper>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>
-                Inspections
-              </Typography>
-              <Typography variant="h6" fontWeight={700}>
-                {managedInspectionCount}
-              </Typography>
-            </Paper>
-            <Paper className="glass-card" sx={{ flex: 1, minWidth: 0, p: 1 }}>
-              <Typography variant="caption" color="text.secondary" noWrap sx={{ fontSize: "0.62rem" }}>
-                Open Installs
-              </Typography>
-              <Typography variant="h6" fontWeight={700}>
-                {managedOpenAssetsCount}
-              </Typography>
-            </Paper>
-          </Stack>
           <Stack direction="row" spacing={0.75} sx={{ flexWrap: "wrap", gap: 0.5 }}>
             <Tooltip title="Workflow run is currently active" arrow>
               <Chip
@@ -202,21 +172,28 @@ export default function DashboardManagerMobileHome({
       </Box>
 
       <Stack direction="row" spacing={1}>
-        {(
-          [
-            { key: "projects" as const, label: "My Projects" },
-            { key: "inspections" as const, label: "My Inspections" },
-            { key: "installs" as const, label: "My Installs" },
-          ] as const
-        ).map((tab) => (
+        {mobileTabs.map((tab) => (
           <Chip
             key={tab.key}
-            label={tab.label}
+            label={renderTabLabel(tab.label, tab.signal)}
             clickable
             color={mobileManagerTab === tab.key ? "primary" : "default"}
             variant={mobileManagerTab === tab.key ? "filled" : "outlined"}
             onClick={() => onMobileManagerTabChange(tab.key)}
-            sx={{ flex: 1, height: 34 }}
+            sx={{
+              flex: 1,
+              minWidth: 0,
+              height: "auto",
+              minHeight: 34,
+              py: 0.5,
+              "& .MuiChip-label": {
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "100%",
+                px: 0.5,
+              },
+            }}
           />
         ))}
       </Stack>

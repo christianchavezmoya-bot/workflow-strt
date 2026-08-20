@@ -1036,18 +1036,6 @@ const Dashboard = () => {
       String(project.projectManager ?? "").trim().toLowerCase() === String(user.fullName ?? "").trim().toLowerCase()
     );
   }, [activeDashboardProjects, canViewAllProjects, dashboardProjectOwnerName, scopedProjects, user.fullName, viewedDashboardUserId]);
-  const managedProjectIds = useMemo(() => new Set(managedProjects.map((project) => project.id)), [managedProjects]);
-  const managedOpenAssets = useMemo(
-    () => openAssets.filter((asset) => managedProjectIds.has(asset.projectId)),
-    [openAssets, managedProjectIds]
-  );
-  const managedOverdueProjects = useMemo(
-    () => managedProjects.filter((project) => {
-      if (!project.finishDate) return false;
-      return new Date(project.finishDate) < new Date();
-    }),
-    [managedProjects],
-  );
   const managedInspectionProjects = useMemo(
     () => managedProjects.filter((project) => project.workflowMode === "INSPECTION_ONLY" || project.workflowMode === "MIXED"),
     [managedProjects],
@@ -2955,7 +2943,15 @@ const Dashboard = () => {
 
   const managerMobileProjectsTab = (
     <>
-      {NeedsAttentionSection}
+      <DashboardManagerMobileProjectsList
+        projects={dashboardProjects}
+        canViewAllProjects={canViewAllProjects}
+        dashboardProjectScope={dashboardProjectScope}
+        onDashboardProjectScopeChange={setDashboardProjectScope}
+        onNavigateToProjects={() => navigate("/projects")}
+        onNavigateToProjectAssets={(project) => navigate(projectAssetsPath(project))}
+        getProjectCompletionMetrics={getProjectCompletionMetrics}
+      />
 
       {pendingApprovals.length > 0 && (
         <DashboardPendingApprovalsSection
@@ -2965,20 +2961,12 @@ const Dashboard = () => {
         />
       )}
 
+      {NeedsAttentionSection}
+
       <DashboardAutoAssignFlagsSection
         flags={autoAssignFlags}
         onFlagsChange={setAutoAssignFlags}
         onNavigateToAssets={() => navigate("/installations/assets")}
-      />
-
-      <DashboardManagerMobileProjectsList
-        projects={dashboardProjects}
-        canViewAllProjects={canViewAllProjects}
-        dashboardProjectScope={dashboardProjectScope}
-        onDashboardProjectScopeChange={setDashboardProjectScope}
-        onNavigateToProjects={() => navigate("/projects")}
-        onNavigateToProjectAssets={(project) => navigate(projectAssetsPath(project))}
-        getProjectCompletionMetrics={getProjectCompletionMetrics}
       />
 
       {InspectionInboxSection}
@@ -3018,43 +3006,14 @@ const Dashboard = () => {
   );
 
   const managerMobileInstallsTab = (
-    <>
-      <Box className="glass-card" sx={{ p: 2 }}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between" sx={{ mb: 1.5 }}>
-          <Typography variant="subtitle1" fontWeight={700} sx={{ fontFamily: "Sora" }}>My Installs</Typography>
-          <Button size="small" variant="text" onClick={() => navigate("/installations/assets")}>View all</Button>
-        </Stack>
-        {managedOpenAssets.length === 0
-          ? <Typography variant="caption" color="text.secondary">No installation assets in scope.</Typography>
-          : <Stack spacing={1}>
-              {managedOpenAssets.slice(0, 6).map((asset) => (
-                <Paper key={asset.id} elevation={0} onClick={() => navigate("/installations/assets")}
-                  sx={{ p: 1.5, border: "1px solid var(--stroke)", borderRadius: 1.5, cursor: "pointer",
-                        "&:hover": { borderColor: "primary.main", background: "rgba(45,212,191,0.04)" } }}>
-                  <Stack direction="row" spacing={1} alignItems="center">
-                    <Box sx={{ flex: 1, minWidth: 0 }}>
-                      <Typography variant="body2" fontWeight={700} noWrap>{asset.assetTag || asset.assetName || asset.id}</Typography>
-                      <Typography variant="caption" color="text.secondary" noWrap display="block">
-                        {asset.jobNumber} · {asset.assignedUserId ? "Assigned" : "Unassigned"}
-                      </Typography>
-                    </Box>
-                    <Chip
-                      label={dashboardStatusChip(asset).label}
-                      size="small"
-                      color={dashboardStatusChip(asset).color}
-                      variant="outlined"
-                      sx={{ height: 18, fontSize: "0.62rem" }}
-                    />
-                  </Stack>
-                </Paper>
-              ))}
-            </Stack>
-        }
-      </Box>
-
-      {WorkloadPanel}
-      {EvidenceHealthGrid}
-    </>
+    <DashboardPmInstallWorkspace
+      myInstallAssets={myInstallAssets}
+      myInstallHistory={myInstallHistory}
+      historyLoadingAssetId={historyDialogLoading}
+      isNativePlatform={isNativePlatform}
+      onNavigateToAssets={() => navigate("/installations/assets")}
+      onOpenHistory={(asset) => { void openHistoryReport(asset); }}
+    />
   );
 
   const ManagerMobileHome = (
@@ -3063,11 +3022,6 @@ const Dashboard = () => {
       userRole={user.role}
       userId={user.id}
       activeOffice={activeOffice}
-      canViewAllProjects={canViewAllProjects}
-      managedProjectsCount={managedProjects.length}
-      managedOverdueCount={managedOverdueProjects.length}
-      managedInspectionCount={managedInspectionProjects.length}
-      managedOpenAssetsCount={managedOpenAssets.length}
       overviewActiveCount={overviewActiveCount}
       overviewPausedCount={overviewPausedCount}
       overviewQueuedCount={overviewQueuedCount}
@@ -3081,6 +3035,10 @@ const Dashboard = () => {
       onSelectedDashboardIdChange={setSelectedDashboardId}
       mobileManagerTab={mobileManagerTab}
       onMobileManagerTabChange={setMobileManagerTab}
+      projectTabSignal={projectTabSignal}
+      inspectionTabSignal={inspectionTabSignal}
+      installTabSignal={installTabSignal}
+      renderTabLabel={renderDashboardTabLabel}
       projectsTab={managerMobileProjectsTab}
       inspectionsTab={managerMobileInspectionsTab}
       installsTab={managerMobileInstallsTab}
