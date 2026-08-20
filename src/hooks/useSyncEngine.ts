@@ -1399,7 +1399,7 @@ export function useSyncEngine(): SyncState {
     window.addEventListener("repo:issues:fetch-failed",   handleUnreachable);
     return () => {
       window.removeEventListener("api-serving-cache",        handleUnreachable);
-      window.removeEventListener("offline-mode-online",      handleReachable);
+      window.removeEventListener("offline-mode-online",      handleBackOnline);
       window.removeEventListener("api-server-reachable",     handleReachable);
       window.removeEventListener("api-auth-error",           handleAuthError);
       window.removeEventListener("auth-change",              handleAuthRecovered);

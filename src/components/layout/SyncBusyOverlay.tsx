@@ -6,7 +6,7 @@ import { Backdrop, Box, Stack, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import StrataNgoSpinLogo3D from "../branding/StrataNgoSpinLogo3D";
 import { isMobileNativePlatform } from "../../utils/platform";
-import { shouldDeferBackgroundSync } from "../../services/connectivityMonitor";
+import { isNativeSyncUiActive, isNativeSyncUiActiveNow } from "../../utils/nativeSyncUiState";
 
 const MIN_VISIBLE_MS = 450;
 
@@ -19,7 +19,7 @@ export default function SyncBusyOverlay() {
     if (!isMobileNativePlatform()) return;
 
     const applySyncing = (active: boolean) => {
-      if (active && shouldDeferBackgroundSync()) return;
+      if (active && !isNativeSyncUiActive(true)) return;
 
       if (active) {
         if (hideTimerRef.current !== null) {
@@ -47,6 +47,11 @@ export default function SyncBusyOverlay() {
     };
 
     window.addEventListener("sync-engine:syncing", onSyncing);
+
+    if (isNativeSyncUiActiveNow()) {
+      applySyncing(true);
+    }
+
     return () => {
       window.removeEventListener("sync-engine:syncing", onSyncing);
       if (hideTimerRef.current !== null) window.clearTimeout(hideTimerRef.current);
