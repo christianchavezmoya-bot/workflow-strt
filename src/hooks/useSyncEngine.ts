@@ -232,6 +232,8 @@ function dispatchSyncEngineSyncing(syncing: boolean): void {
 
 // ── Singleton flush lock so multiple hook instances don't double-flush ────────
 let _flushing = false;
+/** Count of mounted useSyncEngine() instances — only the first starts the boot flush. */
+let syncEngineMounts = 0;
 
 function hasNetworkSignal(): boolean {
   if (isMobileNativePlatform()) {
@@ -820,7 +822,6 @@ export function useSyncEngine(): SyncState {
     if (!canAttemptSyncFlush()) return;
 
     _flushing = true;
-    setSyncFlushing(true);
     markOfflinePerf("queue_flush_start");
 
     let due: PendingAction[] = [];
@@ -837,6 +838,9 @@ export function useSyncEngine(): SyncState {
         return;
       }
 
+      // Only advertise "syncing" when there is real work — empty-queue probes
+      // must not start the overlay / keep-alive (native felt stuck in sync mode).
+      setSyncFlushing(true);
       setSyncing(true);
       dispatchSyncEngineSyncing(true);
       setSyncConnectivitySyncing(true);
@@ -1251,9 +1255,11 @@ export function useSyncEngine(): SyncState {
       await scheduleRetryRef.current?.();
     } finally {
       await pendingResetStaleUploading();
-      setSyncing(false);
-      dispatchSyncEngineSyncing(false);
-      setSyncConnectivitySyncing(false);
+      if (due.length > 0) {
+        setSyncing(false);
+        dispatchSyncEngineSyncing(false);
+        setSyncConnectivitySyncing(false);
+      }
       markOfflinePerf("queue_flush_end");
       _flushing = false;
       setSyncFlushing(false);
@@ -1430,10 +1436,26 @@ export function useSyncEngine(): SyncState {
     });
   }, [setConnectivityState, setConnectivityUnlessTokenExpired]);
 
-  // ── Initial load ───────────────────────────────────────────────────────────
+  // ── Keep every hook instance's `syncing` in lockstep with the overlay ──────
   useEffect(() => {
+    const onSyncing = (event: Event) => {
+      const detail = (event as CustomEvent<{ syncing?: boolean }>).detail;
+      setSyncing(Boolean(detail?.syncing));
+    };
+    window.addEventListener("sync-engine:syncing", onSyncing);
+    return () => window.removeEventListener("sync-engine:syncing", onSyncing);
+  }, []);
+
+  // ── Initial load ───────────────────────────────────────────────────────────
+  // ~10 UI consumers mount this hook; only the first instance probes the queue.
+  useEffect(() => {
+    syncEngineMounts += 1;
+    const isPrimary = syncEngineMounts === 1;
     void refreshPending();
-    if (canAttemptSyncFlush() && !shouldSkipBlockingFetch()) void flush();
+    if (isPrimary && canAttemptSyncFlush() && !shouldSkipBlockingFetch()) void flush();
+    return () => {
+      syncEngineMounts -= 1;
+    };
   }, [flush, refreshPending]);
 
   // ── queueOrSend ───────────────────────────────────────────────────────────
