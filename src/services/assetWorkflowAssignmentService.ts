@@ -29,6 +29,7 @@ export const assetWorkflowAssignmentService = {
         workflowTypeId,
       });
       invalidateWebCache(`/asset-workflow-assignments/by-asset/${assetId}`);
+      void workflowConfigService.refreshByIdInBackground(workflowConfigId);
       return res.data;
     }
 
@@ -75,6 +76,7 @@ export const assetWorkflowAssignmentService = {
           res.data,
         ]);
       } catch { /* non-fatal */ }
+      void workflowConfigService.refreshByIdInBackground(workflowConfigId);
       return res.data;
     } catch (error) {
       if (isOfflineNetworkError(error)) {

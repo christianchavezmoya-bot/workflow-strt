@@ -4,6 +4,8 @@ import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import {
   countMissingWorkflowItems,
   getMissingWorkflowItems,
+  getRunMissingMediaSteps,
+  sanitizeMissingMediaFlags,
   splitMissingItemsByGate,
 } from "./workflowCompleteness";
 
@@ -170,5 +172,57 @@ describe("countMissingWorkflowItems — run level", () => {
       run(steps, [{ stepId: "__nav__", values: { currentStepId: "s1", historyJson: "[]" } }]),
     );
     expect(missing).toBe(1);
+  });
+});
+
+describe("getRunMissingMediaSteps — required photo/video only", () => {
+  const run = (steps: WorkflowStep[], results: Array<{ stepId: string; values: Record<string, string> }>) =>
+    ({
+      workflowSnapshotJson: JSON.stringify({ stepsJson: JSON.stringify(steps) }),
+      stepResultsJson: JSON.stringify(results),
+      isLocked: false,
+    } as unknown as AssetWorkflowRun);
+
+  it("returns no missing steps when all media inputs are optional", () => {
+    const steps = [
+      step([input({ id: "p1", type: "photo", required: false })], { id: "s1" }),
+      step([input({ id: "v1", type: "video", required: false })], { id: "s2", order: 2 }),
+    ];
+    const { allRequired, missing } = getRunMissingMediaSteps(
+      run(steps, [
+        { stepId: "s1", values: {} },
+        { stepId: "s2", values: {} },
+      ]),
+    );
+    expect(allRequired).toEqual([]);
+    expect(missing).toEqual([]);
+  });
+
+  it("counts only required media for dashboard flags", () => {
+    const steps = [
+      step(
+        [
+          input({ id: "p1", type: "photo", required: true }),
+          input({ id: "p2", type: "photo", required: false }),
+        ],
+        { id: "s1" },
+      ),
+    ];
+    const { allRequired, missing } = getRunMissingMediaSteps(
+      run(steps, [{ stepId: "s1", values: {} }]),
+    );
+    expect(allRequired).toHaveLength(1);
+    expect(allRequired[0]?.inputId).toBe("p1");
+    expect(missing).toHaveLength(1);
+  });
+
+  it("drops stale flags when optional-only runs are revalidated", () => {
+    const steps = [step([input({ id: "p1", type: "photo", required: false })], { id: "s1" })];
+    const lockedRun = run(steps, [{ stepId: "s1", values: {} }]);
+    const sanitized = sanitizeMissingMediaFlags(
+      [{ runId: "run-1", id: "flag-1" }],
+      new Map([["run-1", { ...lockedRun, id: "run-1" } as AssetWorkflowRun]]),
+    );
+    expect(sanitized).toEqual([]);
   });
 });

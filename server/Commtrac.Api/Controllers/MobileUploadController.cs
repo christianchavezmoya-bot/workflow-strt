@@ -405,8 +405,9 @@ public class MobileUploadController : ControllerBase
         {
             stepIndex++;
             foreach (var input in step.Inputs.Where(inp =>
-                         string.Equals(inp.Type, "photo", StringComparison.OrdinalIgnoreCase) ||
-                         string.Equals(inp.Type, "video", StringComparison.OrdinalIgnoreCase)))
+                         (string.Equals(inp.Type, "photo", StringComparison.OrdinalIgnoreCase) ||
+                          string.Equals(inp.Type, "video", StringComparison.OrdinalIgnoreCase)) &&
+                         inp.Required))
             {
                 var captured = ParseCaptureValues(
                     resultValues.TryGetValue(step.Id, out var values)
@@ -610,4 +611,5 @@ public sealed class WorkflowSnapshotInputSummary
     public string Id { get; set; } = string.Empty;
     public string? Label { get; set; }
     public string? Type { get; set; }
+    public bool Required { get; set; }
 }
