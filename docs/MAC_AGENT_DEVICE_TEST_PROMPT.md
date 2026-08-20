@@ -118,18 +118,19 @@ DevTools → Network: requests must go to **`$LANIP:8080`**. No CORS errors in C
 | ID | Check | PASS if |
 |----|-------|---------|
 | W1 | Login → Dashboard | Loads, no redirect loop, no console errors |
-| W2 | Sidebar | **BOM Project** is present |
-| W3 | Admin → Workflows | **Chambers_default** listed for the Chambers product |
-| W4 | Projects → column picker | Customer / Job Number / Status / Global Offices each appear **once** |
-| W5 | Documents | Upload a small file, preview it, download it |
+| W2 | Sidebar | **BOM Project** is present; **Admin** visible for admin only |
+| W3 | Log in as PM in a second browser/incognito | **Admin NOT in sidebar** (PM has no admin.view) |
+| W4 | Admin → Workflows | **Chambers_default** listed for the Chambers product |
+| W5 | Projects → column picker | Customer / Job Number / Status / Global Offices each appear **once** |
+| W6 | Documents | Upload a small file, preview it, download it |
 
 Now open the **same URL on the iPhone's Safari and the Android's Chrome**. This is the fastest proof the network path works before you spend time on native builds.
 
 | ID | PASS if |
 |----|---------|
-| W6 | Phone browser loads the app over `http://$LANIP:5174` and login succeeds |
+| W7 | Phone browser loads the app over `http://$LANIP:5174` and login succeeds |
 
-**If W6 fails but L3 passed**, the phone is on a different network (guest Wi-Fi, or cellular still preferred). Fix that before continuing — native builds will fail the same way.
+**If W7 fails but L3 passed**, the phone is on a different network (guest Wi-Fi, or cellular still preferred). Fix that before continuing — native builds will fail the same way.
 
 ---
 
@@ -168,7 +169,7 @@ Set a password (needs upper, lower, digit, symbol — e.g. `Tester123!`), then l
 | U1 | Both users created and listed |
 | U2 | Invite returns success; user shows inactive; a reset token exists in the DB |
 | U3 | Invite link sets a password and the account becomes active |
-| U4 | New user logs in and sees a **narrower** menu than admin (permissions applied) |
+| U4 | New user logs in and sees a **narrower** menu than admin (PM also lacks Admin tab) |
 
 ---
 
@@ -298,10 +299,11 @@ B3 web 5174 over LAN: PASS / FAIL
 WEB
 W1 login dashboard: PASS / FAIL
 W2 BOM sidebar: PASS / FAIL
-W3 Chambers_default in workflows: PASS / FAIL
-W4 no duplicate project columns: PASS / FAIL
-W5 document upload/preview/download: PASS / FAIL
-W6 phone browser over LAN: PASS / FAIL
+W3 PM no Admin sidebar: PASS / FAIL
+W4 Chambers_default in workflows: PASS / FAIL
+W5 no duplicate project columns: PASS / FAIL
+W6 document upload/preview/download: PASS / FAIL
+W7 phone browser over LAN: PASS / FAIL
 
 USERS
 U1 users created: PASS / FAIL
