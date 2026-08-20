@@ -93,7 +93,7 @@ describe("usePermissions", () => {
     const { result } = renderHook(() => usePermissions());
     await waitFor(() => expect(result.current.permissionsReady).toBe(true));
 
-    // Saved config had settings.view/edit false, but admin fallback OR-merge keeps access.
+    // Saved config had settings.view/edit false, but createUsers OR-merge keeps access.
     expect(result.current.settings.view).toBe(true);
     expect(result.current.settings.edit).toBe(true);
   });

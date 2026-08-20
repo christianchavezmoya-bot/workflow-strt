@@ -53,6 +53,14 @@ export function resolveRoleDomains(
         view: defaults.settings.view || (saved.settings?.view ?? false),
         edit: defaults.settings.edit || (saved.settings?.edit ?? false),
       },
+      admin: {
+        view: defaults.admin.view || (saved.admin?.view ?? false),
+        manageUsers: defaults.admin.manageUsers || (saved.admin?.manageUsers ?? false),
+        manageRoles: defaults.admin.manageRoles || (saved.admin?.manageRoles ?? false),
+        manageCustomers: defaults.admin.manageCustomers || (saved.admin?.manageCustomers ?? false),
+        manageTabs: defaults.admin.manageTabs || (saved.admin?.manageTabs ?? false),
+        tableConfig: defaults.admin.tableConfig || (saved.admin?.tableConfig ?? false),
+      },
       bomProject: { ...defaults.bomProject, ...(saved.bomProject ?? {}) },
       tips:       { ...defaults.tips,       ...(saved.tips ?? {}) },
       analytics:  { ...defaults.analytics,  ...(saved.analytics ?? {}) },
@@ -65,6 +73,7 @@ export function resolveRoleDomains(
   if (permissions.viewOnly) {
     return {
       ...domains,
+      admin: { view: false, manageUsers: false, manageRoles: false, manageCustomers: false, manageTabs: false, tableConfig: false },
       projects:           { ...domains.projects,           delete: false },
       installationAssets: { ...domains.installationAssets, delete: false },
       documents:          { ...domains.documents,          delete: false },
@@ -91,6 +100,7 @@ export type EffectivePermissions = {
   workInstructionsBuilder: DomainPermissions["workInstructionsBuilder"];
   documents: DomainPermissions["documents"];
   settings: DomainPermissions["settings"];
+  admin: DomainPermissions["admin"];
   bomProject: DomainPermissions["bomProject"];
   tips: DomainPermissions["tips"];
   analytics: DomainPermissions["analytics"];
@@ -112,6 +122,7 @@ export function buildEffectivePermissions(
       workInstructionsBuilder: domains.workInstructionsBuilder,
       documents: domains.documents,
       settings:  domains.settings,
+      admin:     domains.admin,
       bomProject: { ...domains.bomProject, upload: false, map: false, commit: false, delete: false },
       tips:       { ...domains.tips,       create: false, edit: false, delete: false },
       analytics:  domains.analytics,
@@ -130,6 +141,7 @@ export function buildEffectivePermissions(
     workInstructionsBuilder: domains.workInstructionsBuilder,
     documents: domains.documents,
     settings:  domains.settings,
+    admin:     domains.admin,
     bomProject: domains.bomProject,
     tips:       domains.tips,
     analytics:  domains.analytics,

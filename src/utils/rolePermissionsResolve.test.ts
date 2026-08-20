@@ -36,7 +36,7 @@ describe("resolveRoleDomains", () => {
     expect(domains.analytics.view).toBe(false);
   });
 
-  it("OR-merges settings.view when createDeleteTables grants admin settings access", () => {
+  it("OR-merges settings.view when createUsers grants admin settings access", () => {
     const adminLike = createRolePermissions({
       viewOnly: false,
       createDeleteTables: true,
@@ -50,6 +50,15 @@ describe("resolveRoleDomains", () => {
     const domains = resolveRoleDomains("Admin", adminLike);
     expect(domains.settings.view).toBe(true);
     expect(domains.settings.edit).toBe(true);
+    expect(domains.admin.view).toBe(true);
+    expect(domains.admin.manageUsers).toBe(true);
+  });
+
+  it("Project Manager defaults do not grant Admin page access", () => {
+    const domains = resolveRoleDomains("Project Manager", FALLBACK_ROLE_PERMISSIONS["Project Manager"]);
+    expect(domains.admin.view).toBe(false);
+    expect(domains.admin.manageUsers).toBe(false);
+    expect(domains.settings.view).toBe(false);
   });
 
   it("hard-locks delete and workflow authoring for viewOnly roles even if admin saved true", () => {
@@ -80,12 +89,22 @@ describe("buildEffectivePermissions", () => {
     expect(perms.workInstructionsBuilder.build).toBe(false);
   });
 
-  it("Admin fallback has full table and BOM rights", () => {
+  it("Admin fallback has full table, BOM, and admin rights", () => {
     const perms = buildEffectivePermissions("Admin", FALLBACK_ROLE_PERMISSIONS.Admin);
     expect(perms.createDeleteTables).toBe(true);
     expect(perms.createUsers).toBe(true);
+    expect(perms.admin.view).toBe(true);
+    expect(perms.admin.manageUsers).toBe(true);
     expect(perms.bomProject.commit).toBe(true);
     expect(domainsMatchScopeAll(perms.projects)).toBe(true);
+  });
+
+  it("Project Manager fallback cannot open Admin or Settings", () => {
+    const perms = buildEffectivePermissions("Project Manager", FALLBACK_ROLE_PERMISSIONS["Project Manager"]);
+    expect(perms.createDeleteTables).toBe(true);
+    expect(perms.createUsers).toBe(false);
+    expect(perms.admin.view).toBe(false);
+    expect(perms.settings.view).toBe(false);
   });
 
   it("Viewer strips BOM upload even when saved domains grant it", () => {

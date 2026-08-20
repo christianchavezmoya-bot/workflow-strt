@@ -339,6 +339,7 @@ export const UserManagement: React.FC = () => {
     workInstructionsBuilder: { view: false, viewScope: "own", build: false, publish: false, archive: false, delete: false },
     documents:               { view: false, viewScope: "own", upload: false, delete: false },
     settings:                { view: false, edit: false },
+    admin:                   { view: false, manageUsers: false, manageRoles: false, manageCustomers: false, manageTabs: false, tableConfig: false },
     bomProject:              { view: false, upload: false, map: false, commit: false, delete: false },
     tips:                    { view: false, create: false, edit: false, delete: false },
     analytics:               { view: false, viewScope: "own", export: false },
@@ -494,6 +495,8 @@ export const UserManagement: React.FC = () => {
       return;
     }
 
+    if (!can.admin.manageRoles) return;
+
     // Save to database when roles are actually changed by user.
     // Dispatch the "roles-config-changed" event AFTER the PUT completes so that
     // usePermissions re-fetches from a DB that already has the new data. Dispatching
@@ -509,7 +512,7 @@ export const UserManagement: React.FC = () => {
       .catch((error) => {
         console.error('❌ Failed to save roles to database:', error);
       });
-  }, [rolesConfig]);
+  }, [rolesConfig, can.admin.manageRoles]);
 
   useEffect(() => {
     if (roles.length === 0) return;
@@ -645,6 +648,14 @@ export const UserManagement: React.FC = () => {
             settings: {
               view: computed.settings.view || (saved.settings?.view ?? false),
               edit: computed.settings.edit || (saved.settings?.edit ?? false),
+            },
+            admin: {
+              view: computed.admin.view || (saved.admin?.view ?? false),
+              manageUsers: computed.admin.manageUsers || (saved.admin?.manageUsers ?? false),
+              manageRoles: computed.admin.manageRoles || (saved.admin?.manageRoles ?? false),
+              manageCustomers: computed.admin.manageCustomers || (saved.admin?.manageCustomers ?? false),
+              manageTabs: computed.admin.manageTabs || (saved.admin?.manageTabs ?? false),
+              tableConfig: computed.admin.tableConfig || (saved.admin?.tableConfig ?? false),
             },
             // Fall back to computed for areas added after this config was saved, so the
             // editor opens showing the role's effective rights rather than all-unticked.
@@ -992,6 +1003,21 @@ export const UserManagement: React.FC = () => {
     });
     setCustomTabConfigs((prev) => ({ ...initial, ...prev }));
   }, [adminTabsConfig]);
+
+  const currentAdminTabType = adminTabsConfig[tab]?.type ?? "";
+  const showAdminTableConfigMenu =
+    currentAdminTabType !== "customers" && can.admin.tableConfig;
+  const showAdminAddMenu = (() => {
+    switch (currentAdminTabType) {
+      case "users": return can.admin.manageUsers;
+      case "customers": return can.admin.manageCustomers;
+      case "roles": return can.admin.manageRoles;
+      case "custom": return can.admin.tableConfig;
+      default: return false;
+    }
+  })();
+  const showAdminGearMenu =
+    showAdminTableConfigMenu || showAdminAddMenu || can.admin.manageTabs;
 
   const numberedUsers = useMemo(() => users.map((user, index) => ({ ...user, seq: index + 1 })), [users]);
   const userAccessors = useMemo(
@@ -1505,7 +1531,7 @@ export const UserManagement: React.FC = () => {
           <Typography variant="body2" color="text.secondary">Manage users, roles, offices and system settings</Typography>
         </Box>
         <Stack direction="row" spacing={1} alignItems="center">
-          {adminTabsConfig[tab]?.type === "users" && can.createUsers && (
+          {adminTabsConfig[tab]?.type === "users" && can.admin.manageUsers && (
             <>
               <Button variant="outlined" startIcon={<UploadFileOutlined />}
                 onClick={() => { setBulkImportRows([]); setBulkImportResult(null); setBulkImportOpen(true); }}>
@@ -1516,7 +1542,7 @@ export const UserManagement: React.FC = () => {
               </Button>
             </>
           )}
-          {can.createDeleteTables && (
+          {showAdminGearMenu && (
             <IconButton
               size="small"
               onClick={(event) => {
@@ -1662,14 +1688,14 @@ export const UserManagement: React.FC = () => {
                   })}
                   <TableCell sx={{ padding: '8px 12px' }}>
                     <Stack direction="row" spacing={0.5} alignItems="center">
-                      {can.createUsers && (
+                      {can.admin.manageUsers && (
                         <Tooltip title="Send invite email">
                           <IconButton size="small" onClick={() => dispatch(inviteUser(user.id))}>
                             <EmailOutlined fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-                      {can.createUsers && (
+                      {can.admin.manageUsers && (
                         <Tooltip title={user.isActive ? "Deactivate user" : "User already inactive"}>
                           <span>
                             <IconButton
@@ -1690,21 +1716,21 @@ export const UserManagement: React.FC = () => {
                           </IconButton>
                         </Tooltip>
                       )}
-                      {can.createUsers && (
+                      {can.admin.manageUsers && (
                         <Tooltip title="Reset onboarding — user will see welcome tour on next login">
                           <IconButton size="small" color="info" onClick={() => dispatch(resetOnboarding(user.id))}>
                             <ReplayOutlined fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-                      {can.createUsers && (
+                      {can.admin.manageUsers && (
                         <Tooltip title="Edit user">
                           <IconButton size="small" onClick={() => handleEditUser(user)}>
                             <EditOutlined fontSize="small" />
                           </IconButton>
                         </Tooltip>
                       )}
-                      {can.createUsers && (
+                      {can.admin.manageUsers && (
                         <Tooltip title="Delete user">
                           <IconButton
                             size="small"
@@ -1812,7 +1838,7 @@ export const UserManagement: React.FC = () => {
       {/* Roles Tab */}
       {adminTabsConfig[tab]?.type === "roles" && (
         <Stack spacing={2}>
-          {can.createDeleteTables && (
+          {can.admin.manageRoles && (
             <Stack direction="row">
               <Button variant="contained" onClick={() => openRoleDialog()}>
                 New role
@@ -1848,7 +1874,7 @@ export const UserManagement: React.FC = () => {
                     </TableCell>
                   );
                 })}
-                {can.createDeleteTables && <TableCell>Actions</TableCell>}
+                {can.admin.manageRoles && <TableCell>Actions</TableCell>}
               </TableRow>
             </TableHead>
             <TableBody>
@@ -1862,7 +1888,7 @@ export const UserManagement: React.FC = () => {
                       <TableCell key={`${row.role}-${field.id}`}>
                         <Checkbox
                           checked={!!(rolesConfig[row.role] as unknown as Record<string, boolean>)?.[permKey]}
-                          disabled={!can.createDeleteTables}
+                          disabled={!can.admin.manageRoles}
                           onChange={(event) =>
                             setRolesConfig((prev) => ({
                               ...prev,
@@ -1876,7 +1902,7 @@ export const UserManagement: React.FC = () => {
                       </TableCell>
                     );
                   })}
-                  {can.createDeleteTables && (
+                  {can.admin.manageRoles && (
                     <TableCell>
                       <Stack direction="row" spacing={1}>
                         <Tooltip title="Edit role">
@@ -3498,6 +3524,53 @@ export const UserManagement: React.FC = () => {
                     <TableCell />
                   </TableRow>
 
+                  {/* Admin — page access and management actions (separate from app Settings) */}
+                  <TableRow>
+                    <TableCell><Typography variant="caption" fontWeight={600}>Admin</Typography></TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.admin?.view}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, admin: { ...prev.domains.admin, view: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>view page</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.admin?.tableConfig}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, admin: { ...prev.domains.admin, tableConfig: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>tables</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.admin?.manageUsers}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, admin: { ...prev.domains.admin, manageUsers: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>users</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.admin?.manageCustomers}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, admin: { ...prev.domains.admin, manageCustomers: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>customers</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.admin?.manageRoles}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, admin: { ...prev.domains.admin, manageRoles: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>roles</Typography>
+                      </Stack>
+                    </TableCell>
+                    <TableCell align="center">
+                      <Stack alignItems="center" spacing={0}>
+                        <Checkbox size="small" checked={!!roleForm.domains.admin?.manageTabs}
+                          onChange={(e) => setRoleForm((prev) => ({ ...prev, domains: { ...prev.domains, admin: { ...prev.domains.admin, manageTabs: e.target.checked } } }))} />
+                        <Typography variant="caption" color="text.secondary" sx={{ fontSize: "0.6rem", mt: -0.5 }}>tabs</Typography>
+                      </Stack>
+                    </TableCell>
+                  </TableRow>
+
                   {/* Settings */}
                   <TableRow>
                     <TableCell><Typography variant="caption" fontWeight={600}>Settings</Typography></TableCell>
@@ -4200,7 +4273,7 @@ export const UserManagement: React.FC = () => {
           open={adminSettingsMenuOpen}
           onClose={() => setAdminSettingsMenuOpen(false)}
         >
-        {adminTabsConfig[tab]?.type !== "customers" && (
+        {showAdminTableConfigMenu && (
           <MenuItem
             onClick={() => {
               setAdminSettingsMenuOpen(false);
@@ -4219,16 +4292,19 @@ export const UserManagement: React.FC = () => {
             Table configuration
           </MenuItem>
         )}
+        {showAdminAddMenu && (
         <MenuItem
           onClick={() => {
             setAdminSettingsMenuOpen(false);
             const selected = adminTabsConfig[tab];
             if (!selected) return;
             if (selected.type === "users") {
+              if (!can.admin.manageUsers) return;
               setInviteOpen(true);
               return;
             }
             if (selected.type === "customers") {
+              if (!can.admin.manageCustomers) return;
               setCustomerOpen(true);
               return;
             }
@@ -4252,12 +4328,15 @@ export const UserManagement: React.FC = () => {
                 return;
               }
             if (selected.type === "roles") {
+              if (!can.admin.manageRoles) return;
               openRoleDialog();
             }
           }}
         >
           Add/Create/Invite
         </MenuItem>
+        )}
+        {can.admin.manageTabs && (
         <MenuItem
           onClick={() => {
             setAdminSettingsMenuOpen(false);
@@ -4266,6 +4345,7 @@ export const UserManagement: React.FC = () => {
         >
           Admin Tabs Manager
         </MenuItem>
+        )}
       </Menu>
 
       <Dialog

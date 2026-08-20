@@ -87,13 +87,13 @@ const TimeAnalyticsRoute = () => {
 const AdminRoute = () => {
   const can = usePermissions();
   if (!can.permissionsReady) return null;
-  return can.createUsers || can.settings.view ? <UserManagement /> : <Navigate to="/" replace />;
+  return can.admin.view ? <UserManagement /> : <Navigate to="/" replace />;
 };
 
 const CustomerSitesRoute = () => {
   const can = usePermissions();
   if (!can.permissionsReady) return null;
-  return can.createUsers || can.settings.view ? <CustomerSites /> : <Navigate to="/" replace />;
+  return can.admin.view ? <CustomerSites /> : <Navigate to="/" replace />;
 };
 
 const FaultReportsRoute = () => {
