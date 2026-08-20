@@ -47,6 +47,7 @@ import {
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { useCatalogPrefetch } from "../../hooks/useCatalogPrefetch";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
@@ -252,6 +253,7 @@ const AssetInstallationPage = () => {
   const dispatch = useAppDispatch();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const toast = useAppToast();
   const can = usePermissions();
   const { complexViewActive } = useComplexView();
   const { zone: officeZone } = useOfficeTimeZone();
@@ -2294,7 +2296,7 @@ const AssetInstallationPage = () => {
       setDeleteAsset(null);
       refreshAssets();
     } catch {
-      alert("Failed to delete asset.");
+      toast.error("Failed to delete asset.");
     } finally {
       setDeletingAsset(false);
     }
@@ -2309,7 +2311,7 @@ const AssetInstallationPage = () => {
       setBulkDeleteOpen(false);
       refreshAssets();
     } catch {
-      alert("One or more assets could not be deleted.");
+      toast.error("One or more assets could not be deleted.");
     } finally {
       setBulkDeleting(false);
     }
@@ -2321,7 +2323,7 @@ const AssetInstallationPage = () => {
       await projectAssetService.restore(asset.id);
       refreshAssets();
     } catch {
-      alert("Failed to restore asset.");
+      toast.error("Failed to restore asset.");
     } finally {
       setDeletingAsset(false);
     }
@@ -2335,7 +2337,7 @@ const AssetInstallationPage = () => {
       setPurgeAsset(null);
       refreshAssets();
     } catch {
-      alert("Failed to permanently delete asset.");
+      toast.error("Failed to permanently delete asset.");
     } finally {
       setPurgingAsset(false);
     }
@@ -2441,17 +2443,17 @@ const AssetInstallationPage = () => {
         }
 
         if (shouldSkipBlockingFetch()) {
-          alert(OFFLINE_CONFIG_MISSING_MESSAGE);
+          toast.warning(OFFLINE_CONFIG_MISSING_MESSAGE);
           retryOfflineDownload();
           return;
         }
-        alert("Work instruction config not found.");
+        toast.error("Work instruction config not found.");
         return;
       }
       // Legacy path: workflowTemplateId
       if (asset.workflowTemplateId) {
         const wf = await workflowTemplateService.getById(asset.workflowTemplateId);
-        if (!wf) { alert("Workflow template not found."); return; }
+        if (!wf) { toast.error("Workflow template not found."); return; }
         setRunnerExistingRunId(undefined);
         setRunnerAsset(asset);
         setRunnerWorkflow(wf);
@@ -2459,9 +2461,9 @@ const AssetInstallationPage = () => {
         setRunnerOpen(true);
         return;
       }
-      alert("This asset has no work instruction assigned. Edit the asset and select a Configuration Type first.");
+      toast.warning("This asset has no work instruction assigned. Edit the asset and select a Configuration Type first.");
     } catch {
-      alert("Failed to load workflow.");
+      toast.error("Failed to load workflow.");
     } finally {
       setRunnerLoading(null);
     }
@@ -2616,7 +2618,7 @@ const AssetInstallationPage = () => {
       }
     } catch (err) {
       console.error("[AssetInstallationPage] Failed to save asset issue", err);
-      alert(err instanceof Error ? err.message : "Failed to save issue offline.");
+      toast.error(err instanceof Error ? err.message : "Failed to save issue offline.");
     }
   }
 
@@ -2690,7 +2692,7 @@ const AssetInstallationPage = () => {
         mergeMedia: true,
       });
       if (!payload) {
-        alert("Workflow config not found.");
+        toast.error("Workflow config not found.");
         return;
       }
 
@@ -2703,7 +2705,7 @@ const AssetInstallationPage = () => {
       setRunnerOpen(true);
       refreshWorkflowOpenDataInBackground(asset.id, run.workflowConfigId);
     } catch {
-      alert("Failed to load workflow.");
+      toast.error("Failed to load workflow.");
     } finally {
       setRunnerLoading(null);
     }
@@ -2895,7 +2897,7 @@ const AssetInstallationPage = () => {
         configFromMemory: cfgFromMemory,
         mergeMedia: true,
       });
-      if (!payload) { alert("Workflow config not found."); return; }
+      if (!payload) { toast.error("Workflow config not found."); return; }
 
       setRunnerPrefillValues(prefillValues);
       setRunnerExistingRunId(undefined);
@@ -2907,7 +2909,7 @@ const AssetInstallationPage = () => {
       refreshWorkflowOpenDataInBackground(asset.id, configId);
       // Optimistically mark asset as InProgress so the Continue button shows if the user pauses
       setAssets(prev => prev.map(a => a.id === asset.id ? { ...a, status: "InProgress" as const } : a));
-    } catch { alert("Failed to load workflow."); } finally {
+    } catch { toast.error("Failed to load workflow."); } finally {
       setRunnerLoading(null);
     }
   }
@@ -2925,7 +2927,7 @@ const AssetInstallationPage = () => {
         runs: runsMap[asset.id],
         mergeMedia: true,
       });
-      if (!payload) { alert("Workflow config not found."); return; }
+      if (!payload) { toast.error("Workflow config not found."); return; }
 
       setRunnerExistingRunId(run.id);
       setRunnerAsset(asset);
@@ -2934,7 +2936,7 @@ const AssetInstallationPage = () => {
       setRunnerFeatureSelections(parseFeatureSelectionsForConfig(run.workflowConfigId));
       setRunnerOpen(true);
       refreshWorkflowOpenDataInBackground(asset.id, run.workflowConfigId);
-    } catch { alert("Failed to load workflow."); } finally {
+    } catch { toast.error("Failed to load workflow."); } finally {
       setRunnerLoading(null);
     }
   }

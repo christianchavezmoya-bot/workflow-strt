@@ -1094,7 +1094,7 @@ const Dashboard = () => {
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to close this project right now.";
-      window.alert(message);
+      setDashboardError(message);
     } finally {
       setClosingDashboardProjectId(null);
     }
@@ -2129,15 +2129,15 @@ const Dashboard = () => {
       });
       if (!payload) {
         if (isOfflineConfigMissingContext()) {
-          alert(OFFLINE_CONFIG_MISSING_MESSAGE);
+          setDashboardError(OFFLINE_CONFIG_MISSING_MESSAGE);
           retryOfflineDownload();
         } else {
-          alert("Workflow config not found.");
+          setDashboardError("Workflow config not found.");
         }
         return false;
       }
       if (payload.workflow.steps.length === 0) {
-        alert("This workflow has no steps defined.");
+        setDashboardError("This workflow has no steps defined.");
         return false;
       }
       setRunnerExistingRunId(options?.existingRunId ?? payload.existingRunId);
@@ -2149,7 +2149,7 @@ const Dashboard = () => {
       options?.onOpened?.();
       return true;
     } catch {
-      alert("Failed to load workflow.");
+      setDashboardError("Failed to load workflow.");
       return false;
     } finally {
       setRunnerLoading(null);
@@ -2355,7 +2355,7 @@ const Dashboard = () => {
     const cfg = workflowConfigs.find((c) => c.id === assignForm.workflowConfigId);
     const workflowTypeId = cfg ? resolveConfigWorkflowTypeId(cfg, workflowTypes) || (cfg.workflowTypeId ?? "") : "";
     if (!workflowTypeId) {
-      alert("Could not determine the workflow type for this config. Reconnect and try again.");
+      setDashboardError("Could not determine the workflow type for this config. Reconnect and try again.");
       return;
     }
     setAssignSaving(true);
@@ -2372,7 +2372,7 @@ const Dashboard = () => {
       setAssignForm({ workflowTypeId: "", workflowConfigId: "" });
     } catch (err) {
       console.error("[Dashboard] Failed to save assignment", err);
-      alert("Failed to assign workflow. Please try again.");
+      setDashboardError("Failed to assign workflow. Please try again.");
     } finally {
       setAssignSaving(false);
     }

@@ -558,7 +558,7 @@ export const UserManagement: React.FC = () => {
       if (isVirtual) {
         const name = (editSiteFormData.name || "").trim();
         if (!name) {
-          alert("Site name is required.");
+          toast.warning("Site name is required.");
           return;
         }
         const response = await api.post('/sites', {
@@ -600,7 +600,7 @@ export const UserManagement: React.FC = () => {
       setEditSiteFormData({});
     } catch (err) {
       console.error('Failed to save site', err);
-      alert('Failed to save site');
+      toast.error('Failed to save site');
     }
   };
 
@@ -1475,7 +1475,7 @@ export const UserManagement: React.FC = () => {
       setDeleteTarget(null);
     } catch (error) {
       console.error("Failed to delete item:", error);
-      alert("Failed to delete item");
+      toast.error("Failed to delete item");
     } finally {
       setDeleteSaving(false);
     }
@@ -2020,7 +2020,7 @@ export const UserManagement: React.FC = () => {
                     setEditCustomerPhotoScale(created.photoScale || 100);
                   } catch (err) {
                     console.error("Failed to create customer", err);
-                    alert("Failed to create customer");
+                    toast.error("Failed to create customer");
                   }
                 }}
               >
@@ -2033,7 +2033,7 @@ export const UserManagement: React.FC = () => {
                 onClick={async () => {
                   // First check if we have any customers
                   if (filteredCustomers.length === 0) {
-                    alert('Please create a customer first by switching to Cards view');
+                    toast.warning('Please create a customer first by switching to Cards view');
                     return;
                   }
 
@@ -2068,7 +2068,7 @@ export const UserManagement: React.FC = () => {
                     });
                   } catch (err) {
                     console.error('Failed to create site', err);
-                    alert('Failed to create site.');
+                    toast.error('Failed to create site.');
                   }
                 }}
               >
@@ -2432,7 +2432,7 @@ export const UserManagement: React.FC = () => {
                               await dispatch(updateCustomer({ id: customer.id, payload: customerPayload })).unwrap();
                             } catch (err) {
                               console.error("Failed to save customer", err);
-                              alert("Failed to save customer");
+                              toast.error("Failed to save customer");
                             }
 
                             setEditingCustomerId(null);
