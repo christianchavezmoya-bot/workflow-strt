@@ -197,6 +197,7 @@ import { useBulkActionWarning } from "./useBulkActionWarning";
 import {
   buildBulkAssignWarnRows,
   dedupeLatestPublishedWorkflowConfigs,
+  filterPublishedConfigsForProject,
   findAssetsNeedingBulkAssignWarning,
 } from "./assetInstallationWorkflowAssign";
 import {
@@ -2250,11 +2251,17 @@ const AssetInstallationPage = () => {
 
   async function handleImportCsv() {
     if (!activeProduct) return;
+    const project = selectedProjectId ? projectMap.get(selectedProjectId) : projects[0];
+    const scopedConfigs = filterPublishedConfigsForProject(
+      latestPublishedWfConfigs,
+      workflowTypes,
+      project,
+    );
     await importCsv({
       activeProduct,
       projectId: selectedProjectId,
       fallbackProjectId: projects[0]?.id,
-      workflowConfigs,
+      workflowConfigs: scopedConfigs,
       onAssetsCreated: (created) => {
         setAssets((prev) => mergeImportedAssets(prev, created));
       },
@@ -3669,6 +3676,7 @@ const AssetInstallationPage = () => {
         users={users}
         latestPublishedWfConfigs={latestPublishedWfConfigs}
         publishedWfConfigs={publishedWfConfigs}
+        workflowTypes={workflowTypes}
         configs={configs}
         getSiteLocation={getSiteLocation}
         onClose={() => setAddOpen(false)}
@@ -3681,6 +3689,7 @@ const AssetInstallationPage = () => {
         asset={editAsset}
         users={users}
         latestPublishedWfConfigs={latestPublishedWfConfigs}
+        workflowTypes={workflowTypes}
         getProject={getProjectById}
         getSiteLocation={getSiteLocation}
         canEditAssetStatus={canEditAssetStatus}

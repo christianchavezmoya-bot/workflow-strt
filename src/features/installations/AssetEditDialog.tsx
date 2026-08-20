@@ -1,4 +1,4 @@
-import { memo, useEffect, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Button,
@@ -19,8 +19,11 @@ import {
 import type { Project } from "../../types/project";
 import type { ProjectAsset, ProjectAssetStatus } from "../../types/projectAsset";
 import type { WorkflowConfig } from "../../types/workflowConfig";
+import type { WorkflowType } from "../../types/workflowType";
 import type { User } from "../../types/user";
 import { projectAssetService } from "../../services/projectAssetService";
+import { findWorkflowType, resolveProjectWorkflowTypeId } from "../../utils/workflowTypeRules";
+import { filterPublishedConfigsForProject } from "./assetInstallationWorkflowAssign";
 import { CONFIG_TYPE_LABEL } from "./assetInstallationPageLogic";
 import { STATUS_COLORS, STATUS_LABELS } from "./assetStatusDisplay";
 
@@ -65,6 +68,7 @@ interface Props {
   asset: ProjectAsset | null;
   users: User[];
   latestPublishedWfConfigs: WorkflowConfig[];
+  workflowTypes: WorkflowType[];
   getProject: (projectId: string) => Project | undefined;
   getSiteLocation: (siteId?: string) => string;
   canEditAssetStatus: boolean;
@@ -76,6 +80,7 @@ function AssetEditDialogInner({
   asset,
   users,
   latestPublishedWfConfigs,
+  workflowTypes,
   getProject,
   getSiteLocation,
   canEditAssetStatus,
@@ -103,6 +108,17 @@ function AssetEditDialogInner({
 
   const isCancelled = currentAsset.status === "Cancelled";
   const project = getProject(currentAsset.projectId);
+  const scopedPublishedWfConfigs = useMemo(() => {
+    const filtered = filterPublishedConfigsForProject(latestPublishedWfConfigs, workflowTypes, project);
+    const current = latestPublishedWfConfigs.find((config) => config.id === form.configId);
+    if (current && !filtered.some((config) => config.id === current.id)) {
+      return [...filtered, current];
+    }
+    return filtered;
+  }, [latestPublishedWfConfigs, workflowTypes, project, form.configId]);
+  const projectWorkflowTypeName = project
+    ? findWorkflowType(workflowTypes, resolveProjectWorkflowTypeId(project))?.name
+    : undefined;
 
   async function save() {
     const tag = form.assetTag.trim();
@@ -244,7 +260,7 @@ function AssetEditDialogInner({
               disabled={Boolean(isCancelled)}
             >
               <MenuItem value="">(None)</MenuItem>
-              {latestPublishedWfConfigs.map((wc) => (
+              {scopedPublishedWfConfigs.map((wc) => (
                 <MenuItem key={wc.id} value={wc.id}>
                   {wc.configType ? `${wc.configType} - ` : ""}
                   {wc.name}
@@ -253,6 +269,11 @@ function AssetEditDialogInner({
               ))}
             </Select>
           </FormControl>
+          {latestPublishedWfConfigs.length > 0 && project && scopedPublishedWfConfigs.length === 0 && (
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              No {projectWorkflowTypeName ?? "matching"} work instructions for project {project.jobNumber}.
+            </Alert>
+          )}
           <TextField
             label="Serial Number"
             size="small"

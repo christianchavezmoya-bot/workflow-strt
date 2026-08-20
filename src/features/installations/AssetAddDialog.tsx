@@ -21,9 +21,12 @@ import type { Project } from "../../types/project";
 import type { Product } from "../../types/product";
 import type { User } from "../../types/user";
 import type { WorkflowConfig } from "../../types/workflowConfig";
+import type { WorkflowType } from "../../types/workflowType";
 import type { StepInput } from "../../types/workflow";
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { projectAssetService } from "../../services/projectAssetService";
+import { findWorkflowType, resolveProjectWorkflowTypeId } from "../../utils/workflowTypeRules";
+import { filterPublishedConfigsForProject } from "./assetInstallationWorkflowAssign";
 import { CONFIG_TYPE_LABEL } from "./assetInstallationPageLogic";
 
 export interface AssetFormValues {
@@ -63,6 +66,7 @@ interface Props {
   users: User[];
   latestPublishedWfConfigs: WorkflowConfig[];
   publishedWfConfigs: WorkflowConfig[];
+  workflowTypes: WorkflowType[];
   configs: { id: string; workflowTemplateId?: string }[];
   getSiteLocation: (siteId?: string) => string;
   onClose: () => void;
@@ -143,6 +147,7 @@ function AssetAddDialogInner({
   users,
   latestPublishedWfConfigs,
   publishedWfConfigs,
+  workflowTypes,
   configs,
   getSiteLocation,
   onClose,
@@ -158,6 +163,19 @@ function AssetAddDialogInner({
     setError(null);
     setConfigFeatureInputs([]);
   }, [defaultProjectId]);
+
+  const selectedProject = projects.find((p) => p.id === form.projectId);
+  const scopedPublishedWfConfigs = useMemo(
+    () => filterPublishedConfigsForProject(latestPublishedWfConfigs, workflowTypes, selectedProject),
+    [latestPublishedWfConfigs, workflowTypes, selectedProject],
+  );
+
+  useEffect(() => {
+    if (!form.configId) return;
+    if (!scopedPublishedWfConfigs.some((config) => config.id === form.configId)) {
+      setForm((prev) => ({ ...prev, configId: "" }));
+    }
+  }, [form.configId, scopedPublishedWfConfigs]);
 
   const selectedConfig = useMemo(
     () => configs.find((c) => c.id === form.configId) ?? null,
@@ -228,14 +246,14 @@ function AssetAddDialogInner({
     }
   }
 
-  const selectedProject = projects.find((p) => p.id === form.projectId);
-  // Asset tag is the minimum the server accepts, and a project has to own the asset.
-  // Greying the button out beats submitting and reading an error.
   const missingRequired = [
     form.assetTag.trim() ? null : "asset tag",
     form.projectId ? null : "project",
   ].filter((label): label is string => !!label);
   const canSave = missingRequired.length === 0;
+  const projectWorkflowTypeName = selectedProject
+    ? findWorkflowType(workflowTypes, resolveProjectWorkflowTypeId(selectedProject))?.name
+    : undefined;
 
   return (
     <>
@@ -279,7 +297,7 @@ function AssetAddDialogInner({
               onChange={(e) => setForm((p) => ({ ...p, configId: e.target.value }))}
             >
               <MenuItem value="">(None)</MenuItem>
-              {latestPublishedWfConfigs.map((wc) => (
+              {scopedPublishedWfConfigs.map((wc) => (
                 <MenuItem key={wc.id} value={wc.id}>
                   {wc.configType ? `${wc.configType} - ` : ""}
                   {wc.name}
@@ -292,6 +310,12 @@ function AssetAddDialogInner({
             <Alert severity="info" sx={{ fontSize: 12 }}>
               No published work instructions for {activeProduct?.name ?? "this product"} yet. Publish one in Work
               Instructions first.
+            </Alert>
+          )}
+          {publishedWfConfigs.length > 0 && selectedProject && scopedPublishedWfConfigs.length === 0 && (
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              No {projectWorkflowTypeName ?? "matching"} work instructions for project {selectedProject.jobNumber}.
+              Publish one in Work Instructions or check the project workflow type.
             </Alert>
           )}
 
