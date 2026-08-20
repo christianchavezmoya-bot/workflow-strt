@@ -32,6 +32,13 @@ import {
   getDocumentPreviewFileType,
 } from "../../utils/documentPreview";
 import { isDownloadOnlyPreviewExtension } from "../../utils/documentFileTypes";
+import { usePinchZoom } from "../../hooks/usePinchZoom";
+import {
+  formatZoomPercent,
+  PREVIEW_ZOOM_MAX,
+  PREVIEW_ZOOM_MIN,
+  stepZoom,
+} from "../../utils/pinchZoom";
 
 type PdfJsModule = typeof import("pdfjs-dist");
 let pdfjsModulePromise: Promise<PdfJsModule> | null = null;
@@ -692,6 +699,19 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
   const showDownload = !!doc?.downloadUrl;
   const sizeLabel = formatSize(doc?.fileSize);
 
+  // Pinch, double-tap and ctrl+wheel drive the same zoom value as the toolbar
+  // buttons, so a gesture and a button press cannot disagree.
+  const zoomSurfaceRef = usePinchZoom<HTMLDivElement>({
+    zoom,
+    onZoomChange: setZoom,
+    enabled: canZoom && !loading,
+  });
+
+  // Reset per document so a new preview never opens already magnified.
+  useEffect(() => {
+    setZoom(1);
+  }, [doc?.id, open]);
+
   return (
     <Dialog
       open={open}
@@ -738,13 +758,13 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         </Box>
 
         {canZoom && (
-          <Stack direction="row" spacing={0.5} sx={{ mr: 0.5 }}>
+          <Stack direction="row" spacing={0.5} alignItems="center" sx={{ mr: 0.5 }}>
             <Tooltip title="Zoom out">
               <span>
                 <IconButton
                   size="small"
-                  onClick={() => setZoom((current) => Math.max(0.7, Number((current - 0.15).toFixed(2))))}
-                  disabled={loading}
+                  onClick={() => setZoom((current) => stepZoom(current, -1))}
+                  disabled={loading || zoom <= PREVIEW_ZOOM_MIN}
                   sx={{ color: "#cbd5e1" }}
                 >
                   <ZoomOutOutlined fontSize="small" />
@@ -757,9 +777,15 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
                   size="small"
                   onClick={() => setZoom(1)}
                   disabled={loading}
-                  sx={{ color: "#cbd5e1" }}
+                  sx={{ color: "#cbd5e1", minWidth: 44 }}
                 >
-                  <RestartAltOutlined fontSize="small" />
+                  {zoom === 1 ? (
+                    <RestartAltOutlined fontSize="small" />
+                  ) : (
+                    <Typography variant="caption" sx={{ color: "#cbd5e1", fontWeight: 600 }}>
+                      {formatZoomPercent(zoom)}
+                    </Typography>
+                  )}
                 </IconButton>
               </span>
             </Tooltip>
@@ -767,8 +793,8 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
               <span>
                 <IconButton
                   size="small"
-                  onClick={() => setZoom((current) => Math.min(2.4, Number((current + 0.15).toFixed(2))))}
-                  disabled={loading}
+                  onClick={() => setZoom((current) => stepZoom(current, 1))}
+                  disabled={loading || zoom >= PREVIEW_ZOOM_MAX}
                   sx={{ color: "#cbd5e1" }}
                 >
                   <ZoomInOutlined fontSize="small" />
@@ -800,12 +826,16 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
       </Toolbar>
 
       <DialogContent
+        ref={zoomSurfaceRef}
         sx={{
           p: 0,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
           bgcolor: "transparent",
+          // Let the pinch handler own scaling; without this the browser zooms the
+          // whole dialog instead of the document.
+          touchAction: canZoom ? "pan-x pan-y" : undefined,
         }}
       >
         {loading && (
@@ -914,7 +944,9 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
               alt={doc?.name}
               sx={{
                 display: "block",
-                width: `${Math.max(100, zoom * 100)}%`,
+                // Unclamped so pinching below 100% actually shrinks a large
+                // drawing to fit rather than doing nothing.
+                width: `${zoom * 100}%`,
                 maxWidth: "none",
                 height: "auto",
                 mx: "auto",
