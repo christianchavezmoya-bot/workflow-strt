@@ -60,6 +60,7 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { useComplexView } from "../../contexts/ComplexViewContext";
 import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platform";
+import { filterDocumentsForLibrary, isDocumentsLibraryDocument } from "../../utils/documentScope";
 
 const MobileDocumentPreviewDialog = lazy(() => import("../../components/ui/MobileDocumentPreviewDialog"));
 
@@ -324,7 +325,10 @@ export default function DocumentsPage() {
 
   async function loadDocs() {
     if (docs.length === 0) setLoading(true);
-    try { setDocs(await documentService.getDocuments()); } catch {} finally { setLoading(false); }
+    try {
+      const all = await documentService.getDocuments();
+      setDocs(filterDocumentsForLibrary(all));
+    } catch {} finally { setLoading(false); }
   }
 
   async function loadConfig() {
@@ -460,7 +464,7 @@ export default function DocumentsPage() {
           }
         }
 
-        setDocs((prev) => [...uploaded.reverse(), ...prev]);
+        setDocs((prev) => [...uploaded.reverse().filter(isDocumentsLibraryDocument), ...prev]);
         setUploadProgress(null);
         if (firstError) { setAddError(firstError); } else { setAddOpen(false); setAddForm(makeEmptyForm()); }
       } else {
@@ -469,7 +473,10 @@ export default function DocumentsPage() {
           linkedTo: addForm.linkedTo.trim(), uploadedAt: new Date().toISOString(),
           downloadUrl: addForm.url.trim(), notes, customValues,
         });
-        setDocs((prev) => [raw, ...prev]);
+        setDocs((prev) => {
+          const next = filterDocumentsForLibrary([raw, ...prev]);
+          return next;
+        });
         setAddOpen(false); setAddForm(makeEmptyForm());
       }
     } catch {
@@ -793,17 +800,20 @@ export default function DocumentsPage() {
             </>
           )}
 
-          {canUploadDocuments && showComplexControls && (
+          {canUploadDocuments && (
             <>
               <QRUploadButton
+                key={activeCategoryId}
                 docType={activeCategoryId !== "all" ? activeCategoryId : "technical"}
                 linkedTo=""
                 onUploaded={() => { loadDocs(); }}
               />
+              {showComplexControls && (
               <Button variant="contained" startIcon={<AddOutlined />}
                 onClick={() => { setAddForm(makeEmptyForm()); setAddError(null); setAddOpen(true); }}>
                 Add document
               </Button>
+              )}
             </>
           )}
         </Stack>
@@ -839,7 +849,7 @@ export default function DocumentsPage() {
 
       {isMobileNativePlatform() && isOfflineMode && (
         <Alert severity="info">
-          Showing cached documents. Preview uses files downloaded during field sync (library + tips, up to 100 MB).
+          Showing cached documents. Preview uses files downloaded during field sync (library documents only, up to 100 MB).
         </Alert>
       )}
 

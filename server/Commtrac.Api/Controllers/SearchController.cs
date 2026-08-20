@@ -131,6 +131,7 @@ public class SearchController : ControllerBase
         var docs = await _db.Documents.AsNoTracking().ToListAsync();
         foreach (var d in docs)
         {
+            var isTips = string.Equals(d.Type, "tips", StringComparison.OrdinalIgnoreCase);
             TryAddResult(
                 results,
                 terms,
@@ -138,7 +139,7 @@ public class SearchController : ControllerBase
                 entityId: d.Id,
                 title: string.IsNullOrWhiteSpace(d.Name) ? "(Untitled Document)" : d.Name,
                 subtitle: d.Type,
-                route: "/documents",
+                route: isTips ? "/tips" : "/documents",
                 fields: new Dictionary<string, string?>
                 {
                     ["Name"] = d.Name,

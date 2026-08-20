@@ -57,6 +57,7 @@ import { isMobileNativePlatform } from "../../utils/platform";
 import QRUploadButton from "../../components/QRUploadButton";
 import DocThumbnail from "../../components/ui/DocThumbnail";
 import { TIPS_UPLOAD_ACCEPT } from "../../utils/documentFileTypes";
+import { filterDocumentsForTips } from "../../utils/documentScope";
 import type { Product } from "../../types/product";
 import {
   buildTipCustomValues,
@@ -178,7 +179,7 @@ export default function TipsAndTricksPage() {
     setError(null);
     try {
       const all = await documentService.getDocuments();
-      setDocs(all.filter((d) => d.type === "tips"));
+      setDocs(filterDocumentsForTips(all));
     } catch {
       if (!isMobileNativePlatform() || !isOfflineMode) {
         setError("Could not load documents. Make sure the server is reachable.");
@@ -1113,6 +1114,7 @@ export default function TipsAndTricksPage() {
             {canUploadTips && (
               <>
                 <QRUploadButton
+                  key={`${qrUploadMetadata.linkedTo}:${qrUploadMetadata.customValuesJson ?? ""}`}
                   docType="tips"
                   linkedTo={qrUploadMetadata.linkedTo}
                   customValuesJson={qrUploadMetadata.customValuesJson}
