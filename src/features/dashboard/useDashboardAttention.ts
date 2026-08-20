@@ -55,12 +55,14 @@ export function useDashboardAttention({
       };
 
       if (isNativePlatform) {
+        let cachedIssues: OpenIssueRecord[] = [];
+        let cachedSigs: PendingSignatureRecord[] = [];
         try {
-          const [localIssues, localSigs] = await Promise.all([
+          [cachedIssues, cachedSigs] = await Promise.all([
             assetWorkflowRunService.listOpenIssues(attentionUserId),
             assetWorkflowRunService.listPendingSignaturesLocal(attentionUserId),
           ]);
-          applyAttention(localIssues, localSigs);
+          applyAttention(cachedIssues, cachedSigs);
         } catch {
           // Keep the current attention widgets if local cache probing fails.
         }
@@ -68,12 +70,11 @@ export function useDashboardAttention({
           finishAttention();
           return;
         }
+        // Open issues: IssueRepository.getAll already kicked off a background GET on the
+        // first listOpenIssues call — skip a redundant blocking fetch here.
         try {
-          const [iss, sigs] = await Promise.all([
-            assetWorkflowRunService.listOpenIssues(attentionUserId),
-            assetWorkflowRunService.listPendingSignatures(attentionUserId),
-          ]);
-          applyAttention(iss, sigs);
+          const sigs = await assetWorkflowRunService.listPendingSignatures(attentionUserId);
+          applyAttention(cachedIssues, sigs);
         } catch {
           // Keep local attention widgets on timeout or server errors.
         } finally {
