@@ -16,9 +16,23 @@ import type { ProjectAsset } from "../types/projectAsset";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
+/** Coalesce concurrent prefetch for the same asset (workspace boot + quick actions). */
+const prefetchInFlight = new Map<string, Promise<void>>();
+
 export async function prefetchAssetWorkflowData(assetId: string): Promise<void> {
   if (!isMobileNativePlatform()) return;
 
+  const existing = prefetchInFlight.get(assetId);
+  if (existing) return existing;
+
+  const flight = prefetchAssetWorkflowDataInner(assetId).finally(() => {
+    prefetchInFlight.delete(assetId);
+  });
+  prefetchInFlight.set(assetId, flight);
+  return flight;
+}
+
+async function prefetchAssetWorkflowDataInner(assetId: string): Promise<void> {
   const { projectAssetService } = await import("./projectAssetService");
   const cached = await entityGetAsset(assetId);
   const cachedAsset = cached?.data as ProjectAsset | undefined;

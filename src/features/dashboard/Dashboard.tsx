@@ -1615,17 +1615,24 @@ const Dashboard = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNativePlatform, myInstallAssetIdsKey]);
 
-  // While online, refresh assignments for visible My Jobs assets in background.
+  // While online, refresh assignments only for My Jobs assets with no local cache yet.
+  // Full workspace prefetch already warms assignments for assigned assets; this fills
+  // gaps without re-fetching every asset on each dashboard boot (request storm).
   useEffect(() => {
     if (!isNativePlatform || myInstallAssets.length === 0 || shouldSkipBlockingFetch()) return;
-    for (const asset of myInstallAssets) {
-      void assetWorkflowAssignmentService.listByAsset(asset.id);
-    }
-    // This is the effect that was driving the request storm: listByAsset() dispatches
-    // repo:assignments:updated on native, which triggers a dashboardWorkspace refresh,
-    // which produced a new myInstallAssets reference, which (with myInstallAssets in
-    // deps) re-ran this effect immediately - a self-sustaining ~1s loop. Depend only on
-    // the id-set key, not the array reference.
+    let cancelled = false;
+    void (async () => {
+      for (const asset of myInstallAssets) {
+        if (cancelled) return;
+        const local = await WorkflowAssignmentRepository.getLocalByAsset(asset.id).catch(() => []);
+        if (local.length === 0) {
+          void assetWorkflowAssignmentService.listByAsset(asset.id);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isNativePlatform, myInstallAssetIdsKey]);
 
