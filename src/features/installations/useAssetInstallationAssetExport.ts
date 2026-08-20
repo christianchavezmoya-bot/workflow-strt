@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { downloadBlob } from "../../utils/bulkWorkflowReportDownload";
 import { openPrintWindow } from "../../utils/printWindow";
 import {
@@ -15,6 +16,7 @@ export type AssetExportDatasetParams = Omit<
 >;
 
 export function useAssetInstallationAssetExport() {
+  const toast = useAppToast();
   const [assetExportDialogOpen, setAssetExportDialogOpen] = useState(false);
   const [assetExportFormat, setAssetExportFormat] = useState<"pdf" | "json" | "excel">("pdf");
   const [assetExportSelectedColumnIds, setAssetExportSelectedColumnIds] = useState<string[]>([]);
@@ -38,7 +40,7 @@ export function useAssetInstallationAssetExport() {
   const exportAssetDataset = useCallback(
     async (params: AssetExportDatasetParams) => {
       if (assetExportSelectedColumnIds.length === 0) {
-        alert("Select at least one column to export.");
+        toast.warning("Select at least one column to export.");
         return;
       }
 
@@ -78,7 +80,7 @@ export function useAssetInstallationAssetExport() {
         setAssetExportDialogOpen(false);
       } catch (error) {
         console.error("[useAssetInstallationAssetExport] asset export failed", error);
-        alert(error instanceof Error ? error.message : "Failed to export assets.");
+        toast.error(error instanceof Error ? error.message : "Failed to export assets.");
       } finally {
         setAssetExportRunning(false);
       }
@@ -89,6 +91,7 @@ export function useAssetInstallationAssetExport() {
       assetExportIncludeCustomerLogo,
       assetExportIncludeProjectMeta,
       assetExportSelectedColumnIds,
+      toast,
     ],
   );
 

@@ -49,6 +49,7 @@ import type { RunIssue } from "../../types/assetWorkflowRun";
 import type { AssetIssue } from "../../types/projectAsset";
 import MediaCapture from "../../components/ui/MediaCapture";
 import { useAuth } from "../../hooks/useAuth";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { exportIssuesExcel, exportIssuesPdf } from "../../utils/exportIssuesBoard";
 
@@ -95,6 +96,7 @@ const IssuesBoard = () => {
   const theme    = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down("md"));
   const { user } = useAuth();
+  const toast = useAppToast();
   const currentUserName = user?.fullName ?? user?.email ?? "Unknown";
 
   const [activeTab,      setActiveTab]      = useState<"open" | "history">("open");
@@ -317,7 +319,7 @@ const IssuesBoard = () => {
       void loadHistory();
     } catch (e) {
       console.error("Failed to close issue", e);
-      alert(e instanceof Error ? e.message : "Failed to close issue. Try again when back online.");
+      toast.error(e instanceof Error ? e.message : "Failed to close issue. Try again when back online.");
     } finally {
       setClosingKey(null);
     }

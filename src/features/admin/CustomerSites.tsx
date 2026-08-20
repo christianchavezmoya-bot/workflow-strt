@@ -15,12 +15,14 @@ import { useNavigate, useParams } from "react-router-dom";
 import { Site } from "../../types/site";
 import api from "../../services/api";
 import DeleteConfirmDialog from "../../components/ui/DeleteConfirmDialog";
+import { useAppToast } from "../../contexts/AppToastContext";
 import { usePermissions } from "../../hooks/usePermissions";
 
 const CustomerSites = () => {
   const { customerId } = useParams<{ customerId: string }>();
   const navigate = useNavigate();
   const can = usePermissions();
+  const toast = useAppToast();
 
   const [customerName, setCustomerName] = useState<string>("Loading...");
   const [customerLogo, setCustomerLogo] = useState<string | null>(null);
@@ -161,7 +163,7 @@ const CustomerSites = () => {
     } catch (err: any) {
       console.error("Failed to save site", err);
       const errorMessage = err?.response?.data || err?.message || "Failed to save site";
-      alert(`Failed to save site: ${errorMessage}`);
+      toast.error(`Failed to save site: ${errorMessage}`);
     }
   };
 
@@ -189,7 +191,7 @@ const CustomerSites = () => {
       setDeleteTarget(null);
     } catch (err) {
       console.error("Failed to delete site", err);
-      alert("Failed to delete site");
+      toast.error("Failed to delete site");
     } finally {
       setDeleteSavingId(null);
     }

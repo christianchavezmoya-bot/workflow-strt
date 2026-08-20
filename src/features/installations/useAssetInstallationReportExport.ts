@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { useAppToast } from "../../contexts/AppToastContext";
 import type { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import type { brandSettingsService } from "../../services/brandSettingsService";
 import type { customerService } from "../../services/customerService";
@@ -40,6 +41,7 @@ export type BuildAssetReportContextParams = {
 } & AssetReportExportServices;
 
 export function useAssetInstallationReportExport() {
+  const toast = useAppToast();
   const [reportGenerating, setReportGenerating] = useState<string | null>(null);
   const [reportExportOpen, setReportExportOpen] = useState(false);
   const [reportExportAsset, setReportExportAsset] = useState<ProjectAsset | null>(null);
@@ -240,12 +242,12 @@ export function useAssetInstallationReportExport() {
         downloadBlob(docxBlob, `${fileBase}.docx`);
       } catch (err) {
         console.error("[useAssetInstallationReportExport] Report export failed", err);
-        alert("Failed to export report.");
+        toast.error("Failed to export report.");
       } finally {
         setReportGenerating(null);
       }
     },
-    [buildAssetReportContext, reportExportAsset, reportPreviewContext, reportPreviewFileBase],
+    [buildAssetReportContext, reportExportAsset, reportPreviewContext, reportPreviewFileBase, toast],
   );
 
   return {

@@ -49,6 +49,9 @@ export default tseslint.config(
       "no-empty": ["warn", { allowEmptyCatch: true }],
       // Keep the genuinely bug-catching rules as ERRORS (these are the ratchet floor):
       // no-constant-binary-expression, no-case-declarations, prefer-const, no-useless-escape.
+      // Native alert/confirm bypass app theme — use useAppToast / useConfirm instead.
+      "no-alert": "warn",
+      "no-restricted-globals": ["warn", { name: "confirm", message: "Use useConfirm() instead of window.confirm()." }],
     },
   },
   // Turn off formatting rules that would fight Prettier.
