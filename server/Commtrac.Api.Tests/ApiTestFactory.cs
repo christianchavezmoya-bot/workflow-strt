@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using Commtrac.Api.Data;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Commtrac.Api.Tests;
 
@@ -43,6 +46,11 @@ public class ApiTestFactory : WebApplicationFactory<Program>
                 // to avoid races when multiple factories start/stop in parallel on CI.
                 ["DatabaseBackups:Enabled"] = "false",
             });
+        });
+        builder.ConfigureServices(services =>
+        {
+            TestDbRegistration.UseTestDatabase(services, options =>
+                options.UseSqlite($"Data Source={_dbPath}"));
         });
     }
 

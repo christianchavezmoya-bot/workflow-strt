@@ -490,8 +490,14 @@ public class MobileUploadController : ControllerBase
 
     private async Task ExpireStaleTokensAsync()
     {
+        // Must be a local, not DateTime.UtcNow inline: Npgsql translates the property
+        // access to now() (timestamptz), and dates are stored as text on Postgres
+        // (see AppDbContext.ApplySqliteShapedPostgresConversions), so the comparison
+        // fails with "operator does not exist: text < timestamp with time zone".
+        // A local becomes a parameter that the same value converter renders as ISO-8601 text.
+        var now = DateTime.UtcNow;
         var stale = await _db.MobileUploadTokens
-            .Where(t => t.Status == "pending" && t.ExpiresAtUtc < DateTime.UtcNow)
+            .Where(t => t.Status == "pending" && t.ExpiresAtUtc < now)
             .ToListAsync();
 
         if (stale.Count == 0) return;
