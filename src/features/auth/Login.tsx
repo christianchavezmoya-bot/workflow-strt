@@ -39,7 +39,7 @@ const PageWrapper = ({ children }: { children: React.ReactNode }) => (
   >
     <Stack alignItems="center" spacing={1.5} sx={{ mt: { xs: 6, sm: 0 }, mb: { xs: 4, sm: 0 } }}>
       <Box component="img" src={strataLogo} alt={APP_NAME} sx={{ height: { xs: 72, sm: 56 }, borderRadius: "12px" }} />
-      <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora", display: { xs: "block", sm: "none" } }}>
+      <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora", display: { xs: "block", sm: "none" }, whiteSpace: "nowrap" }}>
         {APP_NAME}
       </Typography>
     </Stack>
@@ -332,7 +332,7 @@ const Login = () => {
         )}
 
         <Box>
-          <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora" }}>
+          <Typography variant="h5" fontWeight={700} sx={{ fontFamily: "Sora", whiteSpace: "nowrap" }}>
             {isFirstTimeUser ? `Welcome to ${APP_NAME}` : "Welcome back"}
           </Typography>
           <Typography variant="body2" color="text.secondary">

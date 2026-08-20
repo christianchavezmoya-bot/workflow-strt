@@ -83,6 +83,7 @@ import {
 } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx } from "../../utils/nativeDialogInsets";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
 import { formatInstant } from "../../utils/datetime";
@@ -311,7 +312,7 @@ export default function WorkOrderRunner({
     setSheetDragOffset(0);
   }
 
-  const nativeBottomInset = "calc(64px + env(safe-area-inset-bottom))";
+  const nativeBottomInset = NATIVE_BOTTOM_NAV_INSET;
 
   const runEditPerms = useMemo(
     () => (activeRun && user ? canEditRun(activeRun, user.role) : { time: true, data: true, finalized: false }),
@@ -2451,7 +2452,7 @@ export default function WorkOrderRunner({
           </DialogActions>
         </Dialog>
 
-        <DialogActions sx={{ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" }}>
+        <DialogActions sx={nativeDialogActionsSx({ flexWrap: "wrap", gap: 0.75, justifyContent: "space-between" })}>
           {isPreviewWalkthrough ? (
             <>
               <Stack direction="row" spacing={0.75} alignItems="center">
@@ -2595,7 +2596,7 @@ export default function WorkOrderRunner({
         onClose={handleClose}
         maxWidth="sm"
         fullWidth
-        sx={isMobileNativePlatform() ? { zIndex: 1200 } : undefined}
+        sx={isMobileNativePlatform() ? nativeDialogSx() : undefined}
         PaperProps={{
           sx: {
             ...(isMobileNativePlatform()

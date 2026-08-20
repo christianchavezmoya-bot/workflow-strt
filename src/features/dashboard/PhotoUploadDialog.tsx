@@ -38,6 +38,7 @@ import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendB
 import { randomId } from "../../utils/randomId";
 import api from "../../services/api";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { nativeDialogActionsSx, nativeDialogPaperSx, nativeDialogSx } from "../../utils/nativeDialogInsets";
 import { formatPayloadSize, measurePayload } from "../../utils/syncDiagnostics";
 import { fileToDataUrl, prepareWorkflowMediaFile } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
@@ -682,14 +683,9 @@ export default function PhotoUploadDialog({
       onClose={onClose}
       maxWidth="sm"
       fullWidth
-      sx={isMobileNativePlatform() ? { zIndex: 1200 } : undefined}
+      sx={nativeDialogSx()}
       PaperProps={{
-        sx: isMobileNativePlatform()
-          ? {
-              maxHeight: "calc(100vh - calc(64px + env(safe-area-inset-bottom)))",
-              mb: "calc(64px + env(safe-area-inset-bottom))",
-            }
-          : undefined,
+        sx: nativeDialogPaperSx(),
       }}
     >
       <DialogTitle>
@@ -911,17 +907,17 @@ export default function PhotoUploadDialog({
                             e.target.value = "";
                           }}
                         />
-                        {isWebBrowser && (
-                          <input
-                            type="file"
-                            accept={acceptForInputType("video")}
-                            multiple
-                            capture="environment"
-                            style={{ display: "none" }}
-                            ref={(el) => { videoInputRefs.current[key] = el; }}
-                            onChange={(e) => handleFilesSelected(stepId, inputId, e.target.files)}
-                          />
-                        )}
+                        <input
+                          type="file"
+                          accept={acceptForInputType("video")}
+                          multiple
+                          style={{ display: "none" }}
+                          ref={(el) => { videoInputRefs.current[key] = el; }}
+                          onChange={(e) => {
+                            void handleFilesSelected(stepId, inputId, e.target.files);
+                            e.target.value = "";
+                          }}
+                        />
                         {!isVideo && (
                           <Button
                             variant="contained"
@@ -933,7 +929,7 @@ export default function PhotoUploadDialog({
                             {currentCount > 0 ? "Add photo" : "Add photo"}
                           </Button>
                         )}
-                        {(isVideo || isWebBrowser) && (
+                        {isVideo && (
                           <Button
                             variant="outlined"
                             size="small"
@@ -941,7 +937,7 @@ export default function PhotoUploadDialog({
                             startIcon={<VideocamOutlined sx={{ fontSize: 16 }} />}
                             onClick={() => videoInputRefs.current[key]?.click()}
                           >
-                            {currentCount > 0 ? "Add video" : (isVideo ? "Add video" : "Capture video")}
+                            {currentCount > 0 ? "Add video" : "Add video"}
                           </Button>
                         )}
                       </Stack>
@@ -997,7 +993,7 @@ export default function PhotoUploadDialog({
         )}
       </DialogContent>
 
-      <DialogActions sx={{ px: 3, py: 2, gap: 1 }}>
+      <DialogActions sx={nativeDialogActionsSx({ px: 3, py: 2, gap: 1 })}>
         <Button onClick={onClose} color="inherit" disabled={saving}>Close</Button>
         {isPM && (
           <Button

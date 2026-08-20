@@ -30,6 +30,9 @@ export const runnerSummaryDialogActionsSx = {
   bgcolor: "background.paper",
   borderTop: "1px solid",
   borderColor: "divider",
+  ...(isMobileNativePlatform()
+    ? { pb: `calc(12px + env(safe-area-inset-bottom, 0px))` }
+    : {}),
 } as const;
 
 export function renderAssetIdentifier(assetTag?: string) {

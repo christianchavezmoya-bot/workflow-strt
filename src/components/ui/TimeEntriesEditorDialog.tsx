@@ -45,6 +45,7 @@ import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import TimeEntriesTimelineEditor from "./TimeEntriesTimelineEditor";
 import OfflineGuardDialog from "./OfflineGuardDialog";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { nativeDialogActionsSx, nativeDialogPaperSx, nativeDialogSx } from "../../utils/nativeDialogInsets";
 
 interface Props {
   open: boolean;
@@ -363,62 +364,83 @@ export default function TimeEntriesEditorDialog({
       onClose={onClose}
       maxWidth="md"
       fullWidth
+      fullScreen={isPhoneApp}
+      sx={nativeDialogSx()}
       PaperProps={{
         className: "glass-card",
-        sx: { background: "var(--panel)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 3 },
+        sx: {
+          background: "var(--panel)",
+          border: "1px solid rgba(255,255,255,0.08)",
+          borderRadius: isPhoneApp ? 0 : 3,
+          ...nativeDialogPaperSx(isPhoneApp ? { mb: 0, maxHeight: "100vh" } : undefined),
+        },
       }}
     >
-      <DialogTitle>
-        <Stack direction="row" justifyContent="space-between" alignItems="center">
-          <Box>
-            <Typography variant="h6" fontWeight={700}>
-              Time Entries — Run #{run.runNumber}
-            </Typography>
-            <Typography variant="caption" color="text.secondary">
-              {readOnly ? "View only — run is locked" : "Add, edit or remove time entries to correct tracking."}
-              {timeZoneId
-                ? ` Times shown in ${zoneAbbreviation(timeZoneId)} (${timeZoneId}).`
-                : " Warning: project timezone not loaded — times may show as UTC."}
-            </Typography>
-          </Box>
-          {!readOnly ? (
-            <Stack direction="row" spacing={1}>
-              <Button
-                size="small"
-                variant={viewMode === "timeline" ? "contained" : "outlined"}
-                onClick={() => setViewMode("timeline")}
+      <DialogTitle sx={{ pb: 1 }}>
+        <Stack spacing={1}>
+          <Stack direction="row" justifyContent="space-between" alignItems="flex-start" spacing={1}>
+            <Box sx={{ flex: 1, minWidth: 0 }}>
+              <Typography
+                variant="overline"
+                color="text.secondary"
+                sx={{ letterSpacing: 1.2, fontWeight: 700, lineHeight: 1.2 }}
               >
-                Timeline
-              </Button>
-              <Button
-                size="small"
-                variant={viewMode === "table" ? "contained" : "outlined"}
-                onClick={() => setViewMode("table")}
-              >
-                Table
-              </Button>
-              <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={openAddForm}>
-                Add Entry
-              </Button>
-            </Stack>
-          ) : (
-            <Stack direction="row" spacing={1}>
-              <Button
-                size="small"
-                variant={viewMode === "timeline" ? "contained" : "outlined"}
-                onClick={() => setViewMode("timeline")}
-              >
-                Timeline
-              </Button>
-              <Button
-                size="small"
-                variant={viewMode === "table" ? "contained" : "outlined"}
-                onClick={() => setViewMode("table")}
-              >
-                Table
-              </Button>
-            </Stack>
-          )}
+                TIME ENTRIES
+              </Typography>
+              <Typography variant="h6" fontWeight={700} sx={{ lineHeight: 1.25 }}>
+                Run #{run.runNumber}
+              </Typography>
+              {!readOnly && (
+                <Alert severity="info" sx={{ mt: 1.25, py: 0.5, fontSize: "0.78rem" }}>
+                  Add, edit or remove time entries here to correct tracking before saving the run.
+                </Alert>
+              )}
+              <Typography variant="caption" color="text.secondary" display="block" sx={{ mt: 0.75 }}>
+                {readOnly ? "View only — run is locked. " : ""}
+                {timeZoneId
+                  ? `Times shown in ${zoneAbbreviation(timeZoneId)} (${timeZoneId}).`
+                  : "Warning: project timezone not loaded — times may show as UTC."}
+              </Typography>
+            </Box>
+            {!readOnly ? (
+              <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap justifyContent="flex-end">
+                <Button
+                  size="small"
+                  variant={viewMode === "timeline" ? "contained" : "outlined"}
+                  onClick={() => setViewMode("timeline")}
+                >
+                  Timeline
+                </Button>
+                <Button
+                  size="small"
+                  variant={viewMode === "table" ? "contained" : "outlined"}
+                  onClick={() => setViewMode("table")}
+                >
+                  Table
+                </Button>
+                <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={openAddForm}>
+                  Add Entry
+                </Button>
+              </Stack>
+            ) : (
+              <Stack direction="row" spacing={1}>
+                <Button
+                  size="small"
+                  variant={viewMode === "timeline" ? "contained" : "outlined"}
+                  onClick={() => setViewMode("timeline")}
+                >
+                  Timeline
+                </Button>
+                <Button
+                  size="small"
+                  variant={viewMode === "table" ? "contained" : "outlined"}
+                  onClick={() => setViewMode("table")}
+                >
+                  Table
+                </Button>
+              </Stack>
+            )}
+          </Stack>
         </Stack>
       </DialogTitle>
 
@@ -648,7 +670,7 @@ export default function TimeEntriesEditorDialog({
         )}
       </DialogContent>
 
-      <DialogActions sx={{ px: 2.5, py: 1.5 }}>
+      <DialogActions sx={nativeDialogActionsSx({ px: 2.5, py: 1.5 })}>
         <Button onClick={onClose}>Cancel</Button>
         {!readOnly && (
           <Button variant="contained" disabled={saving} onClick={handleSave}>
