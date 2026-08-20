@@ -12,7 +12,9 @@ const FOREGROUND_PING_RETRY_MS = 1_500;
 /**
  * Single native lifecycle hook: resume connectivity + sync on foreground.
  * Dispatches app-foregrounded / app-backgrounded for other subscribers.
- * Upload/download are NOT paused in background (Background URLSession planned separately).
+ * Upload/download continue in background when the Android dataSync foreground
+ * service is active (see useSyncKeepAlive); iOS still suspends WebView JS unless
+ * the app stays in foreground with keep-awake enabled.
  */
 export function useNativeSyncLifecycle(): void {
   useEffect(() => {

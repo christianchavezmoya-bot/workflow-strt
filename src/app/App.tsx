@@ -18,6 +18,7 @@ import Login from "../features/auth/Login";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { useNativeSyncLifecycle } from "../hooks/useNativeSyncLifecycle";
+import { useSyncKeepAlive } from "../hooks/useSyncKeepAlive";
 import { useRouteBreadcrumbs } from "../hooks/useRouteBreadcrumbs";
 
 // Routes AppRoutes serves without requiring a session — password reset/invite
@@ -41,6 +42,7 @@ const App = () => {
   const [loginGateTick, setLoginGateTick] = useState(0);
 
   useNativeSyncLifecycle();
+  useSyncKeepAlive();
   useRouteBreadcrumbs();
 
   const forceLogin = useCallback(() => {

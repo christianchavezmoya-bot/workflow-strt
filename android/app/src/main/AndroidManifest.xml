@@ -29,6 +29,11 @@
             android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/file_paths" />
         </provider>
+
+        <service
+            android:name=".SyncForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
     </application>
 
     <!-- Permissions -->
@@ -56,6 +61,11 @@
 
     <!-- Network state for offline detection -->
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <!-- Foreground sync upload (keeps process alive while queue flushes) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Push + local notifications (Android 13+) -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />

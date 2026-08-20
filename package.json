@@ -38,6 +38,7 @@
     "hooks:install": "node scripts/install-githooks.mjs"
   },
   "dependencies": {
+    "@capacitor-community/keep-awake": "^8.0.1",
     "@capacitor/android": "^8.3.4",
     "@capacitor/app": "^8.1.0",
     "@capacitor/camera": "^8.2.0",

@@ -1246,6 +1246,7 @@ public class AssetWorkflowRunsController : ControllerBase
 
     // POST api/asset-workflow-runs/{id}/sync-bundle — atomic complete + signatures (offline field sync)
     [HttpPost("{id}/sync-bundle")]
+    [RequestSizeLimit(100_000_000)]
     public async Task<IActionResult> SyncBundle(string id, [FromBody] SyncRunBundleRequest req)
     {
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
