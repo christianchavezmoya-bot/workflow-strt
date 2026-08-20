@@ -436,23 +436,6 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       });
   }, [selectedCustomerId]);
 
-  // When creating a new project, default the office based on the active country filter.
-  // Project.office now stores the officeId (UUID) so filtering is FK-based.
-  useEffect(() => {
-    if (id) return;
-    if (activeOffice === "All") return;
-    if (globalOffices.length === 0) return;
-
-    const currentOfficeEntity = globalOffices.find((o) => o.id === office);
-    if (currentOfficeEntity?.country === activeOffice) return;
-
-    const defaultOffice = globalOffices.find(
-      (o) => (o.country || "").toLowerCase() === activeOffice.toLowerCase() && !!o.city
-    );
-
-    if (defaultOffice) setValue("office", defaultOffice.id, { shouldValidate: true });
-  }, [id, activeOffice, globalOffices, office, setValue]);
-
   const matchedCustomerId = useMemo(() => {
     if (!customerId) return "";
     return filteredCustomers.find((customer) => customer.customerId === customerId)?.id || "";
@@ -471,31 +454,15 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     if (!selected) return;
     setValue("customerName", selected.name, { shouldValidate: true });
     setValue("customerId", selected.customerId, { shouldValidate: true });
-    if (selected.office && selected.office !== "All") {
-      // Customer.office is a country or city string — resolve to an officeId.
-      const officeByCity = globalOffices.find((o) => o.city === selected.office);
-      if (officeByCity) {
-        setValue("office", officeByCity.id, { shouldValidate: true });
-      } else {
-        const defaultOffice = globalOffices.find(
-          (o) => (o.country || "").toLowerCase() === selected.office.toLowerCase() && !!o.city
-        );
-        if (defaultOffice) setValue("office", defaultOffice.id, { shouldValidate: true });
-      }
-    }
-  }, [selectedCustomerId, filteredCustomers, globalOffices, setValue]);
-
-  useEffect(() => {
-    if (!office || globalOffices.length === 0) return;
-    const selectedOffice = globalOffices.find((o) => o.id === office);
-    if (selectedOffice && selectedOffice.country) {
-      setValue("region", selectedOffice.country, { shouldValidate: true });
-    }
-  }, [office, globalOffices, setValue]);
+  }, [selectedCustomerId, filteredCustomers, setValue]);
 
   useEffect(() => {
     const managerName = String(projectManager || "").trim();
-    if (!managerName || globalOffices.length === 0 || usersState.items.length === 0) return;
+    if (!managerName) {
+      setValue("region", "", { shouldValidate: true });
+      return;
+    }
+    if (globalOffices.length === 0 || usersState.items.length === 0) return;
 
     const selectedManager = usersState.items.find(
       (user) => String(user.fullName || "").trim().toLowerCase() === managerName.toLowerCase()
@@ -937,7 +904,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
   const labelJobNumber = builtInLabel("jobNumber", "Job Number");
   const labelPurchaseOrderNumber = builtInLabel("purchaseOrderNumber", "Purchase Order Number");
   const labelOffice = builtInLabel("office", "Office");
-  const labelRegion = builtInLabel("region", "Country");
+  const labelRegion = builtInLabel("region", "Global office in charge");
   const labelProjectManager = builtInLabel("projectManager", "Project Manager");
   const labelTeamMembers = builtInLabel("teamMembers", "Project Team Members");
   const labelDescription = builtInLabel("description", "Description");
@@ -954,9 +921,9 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
       "customerId",
       "products",
       "office",
-      "region",
       "timeZoneId",
       "projectManager",
+      "region",
       "teamMembers",
       "description",
       "startDate",
@@ -1279,7 +1246,11 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                   label={labelWithRequired("region", labelRegion)}
                   fullWidth
                   error={!!errors.region}
-                  helperText={errors.region?.message || "Auto-filled from Office. Override if needed."}
+                  helperText={
+                    errors.region?.message ||
+                    "Auto-filled from the selected project manager's office."
+                  }
+                  InputProps={{ readOnly: true }}
                 />
               )}
             />
@@ -1609,16 +1580,16 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
     "siteName",
     "customerName",
     cityFieldId,
-    "region",
     "startDate",
+    "finishDate",
   ].filter((fieldId): fieldId is string => fieldId != null && visibleIdSet.has(fieldId));
 
   const rightColumnFieldIds = [
     "products",
     "projectManager",
+    "region",
     "teamMembers",
     "timeZoneId",
-    "finishDate",
   ].filter((fieldId) => visibleIdSet.has(fieldId));
 
   return (

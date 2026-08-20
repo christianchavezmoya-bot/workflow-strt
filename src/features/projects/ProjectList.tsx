@@ -49,6 +49,8 @@ import { officesService } from "../../services/officesService";
 import { buildProjectRequestKey, ProjectRepository, type ProjectRepositoryUpdateDetail } from "../../repositories/ProjectRepository";
 import type { Office } from "../../components/GlobalOfficeMap";
 import { createCountryResolver } from "../../utils/officeCountry";
+import { findWorkflowType, resolveProjectWorkflowTypeId } from "../../utils/workflowTypeRules";
+import { workflowTypeService } from "../../services/workflowTypeService";
 import { useAppDispatch, useAppSelector } from "../../store/hooks";
 import { fetchProducts } from "../../store/productsSlice";
 import { deleteProject, fetchProjects, setProjects } from "../../store/projectSlice";
@@ -102,6 +104,7 @@ const DEFAULT_PROJECT_COLUMN_ORDER = [
   "projectManager",
   "customerName",
   "products",
+  "workflowTypeId",
   "siteName",
   "region",
   "description",
@@ -207,6 +210,13 @@ const builtInColumnConfigs: ColumnConfig[] = [
         : "-"
   },
   {
+    id: "workflowTypeId",
+    name: "Workflow type",
+    required: false,
+    minWidth: 130,
+    renderCell: () => "-"
+  },
+  {
     id: "siteName",
     name: "Site",
     required: false,
@@ -306,6 +316,7 @@ const ProjectList = () => {
   const projectsDynamic = useDynamicFields("projects");
   const [tableConfigOpen, setTableConfigOpen] = useState(false);
   const [globalOffices, setGlobalOffices] = useState<Office[]>([]);
+  const [workflowTypes, setWorkflowTypes] = useState<Awaited<ReturnType<typeof workflowTypeService.list>>>([]);
 
   const projectsDynamicFieldDefs = useMemo(
     () => projectsDynamic.definitions.filter((field) => !isDuplicateProjectDynamicField(field)),
@@ -314,6 +325,10 @@ const ProjectList = () => {
 
   useEffect(() => {
     officesService.getAll().then(setGlobalOffices);
+  }, []);
+
+  useEffect(() => {
+    workflowTypeService.list().then(setWorkflowTypes).catch(() => setWorkflowTypes([]));
   }, []);
 
   const projectsTableConfig = useTableConfig(
@@ -471,6 +486,8 @@ const ProjectList = () => {
                 .join(", ")
             : ""
         ),
+      workflowTypeId: (project: Project) =>
+        normalize(findWorkflowType(workflowTypes, resolveProjectWorkflowTypeId(project))?.name),
       office: (project: Project) => normalize(project.office),
       region: (project: Project) => normalize(project.region),
       projectManager: (project: Project) => normalize(project.projectManager),
@@ -480,7 +497,7 @@ const ProjectList = () => {
       status: (project: Project) => normalize(project.status),
       projectType: (project: Project) => normalize(project.projectType)
     }),
-    [products]
+    [products, workflowTypes]
   );
 
   const filteredProjects = useMemo(() => {
@@ -574,6 +591,7 @@ const ProjectList = () => {
       siteName: Array.from(new Set(sourceProjects.map((project) => projectAccessors.siteName(project)))).sort(),
       customerId: Array.from(new Set(sourceProjects.map((project) => projectAccessors.customerId(project)))).sort(),
       products: Array.from(new Set(sourceProjects.map((project) => projectAccessors.products(project)))).sort(),
+      workflowTypeId: Array.from(new Set(sourceProjects.map((project) => projectAccessors.workflowTypeId(project)))).sort(),
       office: Array.from(new Set(sourceProjects.map((project) => projectAccessors.office(project)))).sort(),
       region: Array.from(new Set(sourceProjects.map((project) => projectAccessors.region(project)))).sort(),
       projectManager: Array.from(new Set(sourceProjects.map((project) => projectAccessors.projectManager(project)))).sort(),
@@ -617,7 +635,12 @@ const ProjectList = () => {
         const builtIn = builtInColumnConfigs.find((col) => col.id === id);
         if (builtIn) {
           const overrideName = projectsTableConfig.config.baseFieldNames?.[builtIn.id];
-          return { ...builtIn, name: overrideName || builtIn.name, isBuiltIn: true };
+          const column = { ...builtIn, name: overrideName || builtIn.name, isBuiltIn: true };
+          if (builtIn.id === "workflowTypeId") {
+            column.renderCell = (project: Project) =>
+              findWorkflowType(workflowTypes, resolveProjectWorkflowTypeId(project))?.name || "-";
+          }
+          return column;
         }
         const dynamic = projectDynamicColumns.find((field) => field.id === id);
         if (dynamic) {
@@ -633,7 +656,7 @@ const ProjectList = () => {
         return null;
       })
       .filter((col): col is NonNullable<typeof col> => col !== null);
-  }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity]);
+  }, [projectsTableConfig.config.order, projectsTableConfig.config.hidden, projectDynamicColumns, projectsDynamic.valuesByEntity, workflowTypes]);
 
   return (
     <Stack spacing={3}>
@@ -1243,6 +1266,7 @@ const ProjectList = () => {
           { id: "projectManager", name: "Project Manager", type: "text", required: false },
           { id: "customerName", name: "Customer name", type: "text", required: false },
           { id: "products", name: "Product name", type: "multi-select", required: true },
+          { id: "workflowTypeId", name: "Workflow type", type: "single select", required: false },
           { id: "siteName", name: "Site", type: "text", required: false },
           { id: "region", name: "Country/State", type: "text", required: false },
           { id: "description", name: "Description", type: "text", required: true },
