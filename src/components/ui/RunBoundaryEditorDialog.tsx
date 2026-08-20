@@ -13,7 +13,7 @@ import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs, { type Dayjs } from "dayjs";
 import TimeWheelPicker, { applyMinutesInZoneToUtcIso, utcIsoToMinutesInZone } from "./TimeWheelPicker";
 import { formatInstant, zoneAbbreviation } from "../../utils/datetime";
-import { nativeDialogActionsSx, nativeDialogPaperSx, nativeDialogSx } from "../../utils/nativeDialogInsets";
+import { nativeDialogActionsSx, nativeDialogPaperSx, nativeDialogSx, nativeDatePickerPopperSlotProps } from "../../utils/nativeDialogInsets";
 
 interface Props {
   open: boolean;
@@ -78,6 +78,7 @@ export default function RunBoundaryEditorDialog({
                   fullWidth: true,
                   InputLabelProps: { shrink: true },
                 },
+                popper: nativeDatePickerPopperSlotProps(),
               }}
             />
             <TimeWheelPicker label="Time" valueMinutes={minutes} onChange={setMinutes} />

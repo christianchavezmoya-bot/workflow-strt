@@ -63,7 +63,7 @@ if (typeof rawAdapter === "function") {
   const baseGetAdapter = rawAdapter as GetAdapter;
   api.defaults.adapter = (config) => {
     const method = (config.method ?? "get").toLowerCase();
-    if (method !== "get" || isMobileNativePlatform()) {
+    if (method !== "get") {
       return baseGetAdapter(config);
     }
     const key = inFlightGetKey(config);

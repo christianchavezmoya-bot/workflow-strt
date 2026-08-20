@@ -6,8 +6,19 @@ export const NATIVE_BOTTOM_NAV_INSET = "calc(72px + env(safe-area-inset-bottom))
 /** z-index above BottomTabBar (1400) so dialog actions stay tappable on native. */
 export const NATIVE_DIALOG_Z_INDEX = 1500;
 
+/** MUI DatePicker popper must sit above native dialogs (1500). */
+export const NATIVE_PICKER_Z_INDEX = 1600;
+
 export function nativeDialogSx() {
   return isMobileNativePlatform() ? { zIndex: NATIVE_DIALOG_Z_INDEX } : undefined;
+}
+
+/** Popper slotProps so calendar opens above native workflow/time dialogs. */
+export function nativeDatePickerPopperSlotProps() {
+  if (!isMobileNativePlatform()) return undefined;
+  return {
+    sx: { zIndex: NATIVE_PICKER_Z_INDEX },
+  };
 }
 
 export function nativeDialogPaperSx(extra?: Record<string, unknown>) {
