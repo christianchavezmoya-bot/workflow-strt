@@ -1,4 +1,4 @@
-import axios, { type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
+import axios, { getAdapter, type AxiosResponse, type InternalAxiosRequestConfig } from "axios";
 import { cacheGet, cachePut } from "./localDB";
 import { secureGet, secureSet, secureRemove } from "./secureStorage";
 import { getApiBaseUrl } from "./apiBase";
@@ -45,7 +45,7 @@ const api = axios.create({
   timeout: API_DEFAULT_TIMEOUT_MS,
 });
 
-/** Coalesce identical in-flight GETs on web so parallel mounts don't fan out duplicates. */
+/** Coalesce identical in-flight GETs so parallel mounts don't fan out duplicates. */
 function inFlightGetKey(config: InternalAxiosRequestConfig): string {
   const params = config.params as Record<string, unknown> | undefined;
   const paramStr = params && typeof params === "object"
@@ -58,18 +58,26 @@ type GetAdapter = (config: InternalAxiosRequestConfig) => Promise<AxiosResponse>
 
 const inFlightGets = new Map<string, Promise<AxiosResponse>>();
 
-const rawAdapter = api.defaults.adapter ?? axios.defaults.adapter;
-if (typeof rawAdapter === "function") {
-  const baseGetAdapter = rawAdapter as GetAdapter;
+function resolveAxiosAdapter(): GetAdapter | undefined {
+  try {
+    return getAdapter(api.defaults.adapter ?? axios.defaults.adapter) as GetAdapter;
+  } catch {
+    const fallback = api.defaults.adapter ?? axios.defaults.adapter;
+    return typeof fallback === "function" ? (fallback as GetAdapter) : undefined;
+  }
+}
+
+const resolvedAdapter = resolveAxiosAdapter();
+if (typeof resolvedAdapter === "function") {
   api.defaults.adapter = (config) => {
     const method = (config.method ?? "get").toLowerCase();
     if (method !== "get") {
-      return baseGetAdapter(config);
+      return resolvedAdapter(config);
     }
     const key = inFlightGetKey(config);
     const existing = inFlightGets.get(key);
     if (existing) return existing;
-    const flight = baseGetAdapter(config).finally(() => {
+    const flight = resolvedAdapter(config).finally(() => {
       inFlightGets.delete(key);
     });
     inFlightGets.set(key, flight);
