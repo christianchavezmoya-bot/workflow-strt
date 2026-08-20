@@ -60,11 +60,14 @@ public class MobileUploadController : ControllerBase
     {
         await ExpireStaleTokensAsync();
 
+        if (string.IsNullOrWhiteSpace(request.Type))
+            return BadRequest(new { message = "Document type is required for mobile upload." });
+
         var token = Guid.NewGuid().ToString("N")[..16];
         var entry = new MobileUploadTokenEntity
         {
             Token = token,
-            Type = request.Type ?? "tips",
+            Type = request.Type.Trim(),
             LinkedTo = request.LinkedTo ?? string.Empty,
             CustomValuesJson = request.CustomValuesJson,
             Status = "pending",

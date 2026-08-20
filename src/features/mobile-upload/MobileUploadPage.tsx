@@ -14,7 +14,8 @@ import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import ErrorOutlineIcon from "@mui/icons-material/ErrorOutline";
 import { useSearchParams } from "react-router-dom";
 import api from "../../services/api";
-import { TIPS_UPLOAD_ACCEPT } from "../../utils/documentFileTypes";
+import { DOCUMENT_LIBRARY_UPLOAD_ACCEPT, TIPS_UPLOAD_ACCEPT } from "../../utils/documentFileTypes";
+import { TIPS_DOCUMENT_TYPE } from "../../utils/documentScope";
 
 interface TokenInfo {
   type: string;
@@ -174,6 +175,9 @@ export default function MobileUploadPage() {
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
   };
+
+  const uploadAccept =
+    tokenInfo?.type === TIPS_DOCUMENT_TYPE ? TIPS_UPLOAD_ACCEPT : DOCUMENT_LIBRARY_UPLOAD_ACCEPT;
 
   return (
     <Box
@@ -346,7 +350,7 @@ export default function MobileUploadPage() {
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={TIPS_UPLOAD_ACCEPT}
+                accept={uploadAccept}
                 multiple
                 style={{ display: "none" }}
                 onChange={handleFileChange}
