@@ -1,50 +1,51 @@
-import { Suspense, lazy, type ReactNode } from "react";
+import { Suspense, type ReactNode } from "react";
 import { Box, CircularProgress } from "@mui/material";
 import { Navigate, Outlet, Route, Routes, useParams } from "react-router-dom";
 import AppShell from "../components/layout/AppShell";
 import { usePermissions } from "../hooks/usePermissions";
 import { BOM_MODULE_ENABLED } from "../modules/bom-project";
 import { isMobileNativePlatform } from "../utils/platform";
+import { lazyWithChunkReload } from "../utils/lazyWithChunkReload";
 
-const Dashboard = lazy(() => import("../features/dashboard/Dashboard"));
-const ProjectsPage = lazy(() => import("../features/projects/ProjectsPage"));
-const ProjectForm = lazy(() => import("../features/projects/ProjectForm"));
-const ProjectDetail = lazy(() => import("../features/projects/ProjectDetail"));
-const ProjectAssetInspectionPage = lazy(() => import("../features/projects/ProjectAssetInspectionPage"));
-const AssetInstallationPage = lazy(() => import("../features/installations/AssetInstallationPage"));
-const CaptureTablePage = lazy(() => import("../features/installations/CaptureTablePage"));
-const WorkInstructions = lazy(() => import("../features/workInstructions/WorkInstructions"));
-const UserManagement = lazy(() => import("../features/admin/UserManagement"));
-const CustomerSites = lazy(() => import("../features/admin/CustomerSites"));
-const DocumentsPage = lazy(() => import("../features/documents/DocumentsPage"));
-const TipsAndTricksPage = lazy(() => import("../features/tips/TipsAndTricksPage"));
-const ProfileWizard = lazy(() => import("../features/profile/ProfileWizard"));
-const Settings = lazy(() => import("../features/settings/Settings"));
-const Login = lazy(() => import("../features/auth/Login"));
-const ResetPassword = lazy(() => import("../features/auth/ResetPassword"));
-const ExternalSignPage = lazy(() => import("../features/sign/ExternalSignPage"));
-const AssetReportShareViewPage = lazy(() => import("../features/reports/AssetReportShareViewPage"));
-const IssuesBoard = lazy(() => import("../features/issues/IssuesBoard"));
-const MobileUploadPage = lazy(() => import("../features/mobile-upload/MobileUploadPage"));
-const TimeAnalyticsPage = lazy(() => import("../features/timeAnalytics"));
-const FaultReportsPage = lazy(() => import("../features/support/FaultReportsPage"));
+const Dashboard = lazyWithChunkReload(() => import("../features/dashboard/Dashboard"));
+const ProjectsPage = lazyWithChunkReload(() => import("../features/projects/ProjectsPage"));
+const ProjectForm = lazyWithChunkReload(() => import("../features/projects/ProjectForm"));
+const ProjectDetail = lazyWithChunkReload(() => import("../features/projects/ProjectDetail"));
+const ProjectAssetInspectionPage = lazyWithChunkReload(() => import("../features/projects/ProjectAssetInspectionPage"));
+const AssetInstallationPage = lazyWithChunkReload(() => import("../features/installations/AssetInstallationPage"));
+const CaptureTablePage = lazyWithChunkReload(() => import("../features/installations/CaptureTablePage"));
+const WorkInstructions = lazyWithChunkReload(() => import("../features/workInstructions/WorkInstructions"));
+const UserManagement = lazyWithChunkReload(() => import("../features/admin/UserManagement"));
+const CustomerSites = lazyWithChunkReload(() => import("../features/admin/CustomerSites"));
+const DocumentsPage = lazyWithChunkReload(() => import("../features/documents/DocumentsPage"));
+const TipsAndTricksPage = lazyWithChunkReload(() => import("../features/tips/TipsAndTricksPage"));
+const ProfileWizard = lazyWithChunkReload(() => import("../features/profile/ProfileWizard"));
+const Settings = lazyWithChunkReload(() => import("../features/settings/Settings"));
+const Login = lazyWithChunkReload(() => import("../features/auth/Login"));
+const ResetPassword = lazyWithChunkReload(() => import("../features/auth/ResetPassword"));
+const ExternalSignPage = lazyWithChunkReload(() => import("../features/sign/ExternalSignPage"));
+const AssetReportShareViewPage = lazyWithChunkReload(() => import("../features/reports/AssetReportShareViewPage"));
+const IssuesBoard = lazyWithChunkReload(() => import("../features/issues/IssuesBoard"));
+const MobileUploadPage = lazyWithChunkReload(() => import("../features/mobile-upload/MobileUploadPage"));
+const TimeAnalyticsPage = lazyWithChunkReload(() => import("../features/timeAnalytics"));
+const FaultReportsPage = lazyWithChunkReload(() => import("../features/support/FaultReportsPage"));
 
-const BomProjectProvider = lazy(() =>
+const BomProjectProvider = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomProjectProvider }))
 );
-const BomDashboard = lazy(() =>
+const BomDashboard = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomDashboard }))
 );
-const BomUploadPage = lazy(() =>
+const BomUploadPage = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomUploadPage }))
 );
-const BomMappingPage = lazy(() =>
+const BomMappingPage = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomMappingPage }))
 );
-const BomClassificationPage = lazy(() =>
+const BomClassificationPage = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomClassificationPage }))
 );
-const BomCommitPage = lazy(() =>
+const BomCommitPage = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomCommitPage }))
 );
 
