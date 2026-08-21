@@ -1,4 +1,5 @@
 import { getServerReachable, shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead } from "../services/connectivityMonitor";
+import { isCircuitOpen } from "./circuitBreaker";
 
 /**
  * How long an "authoritative" native read may block the UI before we give up
@@ -47,7 +48,9 @@ export async function boundedFreshRead<T>(
   }
 
   const timeoutMs = options?.timeoutMs
-    ?? (getServerReachable() === false ? BOUNDED_FRESH_PROBE_MS : BOUNDED_FRESH_TIMEOUT_MS);
+    ?? (getServerReachable() === false || isCircuitOpen()
+      ? BOUNDED_FRESH_PROBE_MS
+      : BOUNDED_FRESH_TIMEOUT_MS);
 
   // NOTE: the fresh promise is intentionally NOT cancelled when the timer wins.
   // Letting it finish is what keeps the cache warm and lets a recovering server
