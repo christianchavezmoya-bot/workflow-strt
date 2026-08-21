@@ -439,17 +439,17 @@ const ProjectList = () => {
     const handleUpdated = (event: Event) => {
       const detail = (event as CustomEvent<ProjectRepositoryUpdateDetail>).detail;
       if (!detail) return;
+      if (detail.requestKey !== currentRequestKey) return;
       if (isMobileNativePlatform()) {
-        reloadProjects();
+        dispatch(setProjects({ items: detail.items, total: detail.total }));
         setProjectsCacheStale(false);
         return;
       }
-      if (detail.requestKey !== currentRequestKey) return;
       dispatch(setProjects({ items: detail.items, total: detail.total }));
     };
     window.addEventListener("repo:projects:updated", handleUpdated);
     return () => window.removeEventListener("repo:projects:updated", handleUpdated);
-  }, [currentRequestKey, dispatch, reloadProjects]);
+  }, [currentRequestKey, dispatch]);
 
   useEffect(() => {
     if (productsState.hasFetchedOnce || productsState.loading) return;

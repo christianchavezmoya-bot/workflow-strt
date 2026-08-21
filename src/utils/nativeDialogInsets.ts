@@ -9,16 +9,26 @@ export const NATIVE_DIALOG_Z_INDEX = 1500;
 /** MUI DatePicker popper must sit above native dialogs (1500). */
 export const NATIVE_PICKER_Z_INDEX = 1600;
 
+/** Nested dialogs (e.g. flag-issue inside WorkOrderRunner) sit between runner and pickers. */
+export const NATIVE_NESTED_DIALOG_Z_INDEX = 1550;
+
 export function nativeDialogSx() {
   return isMobileNativePlatform() ? { zIndex: NATIVE_DIALOG_Z_INDEX } : undefined;
 }
 
+export function nativeNestedDialogSx() {
+  return isMobileNativePlatform() ? { zIndex: NATIVE_NESTED_DIALOG_Z_INDEX } : undefined;
+}
+
 /** Popper slotProps so calendar opens above native workflow/time dialogs. */
+export function nativeDatePickerDialogSlotProps() {
+  if (!isMobileNativePlatform()) return undefined;
+  return { sx: { zIndex: NATIVE_PICKER_Z_INDEX } };
+}
+
 export function nativeDatePickerPopperSlotProps() {
   if (!isMobileNativePlatform()) return undefined;
-  return {
-    sx: { zIndex: NATIVE_PICKER_Z_INDEX },
-  };
+  return { sx: { zIndex: NATIVE_PICKER_Z_INDEX } };
 }
 
 export function nativeDialogPaperSx(extra?: Record<string, unknown>) {
