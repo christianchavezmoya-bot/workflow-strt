@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   AccessTimeOutlined,
   AttachMoneyOutlined,
@@ -88,6 +88,10 @@ import RunnerLiveDuration from "./RunnerLiveDuration";
 import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
+import {
+  markWorkflowRunnerClosed,
+  markWorkflowRunnerOpened,
+} from "../../utils/nativeReconnectCoordinator";
 import { formatInstant } from "../../utils/datetime";
 import { shouldSkipRunMutation } from "../../services/connectivityMonitor";
 import WorkOrderRunnerBomStage from "./WorkOrderRunnerBomStage";
@@ -172,7 +176,7 @@ type PendingStepAction =
 
 type MissingCaptureTarget = MissingWorkflowItem & { stepId: string; iterationIndex?: number };
 
-export default function WorkOrderRunner({
+function WorkOrderRunner({
   open,
   onClose,
   workflow,
@@ -205,6 +209,7 @@ export default function WorkOrderRunner({
   );
 
   const [stage, setStage] = useState<Stage>("setup");
+  const stageRef = useRef<Stage>("setup");
   const firstRenderMarkedRef = useRef(false);
   const [currentStepId, setCurrentStepId] = useState<string | null>(stepsSorted[0]?.id ?? null);
   const [history, setHistory] = useState<string[]>([]);
@@ -420,6 +425,17 @@ export default function WorkOrderRunner({
     const effectiveStepId = getEffectiveStepId(step);
     return getMissingWorkflowItems(step, values[effectiveStepId]);
   }
+
+  useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
+
+  useEffect(() => {
+    if (!isMobileNativePlatform()) return;
+    if (!open) return;
+    markWorkflowRunnerOpened();
+    return () => markWorkflowRunnerClosed();
+  }, [open]);
 
   useEffect(() => {
     if (open && existingRunId) setActiveRunId(existingRunId);
@@ -711,10 +727,12 @@ export default function WorkOrderRunner({
     })();
   }
 
-  function applyRunProgressFromRun(run: AssetWorkflowRun): void {
+  function applyRunProgressFromRun(run: AssetWorkflowRun, options?: { preserveInFlightValues?: boolean }): void {
     setActiveRunId(run.id);
     setActiveRun(run);
     syncRunTimeState(run);
+
+    const preserveValues = options?.preserveInFlightValues ?? stageRef.current === "running";
 
     const prevValues: Record<string, Record<string, string>> = {};
     let navRestored = false;
@@ -725,9 +743,19 @@ export default function WorkOrderRunner({
         const dataEntries = prev.filter((sc) => sc.stepId !== "__nav__");
 
         for (const sc of dataEntries) prevValues[sc.stepId] = sc.values;
-        setValues(prevValues);
+        if (preserveValues) {
+          setValues((current) => {
+            const merged = { ...current };
+            for (const sc of dataEntries) {
+              merged[sc.stepId] = { ...sc.values, ...(merged[sc.stepId] ?? {}) };
+            }
+            return merged;
+          });
+        } else {
+          setValues(prevValues);
+        }
 
-        if (navEntry?.values?.currentStepId) {
+        if (navEntry?.values?.currentStepId && !preserveValues) {
           const savedStepId = navEntry.values.currentStepId;
           const savedHistory: string[] = JSON.parse(navEntry.values.historyJson ?? "[]");
           setCurrentStepId(savedStepId);
@@ -737,11 +765,11 @@ export default function WorkOrderRunner({
         }
       } catch { /* ignore */ }
     }
-    if (run.issuesJson && run.issuesJson !== "[]") {
+    if (run.issuesJson && run.issuesJson !== "[]" && !preserveValues) {
       try { setIssues(JSON.parse(run.issuesJson) as RunIssue[]); } catch { /* ignore */ }
     }
 
-    if (!navRestored) {
+    if (!navRestored && !preserveValues) {
       const hasData = Object.keys(prevValues).length > 0;
       if (hasData) {
         setResumingRun(true);
@@ -3025,3 +3053,5 @@ export default function WorkOrderRunner({
     </>
   );
 }
+
+export default memo(WorkOrderRunner);

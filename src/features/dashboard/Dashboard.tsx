@@ -62,6 +62,7 @@ import {
 } from "../../utils/dashboardRefreshSchedule";
 import { runPool } from "../../utils/runPool";
 import {
+  isWorkflowRunnerOpen,
   shouldDeferNativeDashboardFullRefresh,
   shouldDeferPerAssetBackgroundRefresh,
 } from "../../utils/nativeReconnectCoordinator";
@@ -707,7 +708,7 @@ const Dashboard = () => {
   const scheduleDashboardRefresh = useCallback((scope: DashboardLiveRefreshScope = "full") => {
     const result = requestDashboardRefresh(dashboardRefreshDeferRef.current, {
       scope,
-      runnerOpen: runnerOpenRef.current,
+      runnerOpen: runnerOpenRef.current || isWorkflowRunnerOpen(),
       documentHidden: typeof document !== "undefined" && document.hidden,
     });
     dashboardRefreshDeferRef.current = result.next;
@@ -726,11 +727,17 @@ const Dashboard = () => {
 
   const refreshLiveDashboardDataNativeAware = useCallback(() => {
     if (isNativePlatform && shouldDeferNativeDashboardFullRefresh()) {
-      refreshLiveDashboardDataLight();
       return;
     }
     refreshLiveDashboardData();
-  }, [isNativePlatform, refreshLiveDashboardData, refreshLiveDashboardDataLight]);
+  }, [isNativePlatform, refreshLiveDashboardData]);
+
+  const refreshLiveDashboardDataLightNativeAware = useCallback(() => {
+    if (isNativePlatform && shouldDeferNativeDashboardFullRefresh()) {
+      return;
+    }
+    refreshLiveDashboardDataLight();
+  }, [isNativePlatform, refreshLiveDashboardDataLight]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
@@ -818,13 +825,13 @@ const Dashboard = () => {
   // Notification-driven refresh: run state events -> workspace + attention only (not open/workload storm)
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
-    window.addEventListener("notifications:run-state-changed", refreshLiveDashboardDataLight);
+    window.addEventListener("notifications:run-state-changed", refreshLiveDashboardDataLightNativeAware);
     window.addEventListener("notifications:refresh", refreshLiveDashboardDataNativeAware);
     // Also listen for asset-level changes dispatched by AssetRepository (and
     // forwarded by offline issue mutations) so the workspace + attention
     // counts refresh live when assets change offline - not only when the
     // notifications:* events happen to be fired alongside.
-    window.addEventListener("repo:assets:updated", refreshLiveDashboardDataLight);
+    window.addEventListener("repo:assets:updated", refreshLiveDashboardDataLightNativeAware);
     window.addEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
     // Assignment and run caches refresh in the background on native and emit
     // these when they land. Without listening, the dashboard kept rendering the
@@ -832,7 +839,7 @@ const Dashboard = () => {
     // repo:assignments:updated) recovered correctly — so the dashboard alone
     // stayed wrong until a manual reload.
     window.addEventListener("repo:assignments:updated", refreshLiveDashboardDataNativeAware);
-    window.addEventListener("repo:runs:updated", refreshLiveDashboardDataLight);
+    window.addEventListener("repo:runs:updated", refreshLiveDashboardDataLightNativeAware);
     const onFlushComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ syncedAny?: boolean; pendingRemaining?: number }>).detail;
       if (detail?.syncedAny && detail.pendingRemaining === 0) {
@@ -843,22 +850,34 @@ const Dashboard = () => {
     const onReconnectSettled = () => {
       refreshLiveDashboardData();
     };
+    const onRunnerSettled = () => {
+      const flush = flushRunnerDeferredRefresh(dashboardRefreshDeferRef.current);
+      dashboardRefreshDeferRef.current = flush.next;
+      if (flush.schedule && flush.scopeToRun) {
+        enqueueDashboardRefresh(flush.scopeToRun);
+      } else {
+        refreshLiveDashboardDataLight();
+      }
+    };
     window.addEventListener("native-reconnect:settled", onReconnectSettled);
+    window.addEventListener("native-reconnect:settled", onRunnerSettled);
     return () => {
-      window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardDataLight);
+      window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardDataLightNativeAware);
       window.removeEventListener("notifications:refresh", refreshLiveDashboardDataNativeAware);
-      window.removeEventListener("repo:assets:updated", refreshLiveDashboardDataLight);
+      window.removeEventListener("repo:assets:updated", refreshLiveDashboardDataLightNativeAware);
       window.removeEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
       window.removeEventListener("repo:assignments:updated", refreshLiveDashboardDataNativeAware);
-      window.removeEventListener("repo:runs:updated", refreshLiveDashboardDataLight);
+      window.removeEventListener("repo:runs:updated", refreshLiveDashboardDataLightNativeAware);
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
       window.removeEventListener("native-reconnect:settled", onReconnectSettled);
+      window.removeEventListener("native-reconnect:settled", onRunnerSettled);
     };
   }, [
     dashboardBootPhase,
+    enqueueDashboardRefresh,
     refreshAttentionFromIssueCache,
     refreshLiveDashboardData,
-    refreshLiveDashboardDataLight,
+    refreshLiveDashboardDataLightNativeAware,
     refreshLiveDashboardDataNativeAware,
   ]);
 

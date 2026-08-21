@@ -4,6 +4,7 @@ import { assetWorkflowRunService } from "./assetWorkflowRunService";
 import { projectAssetService } from "./projectAssetService";
 import { workflowConfigService } from "./workflowConfigService";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldDeferPerAssetBackgroundRefresh } from "../utils/nativeReconnectCoordinator";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 import {
   filterInspectionRuns,
@@ -46,7 +47,7 @@ export const projectInspectionRunService = {
       );
     }
 
-    if (!shouldSkipBlockingFetch()) {
+    if (!shouldSkipBlockingFetch() && !shouldDeferPerAssetBackgroundRefresh()) {
       void assetWorkflowRunService.listByAssetFresh(projectAssetId).catch(() => {});
     }
 

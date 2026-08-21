@@ -25,6 +25,7 @@ import {
 } from "./documentService";
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
 import { getBootstrapPrefetchLimits } from "../utils/syncPolicy";
+import { waitForBackgroundWorkSlot } from "../utils/nativeReconnectCoordinator";
 import offlineStore from "./offlineStore";
 import type { ProjectAsset } from "../types/projectAsset";
 import type { User } from "../types/user";
@@ -304,6 +305,7 @@ export const offlineBootstrapService = {
       let assetDone = 0;
       const assetPrefetchConcurrency = light ? 2 : 4;
       await runPool(deepAssets, assetPrefetchConcurrency, async (asset) => {
+        if (!(await waitForBackgroundWorkSlot())) return;
         await Promise.allSettled([
           WorkflowAssignmentRepository.prefetchFromNetwork(asset.id),
           assetWorkflowRunService.prefetchFromNetwork(asset.id),

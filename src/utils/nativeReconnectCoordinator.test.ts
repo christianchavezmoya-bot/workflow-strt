@@ -7,11 +7,14 @@ vi.mock("./platform", () => ({
 import { isMobileNativePlatform } from "./platform";
 import {
   isNativeReconnectBusy,
+  isWorkflowRunnerOpen,
   markNativeBootstrapFinished,
   markNativeBootstrapStarted,
   markNativeReconnectPending,
   markNativeSyncFlushFinished,
   markNativeSyncFlushStarted,
+  markWorkflowRunnerClosed,
+  markWorkflowRunnerOpened,
   resetNativeReconnectCoordinatorForTests,
   shouldDeferNativeDashboardFullRefresh,
   shouldDeferPerAssetBackgroundRefresh,
@@ -25,6 +28,7 @@ describe("nativeReconnectCoordinator", () => {
 
   it("is idle by default", () => {
     expect(isNativeReconnectBusy()).toBe(false);
+    expect(isWorkflowRunnerOpen()).toBe(false);
     expect(shouldDeferPerAssetBackgroundRefresh()).toBe(false);
   });
 
@@ -43,15 +47,27 @@ describe("nativeReconnectCoordinator", () => {
     expect(isNativeReconnectBusy()).toBe(true);
   });
 
+  it("defers background work while WorkOrderRunner is open", () => {
+    markWorkflowRunnerOpened();
+    expect(isWorkflowRunnerOpen()).toBe(true);
+    expect(shouldDeferPerAssetBackgroundRefresh()).toBe(true);
+    expect(shouldDeferNativeDashboardFullRefresh()).toBe(true);
+
+    markWorkflowRunnerClosed();
+    expect(isWorkflowRunnerOpen()).toBe(false);
+    // Brief settle window still defers background work after runner closes.
+    expect(shouldDeferPerAssetBackgroundRefresh()).toBe(true);
+  });
+
   it("no-ops on web", () => {
     resetNativeReconnectCoordinatorForTests();
     vi.mocked(isMobileNativePlatform).mockReturnValue(false);
 
     markNativeReconnectPending();
-    markNativeSyncFlushStarted();
-    markNativeBootstrapStarted();
+    markWorkflowRunnerOpened();
 
     expect(isNativeReconnectBusy()).toBe(false);
+    expect(isWorkflowRunnerOpen()).toBe(false);
     expect(shouldDeferPerAssetBackgroundRefresh()).toBe(false);
   });
 });
