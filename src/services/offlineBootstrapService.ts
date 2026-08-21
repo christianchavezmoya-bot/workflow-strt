@@ -6,7 +6,6 @@ import { waitForActiveUploadDrain } from "./bootstrapUploadGate";
 import { syncMetaGet, syncMetaSet, CACHE_SOFT_LIMIT_MS } from "./localDB";
 import { projectService } from "./projectService";
 import { projectAssetService } from "./projectAssetService";
-import { assetWorkflowAssignmentService } from "./assetWorkflowAssignmentService";
 import { assetWorkflowRunService } from "./assetWorkflowRunService";
 import { assetDocumentLinkService } from "./assetDocumentLinkService";
 import { workflowConfigService } from "./workflowConfigService";
@@ -24,6 +23,7 @@ import {
   prefetchLibraryDocuments,
   type AssetDocumentPrefetchLink,
 } from "./documentService";
+import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
 import { getBootstrapPrefetchLimits } from "../utils/syncPolicy";
 import offlineStore from "./offlineStore";
 import type { ProjectAsset } from "../types/projectAsset";
@@ -302,10 +302,11 @@ export const offlineBootstrapService = {
 
       // ── Phase 6: per-asset assignments + full run history (network refresh) ─
       let assetDone = 0;
-      await runPool(deepAssets, 4, async (asset) => {
+      const assetPrefetchConcurrency = light ? 2 : 4;
+      await runPool(deepAssets, assetPrefetchConcurrency, async (asset) => {
         await Promise.allSettled([
-          assetWorkflowAssignmentService.listByAsset(asset.id),
-          assetWorkflowRunService.listByAssetFresh(asset.id),
+          WorkflowAssignmentRepository.prefetchFromNetwork(asset.id),
+          assetWorkflowRunService.prefetchFromNetwork(asset.id),
         ]);
         assetDone++;
         emit("bootstrap:progress", { phase: "workflows", done: assetDone, total: deepAssets.length } satisfies BootstrapProgress);

@@ -7,6 +7,7 @@ import {
 } from "../services/localDB";
 import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldDeferPerAssetBackgroundRefresh } from "../utils/nativeReconnectCoordinator";
 import { webCachedGet } from "../services/webFreshCache";
 import { workflowConfigService } from "../services/workflowConfigService";
 
@@ -114,8 +115,9 @@ export const WorkflowAssignmentRepository = {
 
     const local = await this.getLocalByAsset(assetId);
 
-    // Background refresh keeps the cache warm for offline starts. Skip when offline.
-    if (!shouldSkipBlockingFetch()) {
+    // Background refresh keeps the cache warm for offline starts. Skip when offline
+    // or while reconnect flush/bootstrap is already prefetching the same assets.
+    if (!shouldSkipBlockingFetch() && !shouldDeferPerAssetBackgroundRefresh()) {
       api.get<WorkflowAssignment[]>(`/asset-workflow-assignments/by-asset/${assetId}`)
         .then(async (res) => {
           await this.replaceByAsset(assetId, res.data);
@@ -135,6 +137,19 @@ export const WorkflowAssignmentRepository = {
       return res.data;
     } catch {
       return [];
+    }
+  },
+
+  /** Single network fetch + cache — used by bootstrap to avoid duplicate background GETs. */
+  async prefetchFromNetwork(assetId: string): Promise<void> {
+    if (!isMobileNativePlatform() || shouldSkipBlockingFetch()) return;
+    try {
+      const res = await api.get<WorkflowAssignment[]>(`/asset-workflow-assignments/by-asset/${assetId}`);
+      await this.replaceByAsset(assetId, res.data);
+      await syncMetaSet("workflow_assignments");
+      window.dispatchEvent(new CustomEvent("repo:assignments:updated", { detail: { assetId } }));
+    } catch {
+      /* non-fatal */
     }
   },
 };

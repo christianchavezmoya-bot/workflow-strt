@@ -61,6 +61,10 @@ import {
   requestDashboardRefresh,
 } from "../../utils/dashboardRefreshSchedule";
 import { runPool } from "../../utils/runPool";
+import {
+  shouldDeferNativeDashboardFullRefresh,
+  shouldDeferPerAssetBackgroundRefresh,
+} from "../../utils/nativeReconnectCoordinator";
 import { countMissingWorkflowItems, getRunMissingMediaSteps, runHasCompletedAllSteps, sanitizeMissingMediaFlags } from "../../utils/workflowCompleteness";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
 import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
@@ -720,6 +724,14 @@ const Dashboard = () => {
     scheduleDashboardRefresh("light");
   }, [scheduleDashboardRefresh]);
 
+  const refreshLiveDashboardDataNativeAware = useCallback(() => {
+    if (isNativePlatform && shouldDeferNativeDashboardFullRefresh()) {
+      refreshLiveDashboardDataLight();
+      return;
+    }
+    refreshLiveDashboardData();
+  }, [isNativePlatform, refreshLiveDashboardData, refreshLiveDashboardDataLight]);
+
   useEffect(() => {
     const onVisibilityChange = () => {
       if (document.hidden) return;
@@ -797,17 +809,17 @@ const Dashboard = () => {
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
     const refresh = () => {
-      refreshLiveDashboardData();
+      refreshLiveDashboardDataNativeAware();
     };
     window.addEventListener("notifications:assignments-changed", refresh);
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
-  }, [dashboardBootPhase, refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshLiveDashboardDataNativeAware]);
 
   // Notification-driven refresh: run state events -> workspace + attention only (not open/workload storm)
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
     window.addEventListener("notifications:run-state-changed", refreshLiveDashboardDataLight);
-    window.addEventListener("notifications:refresh", refreshLiveDashboardData);
+    window.addEventListener("notifications:refresh", refreshLiveDashboardDataNativeAware);
     // Also listen for asset-level changes dispatched by AssetRepository (and
     // forwarded by offline issue mutations) so the workspace + attention
     // counts refresh live when assets change offline - not only when the
@@ -819,25 +831,36 @@ const Dashboard = () => {
     // pre-refresh snapshot while other screens (the Assets page listens to
     // repo:assignments:updated) recovered correctly — so the dashboard alone
     // stayed wrong until a manual reload.
-    window.addEventListener("repo:assignments:updated", refreshLiveDashboardData);
+    window.addEventListener("repo:assignments:updated", refreshLiveDashboardDataNativeAware);
     window.addEventListener("repo:runs:updated", refreshLiveDashboardDataLight);
     const onFlushComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ syncedAny?: boolean; pendingRemaining?: number }>).detail;
       if (detail?.syncedAny && detail.pendingRemaining === 0) {
-        refreshLiveDashboardData();
+        refreshLiveDashboardDataNativeAware();
       }
     };
     window.addEventListener("sync-engine:flush-complete", onFlushComplete);
+    const onReconnectSettled = () => {
+      refreshLiveDashboardData();
+    };
+    window.addEventListener("native-reconnect:settled", onReconnectSettled);
     return () => {
       window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardDataLight);
-      window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
+      window.removeEventListener("notifications:refresh", refreshLiveDashboardDataNativeAware);
       window.removeEventListener("repo:assets:updated", refreshLiveDashboardDataLight);
       window.removeEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
-      window.removeEventListener("repo:assignments:updated", refreshLiveDashboardData);
+      window.removeEventListener("repo:assignments:updated", refreshLiveDashboardDataNativeAware);
       window.removeEventListener("repo:runs:updated", refreshLiveDashboardDataLight);
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
+      window.removeEventListener("native-reconnect:settled", onReconnectSettled);
     };
-  }, [dashboardBootPhase, refreshAttentionFromIssueCache, refreshLiveDashboardData, refreshLiveDashboardDataLight]);
+  }, [
+    dashboardBootPhase,
+    refreshAttentionFromIssueCache,
+    refreshLiveDashboardData,
+    refreshLiveDashboardDataLight,
+    refreshLiveDashboardDataNativeAware,
+  ]);
 
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
@@ -1672,6 +1695,7 @@ const Dashboard = () => {
   // gaps without re-fetching every asset on each dashboard boot (request storm).
   useEffect(() => {
     if (!isNativePlatform || myInstallAssets.length === 0 || shouldSkipBlockingFetch()) return;
+    if (shouldDeferPerAssetBackgroundRefresh()) return;
     let cancelled = false;
     void (async () => {
       for (const asset of myInstallAssets) {

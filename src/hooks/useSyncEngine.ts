@@ -841,6 +841,9 @@ export function useSyncEngine(): SyncState {
       // Only advertise "syncing" when there is real work — empty-queue probes
       // must not start the overlay / keep-alive (native felt stuck in sync mode).
       setSyncFlushing(true);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new Event("sync-engine:flush-start"));
+      }
       setSyncing(true);
       dispatchSyncEngineSyncing(true);
       setSyncConnectivitySyncing(true);
