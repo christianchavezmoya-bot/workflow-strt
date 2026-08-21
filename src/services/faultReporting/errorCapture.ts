@@ -8,6 +8,7 @@
 import { recordActionBreadcrumb } from "./breadcrumbs";
 import { flushPendingFaultReports, submitFaultReport } from "./faultReportService";
 import { registerFaultReportSink, serverFaultReportSink } from "./sinks";
+import { isStaleChunkError } from "../../utils/staleChunkError";
 
 /** Same error within this window is treated as one occurrence. */
 const DEDUPE_WINDOW_MS = 60_000;
@@ -42,6 +43,7 @@ export async function captureFault(
 ): Promise<string | null> {
   const err = error instanceof Error ? error : new Error(String(error));
   if (isExpectedAbort(err, options.kind)) return null;
+  if (isStaleChunkError(err)) return null;
   const signature = `${err.name}:${err.message}`;
   if (!shouldReport(signature)) return null;
 

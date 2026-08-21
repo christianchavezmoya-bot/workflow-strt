@@ -16,6 +16,7 @@ import { ComplexViewProvider } from "./contexts/ComplexViewContext";
 import { OfflineModeProvider } from "./contexts/OfflineModeContext";
 import FaultBoundary from "./components/FaultBoundary";
 import { installFaultCapture } from "./services/faultReporting";
+import { clearChunkReloadFlag } from "./utils/staleChunkError";
 import "./index.css";
 import { defineCustomElements } from "@ionic/pwa-elements/loader";
 
@@ -25,6 +26,9 @@ defineCustomElements(window);
 // Catch uncaught errors and rejections, and flush anything queued offline.
 // Installed before render so a crash during mount is still recorded.
 installFaultCapture();
+
+// Successful boot — allow one auto-reload on the next stale chunk after a deploy.
+clearChunkReloadFlag();
 
 // React Router v7 prep — non-blocking navigations (web perf Phase 4).
 const ROUTER_FUTURE: Partial<FutureConfig> = {
