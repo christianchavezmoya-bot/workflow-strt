@@ -527,13 +527,20 @@ const Dashboard = () => {
     if (isNativePlatform) {
       seedNativeDashboardSummariesFromLocal();
       setWorkloadLoading(false);
-      loadAttention();
-      if (!shouldSkipBlockingFetch()) {
-        if (needsTechnicianWorkload) {
-          void projectAssetService.technicianWorkloadSummary()
-            .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
-            .catch(() => {});
-        }
+      void loadAttention();
+      if (shouldSkipBlockingFetch()) return undefined;
+
+      // Same stagger as web: attention first, then workload, then open-assets /
+      // active-summary so native Dashboard boot does not Promise.all the heavy
+      // endpoints against a 10s timeout budget.
+      const workloadTimer = needsTechnicianWorkload
+        ? window.setTimeout(() => {
+            void projectAssetService.technicianWorkloadSummary()
+              .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
+              .catch(() => {});
+          }, 400)
+        : undefined;
+      const summaryTimer = window.setTimeout(() => {
         void projectAssetService.listOpen()
           .then((a) => { setOpenAssets(a); dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); })
           .catch(() => {});
@@ -542,8 +549,11 @@ const Dashboard = () => {
             .then((s) => { setProjectAssetSummary(s); dcPut(DASHBOARD_CACHE_KEYS.projectAssetSummary, s); })
             .catch(() => setProjectAssetSummary([]));
         }
-      }
-      return;
+      }, 800);
+      return () => {
+        if (workloadTimer !== undefined) window.clearTimeout(workloadTimer);
+        window.clearTimeout(summaryTimer);
+      };
     }
 
     if (dashboardWebAttentionBootedRef.current) return;

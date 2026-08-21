@@ -58,33 +58,6 @@ type GetAdapter = (config: InternalAxiosRequestConfig) => Promise<AxiosResponse>
 
 const inFlightGets = new Map<string, Promise<AxiosResponse>>();
 
-function resolveAxiosAdapter(): GetAdapter | undefined {
-  try {
-    return getAdapter(api.defaults.adapter ?? axios.defaults.adapter) as GetAdapter;
-  } catch {
-    const fallback = api.defaults.adapter ?? axios.defaults.adapter;
-    return typeof fallback === "function" ? (fallback as GetAdapter) : undefined;
-  }
-}
-
-const resolvedAdapter = resolveAxiosAdapter();
-if (typeof resolvedAdapter === "function") {
-  api.defaults.adapter = (config) => {
-    const method = (config.method ?? "get").toLowerCase();
-    if (method !== "get") {
-      return resolvedAdapter(config);
-    }
-    const key = inFlightGetKey(config);
-    const existing = inFlightGets.get(key);
-    if (existing) return existing;
-    const flight = resolvedAdapter(config).finally(() => {
-      inFlightGets.delete(key);
-    });
-    inFlightGets.set(key, flight);
-    return flight;
-  };
-}
-
 export type ApiDebugSyncMeta = {
   source?: string;
   opType?: string;
@@ -106,9 +79,42 @@ export type ApiDebugLog = {
 };
 
 type AxiosConfigWithMeta = {
-  metadata?: { start: number };
+  metadata?: { start: number; coalesced?: boolean };
   syncMeta?: ApiDebugSyncMeta;
 };
+
+function resolveAxiosAdapter(): GetAdapter | undefined {
+  try {
+    return getAdapter(api.defaults.adapter ?? axios.defaults.adapter) as GetAdapter;
+  } catch {
+    const fallback = api.defaults.adapter ?? axios.defaults.adapter;
+    return typeof fallback === "function" ? (fallback as GetAdapter) : undefined;
+  }
+}
+
+const resolvedAdapter = resolveAxiosAdapter();
+if (typeof resolvedAdapter === "function") {
+  api.defaults.adapter = (config) => {
+    const method = (config.method ?? "get").toLowerCase();
+    if (method !== "get") {
+      return resolvedAdapter(config);
+    }
+    const key = inFlightGetKey(config);
+    const existing = inFlightGets.get(key);
+    if (existing) {
+      // Interceptors still run once per caller; only the first one owns the
+      // HTTP flight. Mark waiters so the debug log counts flights, not callers.
+      const metaCfg = config as InternalAxiosRequestConfig & AxiosConfigWithMeta;
+      metaCfg.metadata = { ...(metaCfg.metadata ?? { start: Date.now() }), coalesced: true };
+      return existing;
+    }
+    const flight = resolvedAdapter(config).finally(() => {
+      inFlightGets.delete(key);
+    });
+    inFlightGets.set(key, flight);
+    return flight;
+  };
+}
 
 const pushDebugLog = (log: ApiDebugLog) => {
   const anyWindow = window as typeof window & { __apiDebugLogs?: ApiDebugLog[] };
@@ -367,6 +373,9 @@ api.interceptors.response.use(
     const meta = cfg.metadata;
     const syncMeta = cfg.syncMeta;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
+    // Coalesced waiters share the owner's HTTP flight; logging them looks like
+    // duplicate requests with identical durations.
+    if (meta?.coalesced) return response;
     pushDebugLog({
       id: randomId(),
       time: new Date().toLocaleTimeString(),
@@ -400,6 +409,9 @@ api.interceptors.response.use(
     const status = error?.response?.status;
     const config = error?.config || {};
 
+    const cfg = config as typeof config & AxiosConfigWithMeta;
+    const meta = cfg.metadata;
+    const isCoalesced = Boolean(meta?.coalesced);
     // Outcome-based reachability signal.
     //
     // Only a real request failing with a genuine network error should mark the
@@ -407,15 +419,15 @@ api.interceptors.response.use(
     // answered, so those do not count as unreachable.
     // Trip the circuit breaker only via the connectivityMonitor listener on this
     // event — calling tripCircuitBreaker() here as well double-counted failures.
-    if (!(error as { isOfflineSkip?: boolean })?.isOfflineSkip && isNetworkOrTimeoutError(error)) {
+    // Coalesced waiters share the owner's flight: don't emit extra unreachable
+    // events or debug rows for the same timeout.
+    if (!isCoalesced && !(error as { isOfflineSkip?: boolean })?.isOfflineSkip && isNetworkOrTimeoutError(error)) {
       const isTimeout = (error as { code?: string }).code === "ECONNABORTED";
       window.dispatchEvent(new CustomEvent("api-server-unreachable", { detail: { isTimeout } }));
     }
-    const cfg = config as typeof config & AxiosConfigWithMeta;
-    const meta = cfg.metadata;
     const syncMeta = cfg.syncMeta;
     const durationMs = meta?.start ? Date.now() - meta.start : undefined;
-    pushDebugLog({
+    if (!isCoalesced) pushDebugLog({
       id: randomId(),
       time: new Date().toLocaleTimeString(),
       method: config.method?.toUpperCase(),

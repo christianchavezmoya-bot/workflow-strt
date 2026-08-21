@@ -228,6 +228,8 @@ type CachedAssetRecord = {
  * Mirror dashboard-workspace rows into the generic asset entity store so cold-start
  * offline rebuild (dashboardWorkspaceLocal) matches the last online dashboard view.
  * Skips dirty rows so offline edits are not clobbered.
+ * Does not prefetch per-asset runs/documents — that fan-out is deferred from
+ * dashboardWorkspace(full) so Dashboard mount is not a request storm.
  */
 async function hydrateAssetsFromWorkspaceSnapshot(workspace: DashboardWorkspace): Promise<void> {
   if (!isMobileNativePlatform()) return;
@@ -256,9 +258,6 @@ async function hydrateAssetsFromWorkspaceSnapshot(workspace: DashboardWorkspace)
             projectId: full.projectId,
             data: full,
             dirty: false,
-          });
-          void import("./assetPrefetchService").then(({ prefetchAssetWorkflowData }) => {
-            void prefetchAssetWorkflowData(full.id);
           });
         }
       } catch {
@@ -307,12 +306,6 @@ async function hydrateAssetsFromWorkspaceSnapshot(workspace: DashboardWorkspace)
       data: merged,
       dirty: false,
     });
-
-    if (productId || item.totalSteps > 0) {
-      void import("./assetPrefetchService").then(({ prefetchAssetWorkflowData }) => {
-        void prefetchAssetWorkflowData(item.id);
-      });
-    }
   }));
 }
 
@@ -957,9 +950,21 @@ export const projectAssetService = {
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
         await hydrateAssetsFromWorkspaceSnapshot(res.data);
-        void import("./assetPrefetchService").then(({ prefetchAssignedAssetsFromWorkspace }) => {
-          void prefetchAssignedAssetsFromWorkspace(res.data, userId);
-        });
+        // Light workspace is for first paint only — do not fan out per-asset
+        // GETs. Full response defers enrichment so Dashboard effects and
+        // workspace fetch are not competing for the same 10s timeout budget.
+        if (!options?.light) {
+          void import("./assetPrefetchService").then(({ prefetchAssignedAssetsFromWorkspace }) => {
+            const run = () => {
+              void prefetchAssignedAssetsFromWorkspace(res.data, userId, { includeDocuments: false });
+            };
+            if (typeof requestIdleCallback === "function") {
+              requestIdleCallback(run, { timeout: 2000 });
+            } else {
+              window.setTimeout(run, 1200);
+            }
+          });
+        }
       }
       if (isMobileNativePlatform()) {
         return await reconcileWorkspaceWithLocalStatus(res.data);
