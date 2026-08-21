@@ -769,6 +769,16 @@ export const projectAssetService = {
       if (shouldSkipBlockingFetch()) return local;
     }
     try {
+      if (!isMobileNativePlatform()) {
+        return await webCachedGet(
+          "/project-assets/technician-workload-summary",
+          async () => {
+            const res = await api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary");
+            return res.data;
+          },
+          { ttlMs: 30_000 },
+        );
+      }
       const res = await api.get<TechnicianWorkloadSummaryItem[]>("/project-assets/technician-workload-summary");
       return res.data;
     } catch {
@@ -805,6 +815,16 @@ export const projectAssetService = {
       if (shouldSkipBlockingFetch()) return local;
     }
     try {
+      if (!isMobileNativePlatform()) {
+        return await webCachedGet(
+          "/project-assets/active-summary",
+          async () => {
+            const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
+            return res.data;
+          },
+          { ttlMs: 30_000 },
+        );
+      }
       const res = await api.get<ProjectAssetSummaryItem[]>("/project-assets/active-summary");
       return res.data;
     } catch {
@@ -873,6 +893,16 @@ export const projectAssetService = {
       if (shouldSkipBlockingFetch()) return local;
     }
     try {
+      if (!isMobileNativePlatform()) {
+        return await webCachedGet(
+          "/project-assets/open",
+          async () => {
+            const res = await api.get<OpenAssetItem[]>("/project-assets/open");
+            return res.data;
+          },
+          { ttlMs: 30_000 },
+        );
+      }
       const res = await api.get<OpenAssetItem[]>("/project-assets/open");
       return res.data;
     } catch {

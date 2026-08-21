@@ -53,6 +53,8 @@ import {
   shouldFetchProjectAssetSummary,
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
+import { runStaggeredDashboardLiveRefresh } from "../../utils/dashboardRefreshStagger";
+import { runPool } from "../../utils/runPool";
 import { countMissingWorkflowItems, getRunMissingMediaSteps, runHasCompletedAllSteps, sanitizeMissingMediaFlags } from "../../utils/workflowCompleteness";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
 import { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
@@ -538,7 +540,7 @@ const Dashboard = () => {
             void projectAssetService.technicianWorkloadSummary()
               .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
               .catch(() => {});
-          }, 400)
+          }, 1200)
         : undefined;
       const summaryTimer = window.setTimeout(() => {
         void projectAssetService.listOpen()
@@ -562,8 +564,6 @@ const Dashboard = () => {
     // Web cold-start: stagger heavy SQLite reads so attention/workload/open-assets
     // do not stampede the API on first paint (session cache still paints immediately).
     void loadAttention().catch(() => {});
-    // Only roles that render WorkloadPanel pay for the workload query — it is the
-    // heaviest dashboard endpoint (all active assets + all their runs, blobs included).
     const workloadTimer = needsTechnicianWorkload
       ? window.setTimeout(() => {
           setWorkloadLoading(true);
@@ -571,12 +571,10 @@ const Dashboard = () => {
             .then((w) => { setWorkload(w); })
             .catch(() => {})
             .finally(() => setWorkloadLoading(false));
-        }, 400)
+        }, 1200)
       : undefined;
     const summaryTimer = window.setTimeout(() => {
       projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
-      // active-summary is a GROUP BY over every ProjectAsset row and only feeds the
-      // manager project-completion cards.
       if (needsProjectAssetSummary) {
         projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
       }
@@ -638,15 +636,22 @@ const Dashboard = () => {
       }
       setWorkspaceLoading(true);
       try {
-        await Promise.all([
-          projectAssetService.listOpen().then(setOpenAssets),
-          projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([])),
-          projectAssetService
+        await runStaggeredDashboardLiveRefresh({
+          workspace: () => projectAssetService
             .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
             .then((data) => { applyDashboardWorkspace(data); })
-            .catch(() => { /* keep last-good workspace on a failed manual refresh - never blank it */ }),
-          loadAttention({ silent: true }),
-        ]);
+            .catch(() => { /* keep last-good workspace on a failed manual refresh */ }),
+          attention: () => loadAttention({ silent: true }),
+          listOpen: () => projectAssetService.listOpen().then(setOpenAssets),
+          activeSummary: needsProjectAssetSummary
+            ? () => projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]))
+            : undefined,
+          workload: needsTechnicianWorkload
+            ? () => projectAssetService.technicianWorkloadSummary()
+              .then(setWorkload)
+              .catch(() => {})
+            : undefined,
+        });
         setAnalyticsRefreshTick((t) => t + 1);
       } finally {
         setWorkspaceLoading(false);
@@ -667,6 +672,8 @@ const Dashboard = () => {
     effectiveDashboardWorkspaceUserId,
     isNativePlatform,
     loadAttention,
+    needsProjectAssetSummary,
+    needsTechnicianWorkload,
     seedNativeDashboardSummariesFromLocal,
   ]);
 
@@ -760,15 +767,11 @@ const Dashboard = () => {
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
     const refresh = () => {
-      if (needsTechnicianWorkload) {
-        setWorkloadLoading(true);
-        projectAssetService.technicianWorkloadSummary().then(setWorkload).finally(() => setWorkloadLoading(false));
-      }
       refreshLiveDashboardData();
     };
     window.addEventListener("notifications:assignments-changed", refresh);
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
-  }, [dashboardBootPhase, needsTechnicianWorkload, refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshLiveDashboardData]);
 
   // Notification-driven refresh: run state events -> workspace + open assets + attention items + analytics
   useEffect(() => {
@@ -1499,9 +1502,16 @@ const Dashboard = () => {
 
     let cancelled = false;
     void (async () => {
-      const entries = await Promise.all(
-        myInstallAssets.map(async (asset) => {
-          if (isNativePlatform) {
+      if (!isNativePlatform) {
+        // Let workspace + attention boot finish before per-asset card enrichment.
+        await new Promise((resolve) => window.setTimeout(resolve, 1200));
+        if (cancelled) return;
+      }
+
+      const results: Array<readonly [string, NativeMyJobsCardContext] | null> = [];
+      if (isNativePlatform) {
+        const entries = await Promise.all(
+          myInstallAssets.map(async (asset) => {
             const [cachedAsset, runs] = await Promise.all([
               entityGetAsset(asset.id),
               assetWorkflowRunService.listLocalByAsset(asset.id),
@@ -1509,23 +1519,25 @@ const Dashboard = () => {
             const data = cachedAsset?.data as ProjectAsset | undefined;
             if (!data) return null;
             return [asset.id, { asset: data, runs }] as const;
-          }
-
-          if (shouldSkipBlockingFetch()) return null;
-
+          }),
+        );
+        results.push(...entries);
+      } else {
+        await runPool(myInstallAssets, 2, async (asset) => {
+          if (cancelled || shouldSkipBlockingFetch()) return;
           const [fullAsset, runs] = await Promise.all([
             projectAssetService.getById(asset.id).catch(() => null),
             assetWorkflowRunService.listByAsset(asset.id).catch(() => [] as AssetWorkflowRun[]),
           ]);
-          if (!fullAsset) return null;
-          return [asset.id, { asset: fullAsset, runs }] as const;
-        })
-      );
+          if (!fullAsset) return;
+          results.push([asset.id, { asset: fullAsset, runs }]);
+        });
+      }
 
       if (cancelled) return;
       setNativeMyJobsCardContext((prev) => {
         const fresh: Record<string, NativeMyJobsCardContext> = {};
-        for (const entry of entries) {
+        for (const entry of results) {
           if (!entry) continue;
           fresh[entry[0]] = entry[1];
         }
