@@ -573,6 +573,7 @@ function refreshProjectRunsInBackground(
   priority: RunHydrationPriorityLevel = RunHydrationPriority.normal,
 ): void {
   if (shouldSkipBlockingNetworkRead()) return;
+  if (shouldDeferPerAssetBackgroundRefresh()) return;
   void fetchNativeProjectRunSummaries(projectId)
     .then((summaries) => {
       scheduleProjectRunHydration(

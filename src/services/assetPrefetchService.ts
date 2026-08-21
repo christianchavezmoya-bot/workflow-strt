@@ -3,6 +3,7 @@
  */
 
 import { isMobileNativePlatform } from "../utils/platform";
+import { shouldDeferPerAssetBackgroundRefresh } from "../utils/nativeReconnectCoordinator";
 import { clearServerChangeFlag } from "../utils/bootstrapFreshness";
 import { entityGetAsset } from "./localDB";
 import { assetWorkflowAssignmentService } from "./assetWorkflowAssignmentService";
@@ -62,6 +63,7 @@ async function prefetchAssetWorkflowDataInner(
   assetId: string,
   options?: PrefetchAssetOptions,
 ): Promise<void> {
+  if (shouldDeferPerAssetBackgroundRefresh()) return;
   const { projectAssetService } = await import("./projectAssetService");
   const cached = await entityGetAsset(assetId);
   const cachedAsset = cached?.data as ProjectAsset | undefined;

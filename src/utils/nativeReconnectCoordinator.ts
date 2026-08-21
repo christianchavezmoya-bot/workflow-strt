@@ -1,6 +1,6 @@
 /**
- * Coordinates native reconnect work so upload flush, bootstrap prefetch, and
- * dashboard live refresh do not stampede the same per-asset endpoints.
+ * Single native gate for background prefetch / dashboard refresh work that
+ * would compete with an open workflow runner or reconnect flush→bootstrap.
  */
 
 import { isMobileNativePlatform } from "./platform";
@@ -10,6 +10,7 @@ let flushInProgress = false;
 let bootstrapRunning = false;
 let settling = false;
 let settleTimer: ReturnType<typeof setTimeout> | null = null;
+let workflowRunnerOpenCount = 0;
 
 /** Brief pause after flush/bootstrap before heavy dashboard GETs resume. */
 export const NATIVE_RECONNECT_SETTLE_MS = 2_500;
@@ -35,6 +36,15 @@ function scheduleSettleWindow(): void {
   }, NATIVE_RECONNECT_SETTLE_MS);
 }
 
+function shouldDeferNativeBackgroundWork(): boolean {
+  if (!isMobileNativePlatform()) return false;
+  return reconnectPending
+    || flushInProgress
+    || bootstrapRunning
+    || settling
+    || workflowRunnerOpenCount > 0;
+}
+
 /** Radio/server just came back after an offline stretch — defer competing GET storms. */
 export function markNativeReconnectPending(): void {
   if (!isMobileNativePlatform()) return;
@@ -51,7 +61,7 @@ export function markNativeSyncFlushStarted(): void {
 export function markNativeSyncFlushFinished(): void {
   if (!isMobileNativePlatform()) return;
   flushInProgress = false;
-  if (!bootstrapRunning && !reconnectPending) {
+  if (!bootstrapRunning && !reconnectPending && workflowRunnerOpenCount === 0) {
     scheduleSettleWindow();
   }
 }
@@ -69,19 +79,55 @@ export function markNativeBootstrapFinished(): void {
   scheduleSettleWindow();
 }
 
+/** WorkOrderRunner opened — block background per-asset GETs until it closes. */
+export function markWorkflowRunnerOpened(): void {
+  if (!isMobileNativePlatform()) return;
+  workflowRunnerOpenCount += 1;
+  clearSettleTimer();
+}
+
+export function markWorkflowRunnerClosed(): void {
+  if (!isMobileNativePlatform()) return;
+  workflowRunnerOpenCount = Math.max(0, workflowRunnerOpenCount - 1);
+  if (
+    workflowRunnerOpenCount === 0
+    && !reconnectPending
+    && !flushInProgress
+    && !bootstrapRunning
+  ) {
+    scheduleSettleWindow();
+  }
+}
+
+export function isWorkflowRunnerOpen(): boolean {
+  if (!isMobileNativePlatform()) return false;
+  return workflowRunnerOpenCount > 0;
+}
+
 export function isNativeReconnectBusy(): boolean {
   if (!isMobileNativePlatform()) return false;
   return reconnectPending || flushInProgress || bootstrapRunning || settling;
 }
 
-/** Skip fire-and-forget assignment/run background refreshes while reconnect work runs. */
+/** Skip fire-and-forget assignment/run background refreshes while runner or reconnect work is active. */
 export function shouldDeferPerAssetBackgroundRefresh(): boolean {
-  return isNativeReconnectBusy();
+  return shouldDeferNativeBackgroundWork();
 }
 
-/** Dashboard should prefer light refresh until reconnect work settles. */
+/** Dashboard should defer live refresh while runner or reconnect work is active. */
 export function shouldDeferNativeDashboardFullRefresh(): boolean {
-  return isNativeReconnectBusy();
+  return shouldDeferNativeBackgroundWork();
+}
+
+/** Wait until background prefetch is allowed (e.g. bootstrap phase 6 while runner closes). */
+export async function waitForBackgroundWorkSlot(maxMs = 45_000): Promise<boolean> {
+  if (!shouldDeferPerAssetBackgroundRefresh()) return true;
+  const deadline = Date.now() + maxMs;
+  while (shouldDeferPerAssetBackgroundRefresh()) {
+    if (Date.now() >= deadline) return false;
+    await new Promise((resolve) => window.setTimeout(resolve, 300));
+  }
+  return true;
 }
 
 /** Test hook — reset coordinator state. */
@@ -89,5 +135,6 @@ export function resetNativeReconnectCoordinatorForTests(): void {
   reconnectPending = false;
   flushInProgress = false;
   bootstrapRunning = false;
+  workflowRunnerOpenCount = 0;
   clearSettleTimer();
 }

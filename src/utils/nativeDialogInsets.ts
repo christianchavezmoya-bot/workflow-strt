@@ -31,13 +31,15 @@ export function nativeDatePickerPopperSlotProps() {
   return { sx: { zIndex: NATIVE_PICKER_Z_INDEX } };
 }
 
-/** MUI Select/Menu inside native nested dialogs — default menu z-index (1300) sits below dialog (1550). */
+/** MUI Select/Menu inside native nested dialogs — render in-place so stacking beats portal z-index fights. */
 export function nativeSelectMenuProps() {
   if (!isMobileNativePlatform()) return undefined;
   return {
+    disablePortal: true,
     PaperProps: {
       sx: { zIndex: NATIVE_PICKER_Z_INDEX },
     },
+    sx: { zIndex: NATIVE_PICKER_Z_INDEX },
   };
 }
 
