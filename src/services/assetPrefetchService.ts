@@ -16,23 +16,52 @@ import type { ProjectAsset } from "../types/projectAsset";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
+/** Dashboard boot skips blob downloads; SSE / assignment still include them. */
+export type PrefetchAssetOptions = {
+  includeDocuments?: boolean;
+};
+
+/** Cap per-asset enrichment so Dashboard mount does not stampede the API. */
+const PREFETCH_CONCURRENCY = 2;
+
+/** Run an async task over items with a bounded concurrency pool. */
+async function runPool<T>(items: T[], limit: number, fn: (item: T) => Promise<void>): Promise<void> {
+  if (items.length === 0) return;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      try {
+        await fn(items[index]);
+      } catch { /* individual failures are non-fatal */ }
+    }
+  });
+  await Promise.all(workers);
+}
+
 /** Coalesce concurrent prefetch for the same asset (workspace boot + quick actions). */
 const prefetchInFlight = new Map<string, Promise<void>>();
 
-export async function prefetchAssetWorkflowData(assetId: string): Promise<void> {
+export async function prefetchAssetWorkflowData(
+  assetId: string,
+  options?: PrefetchAssetOptions,
+): Promise<void> {
   if (!isMobileNativePlatform()) return;
 
   const existing = prefetchInFlight.get(assetId);
   if (existing) return existing;
 
-  const flight = prefetchAssetWorkflowDataInner(assetId).finally(() => {
+  const flight = prefetchAssetWorkflowDataInner(assetId, options).finally(() => {
     prefetchInFlight.delete(assetId);
   });
   prefetchInFlight.set(assetId, flight);
   return flight;
 }
 
-async function prefetchAssetWorkflowDataInner(assetId: string): Promise<void> {
+async function prefetchAssetWorkflowDataInner(
+  assetId: string,
+  options?: PrefetchAssetOptions,
+): Promise<void> {
   const { projectAssetService } = await import("./projectAssetService");
   const cached = await entityGetAsset(assetId);
   const cachedAsset = cached?.data as ProjectAsset | undefined;
@@ -67,6 +96,8 @@ async function prefetchAssetWorkflowDataInner(assetId: string): Promise<void> {
 
   await Promise.allSettled([...configIds].map((id) => workflowConfigService.getById(id)));
 
+  if (options?.includeDocuments === false) return;
+
   try {
     const links = await assetDocumentLinkService.listByAsset(assetId);
     await prefetchAssetLinkedDocuments(links.map((l) => ({ document: l.document })));
@@ -75,10 +106,15 @@ async function prefetchAssetWorkflowDataInner(assetId: string): Promise<void> {
   }
 }
 
-export async function prefetchAssetIds(assetIds: string[]): Promise<void> {
+export async function prefetchAssetIds(
+  assetIds: string[],
+  options?: PrefetchAssetOptions,
+): Promise<void> {
   if (!isMobileNativePlatform() || assetIds.length === 0) return;
   const unique = [...new Set(assetIds)];
-  await Promise.allSettled(unique.map((id) => prefetchAssetWorkflowData(id)));
+  await runPool(unique, PREFETCH_CONCURRENCY, async (id) => {
+    await prefetchAssetWorkflowData(id, options);
+  });
   await clearServerChangeFlag();
 }
 
@@ -99,6 +135,7 @@ function assignedAssetIdsFromWorkspace(workspace: DashboardWorkspace, projectId:
 export async function prefetchAssignedAssetsFromWorkspace(
   workspace: DashboardWorkspace,
   userId: string,
+  options?: PrefetchAssetOptions,
 ): Promise<void> {
   if (!isMobileNativePlatform()) return;
   const projectIds = [...new Set([
@@ -109,7 +146,7 @@ export async function prefetchAssignedAssetsFromWorkspace(
   ].map((row) => row.projectId).filter(Boolean))];
 
   const assetIds = projectIds.flatMap((projectId) => assignedAssetIdsFromWorkspace(workspace, projectId, userId));
-  await prefetchAssetIds(assetIds);
+  await prefetchAssetIds(assetIds, options);
 }
 
 export async function prefetchAssignedAssetsInProject(projectId: string, userId: string): Promise<void> {
@@ -127,5 +164,5 @@ export async function prefetchAssignedAssetsInProject(projectId: string, userId:
   const { projectAssetService } = await import("./projectAssetService");
   const assets = await projectAssetService.listByProjectFresh(projectId);
   const mine = assets.filter((a) => a.assignedUserId === userId);
-  await Promise.allSettled(mine.map((a) => prefetchAssetWorkflowData(a.id)));
+  await prefetchAssetIds(mine.map((a) => a.id));
 }
