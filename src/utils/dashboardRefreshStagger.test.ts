@@ -32,4 +32,18 @@ describe("runStaggeredDashboardLiveRefresh", () => {
     await promise;
     expect(order).toEqual(["workspace", "attention", "open", "workload"]);
   });
+
+  it("light scope skips open, summary, and workload", async () => {
+    const order: string[] = [];
+    const promise = runStaggeredDashboardLiveRefresh({
+      workspace: async () => { order.push("workspace"); },
+      attention: async () => { order.push("attention"); },
+      listOpen: async () => { order.push("open"); },
+      workload: async () => { order.push("workload"); },
+    }, "light");
+
+    await vi.advanceTimersByTimeAsync(500);
+    await promise;
+    expect(order).toEqual(["workspace", "attention"]);
+  });
 });

@@ -53,7 +53,7 @@ import {
   shouldFetchProjectAssetSummary,
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
-import { runStaggeredDashboardLiveRefresh } from "../../utils/dashboardRefreshStagger";
+import { runStaggeredDashboardLiveRefresh, type DashboardLiveRefreshScope } from "../../utils/dashboardRefreshStagger";
 import { runPool } from "../../utils/runPool";
 import { countMissingWorkflowItems, getRunMissingMediaSteps, runHasCompletedAllSteps, sanitizeMissingMediaFlags } from "../../utils/workflowCompleteness";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
@@ -302,8 +302,12 @@ const Dashboard = () => {
   const [historyDialogLoading, setHistoryDialogLoading] = useState<string | null>(null);
   const dashboardRefreshTimerRef = useRef<number | null>(null);
   const dashboardRefreshWhenVisibleRef = useRef(false);
+  const dashboardRefreshWhenRunnerClosesRef = useRef(false);
+  const dashboardRefreshPendingScopeRef = useRef<DashboardLiveRefreshScope>("light");
+  const runnerOpenRef = useRef(false);
   const dashboardRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const dashboardRefreshQueuedRef = useRef(false);
+  const dashboardRefreshQueuedScopeRef = useRef<DashboardLiveRefreshScope>("light");
   const dashboardWebAttentionBootedRef = useRef(false);
 
   // Quick action dialog for "My Jobs Today" assets (state declared after myInstallAssets is defined)
@@ -622,12 +626,14 @@ const Dashboard = () => {
     return () => window.removeEventListener("repo:projects:updated", handleUpdated);
   }, [dispatch]);
 
-  const refreshLiveDashboardDataNow = useCallback((): Promise<void> => {
+  const refreshLiveDashboardDataNow = useCallback((scope: DashboardLiveRefreshScope = "full"): Promise<void> => {
     if (dashboardRefreshInFlightRef.current) {
       dashboardRefreshQueuedRef.current = true;
+      if (scope === "full") dashboardRefreshQueuedScopeRef.current = "full";
       return dashboardRefreshInFlightRef.current;
     }
 
+    const activeScope = scope;
     const promise = (async () => {
       if (isNativePlatform) {
         seedNativeDashboardSummariesFromLocal();
@@ -651,7 +657,7 @@ const Dashboard = () => {
               .then(setWorkload)
               .catch(() => {})
             : undefined,
-        });
+        }, activeScope);
         setAnalyticsRefreshTick((t) => t + 1);
       } finally {
         setWorkspaceLoading(false);
@@ -662,7 +668,9 @@ const Dashboard = () => {
       dashboardRefreshInFlightRef.current = null;
       if (dashboardRefreshQueuedRef.current) {
         dashboardRefreshQueuedRef.current = false;
-        void refreshLiveDashboardDataNow();
+        const nextScope = dashboardRefreshQueuedScopeRef.current;
+        dashboardRefreshQueuedScopeRef.current = "light";
+        void refreshLiveDashboardDataNow(nextScope);
       }
     });
 
@@ -677,9 +685,14 @@ const Dashboard = () => {
     seedNativeDashboardSummariesFromLocal,
   ]);
 
-  const refreshLiveDashboardData = useCallback(() => {
+  const scheduleDashboardRefresh = useCallback((scope: DashboardLiveRefreshScope = "full") => {
+    if (scope === "full") dashboardRefreshPendingScopeRef.current = "full";
     if (typeof document !== "undefined" && document.hidden) {
       dashboardRefreshWhenVisibleRef.current = true;
+      return;
+    }
+    if (runnerOpenRef.current) {
+      dashboardRefreshWhenRunnerClosesRef.current = true;
       return;
     }
     if (dashboardRefreshTimerRef.current !== null) {
@@ -688,20 +701,31 @@ const Dashboard = () => {
     const delayMs = isNativePlatform ? 650 : 400;
     dashboardRefreshTimerRef.current = window.setTimeout(() => {
       dashboardRefreshTimerRef.current = null;
-      void refreshLiveDashboardDataNow();
+      const pendingScope = dashboardRefreshPendingScopeRef.current;
+      dashboardRefreshPendingScopeRef.current = "light";
+      void refreshLiveDashboardDataNow(pendingScope);
     }, delayMs);
   }, [isNativePlatform, refreshLiveDashboardDataNow]);
+
+  const refreshLiveDashboardData = useCallback(() => {
+    scheduleDashboardRefresh("full");
+  }, [scheduleDashboardRefresh]);
+
+  const refreshLiveDashboardDataLight = useCallback(() => {
+    scheduleDashboardRefresh("light");
+  }, [scheduleDashboardRefresh]);
 
   useEffect(() => {
     const onVisibilityChange = () => {
       if (!document.hidden && dashboardRefreshWhenVisibleRef.current) {
         dashboardRefreshWhenVisibleRef.current = false;
-        refreshLiveDashboardData();
+        scheduleDashboardRefresh(dashboardRefreshPendingScopeRef.current);
+        dashboardRefreshPendingScopeRef.current = "light";
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [refreshLiveDashboardData]);
+  }, [scheduleDashboardRefresh]);
 
   useEffect(() => () => {
     if (dashboardRefreshTimerRef.current !== null) {
@@ -773,16 +797,16 @@ const Dashboard = () => {
     return () => window.removeEventListener("notifications:assignments-changed", refresh);
   }, [dashboardBootPhase, refreshLiveDashboardData]);
 
-  // Notification-driven refresh: run state events -> workspace + open assets + attention items + analytics
+  // Notification-driven refresh: run state events -> workspace + attention only (not open/workload storm)
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
-    window.addEventListener("notifications:run-state-changed", refreshLiveDashboardData);
+    window.addEventListener("notifications:run-state-changed", refreshLiveDashboardDataLight);
     window.addEventListener("notifications:refresh", refreshLiveDashboardData);
     // Also listen for asset-level changes dispatched by AssetRepository (and
     // forwarded by offline issue mutations) so the workspace + attention
     // counts refresh live when assets change offline - not only when the
     // notifications:* events happen to be fired alongside.
-    window.addEventListener("repo:assets:updated", refreshLiveDashboardData);
+    window.addEventListener("repo:assets:updated", refreshLiveDashboardDataLight);
     window.addEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
     // Assignment and run caches refresh in the background on native and emit
     // these when they land. Without listening, the dashboard kept rendering the
@@ -790,7 +814,7 @@ const Dashboard = () => {
     // repo:assignments:updated) recovered correctly — so the dashboard alone
     // stayed wrong until a manual reload.
     window.addEventListener("repo:assignments:updated", refreshLiveDashboardData);
-    window.addEventListener("repo:runs:updated", refreshLiveDashboardData);
+    window.addEventListener("repo:runs:updated", refreshLiveDashboardDataLight);
     const onFlushComplete = (event: Event) => {
       const detail = (event as CustomEvent<{ syncedAny?: boolean; pendingRemaining?: number }>).detail;
       if (detail?.syncedAny && detail.pendingRemaining === 0) {
@@ -799,15 +823,15 @@ const Dashboard = () => {
     };
     window.addEventListener("sync-engine:flush-complete", onFlushComplete);
     return () => {
-      window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardData);
+      window.removeEventListener("notifications:run-state-changed", refreshLiveDashboardDataLight);
       window.removeEventListener("notifications:refresh", refreshLiveDashboardData);
-      window.removeEventListener("repo:assets:updated", refreshLiveDashboardData);
+      window.removeEventListener("repo:assets:updated", refreshLiveDashboardDataLight);
       window.removeEventListener("repo:issues:updated", refreshAttentionFromIssueCache);
       window.removeEventListener("repo:assignments:updated", refreshLiveDashboardData);
-      window.removeEventListener("repo:runs:updated", refreshLiveDashboardData);
+      window.removeEventListener("repo:runs:updated", refreshLiveDashboardDataLight);
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
     };
-  }, [dashboardBootPhase, refreshAttentionFromIssueCache, refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshAttentionFromIssueCache, refreshLiveDashboardData, refreshLiveDashboardDataLight]);
 
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
@@ -2206,6 +2230,7 @@ const Dashboard = () => {
       setRunnerAsset(asset);
       setRunnerWorkflow(payload.workflow);
       setRunnerWorkflowConfigId(configId);
+      runnerOpenRef.current = true;
       setRunnerOpen(true);
       refreshWorkflowOpenDataInBackground(asset.id, configId);
       options?.onOpened?.();
@@ -3496,12 +3521,18 @@ const Dashboard = () => {
         <WorkOrderRunner
           open={runnerOpen}
           onClose={() => {
+            runnerOpenRef.current = false;
             setRunnerOpen(false);
             setRunnerWorkflow(null);
             setRunnerAsset(null);
             setRunnerWorkflowConfigId(undefined);
             setRunnerExistingRunId(undefined);
             setRunnerSignoffReviewMode(false);
+            if (dashboardRefreshWhenRunnerClosesRef.current) {
+              dashboardRefreshWhenRunnerClosesRef.current = false;
+              scheduleDashboardRefresh(dashboardRefreshPendingScopeRef.current);
+              dashboardRefreshPendingScopeRef.current = "light";
+            }
           }}
           workflow={runnerWorkflow}
           productId={""}
@@ -3517,8 +3548,8 @@ const Dashboard = () => {
           timeZoneId={runnerProjectTimeZone}
           teamMembers={runnerTeamMembers}
           signoffReviewMode={runnerSignoffReviewMode}
-          onComplete={refreshLiveDashboardDataNow}
-          onPause={refreshLiveDashboardDataNow}
+          onComplete={() => { void refreshLiveDashboardDataNow(); }}
+          onPause={() => { void refreshLiveDashboardDataNow(); }}
         />
         </Suspense>
       )}
