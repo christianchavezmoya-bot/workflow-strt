@@ -83,7 +83,7 @@ import {
 } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
-import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx } from "../../utils/nativeDialogInsets";
+import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx, nativeNestedDialogSx } from "../../utils/nativeDialogInsets";
 import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
@@ -2254,7 +2254,13 @@ export default function WorkOrderRunner({
           </Stack>
         </DialogContent>
 
-        <Dialog open={flagOpen} onClose={closeFlagDialog} maxWidth="sm" fullWidth>
+        <Dialog
+          open={flagOpen}
+          onClose={closeFlagDialog}
+          maxWidth="sm"
+          fullWidth
+          sx={isMobileNativePlatform() ? nativeNestedDialogSx() : undefined}
+        >
           <DialogTitle sx={{ pb: 1 }}>
             <Stack spacing={0.5}>
               <Typography variant="subtitle2" fontWeight={700} color="error">
@@ -2529,7 +2535,7 @@ export default function WorkOrderRunner({
                 <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
                   {"<- Back"}
                 </Button>
-                {!flagOpen && (() => {
+                {(() => {
                   const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
                   return (
                     <Tooltip title="Flag an issue on this step" {...nativeTooltipTouchProps()}>

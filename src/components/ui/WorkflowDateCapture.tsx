@@ -1,4 +1,4 @@
-import { Stack } from "@mui/material";
+import { Stack, TextField } from "@mui/material";
 import { DatePicker, LocalizationProvider } from "@mui/x-date-pickers";
 import { AdapterDayjs } from "@mui/x-date-pickers/AdapterDayjs";
 import dayjs, { type Dayjs } from "dayjs";
@@ -6,7 +6,8 @@ import TimeWheelPicker, {
   applyMinutesInZoneToUtcIso,
   utcIsoToMinutesInZone,
 } from "./TimeWheelPicker";
-import { nativeDatePickerPopperSlotProps } from "../../utils/nativeDialogInsets";
+import { nativeDatePickerDialogSlotProps, nativeDatePickerPopperSlotProps } from "../../utils/nativeDialogInsets";
+import { isMobileNativePlatform } from "../../utils/platform";
 
 function fieldWantsTime(...parts: Array<string | undefined>): boolean {
   const combined = parts.filter(Boolean).join(" ").toLowerCase();
@@ -58,6 +59,24 @@ export default function WorkflowDateCapture({
     onChange(applyMinutesInZoneToUtcIso(baseIso, nextMinutes, timeZoneId));
   };
 
+  // Native WebView: HTML date input opens the OS picker reliably inside full-screen dialogs.
+  // MUI DatePicker poppers often render behind nested Dialog layers on iOS/Android.
+  if (isMobileNativePlatform() && !wantsTime) {
+    return (
+      <TextField
+        type="date"
+        size="small"
+        fullWidth
+        label={label}
+        value={value.length >= 10 ? value.slice(0, 10) : value}
+        onChange={(event) => onChange(event.target.value)}
+        error={error}
+        helperText={hint}
+        InputLabelProps={{ shrink: true }}
+      />
+    );
+  }
+
   return (
     <LocalizationProvider dateAdapter={AdapterDayjs}>
       <Stack spacing={wantsTime ? 1.5 : 0}>
@@ -73,10 +92,12 @@ export default function WorkflowDateCapture({
               fullWidth: true,
               error,
               helperText: hint,
+              label,
               InputLabelProps: { shrink: true },
             },
             field: { clearable: true },
             popper: nativeDatePickerPopperSlotProps(),
+            dialog: nativeDatePickerDialogSlotProps(),
           }}
         />
         {wantsTime && (
