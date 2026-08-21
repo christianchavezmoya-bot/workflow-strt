@@ -1,42 +1,31 @@
 /**
  * useOfflineBootstrap — keeps the native offline cache warm.
  *
- * - On reconnect / server reachable: assigned-scope download when freshness gate allows.
+ * - On reconnect: mark pending; after upload flush drains, one assigned-scope download.
  * - On mount / foreground: refresh when the last bootstrap is stale (~4h).
  */
 
 import { useEffect, useRef } from "react";
-import { offlineBootstrapService } from "../services/offlineBootstrapService";
-import { scheduleBootstrapAfterUploadDrain, scheduleBootstrapIfQueueEmpty } from "../utils/bootstrapAfterDrain";
+import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
 import { shouldScheduleBootstrap } from "../utils/bootstrapFreshness";
+import {
+  markNativeBootstrapFinished,
+  markNativeBootstrapStarted,
+  markNativeReconnectPending,
+  markNativeSyncFlushFinished,
+  markNativeSyncFlushStarted,
+} from "../utils/nativeReconnectCoordinator";
 import { isMobileNativePlatform } from "../utils/platform";
 import { subscribeServerReachable } from "../services/connectivityMonitor";
+import offlineBootstrapService from "../services/offlineBootstrapService";
 
 export function useOfflineBootstrap(): void {
-  const needsReconnectSyncRef = useRef(false);
+  const needsReconnectBootstrapRef = useRef(false);
 
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
 
     let cancelled = false;
-
-    const RECONNECT_SYNC_COOLDOWN_MS = 90_000;
-
-    const runReconnectSync = async () => {
-      if (cancelled) return;
-      if (typeof navigator !== "undefined" && !navigator.onLine) return;
-      if (offlineBootstrapService.isRunning()) return;
-      const lastMs = offlineBootstrapService.getLastCompletedAtMs();
-      if (lastMs !== null && Date.now() - lastMs < RECONNECT_SYNC_COOLDOWN_MS) return;
-
-      const should = await shouldScheduleBootstrap({
-        reason: "reconnect",
-        scope: "assigned",
-        force: false,
-      });
-      if (!should) return;
-      scheduleBootstrapAfterUploadDrain("assigned", 3_000, false, "reconnect");
-    };
 
     const maybeRunStale = async () => {
       if (cancelled) return;
@@ -56,33 +45,57 @@ export function useOfflineBootstrap(): void {
 
     const onForeground = () => { void maybeRunStale(); };
 
+    const onFlushStart = () => {
+      markNativeSyncFlushStarted();
+    };
+
     const onFlushComplete = (event: Event) => {
+      markNativeSyncFlushFinished();
       const detail = (event as CustomEvent<{ pendingRemaining?: number }>).detail;
-      scheduleBootstrapIfQueueEmpty(detail?.pendingRemaining ?? 0, "assigned");
+      if ((detail?.pendingRemaining ?? 0) > 0) return;
+
+      const reason = needsReconnectBootstrapRef.current ? "reconnect" : "flush-complete";
+      needsReconnectBootstrapRef.current = false;
+      scheduleBootstrapAfterUploadDrain("assigned", 5_000, false, reason);
+    };
+
+    const onBootstrapStart = () => {
+      markNativeBootstrapStarted();
+    };
+
+    const onBootstrapDone = () => {
+      markNativeBootstrapFinished();
     };
 
     let lastServerReachable = true;
     const unsubReachable = subscribeServerReachable((reachable) => {
       if (!reachable) {
-        needsReconnectSyncRef.current = true;
+        needsReconnectBootstrapRef.current = true;
         lastServerReachable = false;
         return;
       }
-      if (!lastServerReachable && needsReconnectSyncRef.current) {
-        needsReconnectSyncRef.current = false;
-        void runReconnectSync();
+      if (!lastServerReachable) {
+        markNativeReconnectPending();
       }
       lastServerReachable = reachable;
     });
 
     window.addEventListener("app-foregrounded", onForeground);
+    window.addEventListener("sync-engine:flush-start", onFlushStart);
     window.addEventListener("sync-engine:flush-complete", onFlushComplete);
+    window.addEventListener("bootstrap:started", onBootstrapStart);
+    window.addEventListener("bootstrap:complete", onBootstrapDone);
+    window.addEventListener("bootstrap:error", onBootstrapDone);
 
     return () => {
       cancelled = true;
       window.clearTimeout(timer);
       window.removeEventListener("app-foregrounded", onForeground);
+      window.removeEventListener("sync-engine:flush-start", onFlushStart);
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
+      window.removeEventListener("bootstrap:started", onBootstrapStart);
+      window.removeEventListener("bootstrap:complete", onBootstrapDone);
+      window.removeEventListener("bootstrap:error", onBootstrapDone);
       unsubReachable();
     };
   }, []);

@@ -20,6 +20,7 @@ import type { RunTimeEntry } from "../types/assetWorkflowRun";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead, shouldSkipRunMutation } from "./connectivityMonitor";
+import { shouldDeferPerAssetBackgroundRefresh } from "../utils/nativeReconnectCoordinator";
 import { isOfflineNetworkError as isOfflineNetworkErrorShape } from "../utils/offlineNetworkError";
 import { boundedFreshRead, BOUNDED_FRESH_TIMEOUT_MS } from "../utils/boundedFreshRead";
 import { webCachedGet, webCacheKey, invalidateWebCache, invalidateWebCacheByPrefix } from "./webFreshCache";
@@ -534,6 +535,7 @@ function refreshRunsInBackground(
   endpoint: string,
 ): void {
   if (shouldSkipBlockingNetworkRead()) return;
+  if (shouldDeferPerAssetBackgroundRefresh()) return;
   if (scope.type === "project") {
     refreshProjectRunsInBackground(scope.id);
     return;
@@ -1247,6 +1249,20 @@ export const assetWorkflowRunService = {
       },
       () => offlineStore.listRunsByAsset(assetId),
     );
+  },
+
+  /** Single network fetch + cache — used by bootstrap to avoid duplicate background GETs. */
+  async prefetchFromNetwork(assetId: string): Promise<void> {
+    if (!isMobileNativePlatform() || shouldSkipBlockingNetworkRead()) return;
+    try {
+      const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
+      const runs = await cacheServerRuns(res.data);
+      window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
+        detail: { assetId, runs },
+      }));
+    } catch {
+      /* non-fatal */
+    }
   },
 
   async getById(id: string): Promise<AssetWorkflowRun | null> {
