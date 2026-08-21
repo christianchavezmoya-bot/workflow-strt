@@ -54,6 +54,12 @@ import {
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
 import { runStaggeredDashboardLiveRefresh, type DashboardLiveRefreshScope } from "../../utils/dashboardRefreshStagger";
+import {
+  flushHiddenDeferredRefresh,
+  flushRunnerDeferredRefresh,
+  INITIAL_DASHBOARD_REFRESH_DEFER_STATE,
+  requestDashboardRefresh,
+} from "../../utils/dashboardRefreshSchedule";
 import { runPool } from "../../utils/runPool";
 import { countMissingWorkflowItems, getRunMissingMediaSteps, runHasCompletedAllSteps, sanitizeMissingMediaFlags } from "../../utils/workflowCompleteness";
 import { formatInstant, resolveReportTimeZone } from "../../utils/datetime";
@@ -301,9 +307,7 @@ const Dashboard = () => {
   // had fired all of them. Mirrors the existing runnerLoading pattern.
   const [historyDialogLoading, setHistoryDialogLoading] = useState<string | null>(null);
   const dashboardRefreshTimerRef = useRef<number | null>(null);
-  const dashboardRefreshWhenVisibleRef = useRef(false);
-  const dashboardRefreshWhenRunnerClosesRef = useRef(false);
-  const dashboardRefreshPendingScopeRef = useRef<DashboardLiveRefreshScope>("light");
+  const dashboardRefreshDeferRef = useRef(INITIAL_DASHBOARD_REFRESH_DEFER_STATE);
   const runnerOpenRef = useRef(false);
   const dashboardRefreshInFlightRef = useRef<Promise<void> | null>(null);
   const dashboardRefreshQueuedRef = useRef(false);
@@ -685,27 +689,28 @@ const Dashboard = () => {
     seedNativeDashboardSummariesFromLocal,
   ]);
 
-  const scheduleDashboardRefresh = useCallback((scope: DashboardLiveRefreshScope = "full") => {
-    if (scope === "full") dashboardRefreshPendingScopeRef.current = "full";
-    if (typeof document !== "undefined" && document.hidden) {
-      dashboardRefreshWhenVisibleRef.current = true;
-      return;
-    }
-    if (runnerOpenRef.current) {
-      dashboardRefreshWhenRunnerClosesRef.current = true;
-      return;
-    }
+  const enqueueDashboardRefresh = useCallback((scope: DashboardLiveRefreshScope) => {
     if (dashboardRefreshTimerRef.current !== null) {
       window.clearTimeout(dashboardRefreshTimerRef.current);
     }
     const delayMs = isNativePlatform ? 650 : 400;
     dashboardRefreshTimerRef.current = window.setTimeout(() => {
       dashboardRefreshTimerRef.current = null;
-      const pendingScope = dashboardRefreshPendingScopeRef.current;
-      dashboardRefreshPendingScopeRef.current = "light";
-      void refreshLiveDashboardDataNow(pendingScope);
+      void refreshLiveDashboardDataNow(scope);
     }, delayMs);
   }, [isNativePlatform, refreshLiveDashboardDataNow]);
+
+  const scheduleDashboardRefresh = useCallback((scope: DashboardLiveRefreshScope = "full") => {
+    const result = requestDashboardRefresh(dashboardRefreshDeferRef.current, {
+      scope,
+      runnerOpen: runnerOpenRef.current,
+      documentHidden: typeof document !== "undefined" && document.hidden,
+    });
+    dashboardRefreshDeferRef.current = result.next;
+    if (result.schedule && result.scopeToRun) {
+      enqueueDashboardRefresh(result.scopeToRun);
+    }
+  }, [enqueueDashboardRefresh]);
 
   const refreshLiveDashboardData = useCallback(() => {
     scheduleDashboardRefresh("full");
@@ -717,15 +722,16 @@ const Dashboard = () => {
 
   useEffect(() => {
     const onVisibilityChange = () => {
-      if (!document.hidden && dashboardRefreshWhenVisibleRef.current) {
-        dashboardRefreshWhenVisibleRef.current = false;
-        scheduleDashboardRefresh(dashboardRefreshPendingScopeRef.current);
-        dashboardRefreshPendingScopeRef.current = "light";
+      if (document.hidden) return;
+      const flush = flushHiddenDeferredRefresh(dashboardRefreshDeferRef.current);
+      dashboardRefreshDeferRef.current = flush.next;
+      if (flush.schedule && flush.scopeToRun) {
+        enqueueDashboardRefresh(flush.scopeToRun);
       }
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
-  }, [scheduleDashboardRefresh]);
+  }, [enqueueDashboardRefresh]);
 
   useEffect(() => () => {
     if (dashboardRefreshTimerRef.current !== null) {
@@ -3528,10 +3534,10 @@ const Dashboard = () => {
             setRunnerWorkflowConfigId(undefined);
             setRunnerExistingRunId(undefined);
             setRunnerSignoffReviewMode(false);
-            if (dashboardRefreshWhenRunnerClosesRef.current) {
-              dashboardRefreshWhenRunnerClosesRef.current = false;
-              scheduleDashboardRefresh(dashboardRefreshPendingScopeRef.current);
-              dashboardRefreshPendingScopeRef.current = "light";
+            const flush = flushRunnerDeferredRefresh(dashboardRefreshDeferRef.current);
+            dashboardRefreshDeferRef.current = flush.next;
+            if (flush.schedule && flush.scopeToRun) {
+              enqueueDashboardRefresh(flush.scopeToRun);
             }
           }}
           workflow={runnerWorkflow}
@@ -3548,8 +3554,8 @@ const Dashboard = () => {
           timeZoneId={runnerProjectTimeZone}
           teamMembers={runnerTeamMembers}
           signoffReviewMode={runnerSignoffReviewMode}
-          onComplete={() => { void refreshLiveDashboardDataNow(); }}
-          onPause={() => { void refreshLiveDashboardDataNow(); }}
+          onComplete={() => { scheduleDashboardRefresh("light"); }}
+          onPause={() => { scheduleDashboardRefresh("light"); }}
         />
         </Suspense>
       )}
