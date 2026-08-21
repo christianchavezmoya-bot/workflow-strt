@@ -30,6 +30,10 @@ import { shouldSuppressUnreachableOffline } from "../utils/syncConnectivityGuard
 const PING_INTERVAL_MS = 30_000;
 const UNREACHABLE_SIGNAL_THRESHOLD = 2;
 const RETRY_PING_DELAY_MS = 1500;
+/** After this many consecutive timeout-tagged failures, flip offline even with radio up. */
+const SUSTAINED_TIMEOUT_SIGNAL_THRESHOLD = 5;
+/** Or when no confirmed server success for this long while timeouts keep arriving. */
+const SUSTAINED_FAILURE_WITHOUT_SUCCESS_MS = 35_000;
 
 type Listener = (reachable: boolean | null) => void;
 
@@ -42,11 +46,15 @@ function hasNetworkSignal(): boolean {
 let started = false;
 let currentValue: boolean | null = null; // null = no successful check yet
 let unreachableSignals = 0;
+let consecutiveTimeoutSignals = 0;
+let lastConfirmedSuccessAt = 0;
 /** Capacitor network status — more reliable on iOS/Android than navigator.onLine. */
 let nativeNetworkConnected: boolean | null = null;
 let isForeground = true;
 let intervalId: ReturnType<typeof setInterval> | null = null;
 const listeners = new Set<Listener>();
+let onApiServerReachable: (() => void) | null = null;
+let onApiServerUnreachable: ((event: Event) => void) | null = null;
 
 function startNativeNetworkTracking(): void {
   if (!isMobileNativePlatform()) return;
@@ -99,7 +107,19 @@ function startNativeNetworkTracking(): void {
 
 function notify(value: boolean | null) {
   currentValue = value;
+  if (value === true) {
+    consecutiveTimeoutSignals = 0;
+    lastConfirmedSuccessAt = Date.now();
+  }
   listeners.forEach((fn) => fn(value));
+}
+
+function sustainedTimeoutFailure(): boolean {
+  if (lastConfirmedSuccessAt <= 0) {
+    return consecutiveTimeoutSignals >= SUSTAINED_TIMEOUT_SIGNAL_THRESHOLD;
+  }
+  return consecutiveTimeoutSignals >= SUSTAINED_TIMEOUT_SIGNAL_THRESHOLD
+    || Date.now() - lastConfirmedSuccessAt >= SUSTAINED_FAILURE_WITHOUT_SUCCESS_MS;
 }
 
 async function runPingIfForeground() {
@@ -178,21 +198,28 @@ export function startConnectivityMonitor(): void {
   // for first confirmation after a cold start (null), so a lone GET on a flaky
   // link does not start uploads from never-confirmed.
   if (typeof window !== "undefined") {
-    window.addEventListener("api-server-reachable", () => {
+    onApiServerReachable = () => {
       unreachableSignals = 0;
+      consecutiveTimeoutSignals = 0;
+      lastConfirmedSuccessAt = Date.now();
       resetCircuitBreaker();
       if (currentValue === false && hadRecentApiSuccess()) {
         notify(true);
       }
-    });
-
-    // Only a real request failing with a genuine network error may mark the
-    // server unreachable. Require consecutive signals so one slow startup
-    // request does not stick the app in "Server not responding".
-    window.addEventListener("api-server-unreachable", (event) => {
+    };
+    onApiServerUnreachable = (event) => {
       const detail = (event as CustomEvent<{ isTimeout?: boolean }>).detail;
+      const isTimeout = Boolean(detail?.isTimeout);
       // A slow endpoint timing out while other calls succeed is not "server down".
-      if (detail?.isTimeout && hadRecentApiSuccess()) return;
+      if (isTimeout && hadRecentApiSuccess()) {
+        consecutiveTimeoutSignals = 0;
+        return;
+      }
+      if (isTimeout) {
+        consecutiveTimeoutSignals += 1;
+      } else {
+        consecutiveTimeoutSignals = 0;
+      }
       unreachableSignals += 1;
       if (unreachableSignals < UNREACHABLE_SIGNAL_THRESHOLD) return;
       tripCircuitBreaker();
@@ -200,11 +227,12 @@ export function startConnectivityMonitor(): void {
       // suppress the offline UI flip, but still trip the circuit so flush stops.
       if (shouldSuppressUnreachableOffline()) return;
       // GET timeouts on a connected phone usually mean a saturated LAN server,
-      // not a dead link. Pause background sync via the circuit, but do not show
-      // offline — interactive writes still attempt (radio is up).
-      if (detail?.isTimeout && hasNetworkSignal()) return;
+      // not a dead link — unless failures are sustained (cellular/LAN truly down).
+      if (isTimeout && hasNetworkSignal() && !sustainedTimeoutFailure()) return;
       if (currentValue !== false) notify(false);
-    });
+    };
+    window.addEventListener("api-server-reachable", onApiServerReachable);
+    window.addEventListener("api-server-unreachable", onApiServerUnreachable);
   }
 }
 
@@ -294,17 +322,31 @@ export function _resetConnectivityMonitorForTests(): void {
   started = false;
   currentValue = null;
   unreachableSignals = 0;
+  consecutiveTimeoutSignals = 0;
+  lastConfirmedSuccessAt = 0;
   nativeNetworkConnected = null;
   isForeground = true;
   if (intervalId) clearInterval(intervalId);
   intervalId = null;
   listeners.clear();
+  if (typeof window !== "undefined") {
+    if (onApiServerReachable) {
+      window.removeEventListener("api-server-reachable", onApiServerReachable);
+      onApiServerReachable = null;
+    }
+    if (onApiServerUnreachable) {
+      window.removeEventListener("api-server-unreachable", onApiServerUnreachable);
+      onApiServerUnreachable = null;
+    }
+  }
 }
 
 /** Reset reachability state without unregistering the singleton monitor. */
 export function _resetConnectivityStateForTests(): void {
   currentValue = null;
   unreachableSignals = 0;
+  consecutiveTimeoutSignals = 0;
+  lastConfirmedSuccessAt = 0;
   nativeNetworkConnected = true;
   resetCircuitBreaker();
 }
