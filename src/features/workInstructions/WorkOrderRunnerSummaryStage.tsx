@@ -8,6 +8,7 @@ import {
   ReportProblemOutlined,
   SyncOutlined,
 } from "@mui/icons-material";
+import RunnerLiveDuration from "./RunnerLiveDuration";
 import {
   Alert,
   Box,
@@ -36,8 +37,8 @@ import RunTimeline from "../../components/ui/RunTimeline";
 import { formatInstant } from "../../utils/datetime";
 import { formatPayloadSize } from "../../utils/syncDiagnostics";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { nativeSelectMenuProps } from "../../utils/nativeDialogInsets";
 import {
-  formatDuration,
   formatSummaryInputValue,
   parseRunTimeEntries,
   renderAssetIdentifier,
@@ -84,8 +85,10 @@ export interface WorkOrderRunnerSummaryStageProps {
   missingCaptureCount: number;
   hasMissingCaptures: boolean;
   isRealRun: boolean;
-  productiveSecondsLive: number;
-  downtimeSecondsLive: number;
+  productiveSecondsBase: number;
+  downtimeSecondsBase: number;
+  trackingCategory: "productive" | "downtime" | null;
+  trackingStartedAt: string | null;
   timeTrackingJson?: string | null;
   timeZoneId?: string;
   showSummaryIssues: boolean;
@@ -143,8 +146,10 @@ export default function WorkOrderRunnerSummaryStage({
   missingCaptureCount,
   hasMissingCaptures,
   isRealRun,
-  productiveSecondsLive,
-  downtimeSecondsLive,
+  productiveSecondsBase,
+  downtimeSecondsBase,
+  trackingCategory,
+  trackingStartedAt,
   timeTrackingJson,
   timeZoneId,
   showSummaryIssues,
@@ -268,8 +273,38 @@ export default function WorkOrderRunnerSummaryStage({
               </Stack>
               {isRealRun && (
                 <Stack direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                  <Chip size="small" color="success" variant="outlined" label={`Productive ${formatDuration(productiveSecondsLive)}`} />
-                  <Chip size="small" color={downtimeSecondsLive > 0 ? "warning" : "default"} variant="outlined" label={`Downtime ${formatDuration(downtimeSecondsLive)}`} />
+                  <Chip
+                    size="small"
+                    color="success"
+                    variant="outlined"
+                    label={(
+                      <>
+                        Productive{" "}
+                        <RunnerLiveDuration
+                          baseSeconds={productiveSecondsBase}
+                          trackingCategory={trackingCategory}
+                          activeCategory="productive"
+                          trackingStartedAt={trackingStartedAt}
+                        />
+                      </>
+                    )}
+                  />
+                  <Chip
+                    size="small"
+                    color={downtimeSecondsBase > 0 ? "warning" : "default"}
+                    variant="outlined"
+                    label={(
+                      <>
+                        Downtime{" "}
+                        <RunnerLiveDuration
+                          baseSeconds={downtimeSecondsBase}
+                          trackingCategory={trackingCategory}
+                          activeCategory="downtime"
+                          trackingStartedAt={trackingStartedAt}
+                        />
+                      </>
+                    )}
+                  />
                 </Stack>
               )}
               {timeTrackingJson && (
@@ -313,8 +348,12 @@ export default function WorkOrderRunnerSummaryStage({
                             value={editIssueDesc} onChange={(e) => onEditIssueDescChange(e.target.value)} />
                           <FormControl size="small" sx={{ maxWidth: 220 }}>
                             <InputLabel shrink>Severity</InputLabel>
-                            <Select label="Severity" value={editIssueSeverity}
-                              onChange={(e) => onEditIssueSeverityChange(e.target.value as "low" | "medium" | "high")}>
+                            <Select
+                              label="Severity"
+                              value={editIssueSeverity}
+                              onChange={(e) => onEditIssueSeverityChange(e.target.value as "low" | "medium" | "high")}
+                              MenuProps={nativeSelectMenuProps()}
+                            >
                               <MenuItem value="low">Low - observation only</MenuItem>
                               <MenuItem value="medium">Medium - attention needed</MenuItem>
                               <MenuItem value="high">High - blocks completion</MenuItem>

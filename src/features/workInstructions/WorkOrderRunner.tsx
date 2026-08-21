@@ -83,7 +83,8 @@ import {
 } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
-import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx, nativeNestedDialogSx } from "../../utils/nativeDialogInsets";
+import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx, nativeNestedDialogSx, nativeSelectMenuProps } from "../../utils/nativeDialogInsets";
+import RunnerLiveDuration from "./RunnerLiveDuration";
 import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
@@ -96,7 +97,6 @@ import WorkOrderRunnerInstallerSignStage from "./WorkOrderRunnerInstallerSignSta
 import WorkOrderRunnerSetupStage from "./WorkOrderRunnerSetupStage";
 import WorkOrderRunnerSummaryStage from "./WorkOrderRunnerSummaryStage";
 import {
-  formatDuration,
   parseRunTimeEntries,
   renderAssetIdentifier,
   runnerBodyStackSx,
@@ -364,7 +364,6 @@ export default function WorkOrderRunner({
   const [downtimeSecondsBase, setDowntimeSecondsBase] = useState(0);
   const [trackingCategory, setTrackingCategory] = useState<"productive" | "downtime" | null>(null);
   const [trackingStartedAt, setTrackingStartedAt] = useState<string | null>(null);
-  const [tickNow, setTickNow] = useState(Date.now());
   const [discardConfirmOpen, setDiscardConfirmOpen] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [discardError, setDiscardError] = useState<string | null>(null);
@@ -422,16 +421,6 @@ export default function WorkOrderRunner({
     return getMissingWorkflowItems(step, values[effectiveStepId]);
   }
 
-  const liveElapsedSeconds = useMemo(() => {
-    if (!trackingStartedAt || !trackingCategory) return 0;
-    const startMs = Date.parse(trackingStartedAt);
-    if (Number.isNaN(startMs)) return 0;
-    return Math.max(0, Math.floor((tickNow - startMs) / 1000));
-  }, [trackingStartedAt, trackingCategory, tickNow]);
-
-  const productiveSecondsLive = productiveSecondsBase + (trackingCategory === "productive" ? liveElapsedSeconds : 0);
-  const downtimeSecondsLive = downtimeSecondsBase + (trackingCategory === "downtime" ? liveElapsedSeconds : 0);
-
   useEffect(() => {
     if (open && existingRunId) setActiveRunId(existingRunId);
     if (!open) reset();
@@ -450,16 +439,6 @@ export default function WorkOrderRunner({
     firstRenderMarkedRef.current = true;
     markOfflinePerf("first_render", "runner");
   }, [open, stage]);
-
-  // Tick every second while the dialog is open â€" drives productiveSecondsLive
-  // and downtimeSecondsLive in real time. Running unconditionally (not gated
-  // on stage or trackingCategory) means the clock never stops due to a stage
-  // transition and always restarts cleanly when tracking switches categories.
-  useEffect(() => {
-    if (!open) return;
-    const t = window.setInterval(() => setTickNow(Date.now()), 1000);
-    return () => window.clearInterval(t);
-  }, [open]);
 
   function reset() {
     firstRenderMarkedRef.current = false;
@@ -501,7 +480,6 @@ export default function WorkOrderRunner({
     setDowntimeSecondsBase(0);
     setTrackingCategory(null);
     setTrackingStartedAt(null);
-    setTickNow(Date.now());
     setRepeatPickerCount(1);
     setUnlistedConsumables([]);
   }
@@ -1907,13 +1885,23 @@ export default function WorkOrderRunner({
                 <Box sx={{ display: "flex", gap: 2, ml: "auto" }}>
                   <Box sx={{ textAlign: "center" }}>
                     <Typography sx={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.82rem", letterSpacing: 1, color: trackingCategory === "productive" ? "#fff" : "text.secondary" }}>
-                      {formatDuration(productiveSecondsLive)}
+                      <RunnerLiveDuration
+                        baseSeconds={productiveSecondsBase}
+                        trackingCategory={trackingCategory}
+                        activeCategory="productive"
+                        trackingStartedAt={trackingStartedAt}
+                      />
                     </Typography>
                     <Typography variant="caption" display="block" sx={{ fontSize: "0.62rem", color: trackingCategory === "productive" ? "rgba(255,255,255,0.7)" : "text.disabled" }}>productive</Typography>
                   </Box>
                   <Box sx={{ textAlign: "center" }}>
                     <Typography sx={{ fontFamily: "monospace", fontWeight: 700, fontSize: "0.82rem", letterSpacing: 1, color: trackingCategory === "downtime" ? "#fff" : "text.secondary" }}>
-                      {formatDuration(downtimeSecondsLive)}
+                      <RunnerLiveDuration
+                        baseSeconds={downtimeSecondsBase}
+                        trackingCategory={trackingCategory}
+                        activeCategory="downtime"
+                        trackingStartedAt={trackingStartedAt}
+                      />
                     </Typography>
                     <Typography variant="caption" display="block" sx={{ fontSize: "0.62rem", color: trackingCategory === "downtime" ? "rgba(255,255,255,0.7)" : "text.disabled" }}>downtime</Typography>
                   </Box>
@@ -2286,6 +2274,7 @@ export default function WorkOrderRunner({
                         label="Severity"
                         value={flagSeverity}
                         onChange={(e) => setFlagSeverity(e.target.value as "low" | "medium" | "high")}
+                        MenuProps={nativeSelectMenuProps()}
                       >
                         <MenuItem value="low">Low - observation, non-blocking</MenuItem>
                         <MenuItem value="medium">Medium - attention needed, non-blocking</MenuItem>
@@ -2687,8 +2676,10 @@ export default function WorkOrderRunner({
             missingCaptureCount={summaryStage.missingCaptureCount}
             hasMissingCaptures={summaryStage.hasMissingCaptures}
             isRealRun={isRealRun}
-            productiveSecondsLive={productiveSecondsLive}
-            downtimeSecondsLive={downtimeSecondsLive}
+            productiveSecondsBase={productiveSecondsBase}
+            downtimeSecondsBase={downtimeSecondsBase}
+            trackingCategory={trackingCategory}
+            trackingStartedAt={trackingStartedAt}
             timeTrackingJson={activeRun?.timeTrackingJson}
             timeZoneId={resolvedTimeZone}
             showSummaryIssues={showSummaryIssues}
