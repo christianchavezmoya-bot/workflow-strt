@@ -1,38 +1,17 @@
 import { Box, keyframes } from "@mui/material";
+import strataNgoLogo from "../../assets/strata-ngo-transparent.png";
 
-/** Horizontal-axis spin only. */
-const spinHorizontal = keyframes`
-  from { transform: rotateY(0deg); }
-  to { transform: rotateY(360deg); }
+/** Rotate the whole extruded mark around the horizontal X-axis (front → edge → back → edge). */
+const spinHorizontalX = keyframes`
+  from { transform: rotateX(0deg); }
+  to { transform: rotateX(360deg); }
 `;
 
-const BLUE_FRONT = "#0099D8";
-const GREY_FRONT = "#5C6670";
-const DEPTH_PX = 14;
-const SLICE_COUNT = 13;
+const DEPTH_PX = 16;
+const SLICE_COUNT = 15;
 
-/** Matches original STRATA N-GO lockup proportions (symbol + wordmark). */
-const VIEWBOX_W = 260;
-const VIEWBOX_H = 210;
-
-function mixHex(hex: string, toward: string, amount: number): string {
-  const parse = (value: string) => {
-    const raw = value.replace("#", "");
-    return [
-      parseInt(raw.slice(0, 2), 16),
-      parseInt(raw.slice(2, 4), 16),
-      parseInt(raw.slice(4, 6), 16),
-    ] as const;
-  };
-  const [r1, g1, b1] = parse(hex);
-  const [r2, g2, b2] = parse(toward);
-  const t = Math.min(1, Math.max(0, amount));
-  const channel = (from: number, to: number) => Math.round(from + (to - from) * t);
-  const r = channel(r1, r2);
-  const g = channel(g1, g2);
-  const b = channel(b1, b2);
-  return `#${[r, g, b].map((value) => value.toString(16).padStart(2, "0")).join("")}`;
-}
+/** Source PNG dimensions — preserve aspect ratio exactly. */
+const LOGO_ASPECT = `${1254} / ${826}`;
 
 type FaceProps = {
   /** 0 = back slice, 1 = front slice */
@@ -41,45 +20,27 @@ type FaceProps = {
 };
 
 function StrataNgoLogoFace({ depthT, emphasize = false }: FaceProps) {
-  const shade = emphasize ? 1 : 0.38 + depthT * 0.52;
-  const blue = mixHex(BLUE_FRONT, "#062636", 1 - shade);
-  const grey = mixHex(GREY_FRONT, "#111820", 1 - shade);
+  const shade = emphasize ? 1 : 0.42 + depthT * 0.5;
+  const brightness = 0.55 + shade * 0.45;
 
   return (
-    <svg
-      viewBox={`0 0 ${VIEWBOX_W} ${VIEWBOX_H}`}
-      width="100%"
-      height="100%"
+    <Box
+      component="img"
+      src={strataNgoLogo}
+      alt=""
       aria-hidden
-      style={{ display: "block" }}
-    >
-      <path d="M 130 8 L 176 44 Q 130 40 84 44 Z" fill={blue} />
-      <path d="M 22 66 Q 130 52 238 66 L 232 74 Q 130 60 28 74 Z" fill={blue} />
-      <text
-        x="130"
-        y="112"
-        textAnchor="middle"
-        fill={grey}
-        fontFamily="Georgia, 'Times New Roman', serif"
-        fontWeight={700}
-        fontSize="38"
-        letterSpacing="4"
-      >
-        STRATA
-      </text>
-      <text
-        x="130"
-        y="144"
-        textAnchor="middle"
-        fill={grey}
-        fontFamily="Arial, Helvetica, sans-serif"
-        fontWeight={700}
-        fontSize="19"
-        letterSpacing="6"
-      >
-        N-GO
-      </text>
-    </svg>
+      draggable={false}
+      sx={{
+        display: "block",
+        width: "100%",
+        height: "100%",
+        objectFit: "contain",
+        objectPosition: "center",
+        filter: emphasize ? "none" : `brightness(${brightness})`,
+        userSelect: "none",
+        WebkitUserDrag: "none",
+      }}
+    />
   );
 }
 
@@ -89,7 +50,8 @@ type Props = {
 };
 
 /**
- * Extruded STRATA N-GO mark — fully transparent background, visible depth as it spins.
+ * Extruded STRATA N-GO mark sourced from the brand PNG.
+ * Spins as one rigid body on the horizontal X-axis with a transparent background.
  */
 export default function StrataNgoSpinLogo3D({
   width = { xs: 132, sm: 148 },
@@ -105,11 +67,11 @@ export default function StrataNgoSpinLogo3D({
   return (
     <Box
       sx={{
-        perspective: 960,
+        perspective: 2400,
         perspectiveOrigin: "center center",
         width,
         height: height ?? "auto",
-        aspectRatio: `${VIEWBOX_W} / ${VIEWBOX_H}`,
+        aspectRatio: LOGO_ASPECT,
         bgcolor: "transparent",
       }}
     >
@@ -119,7 +81,8 @@ export default function StrataNgoSpinLogo3D({
           width: "100%",
           height: "100%",
           transformStyle: "preserve-3d",
-          animation: `${spinHorizontal} 1.15s linear infinite`,
+          transformOrigin: "center center",
+          animation: `${spinHorizontalX} 1.15s linear infinite`,
           willChange: "transform",
         }}
       >
@@ -145,7 +108,7 @@ export default function StrataNgoSpinLogo3D({
             transform: `rotateY(180deg) translateZ(${halfDepth}px)`,
             backfaceVisibility: "hidden",
             pointerEvents: "none",
-            opacity: 0.84,
+            opacity: 0.88,
           }}
         >
           <StrataNgoLogoFace depthT={0} emphasize />
