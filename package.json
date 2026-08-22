@@ -23,7 +23,6 @@
     "test:e2e": "playwright test",
     "test:e2e:full": "playwright test --config playwright.full.config.ts",
     "test:e2e:perf": "playwright test --config playwright.perf.config.ts",
-    "test:e2e:pm-smoke": "playwright test --config playwright.pm-field.config.ts",
     "test:e2e:workflow-consistency": "playwright test --config playwright.workflow-consistency.config.ts",
     "test:e2e:web-perf": "playwright test --config playwright.web-perf.config.ts",
     "test:e2e:visual": "playwright test --config playwright.visual.config.ts",

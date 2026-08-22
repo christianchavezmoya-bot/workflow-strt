@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Seed JO00991 + CAD-0039 + CC-0012 for PM field Playwright smoke.
- * Usage: node scripts/seed-pm-smoke-data.mjs
+ * Seed JO00991 + CAD-0039 + CC-0012 for workflow-consistency e2e checks.
+ * Usage: node scripts/seed-workflow-smoke-data.mjs
  */
 import { execFileSync } from "node:child_process";
 import path from "node:path";
@@ -69,7 +69,7 @@ INSERT INTO Projects (
   ProductFeatureValuesJson, PurchaseOrderNumber, TeamMemberIdsJson, MinimumCompletionPercent,
   TimeZoneId, WorkflowMode, IsDeleted
 ) VALUES (
-  'proj-jo00991', 'Yancoal', 'CUST-YANCOAL', 'JO00991', 'PM smoke test project',
+  'proj-jo00991', 'Yancoal', 'CUST-YANCOAL', 'JO00991', 'Workflow smoke test project',
   '2026-01-01', '2026-12-31', 'Australia', 'NSW', 'External', 'In Progress', 'Approved',
   1, 'Single Installation', 'Jose Lopez', 500000, 'Signed',
   '["${PRODUCT_ID}"]', '{}', '', '[]', 100,

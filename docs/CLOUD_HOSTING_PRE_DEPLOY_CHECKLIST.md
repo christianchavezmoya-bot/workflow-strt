@@ -45,7 +45,8 @@ Run from repo root unless noted.
 Optional Playwright (needs seeded field data):
 
 ```powershell
-npm run test:e2e:pm-smoke
+node scripts/seed-workflow-smoke-data.mjs
+npm run test:e2e:workflow-consistency
 ```
 
 ---

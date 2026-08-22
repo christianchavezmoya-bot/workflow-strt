@@ -35,7 +35,7 @@ Mobile:
 Tests and lint (all of these exist and run in CI — `.github/workflows/ci.yml`):
 - `npm test` — Vitest unit suite (`vitest.config.ts`), 234 tests across 53 files under `src/**/*.test.ts`
 - `npm run lint` — ESLint (`eslint.config.js`). **Currently not clean** (~10 errors, ~244 warnings) and marked `continue-on-error` in CI, so it is a backlog gate, not a blocker. Don't "fix the lint" wholesale as a side quest; don't add new findings either.
-- `npm run test:e2e` — Playwright specs in `e2e/` against the Vite dev server on **:5173** (`playwright.config.ts` starts it). Variants: `test:e2e:full`, `test:e2e:perf`, `test:e2e:web-perf`, `test:e2e:pm-smoke`, `test:e2e:workflow-consistency`, each with its own config.
+- `npm run test:e2e` — Playwright specs in `e2e/` against the Vite dev server on **:5173** (`playwright.config.ts` starts it). Variants: `test:e2e:full`, `test:e2e:perf`, `test:e2e:web-perf`, `test:e2e:workflow-consistency`, each with its own config.
 - `cd server/Commtrac.Api.Tests && dotnet test` — xUnit backend suite. Includes a **migration-chain test** that applies every migration to a fresh SQLite database, plus opt-in Postgres tests (see below).
 
 CI jobs: `frontend` (build + bundle budget + vitest + lint), `backend` (build + test), `standards` (docs/hygiene gates), and four Playwright jobs. A pre-push hook runs typecheck, `dotnet build`, docs, and hygiene locally.
