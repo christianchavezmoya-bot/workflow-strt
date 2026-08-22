@@ -96,13 +96,34 @@ public sealed class ProjectLifecycleService
             .ToListAsync();
 
         var totalAssets = assets.Count;
-        var completedAssets = assets.Count(a =>
-            string.Equals(a.Status, "Complete", StringComparison.OrdinalIgnoreCase) ||
-            string.Equals(a.Status, "Completed", StringComparison.OrdinalIgnoreCase));
-
-        if (totalAssets == 0 || completedAssets != totalAssets)
+        if (totalAssets == 0)
         {
-            return (false, $"Project cannot be closed until all installation assets are complete ({completedAssets}/{totalAssets}).", project);
+            return (false, "Project has no installation assets.", project);
+        }
+
+        var fieldCompleteAssets = assets.Count(IsFieldCompleteStatus);
+        if (fieldCompleteAssets != totalAssets)
+        {
+            return (false, $"Project cannot be closed until all installation assets are complete ({fieldCompleteAssets}/{totalAssets}).", project);
+        }
+
+        var assetIds = assets.Select(a => a.Id).ToList();
+        var lockedRunAssetIds = await _db.AssetWorkflowRuns
+            .Where(r => assetIds.Contains(r.AssetId) && r.IsLocked)
+            .Select(r => r.AssetId)
+            .Distinct()
+            .ToListAsync();
+        var lockedRunAssetIdSet = lockedRunAssetIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var pendingSignatureAssets = assets.Count(a =>
+            lockedRunAssetIdSet.Contains(a.Id)
+            && !string.Equals(a.Status, "Closed", StringComparison.OrdinalIgnoreCase));
+
+        if (pendingSignatureAssets > 0)
+        {
+            return (false,
+                $"Project cannot be closed until all signatures are finalized ({pendingSignatureAssets} asset(s) still awaiting sign-off or closure). Waive customer signature or collect remaining signatures first.",
+                project);
         }
 
         var now = DateTime.UtcNow;
@@ -119,6 +140,14 @@ public sealed class ProjectLifecycleService
         await NotifyProjectStatusAsync(project, "project-closed", "info", "Project closed", actorUserId, actorName, now);
         return (true, null, project);
     }
+
+    private static bool IsFieldCompleteStatus(ProjectAssetEntity asset) =>
+        IsFieldCompleteStatus(asset.Status);
+
+    private static bool IsFieldCompleteStatus(string? status) =>
+        string.Equals(status, "Complete", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, "Completed", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, "Closed", StringComparison.OrdinalIgnoreCase);
 
     private Task NotifyProjectStatusAsync(
         ProjectEntity project,

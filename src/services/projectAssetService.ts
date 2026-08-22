@@ -105,13 +105,32 @@ function buildActiveSummaryFromAssets(cached: ProjectAsset[]): ProjectAssetSumma
   for (const asset of cached) {
     let bucket = byProject.get(asset.projectId);
     if (!bucket) {
-      bucket = { projectId: asset.projectId, notStarted: 0, inProgress: 0, complete: 0, total: 0 };
+      bucket = {
+        projectId: asset.projectId,
+        notStarted: 0,
+        inProgress: 0,
+        complete: 0,
+        total: 0,
+        closed: 0,
+        pendingSignature: 0,
+      };
       byProject.set(asset.projectId, bucket);
     }
     bucket.total += 1;
-    if (asset.status === "Complete" || asset.status === "Closed") bucket.complete += 1;
-    else if (asset.status === "NotStarted") bucket.notStarted += 1;
+    const status = String(asset.status ?? "");
+    if (status === "Complete" || status === "Completed" || status === "Closed") bucket.complete += 1;
+    else if (status === "NotStarted") bucket.notStarted += 1;
     else bucket.inProgress += 1;
+    if (status === "Closed") bucket.closed = (bucket.closed ?? 0) + 1;
+    const signatureStatus = asset.workflowSummary?.signatureStatus;
+    if (
+      (status === "Complete" || status === "Completed")
+      && (signatureStatus === "PendingCustomer"
+        || signatureStatus === "PendingInstaller"
+        || signatureStatus === "Declined")
+    ) {
+      bucket.pendingSignature = (bucket.pendingSignature ?? 0) + 1;
+    }
   }
   return [...byProject.values()];
 }
@@ -1125,6 +1144,8 @@ export interface ProjectAssetSummaryItem {
   inProgress: number;
   complete: number;
   total: number;
+  closed?: number;
+  pendingSignature?: number;
 }
 
 export interface PaperCompletionResult {

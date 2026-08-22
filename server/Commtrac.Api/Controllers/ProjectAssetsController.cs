@@ -55,13 +55,18 @@ public class ProjectAssetsController : ControllerBase
     public async Task<ActionResult<IEnumerable<ProjectAssetSummaryDto>>> ActiveSummary()
     {
         var counts = await _db.ProjectAssets
+            .Where(a => !a.IsDeleted)
             .GroupBy(a => a.ProjectId)
             .Select(g => new ProjectAssetSummaryDto(
                 g.Key,
                 g.Count(a => a.Status == "NotStarted"),
                 g.Count(a => a.Status == "InProgress"),
                 g.Count(a => a.Status == "Complete" || a.Status == "Completed" || a.Status == "Closed"),
-                g.Count()))
+                g.Count(),
+                g.Count(a => a.Status == "Closed"),
+                g.Count(a =>
+                    (a.Status == "Complete" || a.Status == "Completed")
+                    && _db.AssetWorkflowRuns.Any(r => r.AssetId == a.Id && r.IsLocked))))
             .ToListAsync();
         return Ok(counts);
     }

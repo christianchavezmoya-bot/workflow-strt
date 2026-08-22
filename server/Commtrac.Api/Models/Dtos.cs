@@ -1576,7 +1576,14 @@ public record TechnicianWorkloadSummaryDto(
     string? StartedAt);
 
 /// <summary>Per-project asset status counts for the Dashboard regional snapshot.</summary>
-public record ProjectAssetSummaryDto(string ProjectId, int NotStarted, int InProgress, int Complete, int Total);
+public record ProjectAssetSummaryDto(
+    string ProjectId,
+    int NotStarted,
+    int InProgress,
+    int Complete,
+    int Total,
+    int Closed = 0,
+    int PendingSignature = 0);
 
 public record PaperCompletionResultDto(
     string AssetId,
