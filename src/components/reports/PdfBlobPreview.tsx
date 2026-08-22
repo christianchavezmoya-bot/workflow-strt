@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import * as pdfjsLib from "pdfjs-dist";
-import { isMobileNativePlatform } from "../../utils/platform";
+import { usePinchZoom } from "../../hooks/usePinchZoom";
+import { shouldUsePdfJsPreview } from "../../utils/platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -26,13 +27,12 @@ type Props = {
 /**
  * Scrollable PDF preview.
  *
- * Web uses the browser's native PDF viewer (iframe) — stable on LAN/dev links and
- * avoids pdf.js standard-font URL issues in Vite dev. Native mobile uses pdf.js canvas
- * rendering because embedded iframe/blob viewers are less reliable in Capacitor.
+ * Desktop web uses the browser's native PDF viewer (iframe) — stable on LAN/dev links.
+ * Native mobile and mobile web browsers use pdf.js canvas rendering with pinch-to-zoom,
+ * because embedded iframe/blob viewers cannot scroll or zoom multi-page PDFs reliably.
  */
-export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
-  const isNativeMobile = isMobileNativePlatform();
-  const viewportRef = useRef<HTMLDivElement | null>(null);
+export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }: Props) {
+  const usePdfJs = shouldUsePdfJsPreview();
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [pageCount, setPageCount] = useState(0);
@@ -40,6 +40,14 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [pdfData, setPdfData] = useState<ArrayBuffer | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [pinchZoom, setPinchZoom] = useState(1);
+  const effectiveZoom = zoomProp * pinchZoom;
+
+  const viewportRef = usePinchZoom<HTMLDivElement>({
+    zoom: pinchZoom,
+    onZoomChange: setPinchZoom,
+    enabled: usePdfJs && !loading,
+  });
 
   useEffect(() => {
     const nextUrl = URL.createObjectURL(blob);
@@ -48,7 +56,11 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
   }, [blob]);
 
   useEffect(() => {
-    if (!isNativeMobile) {
+    setPinchZoom(1);
+  }, [blob]);
+
+  useEffect(() => {
+    if (!usePdfJs) {
       setLoading(false);
       setError(null);
       return;
@@ -63,10 +75,10 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       if (!cancelled) setError("Could not read PDF data.");
     });
     return () => { cancelled = true; };
-  }, [blob, isNativeMobile]);
+  }, [blob, usePdfJs]);
 
   useEffect(() => {
-    if (!isNativeMobile) return;
+    if (!usePdfJs) return;
 
     const node = viewportRef.current;
     if (!node) return;
@@ -83,10 +95,10 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [isNativeMobile]);
+  }, [usePdfJs, viewportRef]);
 
   useEffect(() => {
-    if (!isNativeMobile) return;
+    if (!usePdfJs) return;
 
     let cancelled = false;
 
@@ -118,7 +130,7 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
           if (cancelled) break;
 
           const baseViewport = page.getViewport({ scale: 1 });
-          const fittedScale = Math.max(0.35, ((containerWidth - 32) / baseViewport.width) * zoom);
+          const fittedScale = Math.max(0.35, ((containerWidth - 32) / baseViewport.width) * effectiveZoom);
           const viewport = page.getViewport({ scale: fittedScale });
 
           const shell = document.createElement("div");
@@ -159,9 +171,9 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
 
     void renderPdf();
     return () => { cancelled = true; };
-  }, [pdfData, containerWidth, isNativeMobile, zoom]);
+  }, [pdfData, containerWidth, effectiveZoom, usePdfJs]);
 
-  if (!isNativeMobile && blobUrl) {
+  if (!usePdfJs && blobUrl) {
     return (
       <Box
         sx={{
@@ -195,6 +207,8 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
     );
   }
 
+  const hintText = scrollHint ?? (pageCount > 1 ? "Scroll to view all pages. Pinch to zoom." : "Pinch to zoom.");
+
   return (
     <Box
       ref={viewportRef}
@@ -202,14 +216,15 @@ export default function PdfBlobPreview({ blob, zoom = 1, scrollHint }: Props) {
         height: "100%",
         overflow: "auto",
         WebkitOverflowScrolling: "touch",
+        touchAction: "pan-x pan-y",
         bgcolor: "#525659",
         px: 1,
         py: 1.5,
       }}
     >
-      {scrollHint && pageCount > 1 && (
+      {scrollHint && (
         <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
-          {scrollHint}
+          {hintText}
         </Typography>
       )}
       {loading && (

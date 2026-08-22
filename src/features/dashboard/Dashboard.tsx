@@ -1185,7 +1185,7 @@ const Dashboard = () => {
     try {
       await dispatch(updateProjectStatus({ id: projectId, payload: { status: "Closed" } })).unwrap();
       await dispatch(fetchProjects({
-        country: activeOffice !== "All" ? activeOffice : undefined,
+        country: isAdmin || activeOffice === "All" ? undefined : activeOffice,
       }));
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to close this project right now.";
@@ -1193,7 +1193,7 @@ const Dashboard = () => {
     } finally {
       setClosingDashboardProjectId(null);
     }
-  }, [activeOffice, dispatch]);
+  }, [activeOffice, dispatch, isAdmin]);
 
   const projectPmLabel = useCallback(
     (projectId?: string | null) => {
