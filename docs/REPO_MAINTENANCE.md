@@ -67,16 +67,13 @@ done
 | #110 | `cursor/native-bootstrap-pending-fix-cd21` | 1 | Bootstrap blocked by pending uploads |
 | #109 | `cursor/native-offline-sync-investigation-cd21` | 1 | Investigation **doc only** — cherry-pick or merge doc |
 | #44 | `cursor/search-performance-fixes-cd21` | 1 | Search + asset typing perf |
-| #67 | `cursor/pm-field-smoke-playwright-cd21` | 1 | Playwright smoke harness |
 | #26 | `cursor/jwt-expiry-retest-windows-cd21` | 1 | JWT=1 min test config (Windows only) |
 
 ### Review — experimental / old
 
 | PR | Branch | Notes |
 |----|--------|-------|
-| #2 | `codex/workflow-inspection-reaudit` | May 2026; 15 commits ahead — likely stale |
-| #4 | `cursor/e2e-offline-walkthrough-7022` | E2E video walkthrough experiment |
-| #5 | `cursor/sales-presentation-7022` | Sales deck — not product code |
+| #2 | `codex/workflow-inspection-reaudit` | May 2026; 15 commits ahead — likely stale (closed) |
 | #8 | `cursor/workflow-capture-columns-845f` | Capture columns from workflow steps |
 | #9–#10 | `cursor/dashboard-*-3e6f` | Dashboard perf / skeleton loading |
 

@@ -2,7 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 /**
  * Workflow consistency smoke — API-level server truth checks.
- * Seed dev DB first: node scripts/seed-pm-smoke-data.mjs
+ * Seed dev DB first: node scripts/seed-workflow-smoke-data.mjs
  *
  * Env:
  *   WC_SMOKE_API      (default http://localhost:4000/api)

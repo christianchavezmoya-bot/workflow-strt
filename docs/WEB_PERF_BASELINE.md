@@ -1,7 +1,7 @@
 # Web performance baseline
 
 **Date:** 2026-08-10 (updated after Phase E)  
-**Environment:** Dev seed DB (`node scripts/seed-pm-smoke-data.mjs`), 152 assets + JO00991, Vite dev + API :4000  
+**Environment:** Dev seed DB (`node scripts/seed-workflow-smoke-data.mjs`), 152 assets + JO00991, Vite dev + API :4000  
 **Reference:** `docs/WEB_PERF_IMPLEMENTATION_PLAN.md`
 
 ---
@@ -16,7 +16,7 @@
 | **D** | `cursor/web-perf-phase-d-cd21` (#139) | ✓ | Runs-detail dedupe, deferred capture search, lazy doc preview |
 | **E** | `cursor/web-perf-phase-e-cd21` | pending | Lower project Autocomplete threshold, debounce web SSE asset refresh, skip unscoped broadcast when project scoped |
 
-**Next (optional):** PM smoke strict gates on field JO00991, backend dashboard slim queries (PR #9), further Assets route code-split.
+**Next (optional):** Backend dashboard slim queries (PR #9), further Assets route code-split.
 
 ---
 
@@ -70,12 +70,10 @@ Record timings in the table above when re-baselining after each phase.
 ## Automated gate
 
 ```bash
-node scripts/seed-pm-smoke-data.mjs
-npm run test:e2e:pm-smoke                    # report only
-PM_SMOKE_STRICT=1 npm run test:e2e:pm-smoke  # fail on threshold breaches
+node scripts/seed-workflow-smoke-data.mjs
+npm run test:e2e:workflow-consistency
+npm run test:e2e:web-perf
 ```
-
-Report written to `e2e-results/pm-field-smoke-report.json`.
 
 **Strict thresholds (Phase 1):** `captureSave*Ms` < 100 ms each; no `step-results` PATCH during capture edits.  
 **Strict thresholds (Phase 5):** `captureSearchMs` < 200 ms when searching full asset tag.

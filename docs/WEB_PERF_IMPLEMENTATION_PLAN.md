@@ -47,7 +47,7 @@ All acceptance thresholds are measured on **production-like web build** (`npm ru
 | **Page paint** | Performance mark in app *or* Playwright `performance.now()` delta | Time from navigation / click to first row visible *or* intentional empty state (not spinner). |
 | **API payload** | Network tab / server middleware | Response body bytes for `by-project` assets and runs. |
 | **Main-thread block** | Performance → Long Tasks | Any task **> 50 ms** during capture edit counts as failure until Phase 3. |
-| **Regression gate** | `npm run test:e2e:pm-smoke` + new perf spec | Automated wall-clock with `PM_SMOKE_STRICT=1` after thresholds wired. |
+| **Regression gate** | `npm run test:e2e:web-perf` + workflow-consistency smoke | Automated wall-clock checks after thresholds wired. |
 
 ### Baseline (current — do not re-measure unless regressing)
 
@@ -71,7 +71,7 @@ Record fresh baseline in `docs/WEB_PERF_BASELINE.md` (one table) before starting
 ### Work
 
 1. **Server timing middleware** — Log per request: path, status, ms, response bytes (focus: `by-project`, `by-product`, `step-results` PATCH).
-2. **Extend `e2e/pm-field-smoke.spec.ts`** — Record capture blur, project select, API call count; fail when `PM_SMOKE_STRICT=1`.
+2. **Extend `e2e/web-perf.spec.ts`** — Record capture blur, project select, API call count; fail when strict env flags are set.
 3. **Baseline doc** — Single table: JO00991, 5 runs median/p95 for each metric above.
 4. **DevTools checklist** — One-page field tester script (login → JO00991 → Capture → 3 cell edits → Issues).
 
@@ -80,7 +80,7 @@ Record fresh baseline in `docs/WEB_PERF_BASELINE.md` (one table) before starting
 | Check | Threshold |
 |-------|-----------|
 | Middleware logs appear for every `by-project` hit | 100% in dev |
-| PM smoke produces `e2e-results/pm-field-smoke-report.json` | File written every run |
+| Web perf spec produces JSON under `e2e-results/` | File written every run |
 | Baseline table committed | All “current” cells filled |
 
 ### Exit
