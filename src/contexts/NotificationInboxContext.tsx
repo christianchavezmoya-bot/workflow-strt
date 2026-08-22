@@ -6,6 +6,7 @@ import { useAuth } from "../hooks/useAuth";
 import { isDashboardRoute } from "../utils/postLoginRoute";
 import type { AppNotification } from "../types/notification";
 import { isMobileNativePlatform } from "../utils/platform";
+import { notificationPollingUsesVisibilityChange } from "../utils/notificationInboxPolling";
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
@@ -58,6 +59,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   const [bannerNotification, setBannerNotification] = useState<AppNotification | null>(null);
   const seenUnreadIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
+  /** Native-only: tracks Capacitor app foreground — survives poll-interval effect re-runs. */
+  const nativeAppActiveRef = useRef(true);
 
   const refresh = useCallback(async () => {
     const path = window.location.pathname;
@@ -146,10 +149,10 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     // signatureService) and every dispatch triggered an immediate full fetch. On a busy
     // screen that produced a storm of large requests competing for the connection pool.
     //
-    // Two changes:
-    //   1) Debounce the EVENT-driven triggers so a burst collapses into a single fetch.
-    //   2) Pause the 15s interval while the tab is hidden; refresh once on becoming visible.
-    //   3) Skip polling entirely while offline — serve the IndexedDB cache instead.
+    // Event-driven triggers are debounced so a burst collapses into a single fetch.
+    // Polling pause/resume uses ONE lifecycle source per platform (mirrors
+    // connectivityMonitor): visibilitychange on web, Capacitor appState on native.
+    // Mixing both on native freezes the bell when camera/picker hides the document.
     let debounceTimer: number | undefined;
     const debouncedRefresh = () => {
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
@@ -167,16 +170,31 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     const stopPolling = () => {
       if (timer !== undefined) { window.clearInterval(timer); timer = undefined; }
     };
-    // Only poll while the tab is visible and online.
-    if (document.visibilityState === "visible" && !shouldSkipBlockingFetch()) startPolling();
+
+    const useVisibilityPolling = notificationPollingUsesVisibilityChange();
+
+    const resumePollingIfAllowed = () => {
+      if (shouldSkipBlockingFetch()) return;
+      stopPolling();
+      startPolling();
+    };
+
+    // Start interval when online. Web waits for a visible tab; native trusts app foreground.
+    if (!shouldSkipBlockingFetch()) {
+      const shouldStart =
+        useVisibilityPolling
+          ? document.visibilityState === "visible"
+          : nativeAppActiveRef.current;
+      if (shouldStart) startPolling();
+    }
 
     const handleRefreshTrigger = () => { debouncedRefresh(); };
     const handleVisibilityChange = () => {
+      if (!useVisibilityPolling) return;
       if (document.visibilityState === "visible") {
         if (!shouldSkipBlockingFetch()) {
           void refresh();
-          stopPolling();
-          startPolling();
+          resumePollingIfAllowed();
         }
       } else {
         stopPolling();
@@ -184,21 +202,24 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     };
     const handleOfflineModeOnline = () => {
       void refresh();
-      startPolling();
+      if (useVisibilityPolling) {
+        if (document.visibilityState === "visible") resumePollingIfAllowed();
+      } else if (nativeAppActiveRef.current) {
+        resumePollingIfAllowed();
+      }
     };
     const handleOfflineModeOffline = () => {
       stopPolling();
       void refresh();
     };
     const handleAppBackground = () => {
+      nativeAppActiveRef.current = false;
       stopPolling();
     };
     const handleAppForeground = () => {
+      nativeAppActiveRef.current = true;
       void refresh();
-      if (!shouldSkipBlockingFetch()) {
-        stopPolling();
-        startPolling();
-      }
+      resumePollingIfAllowed();
     };
 
     window.addEventListener("focus", handleRefreshTrigger);
@@ -208,7 +229,9 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     window.addEventListener("notifications:refresh", handleRefreshTrigger);
     window.addEventListener("offline-mode-online", handleOfflineModeOnline);
     window.addEventListener("offline", handleOfflineModeOffline);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
+    if (useVisibilityPolling) {
+      document.addEventListener("visibilitychange", handleVisibilityChange);
+    }
     if (isMobileNativePlatform()) {
       window.addEventListener("app-backgrounded", handleAppBackground);
       window.addEventListener("app-foregrounded", handleAppForeground);
@@ -220,6 +243,9 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
         window.removeEventListener("app-backgrounded", handleAppBackground);
         window.removeEventListener("app-foregrounded", handleAppForeground);
       }
+      if (useVisibilityPolling) {
+        document.removeEventListener("visibilitychange", handleVisibilityChange);
+      }
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
       window.removeEventListener("online", handleRefreshTrigger);
@@ -228,7 +254,6 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       window.removeEventListener("notifications:refresh", handleRefreshTrigger);
       window.removeEventListener("offline-mode-online", handleOfflineModeOnline);
       window.removeEventListener("offline", handleOfflineModeOffline);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [refresh, pollIntervalMs]);
 
