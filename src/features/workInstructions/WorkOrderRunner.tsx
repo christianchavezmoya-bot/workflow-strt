@@ -2468,11 +2468,17 @@ function WorkOrderRunner({
           </DialogActions>
         </Dialog>
 
-        <Dialog open={validationDialogOpen} onClose={closeValidationDialog} maxWidth="xs" fullWidth>
+        <Dialog
+          open={validationDialogOpen}
+          onClose={closeValidationDialog}
+          maxWidth="xs"
+          fullWidth
+          sx={isMobileNativePlatform() ? nativeNestedDialogSx() : undefined}
+        >
           <DialogTitle>
             {validationDialogMode === "blocking"
               ? validationDialogItems.every(isMissingCaptureItem) ? "Missing captures" : "Required fields missing"
-              : "Capture missing"}
+              : "Capture required"}
           </DialogTitle>
           <DialogContent>
             <Stack spacing={1.25} sx={{ mt: 0.5 }}>
@@ -2481,7 +2487,7 @@ function WorkOrderRunner({
                   ? validationDialogItems.every(isMissingCaptureItem)
                     ? "Missing workflow captures must be completed before the run can be locked."
                     : "You cannot proceed until all required fields on this step are completed."
-                  : "Some captures are still missing on this step. You can still proceed if you want."}
+                  : "Required photos or videos are still missing on this step. You can continue to the next step, but missing captures will block locking the run and signing it off."}
               </Alert>
               <Stack spacing={0.5}>
                 {validationDialogItems.map((item) => (

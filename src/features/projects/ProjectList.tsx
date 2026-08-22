@@ -417,8 +417,9 @@ const ProjectList = () => {
         statusFilter,
         projectNumberFilter,
         showArchived,
+        skipOfficeFilter: isAdminUser,
       }),
-    [activeOffice, projectNumberFilter, showArchived, statusFilter]
+    [activeOffice, isAdminUser, projectNumberFilter, showArchived, statusFilter]
   );
 
   const currentRequestKey = useMemo(() => buildProjectRequestKey(listFilters), [listFilters]);
