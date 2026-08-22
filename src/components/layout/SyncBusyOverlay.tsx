@@ -1,6 +1,6 @@
 /**
  * Full-screen sync busy overlay (native only).
- * Shows a 3D STRATA N-GO mark spinning on the horizontal X-axis while the offline queue flushes.
+ * Shows a 3D STRATA N-GO mark spinning on the vertical Y-axis while the offline queue flushes.
  */
 import { Backdrop, Box, Stack, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
