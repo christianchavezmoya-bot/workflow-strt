@@ -9,7 +9,8 @@
 **Pre-deploy (after this passes):** [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)  
 
 **Login (Strata NGO seed):** `admin@StrataNgo.local` / `Admin123!`  
-**PM login:** `project.manager@StrataNgo.local` / `Pm123!`
+**PM login:** `project.manager@StrataNgo.local` / `Pm123!`  
+**Seed (PR #253):** single product **AIM-100** (`prod-aim-100`) — not `prod-chambers`.
 
 ---
 
@@ -429,7 +430,7 @@ database — it is what caught the `ADD COLUMN IF NOT EXISTS` regression, so a f
 | ID | PASS if |
 |----|---------|
 | T1 | `dotnet build` exit 0 |
-| T2 | `dotnet test` exit 0 (5 passed) |
+| T2 | `dotnet test` exit 0 (all tests in Commtrac.Api.Tests — count varies) |
 | T3 | `npx tsc -b` exit 0 |
 
 ---
