@@ -1,8 +1,8 @@
 # Golden rule — native download/sync stays in the foreground
 
-**Status:** Plan only. Do not implement until this document is signed off.
+**Status:** Implemented (Phases A–D). See `nativeForegroundSyncSession.ts` and `useNativeForegroundSyncSession.ts`.
 
-**Platforms:** iPhone (App Store) first; apply the same product rule on Android.
+**Platforms:** iPhone (App Store) first; same product rule on Android.
 
 ---
 

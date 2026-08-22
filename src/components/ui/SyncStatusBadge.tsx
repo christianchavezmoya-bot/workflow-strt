@@ -25,6 +25,7 @@ import { isOfflineModeActive } from "../../services/offlineModeState";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { pendingGetByEntityId } from "../../services/localDB";
 import SyncCenterPage from "../../features/sync/SyncCenterPage";
+import { SYNC_CENTER_OPEN_EVENT } from "../layout/SyncBusyOverlay";
 
 function timeAgo(date: Date): string {
   const secs = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -36,6 +37,12 @@ function timeAgo(date: Date): string {
 export default function SyncStatusBadge() {
   const { status, pendingCount, conflictCount, lastSyncAt, syncing, canSync, triggerSync, connectivity, bootstrapProgress } = useSyncEngine();
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
+
+  useEffect(() => {
+    const open = () => setSyncCenterOpen(true);
+    window.addEventListener(SYNC_CENTER_OPEN_EVENT, open);
+    return () => window.removeEventListener(SYNC_CENTER_OPEN_EVENT, open);
+  }, []);
 
   const iconSx = { fontSize: 13 };
   const downloadPct = bootstrapProgress && bootstrapProgress.total > 0

@@ -1,11 +1,15 @@
 import { useEffect } from "react";
 import { isMobileNativePlatform } from "../utils/platform";
 import { startSyncKeepAlive, stopSyncKeepAlive } from "../services/syncKeepAlive";
-import { isNativeSyncUiActive, isNativeSyncUiActiveNow } from "../utils/nativeSyncUiState";
+import {
+  NATIVE_FOREGROUND_SYNC_SESSION_EVENT,
+  type NativeForegroundSyncSessionState,
+} from "../utils/nativeForegroundSyncSession";
 
 /**
- * While the offline queue is flushing, keep the device awake and (on Android)
- * run a dataSync foreground service so large uploads survive app backgrounding.
+ * While a native foreground sync session has network work in flight, keep the
+ * device awake and (on Android) run a dataSync foreground service.
+ * Keep-awake turns off when only conflicts remain (Phase D).
  */
 export function useSyncKeepAlive(): void {
   useEffect(() => {
@@ -13,9 +17,8 @@ export function useSyncKeepAlive(): void {
 
     let active = false;
 
-    const apply = (syncing: boolean) => {
-      if (syncing) {
-        if (!isNativeSyncUiActive(true)) return;
+    const apply = (keepAwake: boolean) => {
+      if (keepAwake) {
         if (active) return;
         active = true;
         void startSyncKeepAlive();
@@ -26,19 +29,15 @@ export function useSyncKeepAlive(): void {
       void stopSyncKeepAlive();
     };
 
-    const onSyncing = (event: Event) => {
-      const detail = (event as CustomEvent<{ syncing?: boolean }>).detail;
-      apply(Boolean(detail?.syncing));
+    const onSessionState = (event: Event) => {
+      const detail = (event as CustomEvent<NativeForegroundSyncSessionState>).detail;
+      apply(Boolean(detail?.keepAwake));
     };
 
-    window.addEventListener("sync-engine:syncing", onSyncing);
-
-    if (isNativeSyncUiActiveNow()) {
-      apply(true);
-    }
+    window.addEventListener(NATIVE_FOREGROUND_SYNC_SESSION_EVENT, onSessionState);
 
     return () => {
-      window.removeEventListener("sync-engine:syncing", onSyncing);
+      window.removeEventListener(NATIVE_FOREGROUND_SYNC_SESSION_EVENT, onSessionState);
       if (active) void stopSyncKeepAlive();
     };
   }, []);

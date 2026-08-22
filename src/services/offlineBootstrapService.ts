@@ -25,6 +25,7 @@ import {
 } from "./documentService";
 import { WorkflowAssignmentRepository } from "../repositories/WorkflowAssignmentRepository";
 import { getBootstrapPrefetchLimits } from "../utils/syncPolicy";
+import type { BootstrapReason } from "../utils/bootstrapFreshness";
 import { waitForBackgroundWorkSlot } from "../utils/nativeReconnectCoordinator";
 import offlineStore from "./offlineStore";
 import type { ProjectAsset } from "../types/projectAsset";
@@ -58,6 +59,8 @@ export interface BootstrapRunOptions {
   force?: boolean;
   /** light skips heavy document/media prefetch (routine reconnect). */
   mode?: BootstrapMode;
+  /** Why this bootstrap was scheduled — forwarded to bootstrap:started for foreground session gating. */
+  reason?: BootstrapReason;
 }
 
 export interface BootstrapSummary {
@@ -224,7 +227,7 @@ export const offlineBootstrapService = {
     const userId = currentUserId();
 
     _running = true;
-    emit("bootstrap:started", { scope });
+    emit("bootstrap:started", { scope, reason: options?.reason });
 
     try {
       // ── Phase 1: shared reference data ────────────────────────────────────
