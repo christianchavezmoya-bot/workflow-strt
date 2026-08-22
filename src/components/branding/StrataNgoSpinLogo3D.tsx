@@ -1,10 +1,10 @@
 import { Box, keyframes } from "@mui/material";
 import strataNgoLogo from "../../assets/strata-ngo-transparent.png";
 
-/** Rotate the whole extruded mark around the horizontal X-axis (front → edge → back → edge). */
-const spinHorizontalX = keyframes`
-  from { transform: rotateX(0deg); }
-  to { transform: rotateX(360deg); }
+/** Ballerina spin: vertical Y-axis (front → side → back → side). */
+const spinVerticalY = keyframes`
+  from { transform: rotateY(0deg); }
+  to { transform: rotateY(360deg); }
 `;
 
 const DEPTH_PX = 16;
@@ -51,7 +51,7 @@ type Props = {
 
 /**
  * Extruded STRATA N-GO mark sourced from the brand PNG.
- * Spins as one rigid body on the horizontal X-axis with a transparent background.
+ * Spins as one rigid body on the vertical Y-axis (ballerina) with a transparent background.
  */
 export default function StrataNgoSpinLogo3D({
   width = { xs: 132, sm: 148 },
@@ -82,7 +82,7 @@ export default function StrataNgoSpinLogo3D({
           height: "100%",
           transformStyle: "preserve-3d",
           transformOrigin: "center center",
-          animation: `${spinHorizontalX} 1.15s linear infinite`,
+          animation: `${spinVerticalY} 1.15s linear infinite`,
           willChange: "transform",
         }}
       >
