@@ -942,7 +942,12 @@ public class AssetWorkflowRunsController : ControllerBase
             .OrderByDescending(r => r.StartedAt)
             .FirstOrDefaultAsync();
         if (existingRun is not null)
+        {
+            // Offline sync may re-POST an already-created run; still push SSE so
+            // same-user web sessions refresh without a manual reload.
+            await BroadcastAssetUpdatedAsync(existingRun.AssetId);
             return Ok(ToDto(existingRun));
+        }
 
         // Snapshot: freeze the full config at this moment
         var snapshot = JsonSerializer.Serialize(new

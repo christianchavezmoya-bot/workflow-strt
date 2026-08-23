@@ -654,10 +654,19 @@ const Dashboard = () => {
       setWorkspaceLoading(true);
       try {
         await runStaggeredDashboardLiveRefresh({
-          workspace: () => projectAssetService
-            .dashboardWorkspace(effectiveDashboardWorkspaceUserId)
-            .then((data) => { applyDashboardWorkspace(data); })
-            .catch(() => { /* keep last-good workspace on a failed manual refresh */ }),
+          workspace: async () => {
+            const maxAttempts = 3;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+              try {
+                const data = await projectAssetService.dashboardWorkspace(effectiveDashboardWorkspaceUserId);
+                applyDashboardWorkspace(data);
+                return;
+              } catch {
+                if (attempt === maxAttempts - 1) break;
+                await new Promise((resolve) => window.setTimeout(resolve, 600 * (attempt + 1)));
+              }
+            }
+          },
           attention: () => loadAttention({ silent: true }),
           listOpen: () => projectAssetService.listOpen().then(setOpenAssets),
           activeSummary: needsProjectAssetSummary
@@ -941,11 +950,13 @@ const Dashboard = () => {
   useEffect(() => {
     if (dashboardBootPhase !== "full") return;
     const handleServerAssetUpdate = () => {
-      refreshLiveDashboardData();
+      // SSE means server data changed — fetch immediately (no debounce) so web
+      // sessions pick up phone sync without a manual reload.
+      void refreshLiveDashboardDataNow("full");
     };
     window.addEventListener("sse:assets:updated", handleServerAssetUpdate);
     return () => window.removeEventListener("sse:assets:updated", handleServerAssetUpdate);
-  }, [dashboardBootPhase, refreshLiveDashboardData]);
+  }, [dashboardBootPhase, refreshLiveDashboardDataNow]);
 
   // Phase 4 - evidence completeness (deferred on web until analyticsLoadEnabled)
   useEffect(() => {

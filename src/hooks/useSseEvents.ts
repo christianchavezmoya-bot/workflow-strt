@@ -114,6 +114,7 @@ export function useSseEvents() {
             invalidateWebCacheByPrefix("/project-assets/");
             invalidateWebCacheByPrefix("/asset-workflow-runs/");
             invalidateWebCacheByPrefix("/dashboard/");
+            window.dispatchEvent(new Event("notifications:run-state-changed"));
           }
           window.dispatchEvent(new CustomEvent("sse:assets:updated", { detail }));
           onAssetsUpdatedFromServer(detail);

@@ -1,12 +1,15 @@
 ﻿import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useLocation } from "react-router-dom";
 import { notificationService } from "../services/notificationService";
-import { shouldSkipBlockingFetch } from "../services/connectivityMonitor";
+import { shouldSkipBlockingFetch, getServerReachable } from "../services/connectivityMonitor";
 import { useAuth } from "../hooks/useAuth";
 import { isDashboardRoute } from "../utils/postLoginRoute";
 import type { AppNotification } from "../types/notification";
 import { isMobileNativePlatform } from "../utils/platform";
-import { notificationPollingUsesVisibilityChange } from "../utils/notificationInboxPolling";
+import {
+  nativeNotificationPollingAllowed,
+  notificationPollingUsesVisibilityChange,
+} from "../utils/notificationInboxPolling";
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
@@ -64,7 +67,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   /** Native-only: tracks Capacitor app foreground — survives poll-interval effect re-runs. */
   const nativeAppActiveRef = useRef(true);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { forceNetwork?: boolean }) => {
     const path = window.location.pathname;
     const isPublicRoute =
       path === "/login" ||
@@ -87,10 +90,11 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       return;
     }
 
-    const offlineRead = shouldSkipBlockingFetch();
+    const forceNetwork = options?.forceNetwork === true;
+    const offlineRead = !forceNetwork && shouldSkipBlockingFetch();
     if (!offlineRead) setLoading(true);
     try {
-      const next = await notificationService.list(true, 50);
+      const next = await notificationService.list(true, 50, { forceNetwork });
       setNotifications(next);
       setFromCache(offlineRead);
 
@@ -166,6 +170,14 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
     let timer: number | undefined;
     let healTimer: number | undefined;
+
+    const nativePollingAllowed = () =>
+      nativeNotificationPollingAllowed({
+        nativeAppActive: nativeAppActiveRef.current,
+        serverReachable: getServerReachable(),
+        pathname: window.location.pathname,
+      });
+
     const startPolling = () => {
       if (timer !== undefined || shouldSkipBlockingFetch()) return;
       timer = window.setInterval(() => { void refresh(); }, pollIntervalMs);
@@ -182,13 +194,22 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       startPolling();
     };
 
-    const handleConnectivityResume = () => {
-      void refresh();
+    const handleConnectivityResume = (options?: { forceNetwork?: boolean }) => {
+      void refresh(options);
       if (useVisibilityPolling) {
         if (document.visibilityState === "visible") resumePollingIfAllowed();
-      } else if (nativeAppActiveRef.current) {
+      } else if (nativePollingAllowed()) {
         resumePollingIfAllowed();
       }
+    };
+
+    const handleSyncFlushComplete = (event: Event) => {
+      if (!isMobileNativePlatform()) return;
+      const detail = (event as CustomEvent<{ pendingRemaining?: number }>).detail;
+      if (detail?.pendingRemaining !== 0) return;
+      // Upload overlay can spuriously flip appState; treat a settled flush as foreground.
+      nativeAppActiveRef.current = true;
+      handleConnectivityResume({ forceNetwork: true });
     };
 
     // Start interval when online. Web waits for a visible tab; native trusts app foreground.
@@ -196,7 +217,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       const shouldStart =
         useVisibilityPolling
           ? document.visibilityState === "visible"
-          : nativeAppActiveRef.current;
+          : nativePollingAllowed();
       if (shouldStart) startPolling();
     }
 
@@ -237,9 +258,11 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       const shouldRun =
         useVisibilityPolling
           ? document.visibilityState === "visible"
-          : nativeAppActiveRef.current;
+          : nativePollingAllowed();
       if (shouldRun && timer === undefined) resumePollingIfAllowed();
     }, POLL_HEAL_MS);
+
+    const handleApiServerReachable = () => { handleConnectivityResume(); };
 
     window.addEventListener("focus", handleRefreshTrigger);
     window.addEventListener("online", handleOnline);
@@ -248,7 +271,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     window.addEventListener("notifications:refresh", handleRefreshTrigger);
     window.addEventListener("offline-mode-online", handleOfflineModeOnline);
     window.addEventListener("offline", handleOfflineModeOffline);
-    window.addEventListener("api-server-reachable", handleConnectivityResume);
+    window.addEventListener("api-server-reachable", handleApiServerReachable);
+    window.addEventListener("sync-engine:flush-complete", handleSyncFlushComplete);
     if (useVisibilityPolling) {
       document.addEventListener("visibilitychange", handleVisibilityChange);
     }
@@ -275,7 +299,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       window.removeEventListener("notifications:refresh", handleRefreshTrigger);
       window.removeEventListener("offline-mode-online", handleOfflineModeOnline);
       window.removeEventListener("offline", handleOfflineModeOffline);
-      window.removeEventListener("api-server-reachable", handleConnectivityResume);
+      window.removeEventListener("api-server-reachable", handleApiServerReachable);
+      window.removeEventListener("sync-engine:flush-complete", handleSyncFlushComplete);
     };
   }, [refresh, pollIntervalMs]);
 

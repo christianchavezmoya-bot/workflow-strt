@@ -7,7 +7,13 @@ import { isMobileNativePlatform } from "../utils/platform";
 const NOTIFICATIONS_CACHE_KEY = "notifications_v1";
 
 export const notificationService = {
-  async list(includeRead = true, take = 50): Promise<AppNotification[]> {
+  async list(
+    includeRead = true,
+    take = 50,
+    options?: { forceNetwork?: boolean },
+  ): Promise<AppNotification[]> {
+    const forceNetwork = options?.forceNetwork === true;
+
     if (!isMobileNativePlatform()) {
       const response = await api.get<AppNotification[]>("/notifications", {
         params: { includeRead, take },
@@ -18,7 +24,7 @@ export const notificationService = {
     const cached = await cacheGet<AppNotification[]>(NOTIFICATIONS_CACHE_KEY);
     const cachedList = Array.isArray(cached) ? cached : null;
 
-    if (!shouldSkipBlockingFetch()) {
+    if (forceNetwork || !shouldSkipBlockingFetch()) {
       try {
         const response = await api.get<AppNotification[]>("/notifications", {
           params: { includeRead, take },
