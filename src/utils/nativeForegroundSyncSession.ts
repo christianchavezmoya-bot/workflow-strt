@@ -23,6 +23,8 @@ export type NativeForegroundSyncSessionInput = {
   cannotFlush: boolean;
 };
 
+export type NativeForegroundSyncSessionMode = "focused" | "upload";
+
 export type NativeForegroundSyncSessionState = {
   sessionActive: boolean;
   overlayVisible: boolean;
@@ -67,6 +69,15 @@ export function isNativeSyncSessionComplete(
   );
 }
 
+/** Upload-only session (reconnect flush) — logo while queue drains; no bootstrap hold. */
+export function isUploadSyncSessionComplete(
+  input: NativeForegroundSyncSessionInput,
+): boolean {
+  if (input.flushing) return false;
+  if (input.cannotFlush) return true;
+  return input.pendingCount === 0 && input.conflictCount === 0;
+}
+
 /** Keep screen awake while network work is still running. Conflicts need a person, not a spinner. */
 export function shouldKeepAwakeDuringSession(
   input: NativeForegroundSyncSessionInput & { sessionActive: boolean },
@@ -77,11 +88,35 @@ export function shouldKeepAwakeDuringSession(
 }
 
 export function deriveForegroundSyncSessionState(
-  input: NativeForegroundSyncSessionInput & { sessionActive: boolean },
+  input: NativeForegroundSyncSessionInput & {
+    sessionActive: boolean;
+    sessionMode?: NativeForegroundSyncSessionMode | null;
+  },
 ): NativeForegroundSyncSessionState {
-  const complete = isNativeSyncSessionComplete(input);
-  const overlayVisible = input.sessionActive && !complete;
-  const keepAwake = shouldKeepAwakeDuringSession(input);
+  const mode = input.sessionMode ?? "focused";
+  const complete = mode === "upload"
+    ? isUploadSyncSessionComplete(input)
+    : isNativeSyncSessionComplete(input);
+
+  let overlayVisible = input.sessionActive && !complete;
+  let keepAwake = shouldKeepAwakeDuringSession(input);
+
+  if (mode === "upload") {
+    if (input.cannotFlush) {
+      overlayVisible = false;
+      keepAwake = false;
+    } else if (input.flushing) {
+      overlayVisible = input.sessionActive;
+      keepAwake = input.sessionActive;
+    } else if (input.pendingCount === 0 && input.conflictCount > 0) {
+      overlayVisible = input.sessionActive;
+      keepAwake = false;
+    } else {
+      overlayVisible = false;
+      keepAwake = false;
+    }
+  }
+
   const conflictsOnly = overlayVisible
     && !input.cannotFlush
     && !input.flushing

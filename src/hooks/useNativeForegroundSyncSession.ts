@@ -1,7 +1,8 @@
 /**
- * Native focused sync session — overlay + keep-awake for user-initiated sync only.
- * Background reconnect/pull-sync use banners only. Session ends when offline even
- * if the queue still has pending items (WhatsApp-style "waiting to send").
+ * Native sync session — STRATA N-GO overlay + keep-awake.
+ * - **Focused** (Sync Now / first login): holds through upload + bootstrap until fully ready.
+ * - **Upload** (reconnect flush with queued work): logo + keep-awake while queue drains only.
+ * - Background bootstrap (stale/reconnect download): banner only, no session.
  */
 import { useEffect, useRef } from "react";
 import type { BootstrapReason } from "../utils/bootstrapFreshness";
@@ -15,8 +16,10 @@ import {
   deriveForegroundSyncSessionState,
   dispatchForegroundSyncSessionState,
   isNativeSyncSessionComplete,
+  isUploadSyncSessionComplete,
   NATIVE_SYNC_FOCUSED_REQUESTED_EVENT,
   shouldStartFocusedSyncSessionForBootstrap,
+  type NativeForegroundSyncSessionMode,
   type NativeForegroundSyncSessionState,
 } from "../utils/nativeForegroundSyncSession";
 import { useAppToast } from "../contexts/AppToastContext";
@@ -43,6 +46,7 @@ async function readSessionInputs() {
 export function useNativeForegroundSyncSession(): void {
   const toast = useAppToast();
   const sessionActiveRef = useRef(false);
+  const sessionModeRef = useRef<NativeForegroundSyncSessionMode | null>(null);
   const focusedRequestedRef = useRef(false);
   const interruptedRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
@@ -84,6 +88,7 @@ export function useNativeForegroundSyncSession(): void {
 
     const endSession = () => {
       sessionActiveRef.current = false;
+      sessionModeRef.current = null;
       focusedRequestedRef.current = false;
       interruptedRef.current = false;
       stopPolling();
@@ -111,7 +116,12 @@ export function useNativeForegroundSyncSession(): void {
         return;
       }
 
-      if (isNativeSyncSessionComplete(inputs)) {
+      const mode = sessionModeRef.current ?? "focused";
+      const complete = mode === "upload"
+        ? isUploadSyncSessionComplete(inputs)
+        : isNativeSyncSessionComplete(inputs);
+
+      if (complete) {
         endSession();
         return;
       }
@@ -119,6 +129,7 @@ export function useNativeForegroundSyncSession(): void {
       const derived = deriveForegroundSyncSessionState({
         ...inputs,
         sessionActive: true,
+        sessionMode: mode,
       });
 
       const overlayAllowed = !derived.overlayVisible
@@ -143,11 +154,14 @@ export function useNativeForegroundSyncSession(): void {
 
     const onFocusedRequested = () => {
       focusedRequestedRef.current = true;
+      sessionModeRef.current = "focused";
       beginSession();
     };
 
     const onFlushStart = () => {
-      if (!focusedRequestedRef.current && !sessionActiveRef.current) return;
+      if (!focusedRequestedRef.current && sessionModeRef.current !== "focused") {
+        sessionModeRef.current = "upload";
+      }
       beginSession();
     };
 
@@ -155,6 +169,7 @@ export function useNativeForegroundSyncSession(): void {
       const detail = (event as CustomEvent<{ reason?: BootstrapReason }>).detail;
       if (!shouldStartFocusedSyncSessionForBootstrap(detail?.reason)) return;
       focusedRequestedRef.current = true;
+      sessionModeRef.current = "focused";
       beginSession();
     };
 

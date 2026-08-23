@@ -3,6 +3,7 @@ import {
   deriveForegroundSyncSessionState,
   isNativeSyncSessionComplete,
   isNativeSyncSessionNetworkIdle,
+  isUploadSyncSessionComplete,
   shouldKeepAwakeDuringSession,
   shouldStartFocusedSyncSessionForBootstrap,
 } from "./nativeForegroundSyncSession";
@@ -87,8 +88,56 @@ describe("nativeForegroundSyncSession", () => {
     });
   });
 
+  describe("isUploadSyncSessionComplete", () => {
+    it("completes when flush idle and queue empty", () => {
+      expect(isUploadSyncSessionComplete(idle)).toBe(true);
+    });
+
+    it("stays open while flushing", () => {
+      expect(isUploadSyncSessionComplete({ ...idle, flushing: true })).toBe(false);
+    });
+
+    it("releases when offline even with pending queue", () => {
+      expect(isUploadSyncSessionComplete({
+        ...idle,
+        pendingCount: 3,
+        cannotFlush: true,
+      })).toBe(true);
+    });
+  });
+
   describe("deriveForegroundSyncSessionState", () => {
-    it("shows overlay while bootstrap runs online", () => {
+    it("upload mode shows overlay only while flushing", () => {
+      expect(deriveForegroundSyncSessionState({
+        ...idle,
+        sessionActive: true,
+        sessionMode: "upload",
+        flushing: true,
+        pendingCount: 2,
+      })).toEqual({
+        sessionActive: true,
+        overlayVisible: true,
+        keepAwake: true,
+        conflictsOnly: false,
+      });
+
+      expect(deriveForegroundSyncSessionState({
+        ...idle,
+        sessionActive: true,
+        sessionMode: "upload",
+        flushing: false,
+        pendingCount: 0,
+        bootstrapping: true,
+        readyForOffline: false,
+      })).toEqual({
+        sessionActive: true,
+        overlayVisible: false,
+        keepAwake: false,
+        conflictsOnly: false,
+      });
+    });
+
+    it("shows overlay while bootstrap runs online (focused mode)", () => {
       expect(deriveForegroundSyncSessionState({
         ...idle,
         sessionActive: true,

@@ -7,6 +7,7 @@ import { Backdrop, Box, Button, Stack, Typography } from "@mui/material";
 import { useEffect, useRef, useState } from "react";
 import StrataNgoSpinLogo3D from "../branding/StrataNgoSpinLogo3D";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { useSyncEngine } from "../../hooks/useSyncEngine";
 import {
   NATIVE_FOREGROUND_SYNC_SESSION_EVENT,
   type NativeForegroundSyncSessionState,
@@ -16,6 +17,7 @@ const MIN_VISIBLE_MS = 450;
 const SYNC_CENTER_OPEN_EVENT = "sync-center:open-request";
 
 export default function SyncBusyOverlay() {
+  const { pendingCount, syncing } = useSyncEngine();
   const [overlayVisible, setOverlayVisible] = useState(false);
   const [conflictsOnly, setConflictsOnly] = useState(false);
   const hideTimerRef = useRef<number | null>(null);
@@ -66,6 +68,14 @@ export default function SyncBusyOverlay() {
 
   if (!isMobileNativePlatform() || !overlayVisible) return null;
 
+  const statusLine = (() => {
+    if (conflictsOnly) return null;
+    if (syncing && pendingCount > 0) {
+      return `Uploading ${pendingCount} item${pendingCount === 1 ? "" : "s"}…`;
+    }
+    return "Syncing…";
+  })();
+
   return (
     <Backdrop
       open
@@ -93,7 +103,7 @@ export default function SyncBusyOverlay() {
         >
           {conflictsOnly
             ? "Resolve conflicts in Sync Center to finish syncing."
-            : "Syncing…"}
+            : statusLine}
         </Typography>
         {conflictsOnly && (
           <Button

@@ -80,7 +80,9 @@ export default function SyncStatusBadge() {
         <Stack direction="row" alignItems="center" spacing={0.5}>
           <CircularProgress size={11} thickness={5} />
           <Typography variant="caption" sx={{ fontSize: "0.68rem", color: "text.secondary" }}>
-            Syncing…
+            {pendingCount > 0
+              ? `↑${pendingCount} uploading`
+              : "Syncing…"}
           </Typography>
         </Stack>
       );

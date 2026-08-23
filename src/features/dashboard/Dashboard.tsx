@@ -153,6 +153,7 @@ import {
   isPendingAsset,
   myJobsAssetIdsKey,
   myJobsCardActionFromDisplayState,
+  mergeMissingMediaFlagIntoCardAction,
   pendingSignatureStageLabel,
   pendingSignatureStageText,
   pickActiveRunForAttention,
@@ -753,6 +754,24 @@ const Dashboard = () => {
     return () => document.removeEventListener("visibilitychange", onVisibilityChange);
   }, [enqueueDashboardRefresh]);
 
+  // Web: refresh when the tab regains focus (e.g. phone synced while browser stayed open).
+  useEffect(() => {
+    if (dashboardBootPhase !== "full" || isNativePlatform) return;
+    let focusTimer: number | null = null;
+    const onFocus = () => {
+      if (focusTimer !== null) window.clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        focusTimer = null;
+        refreshLiveDashboardDataLight();
+      }, 1500);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (focusTimer !== null) window.clearTimeout(focusTimer);
+    };
+  }, [dashboardBootPhase, isNativePlatform, refreshLiveDashboardDataLight]);
+
   useEffect(() => () => {
     if (dashboardRefreshTimerRef.current !== null) {
       window.clearTimeout(dashboardRefreshTimerRef.current);
@@ -771,11 +790,29 @@ const Dashboard = () => {
   useEffect(() => {
     const reload = () => {
       const raw: MissingMediaFlag[] = JSON.parse(localStorage.getItem("pm_missing_media_flags") ?? "[]");
-      setMissingMediaFlags(raw.map((f) => ({ ...f, missingSteps: f.missingSteps ?? [], totalExpected: f.totalExpected ?? 0, totalCaptured: f.totalCaptured ?? 0 })));
+      const normalized = raw.map((f) => ({
+        ...f,
+        missingSteps: f.missingSteps ?? [],
+        totalExpected: f.totalExpected ?? 0,
+        totalCaptured: f.totalCaptured ?? 0,
+      }));
+      setMissingMediaFlags(normalized);
+      if (!isNativePlatform) return;
+      for (const flag of normalized) {
+        if (!flag.assetId) continue;
+        void assetWorkflowRunService.listLocalByAsset(flag.assetId).then((runs) => {
+          setNativeMyJobsCardContext((prev) => {
+            const existing = prev[flag.assetId];
+            if (!existing) return prev;
+            return { ...prev, [flag.assetId]: { ...existing, runs } };
+          });
+        });
+      }
     };
+    reload();
     window.addEventListener("missing-media-flags-changed", reload);
     return () => window.removeEventListener("missing-media-flags-changed", reload);
-  }, []);
+  }, [isNativePlatform]);
 
   // Drop stale flags written before required/optional media was respected.
   useEffect(() => {
@@ -1885,9 +1922,11 @@ const Dashboard = () => {
   }, [openIssues, pendingSigs, quickActionAsset, quickActionRuns, resolveMissingMediaForAsset]);
 
   const getMyJobsCardAction = useCallback((asset: QuickActionAsset): MyJobsCardAction => {
+    const missingMediaFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
     const displayState = nativeMyJobsDisplayStateByAssetId.get(asset.id);
     if (displayState) {
-      return myJobsCardActionFromDisplayState(displayState, isNativePlatform);
+      const action = myJobsCardActionFromDisplayState(displayState, isNativePlatform);
+      return mergeMissingMediaFlagIntoCardAction(action, missingMediaFlag ?? undefined, isNativePlatform);
     }
 
     const isActive = isInProgressAsset(asset.runStatus) || isInProgressAsset(asset.status);
@@ -1895,7 +1934,6 @@ const Dashboard = () => {
     const pendingSignature = pendingSigs.find(
       (sig) => sig.assetId === asset.id && isPendingInstallerSignature(sig.signatureStatus),
     ) ?? null;
-    const missingMediaFlag = missingMediaFlags.find((flag) => flag.assetId === asset.id) ?? null;
     const evidenceMissing = (asset.evidenceStatus ?? "").toLowerCase() === "missingdata";
     const hasMissingMediaFallback = asset.totalSteps > 0 && asset.completedSteps >= asset.totalSteps && asset.missingItems > 0;
     const missingCount = missingMediaFlag?.missingSteps?.length
