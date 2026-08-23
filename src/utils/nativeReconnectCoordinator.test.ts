@@ -4,7 +4,12 @@ vi.mock("./platform", () => ({
   isMobileNativePlatform: vi.fn(() => true),
 }));
 
+vi.mock("./syncFlushLock", () => ({
+  isSyncFlushing: vi.fn(() => false),
+}));
+
 import { isMobileNativePlatform } from "./platform";
+import { isSyncFlushing } from "./syncFlushLock";
 import {
   isNativeReconnectBusy,
   isWorkflowRunnerOpen,
@@ -76,6 +81,13 @@ describe("nativeReconnectCoordinator", () => {
     markNativeBootstrapStarted();
     expect(shouldDeferPerAssetBackgroundRefresh()).toBe(true);
     await expect(waitForBackgroundWorkSlot(500)).resolves.toBe(true);
+  });
+
+  it("defers background work while sync flush lock is held", () => {
+    vi.mocked(isSyncFlushing).mockReturnValue(true);
+    expect(shouldDeferPerAssetBackgroundRefresh()).toBe(true);
+    vi.mocked(isSyncFlushing).mockReturnValue(false);
+    expect(shouldDeferPerAssetBackgroundRefresh()).toBe(false);
   });
 
   it("waitForBackgroundWorkSlot waits for runner to close", async () => {

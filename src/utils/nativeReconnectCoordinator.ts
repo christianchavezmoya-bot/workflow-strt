@@ -4,6 +4,7 @@
  */
 
 import { isMobileNativePlatform } from "./platform";
+import { isSyncFlushing } from "./syncFlushLock";
 
 let reconnectPending = false;
 let flushInProgress = false;
@@ -41,6 +42,7 @@ function shouldDeferNativeBackgroundWork(): boolean {
   if (!isMobileNativePlatform()) return false;
   return reconnectPending
     || flushInProgress
+    || isSyncFlushing()
     || bootstrapRunning
     || settling
     || workflowRunnerOpenCount > 0;

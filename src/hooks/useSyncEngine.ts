@@ -30,6 +30,7 @@ import {
   pendingGetAll,
   pendingGetDue,
   pendingMarkRetry,
+  pendingRecordTransientFailure,
   pendingMarkConflict,
   pendingClearConflict,
   pendingGetConflicted,
@@ -1215,28 +1216,23 @@ export function useSyncEngine(): SyncState {
             serverReachable: getServerReachable(),
             connectivity: connectivityRef.current,
           });
-          await pendingMarkRetry(action.id, msg, diagnostics);
-          if (action.entityType === "workflow-run") {
-            await markRunSyncFailed(action.entityId, msg);
-          }
-          anyError = true;
+
           if (isNetworkLikeError(e)) {
+            await pendingRecordTransientFailure(action.id, msg, diagnostics);
+            anyError = true;
             if (timedOutAgainstReachableServer) {
               continue;
-            }
-            // Deliberate offline fast-bail — don't burn retry budget; try again on reconnect.
-            const isOfflineSkip = (e as { isOfflineSkip?: boolean; message?: string }).isOfflineSkip
-              || (e instanceof Error && e.message === "offline-skip");
-            if (isOfflineSkip) {
-              await pendingSetStatus(action.id, "pending");
-              setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
-              networkFailureStoppedPass = true;
-              break;
             }
             setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
             networkFailureStoppedPass = true;
             break;
           }
+
+          await pendingMarkRetry(action.id, msg, diagnostics);
+          if (action.entityType === "workflow-run") {
+            await markRunSyncFailed(action.entityId, msg);
+          }
+          anyError = true;
         }
       }
     }

@@ -10,6 +10,8 @@ import { notificationPollingUsesVisibilityChange } from "../utils/notificationIn
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
+/** If polling stopped during a connectivity blip, retry starting it periodically. */
+const POLL_HEAL_MS = 30_000;
 
 const ASSIGNMENT_EVENT_TYPES = new Set([
   "workflow-assigned", "workflow-assigned-to-installer", "workflow-self-assigned",
@@ -163,6 +165,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     };
 
     let timer: number | undefined;
+    let healTimer: number | undefined;
     const startPolling = () => {
       if (timer !== undefined || shouldSkipBlockingFetch()) return;
       timer = window.setInterval(() => { void refresh(); }, pollIntervalMs);
@@ -179,6 +182,15 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       startPolling();
     };
 
+    const handleConnectivityResume = () => {
+      void refresh();
+      if (useVisibilityPolling) {
+        if (document.visibilityState === "visible") resumePollingIfAllowed();
+      } else if (nativeAppActiveRef.current) {
+        resumePollingIfAllowed();
+      }
+    };
+
     // Start interval when online. Web waits for a visible tab; native trusts app foreground.
     if (!shouldSkipBlockingFetch()) {
       const shouldStart =
@@ -189,6 +201,10 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     }
 
     const handleRefreshTrigger = () => { debouncedRefresh(); };
+    const handleOnline = () => {
+      handleConnectivityResume();
+      debouncedRefresh();
+    };
     const handleVisibilityChange = () => {
       if (!useVisibilityPolling) return;
       if (document.visibilityState === "visible") {
@@ -201,12 +217,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       }
     };
     const handleOfflineModeOnline = () => {
-      void refresh();
-      if (useVisibilityPolling) {
-        if (document.visibilityState === "visible") resumePollingIfAllowed();
-      } else if (nativeAppActiveRef.current) {
-        resumePollingIfAllowed();
-      }
+      handleConnectivityResume();
     };
     const handleOfflineModeOffline = () => {
       stopPolling();
@@ -218,17 +229,26 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     };
     const handleAppForeground = () => {
       nativeAppActiveRef.current = true;
-      void refresh();
-      resumePollingIfAllowed();
+      handleConnectivityResume();
     };
 
+    healTimer = window.setInterval(() => {
+      if (shouldSkipBlockingFetch()) return;
+      const shouldRun =
+        useVisibilityPolling
+          ? document.visibilityState === "visible"
+          : nativeAppActiveRef.current;
+      if (shouldRun && timer === undefined) resumePollingIfAllowed();
+    }, POLL_HEAL_MS);
+
     window.addEventListener("focus", handleRefreshTrigger);
-    window.addEventListener("online", handleRefreshTrigger);
+    window.addEventListener("online", handleOnline);
     window.addEventListener("auth-change", handleRefreshTrigger);
     window.addEventListener("auth-user-updated", handleRefreshTrigger);
     window.addEventListener("notifications:refresh", handleRefreshTrigger);
     window.addEventListener("offline-mode-online", handleOfflineModeOnline);
     window.addEventListener("offline", handleOfflineModeOffline);
+    window.addEventListener("api-server-reachable", handleConnectivityResume);
     if (useVisibilityPolling) {
       document.addEventListener("visibilitychange", handleVisibilityChange);
     }
@@ -239,6 +259,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
 
     return () => {
       stopPolling();
+      if (healTimer !== undefined) window.clearInterval(healTimer);
       if (isMobileNativePlatform()) {
         window.removeEventListener("app-backgrounded", handleAppBackground);
         window.removeEventListener("app-foregrounded", handleAppForeground);
@@ -248,12 +269,13 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       }
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
-      window.removeEventListener("online", handleRefreshTrigger);
+      window.removeEventListener("online", handleOnline);
       window.removeEventListener("auth-change", handleRefreshTrigger);
       window.removeEventListener("auth-user-updated", handleRefreshTrigger);
       window.removeEventListener("notifications:refresh", handleRefreshTrigger);
       window.removeEventListener("offline-mode-online", handleOfflineModeOnline);
       window.removeEventListener("offline", handleOfflineModeOffline);
+      window.removeEventListener("api-server-reachable", handleConnectivityResume);
     };
   }, [refresh, pollIntervalMs]);
 

@@ -11,6 +11,8 @@
 
 **Do NOT merge PR #304 until this report is PASS or blockers are filed with evidence.**
 
+**Known fix (2026-08-23):** bootstrap phase 6 self-deadlock via `waitForBackgroundWorkSlot()` — fixed on branch after Mac report. Re-test download completes past step 5/10.
+
 ---
 
 ## PROMPT START
