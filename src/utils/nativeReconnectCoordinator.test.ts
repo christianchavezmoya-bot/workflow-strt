@@ -18,6 +18,7 @@ import {
   resetNativeReconnectCoordinatorForTests,
   shouldDeferNativeDashboardFullRefresh,
   shouldDeferPerAssetBackgroundRefresh,
+  waitForBackgroundWorkSlot,
 } from "./nativeReconnectCoordinator";
 
 describe("nativeReconnectCoordinator", () => {
@@ -69,5 +70,24 @@ describe("nativeReconnectCoordinator", () => {
     expect(isNativeReconnectBusy()).toBe(false);
     expect(isWorkflowRunnerOpen()).toBe(false);
     expect(shouldDeferPerAssetBackgroundRefresh()).toBe(false);
+  });
+
+  it("waitForBackgroundWorkSlot does not deadlock during bootstrap", async () => {
+    markNativeBootstrapStarted();
+    expect(shouldDeferPerAssetBackgroundRefresh()).toBe(true);
+    await expect(waitForBackgroundWorkSlot(500)).resolves.toBe(true);
+  });
+
+  it("waitForBackgroundWorkSlot waits for runner to close", async () => {
+    vi.useFakeTimers();
+    markWorkflowRunnerOpened();
+
+    const pending = waitForBackgroundWorkSlot(5_000);
+    await vi.advanceTimersByTimeAsync(600);
+    markWorkflowRunnerClosed();
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    await expect(pending).resolves.toBe(true);
+    vi.useRealTimers();
   });
 });
