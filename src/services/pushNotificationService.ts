@@ -10,10 +10,14 @@ import { isMobileNativePlatform } from "../utils/platform";
 
 const PUSH_TOKEN_CACHE_KEY = "native_push_token_v1";
 const ANDROID_FOREGROUND_CHANNEL_ID = "workflow-alerts";
+const TOKEN_REGISTER_MAX_ATTEMPTS = 3;
+const TOKEN_REGISTER_RETRY_MS = 2_000;
 
 let pushListenersAttached = false;
 let pushReplayListenersAttached = false;
 let androidChannelReady = false;
+let pushAuthListenersAttached = false;
+let registrationInFlight: Promise<void> | null = null;
 
 type CachedPushToken = {
   token: string;
@@ -22,11 +26,18 @@ type CachedPushToken = {
 };
 
 async function registerTokenWithServer(token: string, platform: string): Promise<void> {
-  try {
-    await api.post("/push-tokens", { token, platform });
-  } catch (err) {
-    console.warn("[push] failed to register token with server", err);
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < TOKEN_REGISTER_MAX_ATTEMPTS; attempt++) {
+    try {
+      await api.post("/push-tokens", { token, platform }, { timeout: 30_000 });
+      return;
+    } catch (err) {
+      lastErr = err;
+      if (attempt === TOKEN_REGISTER_MAX_ATTEMPTS - 1) break;
+      await new Promise((resolve) => window.setTimeout(resolve, TOKEN_REGISTER_RETRY_MS * (attempt + 1)));
+    }
   }
+  console.warn("[push] failed to register token with server after retries", lastErr);
 }
 
 function readCachedPushToken(): CachedPushToken | null {
@@ -119,6 +130,8 @@ function attachPushReplayListeners(): void {
   window.addEventListener("auth-change", replay);
   window.addEventListener("auth-user-updated", replay);
   window.addEventListener("app-foregrounded", replay);
+  window.addEventListener("api-server-reachable", replay);
+  window.addEventListener("offline-mode-online", replay);
 }
 
 function attachPushListeners(): void {
@@ -149,16 +162,42 @@ function attachPushListeners(): void {
 export async function registerPushNotificationsIfNeeded(): Promise<void> {
   if (!isMobileNativePlatform()) return;
 
-  attachPushListeners();
-  attachPushReplayListeners();
-  await ensureAndroidForegroundChannel();
-
-  let perm = await PushNotifications.checkPermissions();
-  if (perm.receive === "prompt") {
-    perm = await PushNotifications.requestPermissions();
+  if (registrationInFlight) {
+    await registrationInFlight;
+    return;
   }
-  if (perm.receive !== "granted") return;
 
-  await PushNotifications.register();
-  await replayCachedTokenIfAvailable();
+  registrationInFlight = (async () => {
+    attachPushListeners();
+    attachPushReplayListeners();
+    await ensureAndroidForegroundChannel();
+
+    let perm = await PushNotifications.checkPermissions();
+    if (perm.receive === "prompt") {
+      perm = await PushNotifications.requestPermissions();
+    }
+    if (perm.receive !== "granted") return;
+
+    await PushNotifications.register();
+    await replayCachedTokenIfAvailable();
+  })();
+
+  try {
+    await registrationInFlight;
+  } finally {
+    registrationInFlight = null;
+  }
+}
+
+/** Call after login so push registration runs once auth token is available. */
+export function attachPushRegistrationOnAuth(): void {
+  if (!isMobileNativePlatform() || pushAuthListenersAttached) return;
+  pushAuthListenersAttached = true;
+
+  const onAuth = () => {
+    void registerPushNotificationsIfNeeded();
+  };
+
+  window.addEventListener("auth-change", onAuth);
+  window.addEventListener("auth-user-updated", onAuth);
 }

@@ -1,4 +1,3 @@
-import { isDashboardRoute } from "./postLoginRoute";
 import { isMobileNativePlatform } from "./platform";
 
 /**
@@ -15,16 +14,11 @@ export function notificationPollingUsesVisibilityChange(): boolean {
 }
 
 /**
- * Native bell polling may resume when Capacitor appState briefly flips to
- * background during sync overlay / keep-awake while the user is still on
- * Dashboard and the server is reachable again.
+ * Native bell polling runs whenever the device is online (radio up, not manual
+ * offline). Do NOT gate on Capacitor appState — sync overlay / keep-awake /
+ * foreground service can spuriously fire app-backgrounded while the user is
+ * still on screen, which previously killed polling until a full relaunch.
  */
-export function nativeNotificationPollingAllowed(opts: {
-  nativeAppActive: boolean;
-  serverReachable: boolean | null;
-  pathname: string;
-}): boolean {
-  if (opts.nativeAppActive) return true;
-  if (opts.serverReachable === true && isDashboardRoute(opts.pathname)) return true;
-  return false;
+export function nativeBellShouldPoll(isOnline: boolean): boolean {
+  return isOnline;
 }
