@@ -17,6 +17,7 @@ import { Network } from "@capacitor/network";
 import api from "../services/api";
 import { scheduleBootstrapAfterUploadDrain } from "../utils/bootstrapAfterDrain";
 import { shouldScheduleBootstrap } from "../utils/bootstrapFreshness";
+import { dispatchNativeSyncFocusedRequested } from "../utils/nativeForegroundSyncSession";
 import { isMobileNativePlatform } from "../utils/platform";
 import {
   entityGetAllIssues,
@@ -1549,6 +1550,10 @@ export function useSyncEngine(): SyncState {
   const triggerSync = useCallback(async (options?: TriggerSyncOptions): Promise<TriggerSyncResult> => {
     const result: TriggerSyncResult = { uploaded: false, downloadScheduled: false, upToDate: false };
     if (!canAttemptSyncFlush()) return result;
+
+    if (isMobileNativePlatform()) {
+      dispatchNativeSyncFocusedRequested();
+    }
 
     const pendingBefore = pending;
     await reconnectAndFlushNow();

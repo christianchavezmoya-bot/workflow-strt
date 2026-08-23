@@ -26,6 +26,7 @@ import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { pendingGetByEntityId } from "../../services/localDB";
 import SyncCenterPage from "../../features/sync/SyncCenterPage";
 import { SYNC_CENTER_OPEN_EVENT } from "../layout/SyncBusyOverlay";
+import { bootstrapOverallPercent } from "../../utils/bootstrapProgressModel";
 
 function timeAgo(date: Date): string {
   const secs = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -45,8 +46,8 @@ export default function SyncStatusBadge() {
   }, []);
 
   const iconSx = { fontSize: 13 };
-  const downloadPct = bootstrapProgress && bootstrapProgress.total > 0
-    ? Math.round((bootstrapProgress.done / bootstrapProgress.total) * 100)
+  const downloadPct = bootstrapProgress
+    ? bootstrapOverallPercent(bootstrapProgress.phase, bootstrapProgress.done, bootstrapProgress.total)
     : null;
 
   const badge = (() => {

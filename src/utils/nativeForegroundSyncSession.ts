@@ -1,13 +1,17 @@
 import type { BootstrapReason } from "./bootstrapFreshness";
 
-/** Bootstrap reasons that should hold the foreground sync overlay + keep-awake. */
-export const FOREGROUND_SESSION_REASONS: ReadonlySet<BootstrapReason> = new Set([
+/** User-initiated sync — full overlay + keep-awake until network work finishes. */
+export const FOCUSED_SYNC_SESSION_REASONS: ReadonlySet<BootstrapReason> = new Set([
   "sync-now",
   "first-login",
-  "reconnect",
-  "pull-sync",
   "readiness-panel",
 ]);
+
+/** @deprecated Use FOCUSED_SYNC_SESSION_REASONS — reconnect/pull-sync are background-only. */
+export const FOREGROUND_SESSION_REASONS = FOCUSED_SYNC_SESSION_REASONS;
+
+/** Dispatched when the user (or first-login) requests a focused foreground sync. */
+export const NATIVE_SYNC_FOCUSED_REQUESTED_EVENT = "native-sync-focused-requested";
 
 export type NativeForegroundSyncSessionInput = {
   pendingCount: number;
@@ -15,6 +19,8 @@ export type NativeForegroundSyncSessionInput = {
   readyForOffline: boolean;
   flushing: boolean;
   bootstrapping: boolean;
+  /** True when the device cannot reach the server (offline / unreachable). */
+  cannotFlush: boolean;
 };
 
 export type NativeForegroundSyncSessionState = {
@@ -26,23 +32,38 @@ export type NativeForegroundSyncSessionState = {
 
 export const NATIVE_FOREGROUND_SYNC_SESSION_EVENT = "native-foreground-sync-session:state";
 
-export function shouldStartForegroundSessionForBootstrap(
+export function shouldStartFocusedSyncSessionForBootstrap(
   reason: BootstrapReason | undefined,
 ): boolean {
   if (!reason) return false;
-  return FOREGROUND_SESSION_REASONS.has(reason);
+  return FOCUSED_SYNC_SESSION_REASONS.has(reason);
 }
 
-/** Session is complete only when uploads, downloads, and conflicts are all clear. */
+/** @deprecated */
+export const shouldStartForegroundSessionForBootstrap = shouldStartFocusedSyncSessionForBootstrap;
+
+export function isNativeSyncSessionNetworkIdle(input: NativeForegroundSyncSessionInput): boolean {
+  return !input.flushing && !input.bootstrapping;
+}
+
+/**
+ * Session is complete when network work is idle AND either:
+ * - queue/bootstrap/conflicts are clear (online success path), or
+ * - the device cannot sync right now (release the user; queue waits for reconnect).
+ */
 export function isNativeSyncSessionComplete(
   input: NativeForegroundSyncSessionInput,
 ): boolean {
+  if (!isNativeSyncSessionNetworkIdle(input)) return false;
+
+  if (input.cannotFlush) {
+    return true;
+  }
+
   return (
     input.pendingCount === 0
     && input.conflictCount === 0
     && input.readyForOffline
-    && !input.flushing
-    && !input.bootstrapping
   );
 }
 
@@ -51,6 +72,7 @@ export function shouldKeepAwakeDuringSession(
   input: NativeForegroundSyncSessionInput & { sessionActive: boolean },
 ): boolean {
   if (!input.sessionActive) return false;
+  if (input.cannotFlush) return false;
   return input.flushing || input.bootstrapping || input.pendingCount > 0;
 }
 
@@ -61,6 +83,7 @@ export function deriveForegroundSyncSessionState(
   const overlayVisible = input.sessionActive && !complete;
   const keepAwake = shouldKeepAwakeDuringSession(input);
   const conflictsOnly = overlayVisible
+    && !input.cannotFlush
     && !input.flushing
     && !input.bootstrapping
     && input.pendingCount === 0
@@ -79,4 +102,9 @@ export function dispatchForegroundSyncSessionState(
 ): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(NATIVE_FOREGROUND_SYNC_SESSION_EVENT, { detail: state }));
+}
+
+export function dispatchNativeSyncFocusedRequested(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event(NATIVE_SYNC_FOCUSED_REQUESTED_EVENT));
 }

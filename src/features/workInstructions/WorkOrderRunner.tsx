@@ -1510,6 +1510,7 @@ function WorkOrderRunner({
             displayEmpty
             value={val || ""}
             onChange={(e) => onChange(e.target.value)}
+            MenuProps={nativeSelectMenuProps()}
           >
             <MenuItem value="" disabled>Select…</MenuItem>
             {opts.map((opt) => (

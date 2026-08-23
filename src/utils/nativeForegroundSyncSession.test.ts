@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   deriveForegroundSyncSessionState,
   isNativeSyncSessionComplete,
+  isNativeSyncSessionNetworkIdle,
   shouldKeepAwakeDuringSession,
-  shouldStartForegroundSessionForBootstrap,
+  shouldStartFocusedSyncSessionForBootstrap,
 } from "./nativeForegroundSyncSession";
 
 const idle = {
@@ -12,50 +13,57 @@ const idle = {
   readyForOffline: true,
   flushing: false,
   bootstrapping: false,
+  cannotFlush: false,
 };
 
 describe("nativeForegroundSyncSession", () => {
   describe("isNativeSyncSessionComplete", () => {
-    it("is true when all checks pass", () => {
+    it("is true when all checks pass online", () => {
       expect(isNativeSyncSessionComplete(idle)).toBe(true);
     });
 
-    it("fails when pending uploads remain", () => {
+    it("fails when pending uploads remain while online", () => {
       expect(isNativeSyncSessionComplete({ ...idle, pendingCount: 2 })).toBe(false);
     });
 
-    it("fails when conflicts remain", () => {
+    it("completes when offline with pending queue (release user)", () => {
+      expect(isNativeSyncSessionComplete({
+        ...idle,
+        pendingCount: 1,
+        cannotFlush: true,
+      })).toBe(true);
+    });
+
+    it("does not complete while flushing even if offline", () => {
+      expect(isNativeSyncSessionComplete({
+        ...idle,
+        cannotFlush: true,
+        flushing: true,
+      })).toBe(false);
+    });
+
+    it("fails when conflicts remain while online", () => {
       expect(isNativeSyncSessionComplete({ ...idle, conflictCount: 1 })).toBe(false);
     });
 
-    it("fails when bootstrap is not ready for offline", () => {
+    it("fails when bootstrap is not ready for offline while online", () => {
       expect(isNativeSyncSessionComplete({ ...idle, readyForOffline: false })).toBe(false);
-    });
-
-    it("fails while flushing", () => {
-      expect(isNativeSyncSessionComplete({ ...idle, flushing: true })).toBe(false);
-    });
-
-    it("fails while bootstrapping", () => {
-      expect(isNativeSyncSessionComplete({ ...idle, bootstrapping: true })).toBe(false);
     });
   });
 
-  describe("shouldStartForegroundSessionForBootstrap", () => {
-    it("starts for user-facing reasons", () => {
-      expect(shouldStartForegroundSessionForBootstrap("sync-now")).toBe(true);
-      expect(shouldStartForegroundSessionForBootstrap("first-login")).toBe(true);
-      expect(shouldStartForegroundSessionForBootstrap("reconnect")).toBe(true);
-      expect(shouldStartForegroundSessionForBootstrap("readiness-panel")).toBe(true);
+  describe("shouldStartFocusedSyncSessionForBootstrap", () => {
+    it("starts for user-initiated reasons only", () => {
+      expect(shouldStartFocusedSyncSessionForBootstrap("sync-now")).toBe(true);
+      expect(shouldStartFocusedSyncSessionForBootstrap("first-login")).toBe(true);
+      expect(shouldStartFocusedSyncSessionForBootstrap("readiness-panel")).toBe(true);
     });
 
-    it("does not start for routine post-flush scheduling", () => {
-      expect(shouldStartForegroundSessionForBootstrap("flush-complete")).toBe(false);
-    });
-
-    it("does not start for silent background prefetch", () => {
-      expect(shouldStartForegroundSessionForBootstrap("stale-foreground")).toBe(false);
-      expect(shouldStartForegroundSessionForBootstrap("sse-fallback")).toBe(false);
+    it("does not start for background reconnect or pull-sync", () => {
+      expect(shouldStartFocusedSyncSessionForBootstrap("reconnect")).toBe(false);
+      expect(shouldStartFocusedSyncSessionForBootstrap("pull-sync")).toBe(false);
+      expect(shouldStartFocusedSyncSessionForBootstrap("flush-complete")).toBe(false);
+      expect(shouldStartFocusedSyncSessionForBootstrap("stale-foreground")).toBe(false);
+      expect(shouldStartFocusedSyncSessionForBootstrap("sse-fallback")).toBe(false);
     });
   });
 
@@ -64,23 +72,23 @@ describe("nativeForegroundSyncSession", () => {
       expect(shouldKeepAwakeDuringSession({ ...idle, sessionActive: false })).toBe(false);
     });
 
-    it("stays on while flushing or bootstrapping", () => {
-      expect(shouldKeepAwakeDuringSession({ ...idle, sessionActive: true, flushing: true })).toBe(true);
-      expect(shouldKeepAwakeDuringSession({ ...idle, sessionActive: true, bootstrapping: true })).toBe(true);
-    });
-
-    it("turns off when only conflicts remain (Phase D)", () => {
+    it("is off when device cannot flush", () => {
       expect(shouldKeepAwakeDuringSession({
         ...idle,
         sessionActive: true,
-        conflictCount: 2,
-        readyForOffline: false,
+        pendingCount: 2,
+        cannotFlush: true,
       })).toBe(false);
+    });
+
+    it("stays on while flushing or bootstrapping online", () => {
+      expect(shouldKeepAwakeDuringSession({ ...idle, sessionActive: true, flushing: true })).toBe(true);
+      expect(shouldKeepAwakeDuringSession({ ...idle, sessionActive: true, bootstrapping: true })).toBe(true);
     });
   });
 
   describe("deriveForegroundSyncSessionState", () => {
-    it("shows overlay and keep-awake while work is running", () => {
+    it("shows overlay while bootstrap runs online", () => {
       expect(deriveForegroundSyncSessionState({
         ...idle,
         sessionActive: true,
@@ -94,12 +102,25 @@ describe("nativeForegroundSyncSession", () => {
       });
     });
 
+    it("hides overlay when offline releases the session", () => {
+      expect(deriveForegroundSyncSessionState({
+        ...idle,
+        sessionActive: true,
+        pendingCount: 1,
+        cannotFlush: true,
+      })).toEqual({
+        sessionActive: true,
+        overlayVisible: false,
+        keepAwake: false,
+        conflictsOnly: false,
+      });
+    });
+
     it("keeps overlay but drops keep-awake for conflicts-only hold", () => {
       expect(deriveForegroundSyncSessionState({
         ...idle,
         sessionActive: true,
         conflictCount: 1,
-        readyForOffline: true,
       })).toEqual({
         sessionActive: true,
         overlayVisible: true,
@@ -107,17 +128,12 @@ describe("nativeForegroundSyncSession", () => {
         conflictsOnly: true,
       });
     });
+  });
 
-    it("hides overlay when session completes", () => {
-      expect(deriveForegroundSyncSessionState({
-        ...idle,
-        sessionActive: true,
-      })).toEqual({
-        sessionActive: true,
-        overlayVisible: false,
-        keepAwake: false,
-        conflictsOnly: false,
-      });
+  describe("isNativeSyncSessionNetworkIdle", () => {
+    it("is false while flushing or bootstrapping", () => {
+      expect(isNativeSyncSessionNetworkIdle({ ...idle, flushing: true })).toBe(false);
+      expect(isNativeSyncSessionNetworkIdle({ ...idle, bootstrapping: true })).toBe(false);
     });
   });
 });

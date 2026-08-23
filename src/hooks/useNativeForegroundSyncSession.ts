@@ -1,12 +1,13 @@
 /**
- * Native foreground sync session — holds overlay + keep-awake until uploads,
- * downloads, and conflicts are all resolved. Silent stale-foreground prefetch
- * does not start a session.
+ * Native focused sync session — overlay + keep-awake for user-initiated sync only.
+ * Background reconnect/pull-sync use banners only. Session ends when offline even
+ * if the queue still has pending items (WhatsApp-style "waiting to send").
  */
 import { useEffect, useRef } from "react";
 import type { BootstrapReason } from "../utils/bootstrapFreshness";
 import offlineBootstrapService from "../services/offlineBootstrapService";
 import { pendingCount, pendingGetConflicted } from "../services/localDB";
+import { shouldDeferBackgroundSync } from "../services/connectivityMonitor";
 import { isSyncFlushing } from "../utils/syncFlushLock";
 import { isMobileNativePlatform } from "../utils/platform";
 import { isNativeSyncUiActive } from "../utils/nativeSyncUiState";
@@ -14,7 +15,8 @@ import {
   deriveForegroundSyncSessionState,
   dispatchForegroundSyncSessionState,
   isNativeSyncSessionComplete,
-  shouldStartForegroundSessionForBootstrap,
+  NATIVE_SYNC_FOCUSED_REQUESTED_EVENT,
+  shouldStartFocusedSyncSessionForBootstrap,
   type NativeForegroundSyncSessionState,
 } from "../utils/nativeForegroundSyncSession";
 import { useAppToast } from "../contexts/AppToastContext";
@@ -34,12 +36,14 @@ async function readSessionInputs() {
     readyForOffline: bootstrapStatus.readyForOffline,
     flushing: isSyncFlushing(),
     bootstrapping: bootstrapStatus.isRunning,
+    cannotFlush: shouldDeferBackgroundSync(),
   };
 }
 
 export function useNativeForegroundSyncSession(): void {
   const toast = useAppToast();
   const sessionActiveRef = useRef(false);
+  const focusedRequestedRef = useRef(false);
   const interruptedRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
   const lastStateRef = useRef<NativeForegroundSyncSessionState | null>(null);
@@ -80,6 +84,7 @@ export function useNativeForegroundSyncSession(): void {
 
     const endSession = () => {
       sessionActiveRef.current = false;
+      focusedRequestedRef.current = false;
       interruptedRef.current = false;
       stopPolling();
       publish({
@@ -136,13 +141,20 @@ export function useNativeForegroundSyncSession(): void {
       void evaluate();
     };
 
+    const onFocusedRequested = () => {
+      focusedRequestedRef.current = true;
+      beginSession();
+    };
+
     const onFlushStart = () => {
+      if (!focusedRequestedRef.current && !sessionActiveRef.current) return;
       beginSession();
     };
 
     const onBootstrapStarted = (event: Event) => {
       const detail = (event as CustomEvent<{ reason?: BootstrapReason }>).detail;
-      if (!shouldStartForegroundSessionForBootstrap(detail?.reason)) return;
+      if (!shouldStartFocusedSyncSessionForBootstrap(detail?.reason)) return;
+      focusedRequestedRef.current = true;
       beginSession();
     };
 
@@ -164,8 +176,8 @@ export function useNativeForegroundSyncSession(): void {
       if (interruptedRef.current) {
         void readSessionInputs().then((inputs) => {
           if (!isNativeSyncSessionComplete(inputs)) {
-            toast.warning(
-              "Sync paused when you left the app. Stay on this screen until it finishes.",
+            toast.info(
+              "Sync paused when you left the app. Pending items will upload when you're back online.",
               7000,
             );
           } else {
@@ -176,6 +188,7 @@ export function useNativeForegroundSyncSession(): void {
       void evaluate();
     };
 
+    window.addEventListener(NATIVE_SYNC_FOCUSED_REQUESTED_EVENT, onFocusedRequested);
     window.addEventListener("sync-engine:flush-start", onFlushStart);
     window.addEventListener("bootstrap:started", onBootstrapStarted);
     window.addEventListener("sync-engine:flush-complete", onSessionProgress);
@@ -185,13 +198,10 @@ export function useNativeForegroundSyncSession(): void {
     window.addEventListener("app-backgrounded", onBackground);
     window.addEventListener("app-foregrounded", onForeground);
 
-    if (isSyncFlushing()) {
-      beginSession();
-    }
-
     return () => {
       cancelled = true;
       stopPolling();
+      window.removeEventListener(NATIVE_SYNC_FOCUSED_REQUESTED_EVENT, onFocusedRequested);
       window.removeEventListener("sync-engine:flush-start", onFlushStart);
       window.removeEventListener("bootstrap:started", onBootstrapStarted);
       window.removeEventListener("sync-engine:flush-complete", onSessionProgress);

@@ -1,6 +1,6 @@
 import CloudOffOutlinedIcon from "@mui/icons-material/CloudOffOutlined";
 import { Box, Stack, Typography } from "@mui/material";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import { pendingCount as getPendingCount } from "../../services/localDB";
 import { isMobileNativePlatform } from "../../utils/platform";
@@ -9,22 +9,38 @@ export default function OfflineModeBanner() {
   const { isOfflineMode } = useOfflineMode();
   const [pendingCount, setPendingCount] = useState(0);
 
-  useEffect(() => {
-    const refreshPendingCount = () => {
-      void getPendingCount().then(setPendingCount).catch(() => {});
-    };
+  const refreshPendingCount = useCallback(() => {
+    void getPendingCount().then(setPendingCount).catch(() => {});
+  }, []);
 
+  useEffect(() => {
+    refreshPendingCount();
+  }, [isOfflineMode, refreshPendingCount]);
+
+  useEffect(() => {
     refreshPendingCount();
     window.addEventListener("sync-pending-changed", refreshPendingCount);
-    return () => window.removeEventListener("sync-pending-changed", refreshPendingCount);
-  }, []);
+    window.addEventListener("offline-mode-online", refreshPendingCount);
+    window.addEventListener("app-foregrounded", refreshPendingCount);
+    window.addEventListener("online", refreshPendingCount);
+    window.addEventListener("offline", refreshPendingCount);
+    return () => {
+      window.removeEventListener("sync-pending-changed", refreshPendingCount);
+      window.removeEventListener("offline-mode-online", refreshPendingCount);
+      window.removeEventListener("app-foregrounded", refreshPendingCount);
+      window.removeEventListener("online", refreshPendingCount);
+      window.removeEventListener("offline", refreshPendingCount);
+    };
+  }, [refreshPendingCount]);
 
   if (!isMobileNativePlatform() || !isOfflineMode) return null;
 
   const pendingLabel =
-    pendingCount === 1
-      ? "1 change waiting to sync"
-      : `${pendingCount} changes waiting to sync`;
+    pendingCount === 0
+      ? "No changes waiting to sync"
+      : pendingCount === 1
+        ? "1 change waiting to sync"
+        : `${pendingCount} changes waiting to sync`;
 
   return (
     <Box

@@ -17,6 +17,7 @@ import { authService } from "../../services/authService";
 import { secureGet, secureSet } from "../../services/secureStorage";
 import { recordOnlineLogin } from "../../services/biometricAuth";
 import { scheduleBootstrapAfterUploadDrain } from "../../utils/bootstrapAfterDrain";
+import { dispatchNativeSyncFocusedRequested } from "../../utils/nativeForegroundSyncSession";
 import { getNetworkStatus, getNetworkMessage, NetworkStatus } from "../../services/networkService";
 import strataLogo from "../../assets/strata_transparent.png";
 import { APP_NAME } from "../../constants/branding";
@@ -143,6 +144,9 @@ const Login = () => {
     window.dispatchEvent(new Event("auth-user-updated"));
 
     // Prefetch field data after login — gated on /health ping (not radio alone).
+    if (isMobileNativePlatform()) {
+      dispatchNativeSyncFocusedRequested();
+    }
     scheduleBootstrapAfterUploadDrain("all", 3_000, false, "first-login");
 
     const landingRoute = resolvePostLoginRoute(
