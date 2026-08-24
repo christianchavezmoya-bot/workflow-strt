@@ -12,3 +12,13 @@ import { isMobileNativePlatform } from "./platform";
 export function notificationPollingUsesVisibilityChange(): boolean {
   return !isMobileNativePlatform();
 }
+
+/**
+ * Native bell polling runs whenever the device is online (radio up, not manual
+ * offline). Do NOT gate on Capacitor appState — sync overlay / keep-awake /
+ * foreground service can spuriously fire app-backgrounded while the user is
+ * still on screen, which previously killed polling until a full relaunch.
+ */
+export function nativeBellShouldPoll(isOnline: boolean): boolean {
+  return isOnline;
+}

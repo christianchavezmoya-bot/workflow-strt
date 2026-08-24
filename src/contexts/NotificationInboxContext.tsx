@@ -6,10 +6,15 @@ import { useAuth } from "../hooks/useAuth";
 import { isDashboardRoute } from "../utils/postLoginRoute";
 import type { AppNotification } from "../types/notification";
 import { isMobileNativePlatform } from "../utils/platform";
-import { notificationPollingUsesVisibilityChange } from "../utils/notificationInboxPolling";
+import {
+  nativeBellShouldPoll,
+  notificationPollingUsesVisibilityChange,
+} from "../utils/notificationInboxPolling";
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
+/** If polling stopped during a connectivity blip, retry starting it periodically. */
+const POLL_HEAL_MS = 15_000;
 
 const ASSIGNMENT_EVENT_TYPES = new Set([
   "workflow-assigned", "workflow-assigned-to-installer", "workflow-self-assigned",
@@ -48,6 +53,14 @@ type NotificationInboxContextValue = {
 
 const NotificationInboxContext = createContext<NotificationInboxContextValue | undefined>(undefined);
 
+function bellPollingAllowed(useVisibilityPolling: boolean): boolean {
+  if (shouldSkipBlockingFetch()) return false;
+  if (useVisibilityPolling) {
+    return document.visibilityState === "visible";
+  }
+  return nativeBellShouldPoll(true);
+}
+
 export function NotificationInboxProvider({ children }: { children: ReactNode }) {
   const { user, isAuthenticated } = useAuth();
   const location = useLocation();
@@ -59,10 +72,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   const [bannerNotification, setBannerNotification] = useState<AppNotification | null>(null);
   const seenUnreadIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
-  /** Native-only: tracks Capacitor app foreground — survives poll-interval effect re-runs. */
-  const nativeAppActiveRef = useRef(true);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (options?: { forceNetwork?: boolean }) => {
     const path = window.location.pathname;
     const isPublicRoute =
       path === "/login" ||
@@ -85,10 +96,11 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       return;
     }
 
-    const offlineRead = shouldSkipBlockingFetch();
+    const forceNetwork = options?.forceNetwork === true;
+    const offlineRead = !forceNetwork && shouldSkipBlockingFetch();
     if (!offlineRead) setLoading(true);
     try {
-      const next = await notificationService.list(true, 50);
+      const next = await notificationService.list(true, 50, { forceNetwork });
       setNotifications(next);
       setFromCache(offlineRead);
 
@@ -99,13 +111,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
         seenUnreadIdsRef.current = unreadIds;
         setBannerNotification(unreadItems[0] ?? null);
 
-        // Cold-load recovery: if the dashboard's first workspace fetch lost the race
-        // against a slow backend path, replay the existing unread assignment/run-state
-        // signals once so listeners can recover without waiting for a brand-new
-        // notification or a manual asset reassignment.
         const hasUnreadAssignmentEvent = unreadItems.some((n) => ASSIGNMENT_EVENT_TYPES.has(n.eventType));
         const hasUnreadRunStateEvent = unreadItems.some((n) => RUN_STATE_EVENT_TYPES.has(n.eventType));
-        // Recovery signals re-fetch dashboard-workspace — only replay on Dashboard route.
         const dispatchRecovery = isDashboardRoute(window.location.pathname);
         if (hasUnreadAssignmentEvent && dispatchRecovery) {
           rememberDashboardRecoverySignal(DASHBOARD_ASSIGNMENT_RECOVERY_KEY);
@@ -143,16 +150,6 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   useEffect(() => {
     void refresh();
 
-    // PERF: the notification poll (list includeRead=true take=50 -> ~27kB, doubled by
-    // a CORS preflight on cross-origin dev) was firing far more than once per 15s,
-    // because sync activity dispatches "notifications:refresh" repeatedly (useSyncEngine,
-    // signatureService) and every dispatch triggered an immediate full fetch. On a busy
-    // screen that produced a storm of large requests competing for the connection pool.
-    //
-    // Event-driven triggers are debounced so a burst collapses into a single fetch.
-    // Polling pause/resume uses ONE lifecycle source per platform (mirrors
-    // connectivityMonitor): visibilitychange on web, Capacitor appState on native.
-    // Mixing both on native freezes the bell when camera/picker hides the document.
     let debounceTimer: number | undefined;
     const debouncedRefresh = () => {
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
@@ -163,10 +160,15 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     };
 
     let timer: number | undefined;
+    let healTimer: number | undefined;
+
     const startPolling = () => {
-      if (timer !== undefined || shouldSkipBlockingFetch()) return;
+      if (timer !== undefined) return;
+      const useVisibilityPolling = notificationPollingUsesVisibilityChange();
+      if (!bellPollingAllowed(useVisibilityPolling)) return;
       timer = window.setInterval(() => { void refresh(); }, pollIntervalMs);
     };
+
     const stopPolling = () => {
       if (timer !== undefined) { window.clearInterval(timer); timer = undefined; }
     };
@@ -174,73 +176,82 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     const useVisibilityPolling = notificationPollingUsesVisibilityChange();
 
     const resumePollingIfAllowed = () => {
-      if (shouldSkipBlockingFetch()) return;
       stopPolling();
       startPolling();
     };
 
-    // Start interval when online. Web waits for a visible tab; native trusts app foreground.
-    if (!shouldSkipBlockingFetch()) {
-      const shouldStart =
-        useVisibilityPolling
-          ? document.visibilityState === "visible"
-          : nativeAppActiveRef.current;
-      if (shouldStart) startPolling();
-    }
-
-    const handleRefreshTrigger = () => { debouncedRefresh(); };
-    const handleVisibilityChange = () => {
-      if (!useVisibilityPolling) return;
-      if (document.visibilityState === "visible") {
-        if (!shouldSkipBlockingFetch()) {
-          void refresh();
-          resumePollingIfAllowed();
-        }
-      } else {
-        stopPolling();
-      }
-    };
-    const handleOfflineModeOnline = () => {
-      void refresh();
-      if (useVisibilityPolling) {
-        if (document.visibilityState === "visible") resumePollingIfAllowed();
-      } else if (nativeAppActiveRef.current) {
-        resumePollingIfAllowed();
-      }
-    };
-    const handleOfflineModeOffline = () => {
-      stopPolling();
-      void refresh();
-    };
-    const handleAppBackground = () => {
-      nativeAppActiveRef.current = false;
-      stopPolling();
-    };
-    const handleAppForeground = () => {
-      nativeAppActiveRef.current = true;
-      void refresh();
+    const handleConnectivityResume = (options?: { forceNetwork?: boolean }) => {
+      void refresh(options);
       resumePollingIfAllowed();
     };
 
+    const handleSyncFlushComplete = (event: Event) => {
+      if (!isMobileNativePlatform()) return;
+      const detail = (event as CustomEvent<{ pendingRemaining?: number }>).detail;
+      if (detail?.pendingRemaining !== 0) return;
+      handleConnectivityResume({ forceNetwork: true });
+    };
+
+    const reconcilePolling = () => {
+      const useVis = notificationPollingUsesVisibilityChange();
+      if (shouldSkipBlockingFetch() || !bellPollingAllowed(useVis)) {
+        stopPolling();
+        return;
+      }
+      if (timer === undefined) startPolling();
+    };
+
+    reconcilePolling();
+
+    const handleRefreshTrigger = () => { debouncedRefresh(); };
+
+    const handleOnline = () => {
+      handleConnectivityResume({ forceNetwork: true });
+    };
+
+    const handleVisibilityChange = () => {
+      if (!useVisibilityPolling) return;
+      if (document.visibilityState === "visible") {
+        handleConnectivityResume({ forceNetwork: true });
+      } else {
+        stopPolling();
+        void refresh();
+      }
+    };
+
+    const handleOfflineModeOnline = () => {
+      handleConnectivityResume({ forceNetwork: true });
+    };
+
+    const handleAppForeground = () => {
+      handleConnectivityResume({ forceNetwork: true });
+    };
+
+    healTimer = window.setInterval(reconcilePolling, POLL_HEAL_MS);
+
+    const handleApiServerReachable = () => {
+      handleConnectivityResume({ forceNetwork: true });
+    };
+
     window.addEventListener("focus", handleRefreshTrigger);
-    window.addEventListener("online", handleRefreshTrigger);
+    window.addEventListener("online", handleOnline);
     window.addEventListener("auth-change", handleRefreshTrigger);
     window.addEventListener("auth-user-updated", handleRefreshTrigger);
     window.addEventListener("notifications:refresh", handleRefreshTrigger);
     window.addEventListener("offline-mode-online", handleOfflineModeOnline);
-    window.addEventListener("offline", handleOfflineModeOffline);
+    window.addEventListener("api-server-reachable", handleApiServerReachable);
+    window.addEventListener("sync-engine:flush-complete", handleSyncFlushComplete);
     if (useVisibilityPolling) {
       document.addEventListener("visibilitychange", handleVisibilityChange);
     }
     if (isMobileNativePlatform()) {
-      window.addEventListener("app-backgrounded", handleAppBackground);
       window.addEventListener("app-foregrounded", handleAppForeground);
     }
 
     return () => {
       stopPolling();
+      if (healTimer !== undefined) window.clearInterval(healTimer);
       if (isMobileNativePlatform()) {
-        window.removeEventListener("app-backgrounded", handleAppBackground);
         window.removeEventListener("app-foregrounded", handleAppForeground);
       }
       if (useVisibilityPolling) {
@@ -248,12 +259,13 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       }
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
-      window.removeEventListener("online", handleRefreshTrigger);
+      window.removeEventListener("online", handleOnline);
       window.removeEventListener("auth-change", handleRefreshTrigger);
       window.removeEventListener("auth-user-updated", handleRefreshTrigger);
       window.removeEventListener("notifications:refresh", handleRefreshTrigger);
       window.removeEventListener("offline-mode-online", handleOfflineModeOnline);
-      window.removeEventListener("offline", handleOfflineModeOffline);
+      window.removeEventListener("api-server-reachable", handleApiServerReachable);
+      window.removeEventListener("sync-engine:flush-complete", handleSyncFlushComplete);
     };
   }, [refresh, pollIntervalMs]);
 

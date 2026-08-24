@@ -57,4 +57,19 @@ describe("notificationService.list", () => {
     expect(items[0].id).toBe("n2");
     expect(cachePut).toHaveBeenCalled();
   });
+
+  it("forces a network fetch on native when forceNetwork is true", async () => {
+    vi.mocked(shouldSkipBlockingFetch).mockReturnValue(true);
+    vi.mocked(cacheGet).mockResolvedValue([
+      { id: "n1", title: "Cached", isRead: false, eventType: "workflow-assigned", severity: "info", createdAt: "2026-01-01T00:00:00Z" },
+    ]);
+    vi.mocked(api.get).mockResolvedValue({
+      data: [{ id: "n3", title: "Live", isRead: false, eventType: "workflow-started", severity: "info", createdAt: "2026-01-03T00:00:00Z" }],
+    });
+
+    const items = await notificationService.list(true, 50, { forceNetwork: true });
+
+    expect(items[0].id).toBe("n3");
+    expect(api.get).toHaveBeenCalled();
+  });
 });

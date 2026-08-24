@@ -247,13 +247,18 @@ api.interceptors.request.use(async (config) => {
 
   // While the upload queue is flushing, defer non-critical GETs on native so a
   // large POST (e.g. RUN_COMPLETE with embedded photos) is not competing with
-  // dashboard/catalog fetches on a slow LAN link.
+  // dashboard/catalog fetches on a slow LAN link. Notifications stay live so
+  // the bell badge can update during upload.
+  const flushPriorityGet =
+    url.includes("/notifications")
+    || url.includes("/health");
   if (
     isMobileNativePlatform()
     && isSyncFlushing()
     && method === "get"
     && !url.includes("/auth/")
     && !isSyncEngineWrite
+    && !flushPriorityGet
   ) {
     const err = new Error("offline-skip") as Error & { code?: string; isOfflineSkip?: boolean };
     err.code = "ERR_NETWORK";

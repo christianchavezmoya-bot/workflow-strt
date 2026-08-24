@@ -17,6 +17,7 @@ import {
   isWaitingForSignature,
   myJobsAssetIdsKey,
   myJobsCardActionFromDisplayState,
+  mergeMissingMediaFlagIntoCardAction,
   myJobsCardHelperTextFromDisplayState,
   pendingSignatureStageLabel,
   pendingSignatureStageText,
@@ -212,6 +213,44 @@ describe("status normalisation helpers", () => {
     expect(isActiveAsset("Not Started")).toBe(true);
     expect(isOpenInspectionStatus("on_hold")).toBe(true);
     expect(isClosedAsset("Closed")).toBe(true);
+  });
+});
+
+describe("mergeMissingMediaFlagIntoCardAction", () => {
+  it("overrides display-state action when local flag exists", () => {
+    const base = {
+      actionKind: "default" as const,
+      chipLabel: "Complete",
+      chipColor: "success" as const,
+      buttonLabel: "Run Details",
+      buttonColor: "inherit" as const,
+      helperText: "Field work complete",
+      widgets: [],
+    };
+    const merged = mergeMissingMediaFlagIntoCardAction(base, {
+      id: "f1",
+      runId: "r1",
+      assetId: "a1",
+      assetTag: "RC013",
+      jobNumber: "J1",
+      workflowName: "Install",
+      technicianUserId: "u1",
+      technicianName: "Tech",
+      completedAt: new Date().toISOString(),
+      missingSteps: [{
+        stepId: "s1",
+        stepOrder: 1,
+        stepTitle: "Photo",
+        inputId: "i1",
+        inputLabel: "Photo",
+        inputType: "photo",
+        captured: 0,
+      }],
+      totalExpected: 1,
+      totalCaptured: 0,
+    }, true);
+    expect(merged.actionKind).toBe("missing-media");
+    expect(merged.widgets).toEqual([{ kind: "missing-photo", count: 1, color: "warning" }]);
   });
 });
 

@@ -1255,6 +1255,7 @@ export const assetWorkflowRunService = {
   /** Single network fetch + cache — used by bootstrap to avoid duplicate background GETs. */
   async prefetchFromNetwork(assetId: string): Promise<void> {
     if (!isMobileNativePlatform() || shouldSkipBlockingNetworkRead()) return;
+    if (shouldDeferPerAssetBackgroundRefresh()) return;
     try {
       const res = await api.get<AssetWorkflowRun[]>(`/asset-workflow-runs/by-asset/${assetId}`);
       const runs = await cacheServerRuns(res.data);

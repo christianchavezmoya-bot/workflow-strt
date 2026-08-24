@@ -104,6 +104,7 @@ async function executeBootstrap(request: PendingBootstrap): Promise<void> {
     scope: request.scope,
     force: request.force,
     mode: request.mode,
+    reason: request.reason,
   });
 }
 

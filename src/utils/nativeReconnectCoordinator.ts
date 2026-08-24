@@ -4,6 +4,7 @@
  */
 
 import { isMobileNativePlatform } from "./platform";
+import { isSyncFlushing } from "./syncFlushLock";
 
 let reconnectPending = false;
 let flushInProgress = false;
@@ -36,11 +37,25 @@ function scheduleSettleWindow(): void {
   }, NATIVE_RECONNECT_SETTLE_MS);
 }
 
+/** Deferrals that block *external* prefetch (dashboard, assignments) — includes bootstrap. */
 function shouldDeferNativeBackgroundWork(): boolean {
   if (!isMobileNativePlatform()) return false;
   return reconnectPending
     || flushInProgress
+    || isSyncFlushing()
     || bootstrapRunning
+    || settling
+    || workflowRunnerOpenCount > 0;
+}
+
+/**
+ * Deferrals that bootstrap phase 6 should wait on before per-asset GETs.
+ * Must NOT include bootstrapRunning — bootstrap cannot wait on itself (deadlock).
+ */
+function shouldBlockBackgroundWorkSlot(): boolean {
+  if (!isMobileNativePlatform()) return false;
+  return reconnectPending
+    || flushInProgress
     || settling
     || workflowRunnerOpenCount > 0;
 }
@@ -119,11 +134,11 @@ export function shouldDeferNativeDashboardFullRefresh(): boolean {
   return shouldDeferNativeBackgroundWork();
 }
 
-/** Wait until background prefetch is allowed (e.g. bootstrap phase 6 while runner closes). */
+/** Wait until competing background work clears (runner, flush, reconnect). Bootstrap itself must not wait on bootstrapRunning. */
 export async function waitForBackgroundWorkSlot(maxMs = 45_000): Promise<boolean> {
-  if (!shouldDeferPerAssetBackgroundRefresh()) return true;
+  if (!shouldBlockBackgroundWorkSlot()) return true;
   const deadline = Date.now() + maxMs;
-  while (shouldDeferPerAssetBackgroundRefresh()) {
+  while (shouldBlockBackgroundWorkSlot()) {
     if (Date.now() >= deadline) return false;
     await new Promise((resolve) => window.setTimeout(resolve, 300));
   }

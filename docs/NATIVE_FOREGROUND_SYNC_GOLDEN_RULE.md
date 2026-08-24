@@ -1,8 +1,20 @@
 # Golden rule — native download/sync stays in the foreground
 
-**Status:** Plan only. Do not implement until this document is signed off.
+**Status:** Implemented (Phases A–D + Sync UX phase 2). See `nativeForegroundSyncSession.ts` and `useNativeForegroundSyncSession.ts`.
 
-**Platforms:** iPhone (App Store) first; apply the same product rule on Android.
+**Platforms:** iPhone (App Store) first; same product rule on Android.
+
+---
+
+## Sync UX phase 2 (usable app + honest progress)
+
+| Rule | Behaviour |
+|------|-----------|
+| **Focused sync** | Full overlay only for Sync Now, first login, readiness-panel refresh |
+| **Background sync** | Reconnect / pull-sync / stale prefetch — blue banner only, app stays usable |
+| **Offline release** | When server unreachable, session ends even if queue has pending items (badge + Sync Center) |
+| **Download progress** | Overall step progress (caps at 99% until `bootstrap:complete`) — no misleading phase-level 100% |
+| **Pending count** | Offline banner refreshes on connectivity + queue changes |
 
 ---
 

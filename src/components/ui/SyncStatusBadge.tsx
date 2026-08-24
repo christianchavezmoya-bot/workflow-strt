@@ -25,6 +25,8 @@ import { isOfflineModeActive } from "../../services/offlineModeState";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import { pendingGetByEntityId } from "../../services/localDB";
 import SyncCenterPage from "../../features/sync/SyncCenterPage";
+import { SYNC_CENTER_OPEN_EVENT } from "../layout/SyncBusyOverlay";
+import { bootstrapOverallPercent } from "../../utils/bootstrapProgressModel";
 
 function timeAgo(date: Date): string {
   const secs = Math.floor((Date.now() - date.getTime()) / 1000);
@@ -37,9 +39,15 @@ export default function SyncStatusBadge() {
   const { status, pendingCount, conflictCount, lastSyncAt, syncing, canSync, triggerSync, connectivity, bootstrapProgress } = useSyncEngine();
   const [syncCenterOpen, setSyncCenterOpen] = useState(false);
 
+  useEffect(() => {
+    const open = () => setSyncCenterOpen(true);
+    window.addEventListener(SYNC_CENTER_OPEN_EVENT, open);
+    return () => window.removeEventListener(SYNC_CENTER_OPEN_EVENT, open);
+  }, []);
+
   const iconSx = { fontSize: 13 };
-  const downloadPct = bootstrapProgress && bootstrapProgress.total > 0
-    ? Math.round((bootstrapProgress.done / bootstrapProgress.total) * 100)
+  const downloadPct = bootstrapProgress
+    ? bootstrapOverallPercent(bootstrapProgress.phase, bootstrapProgress.done, bootstrapProgress.total)
     : null;
 
   const badge = (() => {
@@ -72,7 +80,9 @@ export default function SyncStatusBadge() {
         <Stack direction="row" alignItems="center" spacing={0.5}>
           <CircularProgress size={11} thickness={5} />
           <Typography variant="caption" sx={{ fontSize: "0.68rem", color: "text.secondary" }}>
-            Syncing…
+            {pendingCount > 0
+              ? `↑${pendingCount} uploading`
+              : "Syncing…"}
           </Typography>
         </Stack>
       );

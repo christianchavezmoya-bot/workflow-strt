@@ -67,6 +67,7 @@ describe("scheduleBootstrapAfterUploadDrain", () => {
       scope: "all",
       force: false,
       mode: "full",
+      reason: "first-login",
     });
   });
 
@@ -81,6 +82,7 @@ describe("scheduleBootstrapAfterUploadDrain", () => {
       scope: "assigned",
       force: false,
       mode: "light",
+      reason: "reconnect",
     });
   });
 });

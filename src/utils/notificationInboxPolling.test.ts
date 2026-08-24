@@ -5,7 +5,10 @@ vi.mock("./platform", () => ({
 }));
 
 import { isMobileNativePlatform } from "./platform";
-import { notificationPollingUsesVisibilityChange } from "./notificationInboxPolling";
+import {
+  nativeBellShouldPoll,
+  notificationPollingUsesVisibilityChange,
+} from "./notificationInboxPolling";
 
 describe("notificationPollingUsesVisibilityChange", () => {
   it("returns true on web (desktop browser)", () => {
@@ -16,5 +19,15 @@ describe("notificationPollingUsesVisibilityChange", () => {
   it("returns false on native Capacitor (use appStateChange instead)", () => {
     vi.mocked(isMobileNativePlatform).mockReturnValue(true);
     expect(notificationPollingUsesVisibilityChange()).toBe(false);
+  });
+});
+
+describe("nativeBellShouldPoll", () => {
+  it("polls when device is online", () => {
+    expect(nativeBellShouldPoll(true)).toBe(true);
+  });
+
+  it("does not poll when device is offline", () => {
+    expect(nativeBellShouldPoll(false)).toBe(false);
   });
 });

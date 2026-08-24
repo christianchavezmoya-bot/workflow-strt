@@ -2,20 +2,8 @@ import DownloadOutlinedIcon from "@mui/icons-material/DownloadOutlined";
 import { Box, LinearProgress, Stack, Typography } from "@mui/material";
 import { useEffect, useState } from "react";
 import type { BootstrapProgress } from "../../services/offlineBootstrapService";
+import { bootstrapOverallPercent, bootstrapStepLabel } from "../../utils/bootstrapProgressModel";
 import { isMobileNativePlatform } from "../../utils/platform";
-
-const PHASE_LABELS: Record<string, string> = {
-  reference: "Reference data",
-  projects: "Projects",
-  assets: "Assets",
-  configs: "Product configs",
-  "linked-configs": "Workflow configs",
-  workflows: "Assignments & runs",
-  issues: "Open & closed issues",
-  "asset-documents": "Asset document links",
-  "document-files": "Linked document files",
-  media: "Reference photos",
-};
 
 type BootstrapState = {
   running: boolean;
@@ -62,8 +50,8 @@ export default function OfflineBootstrapBanner() {
 
   if (!state?.running) return null;
 
-  const label = PHASE_LABELS[state.phase] ?? state.phase;
-  const pct = Math.min(100, Math.round((state.done / state.total) * 100));
+  const label = bootstrapStepLabel(state.phase, state.done, state.total);
+  const pct = bootstrapOverallPercent(state.phase, state.done, state.total);
 
   return (
     <Box
@@ -81,7 +69,7 @@ export default function OfflineBootstrapBanner() {
               Downloading field data…
             </Typography>
             <Typography variant="caption" sx={{ color: "info.light", opacity: 0.85 }}>
-              {label} · {state.done}/{state.total} ({pct}%)
+              {label} · {pct}% overall
             </Typography>
           </Box>
         </Stack>

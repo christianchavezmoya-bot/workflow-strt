@@ -5,7 +5,7 @@ import {
   prepareForegroundConnectivityResume,
 } from "../services/connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
-import { registerPushNotificationsIfNeeded } from "../services/pushNotificationService";
+import { registerPushNotificationsIfNeeded, attachPushRegistrationOnAuth } from "../services/pushNotificationService";
 
 const FOREGROUND_PING_RETRY_MS = 1_500;
 
@@ -50,6 +50,7 @@ export function useNativeSyncLifecycle(): void {
     };
 
     void registerPushNotificationsIfNeeded();
+    attachPushRegistrationOnAuth();
 
     void App.addListener("appStateChange", ({ isActive }) => {
       if (isActive) onForeground();

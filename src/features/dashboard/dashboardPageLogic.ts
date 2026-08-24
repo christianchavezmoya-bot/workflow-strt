@@ -1,5 +1,6 @@
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
+import type { MissingMediaFlag } from "./photoUploadTypes";
 import {
   myJobsCardChipFromDisplayState,
   type WorkflowDisplayState,
@@ -257,6 +258,39 @@ export function myJobsCardActionFromDisplayState(
             ? "primary"
             : "inherit",
     helperText: myJobsCardHelperTextFromDisplayState(displayState),
+    widgets,
+  };
+}
+
+/** localStorage missing-media flags win over stale display-state when runs haven't refreshed yet. */
+export function mergeMissingMediaFlagIntoCardAction(
+  action: MyJobsCardAction,
+  flag: MissingMediaFlag | undefined,
+  compact = false,
+): MyJobsCardAction {
+  if (!flag) return action;
+
+  const count = flag.missingSteps?.length
+    ?? Math.max(0, (flag.totalExpected ?? 0) - (flag.totalCaptured ?? 0));
+  if (count <= 0) return action;
+
+  if (action.actionKind === "missing-media") {
+    const existing = action.widgets.find((w) => w.kind === "missing-photo")?.count ?? 0;
+    if (existing >= count) return action;
+  }
+
+  const widgets = [
+    ...action.widgets.filter((w) => w.kind !== "missing-photo"),
+    { kind: "missing-photo" as const, count, color: "warning" as const },
+  ];
+
+  return {
+    actionKind: "missing-media",
+    chipLabel: "Missing captures",
+    chipColor: "warning",
+    buttonLabel: compact ? "Add Photos" : "Add Missing Photos",
+    buttonColor: "warning",
+    helperText: `${count} missing photo${count === 1 ? "" : "s"}`,
     widgets,
   };
 }

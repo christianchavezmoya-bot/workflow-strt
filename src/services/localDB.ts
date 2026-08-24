@@ -466,6 +466,49 @@ export async function pendingSetStatus(id: string, status: PendingAction["status
   } catch { /* ignore */ }
 }
 
+type PendingAttemptDiagnostics = Partial<Pick<PendingAction,
+  | "lastAttemptAt"
+  | "lastDurationMs"
+  | "lastPayloadBytes"
+  | "lastStepResultsBytes"
+  | "lastPhotoCount"
+  | "lastRequestMethod"
+  | "lastRequestUrl"
+  | "lastMappedRunId"
+  | "lastIsOfflineRunId"
+  | "lastTimeoutMs"
+  | "lastHttpStatus"
+  | "lastErrorCode"
+  | "lastServerReachable"
+  | "lastConnectivity"
+  | "lastOpType"
+  | "lastApiHost"
+>>;
+
+/**
+ * Record a transient network/radio failure without incrementing retry count.
+ * Used when the flush pass stops early — the op will retry on reconnect.
+ */
+export async function pendingRecordTransientFailure(
+  id: string,
+  error: string,
+  diagnostics?: PendingAttemptDiagnostics,
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (!item) return;
+    await db.put("pending_actions", {
+      ...item,
+      ...diagnostics,
+      status: "pending",
+      lastError: error,
+      nextRetryAt: undefined,
+    });
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch { /* ignore */ }
+}
+
 /** Reset one queued action for an immediate retry (clears backoff + conflict flags). */
 export async function pendingRetryNow(id: string): Promise<void> {
   try {
@@ -502,24 +545,7 @@ const MAX_RETRIES = 20;
 export async function pendingMarkRetry(
   id: string,
   error: string,
-  diagnostics?: Partial<Pick<PendingAction,
-    | "lastAttemptAt"
-    | "lastDurationMs"
-    | "lastPayloadBytes"
-    | "lastStepResultsBytes"
-    | "lastPhotoCount"
-    | "lastRequestMethod"
-    | "lastRequestUrl"
-    | "lastMappedRunId"
-    | "lastIsOfflineRunId"
-    | "lastTimeoutMs"
-    | "lastHttpStatus"
-    | "lastErrorCode"
-    | "lastServerReachable"
-    | "lastConnectivity"
-    | "lastOpType"
-    | "lastApiHost"
-  >>,
+  diagnostics?: PendingAttemptDiagnostics,
 ): Promise<void> {
   try {
     const db = await getDB();
