@@ -97,11 +97,12 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - Target group health path `/api/health`, success 200
 - AWS MCP + `StrataClaudeAgentRole` + deployment policy
 - **Task definition revision 10 deployed** (2026-08-26) — `Database__RunMigrationsOnStartup=false`; ECS deployment SUCCESSFUL
+- **ALB custom-domain routing restored** (2026-08-26) — Christian manually updated priority-10 rule to `ad0f64ab` (100%); `curl https://api.staging.strata-ngo.com/api/health` → 200
 
-### Pending / broken
-- **ALB custom-domain routing (503)** — after rev-10 deploy, active task registered in `ad0f64ab` but priority-10 rule still forwards `api.staging.strata-ngo.com` only to `189cba` (draining). **Fix in console** (Christian) — see **ALB custom-domain routing** below. Do **not** proceed to iOS build until `curl https://api.staging.strata-ngo.com/api/health` passes.
+### Pending
+- **Durable ALB routing** — priority-10 rule is still **single-TG pinned** (now `ad0f64ab`). Before the **next** ECS deploy, convert to **weighted dual-TG forward** (both `189cba` + `ad0f64ab`) mirroring the `.on.aws` rule — otherwise custom domain may 503 again when Express swaps groups.
 - **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
-- **iPhone build** against `https://api.staging.strata-ngo.com/api`
+- **iPhone build** against `https://api.staging.strata-ngo.com/api` — **approved** (Phase 2b)
 - **APNs/FCM** push on server
 
 ---
@@ -129,9 +130,13 @@ Use **`--profile strata-agent`** for all AWS CLI from Claude Code.
 
 ECS Express Mode maintains **two** gateway target groups and **swaps** which one receives the running task on each deployment. The auto-managed rule for the `.on.aws` hostname (priority ~44990) uses **weighted forward to both TGs** — Express updates weights during deploy.
 
-The **human-created** rule for `api.staging.strata-ngo.com` (priority **10**) was a **single-TG forward** pinned to `189cba`. That worked until the first deploy moved the task to `ad0f64ab`, leaving `189cba` draining and the custom domain returning **503**.
+The **human-created** rule for `api.staging.strata-ngo.com` (priority **10**) was a **single-TG forward** pinned to `189cba`. After the rev-10 deploy moved the active task to `ad0f64ab`, the custom domain returned **503** until Christian manually repointed the rule to `ad0f64ab` in the console (~2026-08-26).
+
+> **Note:** A later MCP snapshot showed the rule already on `ad0f64ab` and was briefly misread as auto-reconciliation. The restore was a **manual console edit**, not Express auto-updating a custom-domain rule.
 
 ### Immediate restore (Christian — AWS Console, ~2 min)
+
+Use when custom domain returns 503 after a deploy:
 
 1. **EC2** → **Load balancers** → `ecs-express-gateway-alb-02b54f25`
 2. **Listeners** → **HTTPS:443** → **View/edit rules**
@@ -144,9 +149,11 @@ The **human-created** rule for `api.staging.strata-ngo.com` (priority **10**) wa
 
 Claude Code **does not** have `elbv2:ModifyRule` — ALB listener edits are **Christian console** (or admin CLI), not agent deploy scope.
 
-### After ALB fix
+**Before the next ECS deploy:** apply the **durable fix** (weighted dual-TG forward). Do not run another `ecs update-service` until that is done or you accept another possible 503 window.
 
-Re-run Phase 2a verification (custom-domain curl + both TGs). Then proceed to iOS build per `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md`.
+### After ALB fix / Phase 2a pass
+
+Proceed to iOS build per `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md`.
 
 ---
 
