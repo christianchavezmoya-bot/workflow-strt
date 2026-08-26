@@ -77,7 +77,8 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 | Secrets | `strata_ngo/staging/app` (refs: `Jwt__Key`, `ConnectionStrings__DefaultConnection`, `SeedAdmin__Password`) |
 | CloudWatch | `/aws/ecs/default/commtrac-api-ae2c-219a` |
 | ALB | `ecs-express-gateway-alb-02b54f25` |
-| Healthy TG | `ecs-gateway-tg-189cba27392c2044c` |
+| Express target groups | **`ecs-gateway-tg-189cba27392c2044c`** and **`ecs-gateway-tg-ad0f64ab1794c600d`** — ECS Express **alternates** which group gets the active task on each deploy |
+| Custom-domain listener rule | Priority **10**, host `api.staging.strata-ngo.com` — must forward to **both** TGs (weighted), not a single pinned TG (see **ALB custom-domain routing** below) |
 | Health check | HTTP GET **`/api/health`** port 80 → expect **200** (not 401) |
 
 **API URLs:**
@@ -93,12 +94,12 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - **Custom domain live:** `https://api.staging.strata-ngo.com/api/health` → healthy (Cloudflare CNAME → ALB)
 - Secrets via Secrets Manager (ValueFrom ARNs in task definition)
 - RDS inbound from VPC `172.31.0.0/16`
-- ALB listener rule: Host `api.staging.strata-ngo.com` → healthy target group
 - Target group health path `/api/health`, success 200
 - AWS MCP + `StrataClaudeAgentRole` + deployment policy
+- **Task definition revision 10 deployed** (2026-08-26) — `Database__RunMigrationsOnStartup=false`; ECS deployment SUCCESSFUL
 
-### Pending
-- **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
+### Pending / broken
+- **ALB custom-domain routing (503)** — after rev-10 deploy, active task registered in `ad0f64ab` but priority-10 rule still forwards `api.staging.strata-ngo.com` only to `189cba` (draining). **Fix in console** (Christian) — see **ALB custom-domain routing** below. Do **not** proceed to iOS build until `curl https://api.staging.strata-ngo.com/api/health` passes.
 - **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
 - **iPhone build** against `https://api.staging.strata-ngo.com/api`
 - **APNs/FCM** push on server
@@ -116,11 +117,36 @@ An ECS update alone is **not** success. Claude must verify **all**:
 5. `ecs:UpdateService` on **`commtrac-api-ae2c`** only  
 6. Deployment stabilizes (no rollback)  
 7. Task stays **Running**  
-8. ALB target **Healthy** (not 401)  
-9. `/api/health` → `"status":"healthy"`, `"database":"connected"`  
+8. **Both** Express target groups checked — active TG has a **Healthy** target on :80 (TG name **changes** each deploy)  
+9. **`curl -sf https://api.staging.strata-ngo.com/api/health`** → `"status":"healthy"`, `"database":"connected"` (**mandatory** — custom-domain rule can 503 even when ECS is healthy)  
 10. CloudWatch startup logs — no fatal errors  
 
 Use **`--profile strata-agent`** for all AWS CLI from Claude Code.
+
+---
+
+## ALB custom-domain routing (ECS Express gotcha)
+
+ECS Express Mode maintains **two** gateway target groups and **swaps** which one receives the running task on each deployment. The auto-managed rule for the `.on.aws` hostname (priority ~44990) uses **weighted forward to both TGs** — Express updates weights during deploy.
+
+The **human-created** rule for `api.staging.strata-ngo.com` (priority **10**) was a **single-TG forward** pinned to `189cba`. That worked until the first deploy moved the task to `ad0f64ab`, leaving `189cba` draining and the custom domain returning **503**.
+
+### Immediate restore (Christian — AWS Console, ~2 min)
+
+1. **EC2** → **Load balancers** → `ecs-express-gateway-alb-02b54f25`
+2. **Listeners** → **HTTPS:443** → **View/edit rules**
+3. Rule **priority 10** (condition: host `api.staging.strata-ngo.com`)
+4. **Edit rule** → Forward action:
+   - **Quick fix:** forward 100% to **`ecs-gateway-tg-ad0f64ab1794c600d`** (currently active TG — verify in **Target groups** which has the healthy target before saving)
+   - **Durable fix (recommended):** forward **weighted** to **both** `ecs-gateway-tg-189cba27392c2044c` and `ecs-gateway-tg-ad0f64ab1794c600d`, mirroring the `.on.aws` rule — set 100% on whichever TG currently has the healthy task, 0% on the other. Express will flip weights on future deploys **only if both TGs are in the rule**.
+5. **Save**
+6. Verify: `curl -sf https://api.staging.strata-ngo.com/api/health`
+
+Claude Code **does not** have `elbv2:ModifyRule` — ALB listener edits are **Christian console** (or admin CLI), not agent deploy scope.
+
+### After ALB fix
+
+Re-run Phase 2a verification (custom-domain curl + both TGs). Then proceed to iOS build per `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md`.
 
 ---
 
