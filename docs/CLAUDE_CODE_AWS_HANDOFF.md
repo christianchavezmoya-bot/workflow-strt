@@ -41,22 +41,32 @@ aws sts get-caller-identity --profile strata-agent
 
 **Policies:**
 - `StrataClaudeAgentPolicy` (read/inspect)
-- `StrataClaudeStagingDeploymentPolicy` (narrow deploy)
+- `StrataClaudeStagingDeploymentPolicy` (narrow deploy — ECR + ECS register/update)
+- **`StrataClaudeStagingOperatorPolicy`** (2026-08-26) — scoped staging ops:
+  - **`elasticloadbalancing:ModifyRule`** — **only** priority-10 custom-domain rule:  
+    `arn:aws:elasticloadbalancing:ap-southeast-2:920154935299:listener-rule/app/ecs-express-gateway-alb-02b54f25/0453ca9361282042/6c1399afe5a7bd8f/6c083c9cad0afd69`
+  - ELB **Describe** (rules, listeners, target groups, health, load balancers)
+  - ECS **UpdateService / Describe / ListTasks / StopTask** — cluster `default` only
+  - ECR push/pull — repo `commtrac-api` only
+  - Secrets Manager **Get/Put/Update** — secret `strata_ngo/staging/app` only
+  - S3 **Get/Put/List** — bucket `strata-ngo-media-staging` only
 
-**Simulator ALLOWED (staging deploy):**
-- `ecs:RegisterTaskDefinition`
-- `ecs:UpdateService` (service `commtrac-api-ae2c` only)
+**Simulator ALLOWED (staging deploy + ops):**
+- `ecs:RegisterTaskDefinition`, `ecs:UpdateService` (service `commtrac-api-ae2c`)
+- `elasticloadbalancing:ModifyRule` (priority-10 rule ARN above only)
 - `iam:PassRole` → `ecsTaskExecutionRole` (condition `ecs-tasks.amazonaws.com`)
 - `ecr:GetAuthorizationToken`, `ecr:PutImage` → `commtrac-api`
+- `secretsmanager:GetSecretValue` / `PutSecretValue` → `strata_ngo/staging/app` only
 
 **Simulator DENIED (must stay denied):**
 - `ecs:DeleteService`, `rds:ModifyDBInstance`, `rds:DeleteDBInstance`
-- `iam:CreateRole`, `secretsmanager:GetSecretValue`
-- `ec2:CreateVpc`, `s3:DeleteBucket`
+- `iam:CreateRole`, `ec2:CreateVpc`, `s3:DeleteBucket`
+- ELB changes on any rule **other** than the priority-10 ARN above
+- CloudFront, Route53, VPC, unrelated secrets/buckets
 
-Do **not** broaden Claude permissions unless Cursor agent + Christian explicitly approve.
+Do **not** broaden Claude permissions beyond operator policy without Cursor agent + Christian approval.
 
-Claude **cannot read secret values** — diagnose from config names, logs, and `/api/health` only.
+Claude **may read/update** the staging app secret when necessary but must **NEVER** print, log, commit, or paste `Jwt__Key`, passwords, connection strings, or tokens in reports.
 
 ---
 
@@ -91,18 +101,16 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 ### Done
 - ECR image pushed; ECS service running; `/api/health` healthy + Postgres
 - **Custom domain live:** `https://api.staging.strata-ngo.com/api/health` → healthy (Cloudflare CNAME → ALB)
-- Secrets via Secrets Manager (ValueFrom ARNs in task definition)
-- RDS inbound from VPC `172.31.0.0/16`
-- ALB listener rule: Host `api.staging.strata-ngo.com` → healthy target group
-- Target group health path `/api/health`, success 200
-- AWS MCP + `StrataClaudeAgentRole` + deployment policy
+- Secrets via Secrets Manager; **`Jwt__Key` ≥32 chars** (Christian updated 2026-08-26)
+- **ALB priority-10 dual-TG** (Christian updated 2026-08-26) — Claude can verify/adjust via `ModifyRule` on scoped rule ARN
+- AWS MCP + `StrataClaudeAgentRole` + deployment + **operator** policies
+- **PR #310 merged** — native first-login request-storm deferral + JWT fail-fast at startup
 
-### Pending
-- **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
-- **Jwt__Key length** — if login returns 500 at token creation, update Secrets Manager key to ≥32 chars and force new ECS deployment (startup will now fail fast with a clear error instead of 500 on login).
-- **Native first-login perf** — iPhone login works against staging but dashboard was slow/errors before paint (request storm). PR defers push registration, bell inbox refresh, and duplicate catalog prefetch until first-login bootstrap completes. **Rebuild iOS app after merge** to pick up the fix.
-- **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
-- **iPhone build** against `https://api.staging.strata-ngo.com/api`
+### Pending / in progress
+- **ECS redeploy** — force new deployment so running tasks pick up new JWT secret + latest image (Claude, after preflight PASS)
+- **iPhone rebuild** — after ECS stable + `git pull main` (Claude)
+- **Web smoke test** — Mac preview at `http://localhost:5174` against staging API (Claude + Christian browser)
+- **Web hosting** at `https://staging.strata-ngo.com` (S3/CloudFront — not live yet)
 - **APNs/FCM** push on server
 
 ---
