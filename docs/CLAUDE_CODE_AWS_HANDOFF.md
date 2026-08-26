@@ -81,27 +81,27 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 | Health check | HTTP GET **`/api/health`** port 80 → expect **200** (not 401) |
 
 **API URLs:**
-- Working: `https://co-7c80ff093f614e849c3eb733fb76c42c.ecs.ap-southeast-2.on.aws/api`
-- Target: `https://api.staging.strata-ngo.com/api` (needs Cloudflare CNAME)
+- **Primary (use for phone/web builds):** `https://api.staging.strata-ngo.com/api`
+- **ECS Express hostname (cert mismatch on strict TLS):** `https://co-7c80ff093f614e849c3eb733fb76c42c.ecs.ap-southeast-2.on.aws/api` — ALB cert is for `api.staging.strata-ngo.com` only; `curl` without `-k` fails exit 60. Routing is fine; use custom domain for production-like testing.
 
 ---
 
 ## Infrastructure status
 
 ### Done
-- ECR image pushed; ECS service running; `/api/health` healthy + Postgres on ECS URL
+- ECR image pushed; ECS service running; `/api/health` healthy + Postgres
+- **Custom domain live:** `https://api.staging.strata-ngo.com/api/health` → healthy (Cloudflare CNAME → ALB)
 - Secrets via Secrets Manager (ValueFrom ARNs in task definition)
 - RDS inbound from VPC `172.31.0.0/16`
 - ALB listener rule: Host `api.staging.strata-ngo.com` → healthy target group
 - Target group health path `/api/health`, success 200
 - AWS MCP + `StrataClaudeAgentRole` + deployment policy
 
-### Not done
-- **Cloudflare CNAME** `api.staging` → ALB DNS (was NXDOMAIN)
+### Pending
+- **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
 - **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
-- **iPhone build** against cloud API (ready once DNS or use ECS URL)
+- **iPhone build** against `https://api.staging.strata-ngo.com/api`
 - **APNs/FCM** push on server
-- **`Database__RunMigrationsOnStartup=false`** on latest task revision (confirm via MCP)
 
 ---
 
