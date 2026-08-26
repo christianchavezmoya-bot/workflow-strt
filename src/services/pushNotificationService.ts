@@ -7,6 +7,7 @@ import { LocalNotifications } from "@capacitor/local-notifications";
 import { PushNotifications, type PushNotificationSchema } from "@capacitor/push-notifications";
 import api from "./api";
 import { isMobileNativePlatform } from "../utils/platform";
+import { waitForFirstLoginQuiet } from "../utils/postLoginQuietWindow";
 
 const PUSH_TOKEN_CACHE_KEY = "native_push_token_v1";
 const ANDROID_FOREGROUND_CHANNEL_ID = "workflow-alerts";
@@ -168,6 +169,7 @@ export async function registerPushNotificationsIfNeeded(): Promise<void> {
   }
 
   registrationInFlight = (async () => {
+    await waitForFirstLoginQuiet();
     attachPushListeners();
     attachPushReplayListeners();
     await ensureAndroidForegroundChannel();

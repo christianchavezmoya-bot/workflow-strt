@@ -74,7 +74,7 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 | ECR | `920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging` |
 | RDS | `strata-ngo-staging` (PostgreSQL, private) |
 | S3 media | `strata-ngo-media-staging` |
-| Secrets | `strata_ngo/staging/app` (refs: `Jwt__Key`, `ConnectionStrings__DefaultConnection`, `SeedAdmin__Password`) |
+| Secrets | `strata_ngo/staging/app` (refs: `Jwt__Key`, `ConnectionStrings__DefaultConnection`, `SeedAdmin__Password`) — **`Jwt__Key` must be ≥32 UTF-8 bytes** (HS256); API now **fails fast at startup** if too short |
 | CloudWatch | `/aws/ecs/default/commtrac-api-ae2c-219a` |
 | ALB | `ecs-express-gateway-alb-02b54f25` |
 | Healthy TG | `ecs-gateway-tg-189cba27392c2044c` |
@@ -99,6 +99,8 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 
 ### Pending
 - **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
+- **Jwt__Key length** — if login returns 500 at token creation, update Secrets Manager key to ≥32 chars and force new ECS deployment (startup will now fail fast with a clear error instead of 500 on login).
+- **Native first-login perf** — iPhone login works against staging but dashboard was slow/errors before paint (request storm). PR defers push registration, bell inbox refresh, and duplicate catalog prefetch until first-login bootstrap completes. **Rebuild iOS app after merge** to pick up the fix.
 - **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
 - **iPhone build** against `https://api.staging.strata-ngo.com/api`
 - **APNs/FCM** push on server

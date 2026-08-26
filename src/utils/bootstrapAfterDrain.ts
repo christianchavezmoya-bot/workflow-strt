@@ -20,6 +20,7 @@ import {
   type BootstrapReason,
 } from "./bootstrapFreshness";
 import { tryApplySyncDelta } from "../services/syncDeltaService";
+import { markFirstLoginQuietPending } from "./postLoginQuietWindow";
 
 type PendingBootstrap = {
   scope: BootstrapScope;
@@ -116,6 +117,10 @@ export function scheduleBootstrapAfterUploadDrain(
 ): void {
   if (!isMobileNativePlatform()) return;
   ensureCompleteListener();
+
+  if (reason === "first-login") {
+    markFirstLoginQuietPending();
+  }
 
   const request: PendingBootstrap = {
     scope,
