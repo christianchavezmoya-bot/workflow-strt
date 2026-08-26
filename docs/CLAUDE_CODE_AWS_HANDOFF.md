@@ -175,8 +175,8 @@ Never commit .env.*.local or secrets.
 
 | Task | Where |
 |------|--------|
-| Cloudflare CNAME `api.staging` → ALB | Cloudflare DNS |
-| ACM cert validation records | Cloudflare + ACM |
+| ~~Cloudflare CNAME `api.staging` → ALB~~ | **Done** |
+| ACM cert validation records | Cloudflare + ACM (done if custom domain works) |
 | Broad IAM changes | AWS Console (admin) |
 | Secrets Manager value edits | AWS Console |
 
