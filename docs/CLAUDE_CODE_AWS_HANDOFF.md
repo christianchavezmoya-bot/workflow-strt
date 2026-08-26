@@ -98,12 +98,11 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - AWS MCP + `StrataClaudeAgentRole` + deployment policy
 - **Task definition revision 10 deployed** (2026-08-26) — `Database__RunMigrationsOnStartup=false`; ECS deployment SUCCESSFUL
 - **ALB custom-domain routing restored** (2026-08-26) — Christian manually updated priority-10 rule to `ad0f64ab` (100%); `curl https://api.staging.strata-ngo.com/api/health` → 200
+- **iPhone app installed** (2026-08-26) — build + install PASS; login screen OK
 
-### Pending
+### Pending / blocked
+- **Login blocked — Jwt__Key too short** — Secrets Manager `strata_ngo/staging/app` → `Jwt__Key` is **31 chars (248 bits)**; HS256 requires **≥32 chars (256 bits)**. Login POST succeeds through password check then **500** at `AuthController.CreateToken` (`IDX10720`). Fix: Christian updates secret to 32+ chars, then **force new ECS deployment** (secrets inject at task start). Pre-existing; unrelated to rev-10 deploy.
 - **Durable ALB routing** — priority-10 rule is still **single-TG pinned** (now `ad0f64ab`). Before the **next** ECS deploy, convert to **weighted dual-TG forward** (both `189cba` + `ad0f64ab`) mirroring the `.on.aws` rule — otherwise custom domain may 503 again when Express swaps groups.
-- **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
-- **iPhone build** against `https://api.staging.strata-ngo.com/api` — **approved** (Phase 2b)
-- **APNs/FCM** push on server
 
 ---
 
@@ -211,7 +210,7 @@ Never commit .env.*.local or secrets.
 | ~~Cloudflare CNAME `api.staging` → ALB~~ | **Done** |
 | ACM cert validation records | Cloudflare + ACM (done if custom domain works) |
 | Broad IAM changes | AWS Console (admin) |
-| Secrets Manager value edits | AWS Console |
+| Secrets Manager value edits | AWS Console — **`Jwt__Key` must be ≥32 ASCII characters** (HS256 minimum) |
 
 ---
 
