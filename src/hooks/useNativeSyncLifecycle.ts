@@ -49,7 +49,6 @@ export function useNativeSyncLifecycle(): void {
       window.dispatchEvent(new Event("app-backgrounded"));
     };
 
-    void registerPushNotificationsIfNeeded();
     attachPushRegistrationOnAuth();
 
     void App.addListener("appStateChange", ({ isActive }) => {

@@ -10,6 +10,7 @@ import {
   nativeBellShouldPoll,
   notificationPollingUsesVisibilityChange,
 } from "../utils/notificationInboxPolling";
+import { isFirstLoginQuietPending, waitForFirstLoginQuiet } from "../utils/postLoginQuietWindow";
 
 const DASHBOARD_POLL_MS = 15_000;
 const BACKGROUND_POLL_MS = 60_000;
@@ -148,7 +149,18 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   }, [isAuthenticated, user?.id]);
 
   useEffect(() => {
-    void refresh();
+    let cancelled = false;
+
+    const runInitialRefresh = async () => {
+      if (isMobileNativePlatform() && isFirstLoginQuietPending()) {
+        await waitForFirstLoginQuiet();
+      }
+      if (!cancelled) {
+        await refresh();
+      }
+    };
+
+    void runInitialRefresh();
 
     let debounceTimer: number | undefined;
     const debouncedRefresh = () => {
@@ -249,6 +261,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     }
 
     return () => {
+      cancelled = true;
       stopPolling();
       if (healTimer !== undefined) window.clearInterval(healTimer);
       if (isMobileNativePlatform()) {
