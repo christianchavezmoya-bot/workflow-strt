@@ -103,6 +103,8 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 ### Pending / blocked
 - **Login blocked — Jwt__Key too short** — Secrets Manager `strata_ngo/staging/app` → `Jwt__Key` is **31 chars (248 bits)**; HS256 requires **≥32 chars (256 bits)**. Login POST succeeds through password check then **500** at `AuthController.CreateToken` (`IDX10720`). Fix: Christian updates secret to 32+ chars, then **force new ECS deployment** (secrets inject at task start). Pre-existing; unrelated to rev-10 deploy.
 - **Durable ALB routing** — priority-10 rule is still **single-TG pinned** (now `ad0f64ab`). Before the **next** ECS deploy, convert to **weighted dual-TG forward** (both `189cba` + `ad0f64ab`) mirroring the `.on.aws` rule — otherwise custom domain may 503 again when Express swaps groups.
+- **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
+- **APNs/FCM** push on server
 
 ---
 
