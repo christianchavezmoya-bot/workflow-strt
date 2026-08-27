@@ -13,12 +13,19 @@ const PUSH_TOKEN_CACHE_KEY = "native_push_token_v1";
 const ANDROID_FOREGROUND_CHANNEL_ID = "workflow-alerts";
 const TOKEN_REGISTER_MAX_ATTEMPTS = 3;
 const TOKEN_REGISTER_RETRY_MS = 2_000;
+/** Skip duplicate server POSTs for the same token within this window. */
+const TOKEN_REGISTER_COOLDOWN_MS = 5 * 60_000;
+/** Collapse bursty replay events (api-server-reachable fires on every axios success). */
+const TOKEN_REPLAY_DEBOUNCE_MS = 3_000;
 
 let pushListenersAttached = false;
 let pushReplayListenersAttached = false;
 let androidChannelReady = false;
 let pushAuthListenersAttached = false;
 let registrationInFlight: Promise<void> | null = null;
+let serverRegisterInFlight: Promise<void> | null = null;
+let replayDebounceTimer: number | undefined;
+let lastServerRegister: { token: string; platform: string; at: number } | null = null;
 
 type CachedPushToken = {
   token: string;
@@ -26,19 +33,41 @@ type CachedPushToken = {
   updatedAt: number;
 };
 
+function shouldSkipServerRegister(token: string, platform: string): boolean {
+  if (!lastServerRegister) return false;
+  if (lastServerRegister.token !== token || lastServerRegister.platform !== platform) return false;
+  return Date.now() - lastServerRegister.at < TOKEN_REGISTER_COOLDOWN_MS;
+}
+
 async function registerTokenWithServer(token: string, platform: string): Promise<void> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < TOKEN_REGISTER_MAX_ATTEMPTS; attempt++) {
-    try {
-      await api.post("/push-tokens", { token, platform }, { timeout: 30_000 });
-      return;
-    } catch (err) {
-      lastErr = err;
-      if (attempt === TOKEN_REGISTER_MAX_ATTEMPTS - 1) break;
-      await new Promise((resolve) => window.setTimeout(resolve, TOKEN_REGISTER_RETRY_MS * (attempt + 1)));
-    }
+  if (shouldSkipServerRegister(token, platform)) return;
+
+  if (serverRegisterInFlight) {
+    await serverRegisterInFlight;
+    if (shouldSkipServerRegister(token, platform)) return;
   }
-  console.warn("[push] failed to register token with server after retries", lastErr);
+
+  serverRegisterInFlight = (async () => {
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < TOKEN_REGISTER_MAX_ATTEMPTS; attempt++) {
+      try {
+        await api.post("/push-tokens", { token, platform }, { timeout: 30_000 });
+        lastServerRegister = { token, platform, at: Date.now() };
+        return;
+      } catch (err) {
+        lastErr = err;
+        if (attempt === TOKEN_REGISTER_MAX_ATTEMPTS - 1) break;
+        await new Promise((resolve) => window.setTimeout(resolve, TOKEN_REGISTER_RETRY_MS * (attempt + 1)));
+      }
+    }
+    console.warn("[push] failed to register token with server after retries", lastErr);
+  })();
+
+  try {
+    await serverRegisterInFlight;
+  } finally {
+    serverRegisterInFlight = null;
+  }
 }
 
 function readCachedPushToken(): CachedPushToken | null {
@@ -120,19 +149,26 @@ async function mirrorForegroundNotificationOnAndroid(notification: PushNotificat
   }
 }
 
+function scheduleReplayCachedToken(): void {
+  if (replayDebounceTimer !== undefined) {
+    window.clearTimeout(replayDebounceTimer);
+  }
+  replayDebounceTimer = window.setTimeout(() => {
+    replayDebounceTimer = undefined;
+    void replayCachedTokenIfAvailable();
+  }, TOKEN_REPLAY_DEBOUNCE_MS);
+}
+
 function attachPushReplayListeners(): void {
   if (pushReplayListenersAttached) return;
   pushReplayListenersAttached = true;
 
-  const replay = () => {
-    void replayCachedTokenIfAvailable();
-  };
-
-  window.addEventListener("auth-change", replay);
-  window.addEventListener("auth-user-updated", replay);
-  window.addEventListener("app-foregrounded", replay);
-  window.addEventListener("api-server-reachable", replay);
-  window.addEventListener("offline-mode-online", replay);
+  // Do NOT listen to api-server-reachable — it fires on every successful axios
+  // response and caused dozens of concurrent POST /push-tokens (false offline on Wi‑Fi).
+  window.addEventListener("auth-change", scheduleReplayCachedToken);
+  window.addEventListener("auth-user-updated", scheduleReplayCachedToken);
+  window.addEventListener("app-foregrounded", scheduleReplayCachedToken);
+  window.addEventListener("offline-mode-online", scheduleReplayCachedToken);
 }
 
 function attachPushListeners(): void {
