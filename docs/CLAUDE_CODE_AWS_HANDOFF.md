@@ -101,9 +101,25 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
 - **Jwt__Key length** — if login returns 500 at token creation, update Secrets Manager key to ≥32 chars and force new ECS deployment (startup will now fail fast with a clear error instead of 500 on login).
 - **Native first-login perf** — iPhone login works against staging but dashboard was slow/errors before paint (request storm). PR defers push registration, bell inbox refresh, and duplicate catalog prefetch until first-login bootstrap completes. **Rebuild iOS app after merge** to pick up the fix.
-- **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
+- **Web staging** at **`https://www.strata-ngo.com`** (S3/CloudFront) — `staging.strata-ngo.com` was never deployed; do not use it in email links
+- **Invite email links** — must use `Email__FrontendBaseUrl=https://www.strata-ngo.com` on ECS **and** DB `NotificationSettings.FrontendBaseUrl` aligned (auto-patched on API startup after PR merge + redeploy)
 - **iPhone build** against `https://api.staging.strata-ngo.com/api`
 - **APNs/FCM** push on server
+
+### Invite / password-reset email links (2026-08-27)
+
+**Symptom:** Invite email links point to `https://staging.strata-ngo.com/reset-password?...` — Safari cannot open (host not deployed).
+
+**Root cause:** DB `NotificationSettings` row still has `FrontendBaseUrl = https://staging.strata-ngo.com` from early seed; env var alone does not override a non-empty DB value.
+
+**Fix (after PR merge):**
+1. Ensure ECS task env includes `Email__FrontendBaseUrl=https://www.strata-ngo.com` and `Cors__AllowedOrigins__0=https://www.strata-ngo.com`
+2. Build + push new API image + force ECS redeploy — startup patch updates DB automatically
+3. Re-send invite from **Settings → Users** (or use workaround below)
+
+**Immediate workaround (no deploy):** Edit the link in the email — replace `staging.strata-ngo.com` with `www.strata-ngo.com` (token still valid for 24h).
+
+**Or:** Settings → Notifications → **Public frontend URL** → `https://www.strata-ngo.com` → Save → re-send invite.
 
 ---
 

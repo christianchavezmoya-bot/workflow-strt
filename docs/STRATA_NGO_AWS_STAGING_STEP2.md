@@ -12,7 +12,7 @@ This guide is Step 2 only: create AWS infrastructure. Step 3 (phone build) comes
 
 | Purpose | URL |
 |---------|-----|
-| Web app (browser) | `https://staging.strata-ngo.com` |
+| Web app (browser) | `https://www.strata-ngo.com` |
 | API (phone + web) | `https://api.staging.strata-ngo.com` |
 | S3 media bucket | `strata-ngo-media-staging` (or add suffix if name taken) |
 | S3 web bucket | `strata-ngo-web-staging` |
@@ -179,10 +179,10 @@ export SeedProfile=StrataNgo
 | `Storage__Bucket` | `strata-ngo-media-staging` |
 | `Storage__Region` | `ap-southeast-2` |
 | `Storage__KeyPrefix` | `commtrac` |
-| `Cors__AllowedOrigins__0` | `https://staging.strata-ngo.com` |
+| `Cors__AllowedOrigins__0` | `https://www.strata-ngo.com` |
 | `Cors__AllowDeviceOrigins` | `true` |
 | `SeedProfile` | `StrataNgo` |
-| `Email__FrontendBaseUrl` | `https://staging.strata-ngo.com` |
+| `Email__FrontendBaseUrl` | `https://www.strata-ngo.com` |
 
 6. **Secrets** (from Secrets Manager `commtrac/staging/app`):
    - `Jwt__Key`

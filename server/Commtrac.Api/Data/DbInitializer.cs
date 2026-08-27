@@ -63,6 +63,7 @@ public static class DbInitializer
             // database crashes with "no such column: IsDeleted".
             EnsureSoftDeleteColumns(db);
             EnsureNotificationSettingsResendFrom(db);
+            EnsureNotificationSettingsFrontendBaseUrl(db, config);
             EnsurePushDeviceTokensTable(db);
         }
         else if (db.Database.IsNpgsql())
@@ -70,6 +71,7 @@ public static class DbInitializer
             PostgresSchemaEnsurer.EnsureSchema(db);
             EnsureLinkableKeyFieldDefinitions(db);
             EnsureNotificationSettingsResendFrom(db);
+            EnsureNotificationSettingsFrontendBaseUrl(db, config);
         }
 
         var strataNgoSeed = StrataNgoSeeder.IsEnabled(config);
@@ -294,6 +296,51 @@ public static class DbInitializer
             entity.SmtpFrom = AppBranding.EmailFromAddress;
             db.SaveChanges();
         }
+    }
+
+    /// <summary>
+    /// Staging DBs may still have the pre-www frontend URL from early seeds or admin saves.
+    /// When env/appsettings provides a different public URL, align the stored value so invite
+    /// and password-reset emails link to the live web app.
+    /// </summary>
+    private static void EnsureNotificationSettingsFrontendBaseUrl(AppDbContext db, IConfiguration config)
+    {
+        var entity = db.NotificationSettings.FirstOrDefault(s => s.Id == 1);
+        if (entity is null)
+        {
+            return;
+        }
+
+        var configuredFallback = (config["Email:FrontendBaseUrl"] ?? "").Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(configuredFallback))
+        {
+            return;
+        }
+
+        var current = (entity.FrontendBaseUrl ?? "").Trim().TrimEnd('/');
+        if (string.IsNullOrWhiteSpace(current))
+        {
+            entity.FrontendBaseUrl = configuredFallback;
+            db.SaveChanges();
+            return;
+        }
+
+        if (IsDeprecatedStagingWebHost(current)
+            && !current.Equals(configuredFallback, StringComparison.OrdinalIgnoreCase))
+        {
+            entity.FrontendBaseUrl = configuredFallback;
+            db.SaveChanges();
+        }
+    }
+
+    private static bool IsDeprecatedStagingWebHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return uri.Host.Equals("staging.strata-ngo.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsurePushDeviceTokensTable(AppDbContext db)

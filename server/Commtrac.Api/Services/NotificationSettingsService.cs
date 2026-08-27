@@ -162,7 +162,24 @@ public sealed class NotificationSettingsService
                 effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
             }
         }
+        else if (!string.IsNullOrWhiteSpace(fallbackFrontendBaseUrl)
+            && IsDeprecatedStagingWebHost(effectiveFrontendBaseUrl)
+            && !effectiveFrontendBaseUrl.Equals(fallbackFrontendBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            // Staging moved from staging.strata-ngo.com to www; env/appsettings wins until DB is patched.
+            effectiveFrontendBaseUrl = fallbackFrontendBaseUrl;
+        }
 
         return effectiveFrontendBaseUrl;
+    }
+
+    private static bool IsDeprecatedStagingWebHost(string url)
+    {
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+        {
+            return false;
+        }
+
+        return uri.Host.Equals("staging.strata-ngo.com", StringComparison.OrdinalIgnoreCase);
     }
 }
