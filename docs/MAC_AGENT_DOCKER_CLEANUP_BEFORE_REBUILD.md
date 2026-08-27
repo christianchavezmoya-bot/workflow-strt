@@ -62,9 +62,12 @@ docker system df 2>/dev/null || true
 
 ### Rules
 
+- **Never restart Docker Desktop** (quit, kill -9, force relaunch) unless Christian **explicitly** asks. On large Docker VMs, `docker info` can take many minutes while starting — report “not responding yet” and **wait**; do not treat slow as stuck.
+- **Read-only Docker checks** (`docker system df`, `docker ps`) must use a timeout; if they hang, **stop and report** — do not restart the daemon to “fix” it.
 - **Always** cleanup before: `docker build`, ECR push prep, `./scripts/standup-staging.sh --build-web`, fresh Docker Postgres standup.
 - **Repeat** cleanup after any failed `docker build` or `npm run build` with ENOSPC.
 - **Do not** run `docker system prune` while Christian is actively testing a local stack **unless** the prompt says to stand down first (this block stops staging compose first).
+- **AWS-only phone/web testing** (no local compose): use [`MAC_AGENT_AWS_STAGING_PHONE_WEB_TEST_PROMPT.md`](./MAC_AGENT_AWS_STAGING_PHONE_WEB_TEST_PROMPT.md) — **npm builds only, no Docker prune/restart**.
 - Report **disk before/after** in your session report (`df -h /` one line each).
 
 ## PROMPT END
@@ -76,6 +79,7 @@ docker system df 2>/dev/null || true
 | Prompt | Why |
 |--------|-----|
 | [`MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md`](./MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md) | API `docker build` + web `npm run build` |
+| [`MAC_AGENT_AWS_STAGING_PHONE_WEB_TEST_PROMPT.md`](./MAC_AGENT_AWS_STAGING_PHONE_WEB_TEST_PROMPT.md) | Phone reinstall + web verify — **no Docker** |
 | [`MAC_AGENT_DOCKER_STAGING_PROMPT.md`](./MAC_AGENT_DOCKER_STAGING_PROMPT.md) | Full local Docker staging standup |
 | [`MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md`](./MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md) | Fresh Postgres volume standup |
 | [`CLAUDE_CODE_AWS_HANDOFF.md`](./CLAUDE_CODE_AWS_HANDOFF.md) | ECS deploy workflow (step 0) |
