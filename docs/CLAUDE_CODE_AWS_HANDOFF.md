@@ -121,6 +121,29 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 
 **Or:** Settings → Notifications → **Public frontend URL** → `https://www.strata-ngo.com` → Save → re-send invite.
 
+### Public link audit (all link types)
+
+Single config source: **`NotificationSettings.FrontendBaseUrl`** (DB) with fallback **`Email:FrontendBaseUrl`** (ECS env / appsettings). PR #311 patches stale `staging.strata-ngo.com` on API startup and in runtime resolution.
+
+| Link type | URL pattern | Built where | Delivery | Fixed by |
+|-----------|-------------|-------------|----------|----------|
+| User invite email | `/reset-password?token=…&invite=true` | `UsersController` | Email | Server PR #311 |
+| Password reset email | `/reset-password?token=…` | `AuthController` | Email | Server PR #311 |
+| Customer signature email | `/sign/{tokenId}` | `SignatureTokensController` | Email | Server PR #311 |
+| Installer signature email | `/sign/{tokenId}` | `SignatureTokensController` | Email | Server PR #311 |
+| Report share email (preview) | `/share/reports/{shareId}` | `AssetReportSharesController` | Email | Server PR #311 |
+| Report share email (ZIP) | `api.staging.strata-ngo.com/api/asset-report-shares/…/download` | `AssetReportSharesController` | Email | **OK** — API URL is correct |
+| Workflow completion email | `/projects/{id}/installations` | `NotificationService` | Email | Server PR #311 |
+| Scheduled project report email | `/projects/{id}` | `ProjectScheduledReportWorker` | Email | Server PR #311 |
+| Phone upload QR (workflow photos) | `/mobile-upload?token=…` | `QRUploadButton`, `PhotoUploadDialog` | QR on screen | Frontend `publicFrontendBase.ts` + server settings |
+| Phone upload QR (documents/tips) | `/mobile-upload?token=…` | `QRUploadButton` | QR on screen | Frontend `publicFrontendBase.ts` |
+| Copy signature link (no email) | `/sign/{tokenId}` | `RequestCustomerSignatureDialog`, `WorkflowRunHistoryDialog` | Copy/paste UI | Frontend `publicFrontendBase.ts` |
+| Settings → Notifications field | (stored value) | Admin UI | Config | DB patch + manual save |
+
+**Not affected:** In-app routes, API download URLs, push notification payloads (no web deep links today), SMS (no URLs).
+
+**Frontend QR/copy links** use `resolvePublicFrontendBaseUrl()`: when browsing **`https://www.strata-ngo.com`**, links now use that origin immediately (no deploy wait). Deprecated hosts `staging.strata-ngo.com` and `api.*` are never used for QR codes.
+
 ---
 
 ## Deployment success criteria (mandatory)

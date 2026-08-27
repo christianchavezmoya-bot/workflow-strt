@@ -33,8 +33,7 @@ import { useEffect, useRef, useState } from "react";
 import { QRCodeSVG } from "qrcode.react";
 import { assetWorkflowRunService } from "../../services/assetWorkflowRunService";
 import { mediaStore } from "../../services/mediaStore";
-import { settingsService } from "../../services/settingsService";
-import { getFallbackPublicFrontendBaseUrl } from "../../services/publicFrontendBase";
+import { getFallbackPublicFrontendBaseUrl, resolvePublicFrontendBaseUrl } from "../../services/publicFrontendBase";
 import { randomId } from "../../utils/randomId";
 import api from "../../services/api";
 import { isMobileNativePlatform } from "../../utils/platform";
@@ -405,30 +404,9 @@ export default function PhotoUploadDialog({
 
   useEffect(() => {
     if (!open || isPM || !isWebBrowser) return;
-    const frontendPort = window.location.port || (window.location.protocol === "https:" ? "443" : "80");
-
-    settingsService
-      .getRuntimeFrontendBase(frontendPort)
-      .then((runtime) => {
-        const runtimeBase = (runtime.frontendBaseUrl || "").trim().replace(/\/+$/, "");
-        if (runtimeBase) {
-          setPublicFrontendBaseUrl(runtimeBase);
-          return;
-        }
-        return settingsService.getPublicAppSettings().then((settings) => {
-          setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
-        });
-      })
-      .catch(() => {
-        settingsService
-          .getPublicAppSettings()
-          .then((settings) => {
-            setPublicFrontendBaseUrl((settings.frontendBaseUrl || "").trim().replace(/\/+$/, ""));
-          })
-          .catch(() => {
-            setPublicFrontendBaseUrl(getFallbackPublicFrontendBaseUrl());
-          });
-      });
+    void resolvePublicFrontendBaseUrl()
+      .then((base) => setPublicFrontendBaseUrl(base))
+      .catch(() => setPublicFrontendBaseUrl(getFallbackPublicFrontendBaseUrl()));
   }, [open, isPM, isWebBrowser]);
 
   useEffect(() => {

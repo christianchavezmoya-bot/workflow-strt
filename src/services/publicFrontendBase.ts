@@ -23,8 +23,36 @@ function isPrivateIpv4Host(hostname: string): boolean {
   return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
 }
 
+/** Origin of the page the user is on — used for QR/copy links when browsing the live web app. */
+function getBrowserPublicOrigin(): string {
+  try {
+    const { protocol, hostname, origin } = window.location;
+    if (protocol !== "https:" && protocol !== "http:") return "";
+    const host = hostname.trim().toLowerCase();
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return "";
+    if (isPrivateIpv4Host(host)) return "";
+    return trimTrailingSlash(origin);
+  } catch {
+    return "";
+  }
+}
+
+/** Hosts that must never be used as the public frontend URL for links/QR codes. */
+function isDeprecatedPublicFrontendHost(url: string): boolean {
+  try {
+    const host = new URL(url).hostname.trim().toLowerCase();
+    if (host === "staging.strata-ngo.com") return true;
+    // API subdomain is never the web app (e.g. api.staging.strata-ngo.com).
+    if (host.startsWith("api.")) return true;
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 function shouldPreferApiDerivedBase(candidateBase: string, apiDerivedBase: string): boolean {
   if (!candidateBase) return true;
+  if (isDeprecatedPublicFrontendHost(candidateBase)) return true;
 
   try {
     const candidateUrl = new URL(candidateBase);
@@ -43,6 +71,12 @@ function shouldPreferApiDerivedBase(candidateBase: string, apiDerivedBase: strin
   }
 }
 
+function isUsablePublicFrontendBase(url: string, apiDerivedBase: string): boolean {
+  if (!url) return false;
+  if (isDeprecatedPublicFrontendHost(url)) return false;
+  return !shouldPreferApiDerivedBase(url, apiDerivedBase);
+}
+
 function getApiDerivedPublicFrontendBaseUrl(): string {
   try {
     const apiUrl = new URL(getApiBaseUrl());
@@ -53,18 +87,31 @@ function getApiDerivedPublicFrontendBaseUrl(): string {
   }
 }
 
+function resolveFallbackPublicFrontendBaseUrl(): string {
+  const browserOrigin = getBrowserPublicOrigin();
+  if (browserOrigin) return browserOrigin;
+
+  const derived = getApiDerivedPublicFrontendBaseUrl();
+  if (!isDeprecatedPublicFrontendHost(derived)) return derived;
+
+  return trimTrailingSlash(window.location.origin);
+}
+
 export function getFallbackPublicFrontendBaseUrl(): string {
-  return getApiDerivedPublicFrontendBaseUrl();
+  return resolveFallbackPublicFrontendBaseUrl();
 }
 
 export async function resolvePublicFrontendBaseUrl(): Promise<string> {
+  const browserOrigin = getBrowserPublicOrigin();
+  if (browserOrigin) return browserOrigin;
+
   const frontendPort = window.location.port || (window.location.protocol === "https:" ? "443" : "5173");
   const apiDerivedBase = getApiDerivedPublicFrontendBaseUrl();
 
   try {
     const runtime = await settingsService.getRuntimeFrontendBase(frontendPort);
     const runtimeBase = trimTrailingSlash(runtime.frontendBaseUrl || "");
-    if (runtimeBase && !shouldPreferApiDerivedBase(runtimeBase, apiDerivedBase)) return runtimeBase;
+    if (isUsablePublicFrontendBase(runtimeBase, apiDerivedBase)) return runtimeBase;
   } catch {
     // Fall through to the saved public setting.
   }
@@ -72,10 +119,10 @@ export async function resolvePublicFrontendBaseUrl(): Promise<string> {
   try {
     const settings = await settingsService.getPublicAppSettings();
     const savedBase = trimTrailingSlash(settings.frontendBaseUrl || "");
-    if (savedBase && !shouldPreferApiDerivedBase(savedBase, apiDerivedBase)) return savedBase;
+    if (isUsablePublicFrontendBase(savedBase, apiDerivedBase)) return savedBase;
   } catch {
     // Fall through to the derived LAN-safe default.
   }
 
-  return apiDerivedBase;
+  return resolveFallbackPublicFrontendBaseUrl();
 }
