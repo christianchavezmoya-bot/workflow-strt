@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+> **Operating procedure:** All agents must follow [`docs/STRATA_NGO_MASTER_DEV_PROCEDURE.md`](docs/STRATA_NGO_MASTER_DEV_PROCEDURE.md) for coordination, deployment stages, location labels, version tracking, and Christian-facing communication. Use the standard response format (Section 32) in significant updates.
+
 ## What this is
 
 A field-operations app for telecom/utility project management: projects, installable assets,
