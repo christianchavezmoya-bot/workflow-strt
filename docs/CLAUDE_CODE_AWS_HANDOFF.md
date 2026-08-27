@@ -245,6 +245,7 @@ Never commit .env.*.local or secrets.
 ## Related docs
 
 - **`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`** — mandatory before any `docker build`  
+- **`docs/MAC_AGENT_AWS_STAGING_PHONE_WEB_TEST_PROMPT.md`** — iOS + Android reinstall against AWS (no local Docker)  
 - **`docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md`** — API + web rebuild with cleanup + link checks  
 - `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md`  
 - `docs/STRATA_NGO_AWS_STAGING_STEP2.md`  
