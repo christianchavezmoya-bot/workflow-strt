@@ -844,15 +844,23 @@ const Settings = () => {
             brand: String(r["brand"] || r["Brand"] || "").trim(),
             isInventory: invRaw === "true" || invRaw === "yes" || invRaw === "1",
           };
-        }).filter((r) => r.name);
-        if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column."); return; }
+        }).filter((r) => r.name && !r.name.trim().startsWith("*"));
+        if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column and at least one data row (skip the grey hint row in the template)."); return; }
         setFeatureImportRows(parsed);
       } catch {
         setFeatureImportError("Could not parse file. Use the template for correct format.");
       }
     };
+    reader.onerror = () => {
+      setFeatureImportError("Could not read the selected file. Try again.");
+    };
     reader.readAsArrayBuffer(file);
     e.target.value = "";
+    // File picker closes with focus on the Choose file button while the dialog
+    // backdrop still hides #root — blur so the page stays clickable (Chrome aria-hidden warning).
+    window.requestAnimationFrame(() => {
+      (document.activeElement as HTMLElement | null)?.blur?.();
+    });
   }
 
   async function runFeatureImport() {
@@ -3877,7 +3885,7 @@ const Settings = () => {
       </Dialog>
 
       {/* Bulk Feature Import dialog */}
-      <Dialog open={featureImportDialog} onClose={() => { if (!featureImporting) setFeatureImportDialog(false); }} maxWidth="md" fullWidth>
+      <Dialog open={featureImportDialog} onClose={() => { if (!featureImporting) setFeatureImportDialog(false); }} maxWidth="md" fullWidth disableRestoreFocus>
         <DialogTitle>Import Features from CSV / Excel</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>
