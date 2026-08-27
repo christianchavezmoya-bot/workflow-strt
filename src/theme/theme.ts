@@ -32,6 +32,14 @@ const theme = createTheme({
     borderRadius: 12
   },
   components: {
+    MuiDialog: {
+      defaultProps: {
+        // Native file pickers return focus to the triggering button while the modal
+        // backdrop still marks #root aria-hidden — Chrome blocks interaction until
+        // focus moves. Avoid restoring focus to the hidden control on close/picker return.
+        disableRestoreFocus: true,
+      },
+    },
     MuiButton: {
       styleOverrides: {
         root: {
