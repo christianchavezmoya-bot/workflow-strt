@@ -167,17 +167,24 @@ Use **`--profile strata-agent`** for all AWS CLI from Claude Code.
 
 ## End-to-end deploy workflow (Claude Code)
 
-1. Read-only repo assessment (first session — see startup prompt)  
-2. `git pull origin main`  
-3. Code change + `npm run build` / `dotnet build` as needed  
-4. `docker build -t commtrac-api:staging .`  
-5. ECR login + push `commtrac-api:staging`  
-6. Register new task definition revision (if env/config changed) OR force new deployment (image-only)  
-7. `ecs update-service --cluster default --service commtrac-api-ae2c --force-new-deployment`  
-8. Wait for stable deployment + healthy target  
-9. `curl` health endpoint  
-10. Tail CloudWatch logs  
-11. Report PASS/FAIL block to Christian → Cursor agent  
+**Before any `docker build`:** run Step 0 in [`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`](./MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md). Christian’s Mac Docker disk is often full — **always clean first**, and **repeat** if build fails with ENOSPC / no space / out of memory.
+
+**Full rebuild prompt (API + web + link checks):** [`docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md`](./MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md)
+
+1. **Docker/disk cleanup** (mandatory — see cleanup doc)  
+2. Read-only repo assessment (first session — see startup prompt)  
+3. `git pull origin main`  
+4. Code change + `npm run build` / `dotnet build` as needed  
+5. `docker build -t commtrac-api:staging .` — **only after cleanup PASS**  
+6. ECR login + push `commtrac-api:staging`  
+7. Register new task definition revision (if env/config changed) OR force new deployment (image-only)  
+8. `ecs update-service --cluster default --service commtrac-api-ae2c --force-new-deployment`  
+9. Sync ALB priority-10 rule to match rule 44990  
+10. Wait for stable deployment + healthy target  
+11. `curl` health endpoint  
+12. Tail CloudWatch logs  
+13. Rebuild/upload web `dist/` if frontend changed  
+14. Report PASS/FAIL block to Christian → Cursor agent  
 
 ---
 
@@ -202,6 +209,8 @@ Compare task definition (via MCP) to repo Dockerfile port/env expectations.
 Do NOT deploy until Christian/Cursor agent approves.
 
 Phase 2 — when approved:
+- **Docker cleanup first** if rebuilding: docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md
+- **Full AWS rebuild:** docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md
 - Health checks on ECS URL + custom domain (if DNS live)
 - iOS: docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md
 - API deploy: ECR push + ECS update + full success criteria above
@@ -235,6 +244,8 @@ Never commit .env.*.local or secrets.
 
 ## Related docs
 
+- **`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`** — mandatory before any `docker build`  
+- **`docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md`** — API + web rebuild with cleanup + link checks  
 - `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md`  
 - `docs/STRATA_NGO_AWS_STAGING_STEP2.md`  
 - `docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`  

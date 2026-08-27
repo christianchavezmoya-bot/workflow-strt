@@ -8,6 +8,8 @@
 
 **Do not commit:** `.env.staging.local`, `dist/`, signing artifacts.
 
+**Disk/Docker:** If the Mac is low on space or Docker memory is full, run **`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`** before any build in this session (especially if you also run `docker build` for API in the same session).
+
 ---
 
 ## PROMPT START
@@ -66,6 +68,8 @@ echo
 ---
 
 ## Step 1 — Staging env + native build
+
+**If disk is low:** run cleanup from `docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md` (at least `rm -rf dist node_modules/.vite`).
 
 ```bash
 cp .env.staging.strata-ngo.example .env.staging.local

@@ -65,7 +65,7 @@ Report: the **exact migration name**, the **Postgres error code** (e.g. `42804`)
 
 ### Rules
 
-- **Mac disk space:** before standup and after any failed build, run the cleanup block in [`MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md`](./MAC_AGENT_FRESH_DOCKER_STANDUP_PROMPT.md) (Step 0). Target **≥ 8 GB free** on `/`.
+- **Mac disk / Docker memory:** before standup and **before every rebuild attempt**, run the cleanup block in [`MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`](./MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md). Repeat if any build fails with ENOSPC or Docker out-of-memory. Target **≥ 8 GB free** on `/`.
 - Do **not** commit `.env.staging.local`, `.env.production.local`, or LAN IPs
 - Do **not** modify migrations, `docker-compose.staging.yml`, or `src/services/apiBase.ts` locally — report instead
 - Prefer `git pull --no-rebase` over `reset --hard` unless local commits are clearly disposable WIP
