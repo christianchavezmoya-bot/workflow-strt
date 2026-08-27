@@ -8,6 +8,8 @@
 **Claude Code (Mac)** = repo, builds, AWS MCP inspect/deploy, app polish.  
 **Christian** = relay, console when needed, iPhone testing.
 
+**Canonical procedure:** [`STRATA_NGO_MASTER_DEV_PROCEDURE.md`](./STRATA_NGO_MASTER_DEV_PROCEDURE.md) — location labels, deployment journeys, version status, decision gates, Christian response format.
+
 See also: `Strata_NGo_Claude_AWS_MCP_Setup_Handover_Record.pdf` (in repo or Mac uploads).
 
 ---
