@@ -72,6 +72,23 @@ async function loadXlsx() {
   return import("xlsx");
 }
 
+const FEATURE_VALUE_TYPE_HINT =
+  "text|number|single-select|multi-select|component|tri-state|date|rating|percentage";
+
+function parseTrackedInWorkflow(raw: string): boolean | undefined {
+  const v = raw.trim().toLowerCase();
+  if (!v) return undefined;
+  if (v === "true" || v === "yes" || v === "1" || v === "y") return true;
+  if (v === "false" || v === "no" || v === "0" || v === "n") return false;
+  return undefined;
+}
+
+function resolveProductIdByName(productName: string, products: Product[]): string | undefined {
+  const target = productName.trim().toLowerCase();
+  if (!target) return undefined;
+  return products.find((p) => p.name.trim().toLowerCase() === target)?.id;
+}
+
 // ─── Business Logo Tab ────────────────────────────────────────────────────────
 function BusinessLogoTab() {
   const confirmAction = useConfirm();
@@ -742,13 +759,13 @@ const Settings = () => {
   }, [features, featureSearch, featureFilterProduct, featureFilterInventory, featureSort]);
 
   // Bulk feature import state
-  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; isInventory?: boolean; }
+  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; product?: string; isInventory?: boolean; }
   const [featureImportDialog, setFeatureImportDialog] = useState(false);
   const [featureImportRows, setFeatureImportRows] = useState<ImportRow[]>([]);
   const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
   const [featureImportError, setFeatureImportError] = useState<string | null>(null);
   const [featureImporting, setFeatureImporting] = useState(false);
-  const [featureImportDone, setFeatureImportDone] = useState<{ created: number; skipped: number } | null>(null);
+  const [featureImportDone, setFeatureImportDone] = useState<{ created: number; skipped: number; linked: number } | null>(null);
   const featureImportFileRef = useRef<HTMLInputElement>(null);
   const [exportMenuAnchor, setExportMenuAnchor] = useState<HTMLElement | null>(null);
 
@@ -806,9 +823,9 @@ const Settings = () => {
     try {
       const XLSX = await loadXlsx();
       const ws = XLSX.utils.aoa_to_sheet([
-        ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice"],
-        ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00"],
-        ["* required", "optional", "optional (default: text)", "optional", "optional", "optional", "optional", "optional"],
+        ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice", "product", "trackedInWorkflow"],
+        ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00", "Security Camera Kit", "yes"],
+        ["* required", "optional", `optional (${FEATURE_VALUE_TYPE_HINT})`, "optional", "optional", "optional", "optional", "optional", "optional (product name)", "optional (yes/no, default: no)"],
       ]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Features");
@@ -832,7 +849,11 @@ const Settings = () => {
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
         const parsed: ImportRow[] = rows.map((r) => {
-          const invRaw = String(r["isInventory"] || r["is_inventory"] || r["inventory"] || r["Inventory"] || "").trim().toLowerCase();
+          const trackedRaw = String(
+            r["trackedInWorkflow"] || r["tracked_in_workflow"] || r["TrackedInWorkflow"] ||
+            r["isInventory"] || r["is_inventory"] || r["inventory"] || r["Inventory"] || ""
+          ).trim();
+          const tracked = parseTrackedInWorkflow(trackedRaw);
           return {
             name: String(r["name"] || r["Name"] || "").trim(),
             description: String(r["description"] || r["Description"] || "").trim(),
@@ -842,7 +863,8 @@ const Settings = () => {
             manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
             unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
             brand: String(r["brand"] || r["Brand"] || "").trim(),
-            isInventory: invRaw === "true" || invRaw === "yes" || invRaw === "1",
+            product: String(r["product"] || r["Product"] || "").trim(),
+            isInventory: tracked ?? false,
           };
         }).filter((r) => r.name && !r.name.trim().startsWith("*"));
         if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column and at least one data row (skip the grey hint row in the template)."); return; }
@@ -866,7 +888,7 @@ const Settings = () => {
   async function runFeatureImport() {
     setFeatureImporting(true);
     setFeatureImportError(null);
-    let created = 0; let skipped = 0;
+    let created = 0; let skipped = 0; let linked = 0;
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const existing = await featureService.getAll();
     const existingKeys = new Set(existing.map((f) => normalize(f.name)));
@@ -884,8 +906,12 @@ const Settings = () => {
           unitPrice: row.unitPrice ? Number(row.unitPrice) : undefined,
           brand: row.brand || undefined,
         });
-        if (featureImportProduct) {
-          await featureService.linkToProduct(featureImportProduct, created_.id);
+        const productId = row.product
+          ? resolveProductIdByName(row.product, products)
+          : featureImportProduct || undefined;
+        if (productId) {
+          await featureService.linkToProduct(productId, created_.id);
+          linked++;
         }
         existingKeys.add(normalize(row.name));
         created++;
@@ -893,7 +919,7 @@ const Settings = () => {
     }
     await loadFeatures();
     setFeatureImporting(false);
-    setFeatureImportDone({ created, skipped });
+    setFeatureImportDone({ created, skipped, linked });
   }
 
   async function loadFeatures() {
@@ -2528,9 +2554,9 @@ const Settings = () => {
                   value={featureFilterInventory}
                   onChange={(e) => setFeatureFilterInventory(e.target.value as "all" | "inventory" | "non-inventory")}
                 >
-                  <MenuItem value="all">All types</MenuItem>
-                  <MenuItem value="inventory">Inventory only</MenuItem>
-                  <MenuItem value="non-inventory">Non-inventory only</MenuItem>
+                  <MenuItem value="all">All features</MenuItem>
+                  <MenuItem value="inventory">Tracked in workflow: Yes</MenuItem>
+                  <MenuItem value="non-inventory">Tracked in workflow: No</MenuItem>
                 </Select>
               </FormControl>
               {(featureSearch || featureFilterProduct !== "all" || featureFilterInventory !== "all") && (
@@ -2577,7 +2603,7 @@ const Settings = () => {
                       { key: "name",                   label: "Name" },
                       { key: "valueType",              label: "Type" },
                       { key: "alternativePartNumber",  label: "Business Part #" },
-                      { key: "isInventory",            label: "Inventory" },
+                      { key: "isInventory",            label: "Tracked in workflow" },
                       { key: "brand",                  label: "Brand" },
                       { key: "supplier",               label: "Supplier" },
                       { key: "manufacturerPartNumber", label: "Mfr. Part #" },
@@ -2636,7 +2662,7 @@ const Settings = () => {
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.alternativePartNumber || "—"}</Typography></TableCell>
                           <TableCell>
                             <Chip size="small"
-                              label={f.isInventory ? "Inventory" : "Non-inventory"}
+                              label={f.isInventory ? "Yes" : "No"}
                               color={f.isInventory ? "primary" : "default"}
                               variant={f.isInventory ? "filled" : "outlined"}
                             />
@@ -2696,7 +2722,7 @@ const Settings = () => {
                                       <Stack spacing={0.25}>
                                         <Stack direction="row" spacing={1} alignItems="center">
                                           <Typography variant="body2" fontWeight={500}>{dep.name}</Typography>
-                                          <Chip size="small" label={dep.isInventory ? "Inventory" : "Non-inventory"}
+                                          <Chip size="small" label={dep.isInventory ? "Yes" : "No"}
                                             color={dep.isInventory ? "primary" : "default"} variant="outlined" />
                                         </Stack>
                                         <Typography variant="caption" color="text.secondary">
@@ -3791,7 +3817,7 @@ const Settings = () => {
                           />
                           <ListItemText
                             primary={f.name}
-                            secondary={`${f.valueType}${f.isInventory ? " · inventory" : ""}`}
+                            secondary={`${f.valueType}${f.isInventory ? " · tracked in workflow" : ""}`}
                             primaryTypographyProps={{ variant: "body2" }}
                             secondaryTypographyProps={{ variant: "caption" }}
                           />
@@ -3894,7 +3920,7 @@ const Settings = () => {
                 Download template
               </Button>
               <Typography variant="caption" color="text.secondary">
-                Columns: name, description, valueType, supplier, partNumber, unitPrice, brand
+                Columns: name*, description, valueType, brand, supplier, partNumber, manufacturerPartNumber, unitPrice, product, trackedInWorkflow (yes/no)
               </Typography>
             </Stack>
 
@@ -3914,7 +3940,7 @@ const Settings = () => {
               <>
                 <FormControl size="small" fullWidth>
                   <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ mb: 0.5 }}>
-                    Link all imported features to product (optional)
+                    Default product for rows without a product column (optional)
                   </Typography>
                   <Select
                     value={featureImportProduct}
@@ -3927,11 +3953,13 @@ const Settings = () => {
                 </FormControl>
 
                 <TableContainer sx={{ overflowX: "auto", maxHeight: 300 }}>
-                  <Table size="small" stickyHeader sx={{ minWidth: 600 }}>
+                  <Table size="small" stickyHeader sx={{ minWidth: 760 }}>
                     <TableHead>
                       <TableRow>
                         <TableCell>Name</TableCell>
                         <TableCell>Type</TableCell>
+                        <TableCell>Tracked</TableCell>
+                        <TableCell>Product</TableCell>
                         <TableCell>Supplier</TableCell>
                         <TableCell>Part #</TableCell>
                         <TableCell>Mfr. Part #</TableCell>
@@ -3943,6 +3971,8 @@ const Settings = () => {
                         <TableRow key={i}>
                           <TableCell><Typography variant="body2" fontWeight={600}>{r.name}</Typography>{r.description && <Typography variant="caption" color="text.secondary" display="block">{r.description}</Typography>}</TableCell>
                           <TableCell><Chip size="small" label={r.valueType} variant="outlined" /></TableCell>
+                          <TableCell>{r.isInventory ? "Yes" : "No"}</TableCell>
+                          <TableCell>{r.product || (featureImportProduct ? (products.find((p) => p.id === featureImportProduct)?.name ?? "—") : "—")}</TableCell>
                           <TableCell>{r.supplier || "—"}</TableCell>
                           <TableCell>{r.partNumber || "—"}</TableCell>
                           <TableCell>{r.manufacturerPartNumber || "—"}</TableCell>
@@ -3959,7 +3989,7 @@ const Settings = () => {
               <Alert severity="success">
                 Done — {featureImportDone.created} feature{featureImportDone.created !== 1 ? "s" : ""} created
                 {featureImportDone.skipped > 0 ? `, ${featureImportDone.skipped} skipped (already exist)` : ""}.
-                {featureImportProduct && " All linked to selected product."}
+                {featureImportDone.linked > 0 ? ` ${featureImportDone.linked} linked to product${featureImportDone.linked !== 1 ? "s" : ""}.` : ""}
               </Alert>
             )}
           </Stack>
@@ -4003,7 +4033,7 @@ const Settings = () => {
                     <Stack spacing={0.25}>
                       <Stack direction="row" spacing={1} alignItems="center">
                         <Typography variant="body2" fontWeight={500}>{dep.name}</Typography>
-                        <Chip size="small" label={dep.isInventory ? "Inventory" : "Non-inventory"}
+                        <Chip size="small" label={dep.isInventory ? "Yes" : "No"}
                           color={dep.isInventory ? "primary" : "default"} variant="outlined" />
                       </Stack>
                       <Typography variant="caption" color="text.secondary">
@@ -4059,19 +4089,19 @@ const Settings = () => {
                   ))}
                 </Select>
               </FormControl>
-              {/* Inventory toggle */}
+              {/* Tracked-in-workflow toggle (stored as isInventory) */}
               <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography variant="body2">This feature is:</Typography>
+                <Typography variant="body2">Tracked in workflow:</Typography>
                 <Chip
                   size="small"
-                  label="Non-inventory"
+                  label="No"
                   variant={!featureForm.isInventory ? "filled" : "outlined"}
                   color={!featureForm.isInventory ? "primary" : "default"}
                   onClick={() => setFeatureForm((p) => ({ ...p, isInventory: false, captureFields: [] }))}
                 />
                 <Chip
                   size="small"
-                  label="Inventory item"
+                  label="Yes"
                   variant={featureForm.isInventory ? "filled" : "outlined"}
                   color={featureForm.isInventory ? "primary" : "default"}
                   onClick={() => setFeatureForm((p) => ({ ...p, isInventory: true }))}
@@ -4282,17 +4312,17 @@ const Settings = () => {
               InputLabelProps={{ shrink: true }}
             />
             <Stack direction="row" alignItems="center" spacing={1}>
-              <Typography variant="body2">Type:</Typography>
+              <Typography variant="body2">Tracked in workflow:</Typography>
               <Chip
                 size="small"
-                label="Non-inventory"
+                label="No"
                 variant={!depForm.isInventory ? "filled" : "outlined"}
                 color={!depForm.isInventory ? "primary" : "default"}
                 onClick={() => setDepForm((p) => ({ ...p, isInventory: false }))}
               />
               <Chip
                 size="small"
-                label="Inventory"
+                label="Yes"
                 variant={depForm.isInventory ? "filled" : "outlined"}
                 color={depForm.isInventory ? "primary" : "default"}
                 onClick={() => setDepForm((p) => ({ ...p, isInventory: true }))}
