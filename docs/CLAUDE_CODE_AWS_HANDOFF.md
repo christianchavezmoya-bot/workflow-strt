@@ -101,9 +101,48 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
 - **Jwt__Key length** — if login returns 500 at token creation, update Secrets Manager key to ≥32 chars and force new ECS deployment (startup will now fail fast with a clear error instead of 500 on login).
 - **Native first-login perf** — iPhone login works against staging but dashboard was slow/errors before paint (request storm). PR defers push registration, bell inbox refresh, and duplicate catalog prefetch until first-login bootstrap completes. **Rebuild iOS app after merge** to pick up the fix.
-- **Web staging** at `staging.strata-ngo.com` (S3/CloudFront)
+- **Web staging** at **`https://www.strata-ngo.com`** (S3/CloudFront) — `staging.strata-ngo.com` was never deployed; do not use it in email links
+- **Invite email links** — must use `Email__FrontendBaseUrl=https://www.strata-ngo.com` on ECS **and** DB `NotificationSettings.FrontendBaseUrl` aligned (auto-patched on API startup after PR merge + redeploy)
 - **iPhone build** against `https://api.staging.strata-ngo.com/api`
 - **APNs/FCM** push on server
+
+### Invite / password-reset email links (2026-08-27)
+
+**Symptom:** Invite email links point to `https://staging.strata-ngo.com/reset-password?...` — Safari cannot open (host not deployed).
+
+**Root cause:** DB `NotificationSettings` row still has `FrontendBaseUrl = https://staging.strata-ngo.com` from early seed; env var alone does not override a non-empty DB value.
+
+**Fix (after PR merge):**
+1. Ensure ECS task env includes `Email__FrontendBaseUrl=https://www.strata-ngo.com` and `Cors__AllowedOrigins__0=https://www.strata-ngo.com`
+2. Build + push new API image + force ECS redeploy — startup patch updates DB automatically
+3. Re-send invite from **Settings → Users** (or use workaround below)
+
+**Immediate workaround (no deploy):** Edit the link in the email — replace `staging.strata-ngo.com` with `www.strata-ngo.com` (token still valid for 24h).
+
+**Or:** Settings → Notifications → **Public frontend URL** → `https://www.strata-ngo.com` → Save → re-send invite.
+
+### Public link audit (all link types)
+
+Single config source: **`NotificationSettings.FrontendBaseUrl`** (DB) with fallback **`Email:FrontendBaseUrl`** (ECS env / appsettings). PR #311 patches stale `staging.strata-ngo.com` on API startup and in runtime resolution.
+
+| Link type | URL pattern | Built where | Delivery | Fixed by |
+|-----------|-------------|-------------|----------|----------|
+| User invite email | `/reset-password?token=…&invite=true` | `UsersController` | Email | Server PR #311 |
+| Password reset email | `/reset-password?token=…` | `AuthController` | Email | Server PR #311 |
+| Customer signature email | `/sign/{tokenId}` | `SignatureTokensController` | Email | Server PR #311 |
+| Installer signature email | `/sign/{tokenId}` | `SignatureTokensController` | Email | Server PR #311 |
+| Report share email (preview) | `/share/reports/{shareId}` | `AssetReportSharesController` | Email | Server PR #311 |
+| Report share email (ZIP) | `api.staging.strata-ngo.com/api/asset-report-shares/…/download` | `AssetReportSharesController` | Email | **OK** — API URL is correct |
+| Workflow completion email | `/projects/{id}/installations` | `NotificationService` | Email | Server PR #311 |
+| Scheduled project report email | `/projects/{id}` | `ProjectScheduledReportWorker` | Email | Server PR #311 |
+| Phone upload QR (workflow photos) | `/mobile-upload?token=…` | `QRUploadButton`, `PhotoUploadDialog` | QR on screen | Frontend `publicFrontendBase.ts` + server settings |
+| Phone upload QR (documents/tips) | `/mobile-upload?token=…` | `QRUploadButton` | QR on screen | Frontend `publicFrontendBase.ts` |
+| Copy signature link (no email) | `/sign/{tokenId}` | `RequestCustomerSignatureDialog`, `WorkflowRunHistoryDialog` | Copy/paste UI | Frontend `publicFrontendBase.ts` |
+| Settings → Notifications field | (stored value) | Admin UI | Config | DB patch + manual save |
+
+**Not affected:** In-app routes, API download URLs, push notification payloads (no web deep links today), SMS (no URLs).
+
+**Frontend QR/copy links** use `resolvePublicFrontendBaseUrl()`: when browsing **`https://www.strata-ngo.com`**, links now use that origin immediately (no deploy wait). Deprecated hosts `staging.strata-ngo.com` and `api.*` are never used for QR codes.
 
 ---
 
@@ -128,17 +167,24 @@ Use **`--profile strata-agent`** for all AWS CLI from Claude Code.
 
 ## End-to-end deploy workflow (Claude Code)
 
-1. Read-only repo assessment (first session — see startup prompt)  
-2. `git pull origin main`  
-3. Code change + `npm run build` / `dotnet build` as needed  
-4. `docker build -t commtrac-api:staging .`  
-5. ECR login + push `commtrac-api:staging`  
-6. Register new task definition revision (if env/config changed) OR force new deployment (image-only)  
-7. `ecs update-service --cluster default --service commtrac-api-ae2c --force-new-deployment`  
-8. Wait for stable deployment + healthy target  
-9. `curl` health endpoint  
-10. Tail CloudWatch logs  
-11. Report PASS/FAIL block to Christian → Cursor agent  
+**Before any `docker build`:** run Step 0 in [`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`](./MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md). Christian’s Mac Docker disk is often full — **always clean first**, and **repeat** if build fails with ENOSPC / no space / out of memory.
+
+**Full rebuild prompt (API + web + link checks):** [`docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md`](./MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md)
+
+1. **Docker/disk cleanup** (mandatory — see cleanup doc)  
+2. Read-only repo assessment (first session — see startup prompt)  
+3. `git pull origin main`  
+4. Code change + `npm run build` / `dotnet build` as needed  
+5. `docker build -t commtrac-api:staging .` — **only after cleanup PASS**  
+6. ECR login + push `commtrac-api:staging`  
+7. Register new task definition revision (if env/config changed) OR force new deployment (image-only)  
+8. `ecs update-service --cluster default --service commtrac-api-ae2c --force-new-deployment`  
+9. Sync ALB priority-10 rule to match rule 44990  
+10. Wait for stable deployment + healthy target  
+11. `curl` health endpoint  
+12. Tail CloudWatch logs  
+13. Rebuild/upload web `dist/` if frontend changed  
+14. Report PASS/FAIL block to Christian → Cursor agent  
 
 ---
 
@@ -163,6 +209,8 @@ Compare task definition (via MCP) to repo Dockerfile port/env expectations.
 Do NOT deploy until Christian/Cursor agent approves.
 
 Phase 2 — when approved:
+- **Docker cleanup first** if rebuilding: docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md
+- **Full AWS rebuild:** docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md
 - Health checks on ECS URL + custom domain (if DNS live)
 - iOS: docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md
 - API deploy: ECR push + ECS update + full success criteria above
@@ -196,6 +244,8 @@ Never commit .env.*.local or secrets.
 
 ## Related docs
 
+- **`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`** — mandatory before any `docker build`  
+- **`docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md`** — API + web rebuild with cleanup + link checks  
 - `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md`  
 - `docs/STRATA_NGO_AWS_STAGING_STEP2.md`  
 - `docs/CLOUD_HOSTING_AWS_DEPLOY_RUNBOOK.md`  
