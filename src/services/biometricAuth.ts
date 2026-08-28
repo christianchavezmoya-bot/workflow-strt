@@ -28,7 +28,7 @@ export function isOfflineGraceValid(): boolean {
 }
 
 export type BiometricCheckResult =
-  | "not-native"       // running in browser — skip gate
+  | "biometric-skipped" // native build with VITE_SKIP_BIOMETRIC — skip Face ID/PIN gate
   | "no-session"       // no token in keychain — show Login
   | "grace-expired"    // >24 hours since last online login — force re-login
   | "biometric-needed" // session valid, show Face ID gate
@@ -163,7 +163,7 @@ export async function getLaunchAuthModeAsync(): Promise<BiometricCheckResult> {
     if (isAuthTokenExpired(token)) return "no-session";
     return "session-unlocked";
   }
-  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
+  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "biometric-skipped";
 
   const token = secureGet("auth_token");
   if (!token) return "no-session";
@@ -198,7 +198,7 @@ export function getLaunchAuthMode(): BiometricCheckResult {
     if (isAuthTokenExpired(token)) return "no-session";
     return "session-unlocked";
   }
-  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "not-native";
+  if (import.meta.env.VITE_SKIP_BIOMETRIC === "true") return "biometric-skipped";
 
   const token = secureGet("auth_token");
   if (!token) return "no-session";

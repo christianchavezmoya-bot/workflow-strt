@@ -1,5 +1,6 @@
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { OfflineMediaRef } from "./offlineStore";
+import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
 import { MediaMissingError } from "./mediaErrors";
@@ -58,15 +59,7 @@ function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 async function ensureRoot(): Promise<void> {
-  try {
-    await Filesystem.mkdir({
-      path: MEDIA_ROOT,
-      directory: Directory.Data,
-      recursive: true,
-    });
-  } catch {
-    // Directory already exists or is unsupported; ignore.
-  }
+  await ensureNativeDataDir(MEDIA_ROOT);
 }
 
 async function writeMedia(

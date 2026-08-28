@@ -234,7 +234,7 @@ const App = () => {
     return <Login />;
   }
 
-  if (authState === "session-unlocked" || authState === "not-native") {
+  if (authState === "session-unlocked" || authState === "biometric-skipped") {
     return <AppRoutes />;
   }
 
