@@ -82,4 +82,37 @@ describe("myJobsCardChipFromDisplayState", () => {
     expect(displayState.action?.label).toBe("Add Missing Photos");
     expect(displayState.gates.missingMediaCount).toBe(2);
   });
+
+  it("prefers an active in-progress run over a stale locked run and summary", () => {
+    const displayState = getWorkflowDisplayState(
+      asset({
+        status: "InProgress",
+        workflowSummary: {
+          hasWorkflow: true,
+          evidenceStatus: "MissingData",
+          requiredItems: 3,
+          completedItems: 1,
+          missingItems: 2,
+          latestRunLocked: true,
+          hasOpenIssues: false,
+        },
+      }),
+      [
+        {
+          id: "run-new",
+          assetId: "asset-1",
+          status: "InProgress",
+          isLocked: false,
+          signatureStatus: "None",
+          startedAt: "2026-08-04T00:00:00.000Z",
+          stepResultsJson: "[]",
+          issuesJson: "[]",
+        } as AssetWorkflowRun,
+        lockedRun({ id: "run-old", startedAt: "2026-08-03T00:00:00.000Z" }),
+      ],
+      { hasRunnableWorkflowSource: true },
+    );
+    expect(displayState.status.label).toBe("In Progress");
+    expect(displayState.action?.kind).toBe("continue");
+  });
 });

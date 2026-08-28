@@ -674,7 +674,6 @@ function invalidateWebRunMutationCaches(
   invalidateWebRunDetailCaches(runId, assetId);
   if (scope === "asset") {
     invalidateWebCache(`/project-assets/${assetId}`);
-    invalidateWebProjectAssetsListCaches();
   }
 }
 

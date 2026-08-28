@@ -19,7 +19,6 @@
 import type { ProjectAsset, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import { runHasCaptureBlobs } from "../types/assetWorkflowRunSummary";
-import { pickCaptureRun } from "./captureSpreadsheet";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "./workflowCompleteness";
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -209,7 +208,10 @@ export function getWorkflowDisplayState(
   opts: DisplayStateOptions
 ): WorkflowDisplayState {
   const sorted = sortRuns(runs);
-  const latestRun = pickCaptureRun(sorted) ?? sorted[0] ?? null;
+  const activeRun = sorted.find(
+    (r) => !r.isLocked && (r.status === "InProgress" || r.status === "Paused" || r.status === "Issue"),
+  ) ?? null;
+  const latestRun = activeRun ?? sorted[0] ?? null;
   const latestLockedRun = sorted.find((r) => r.isLocked) ?? null;
 
   const summary = asset.workflowSummary;
@@ -220,14 +222,17 @@ export function getWorkflowDisplayState(
   let missingMediaCount = runMissingFromBlobs;
 
   // Web Project Assets loads slim run-summary placeholders (no step JSON).
-  // Prefer the server-computed workflowSummary on the asset DTO when present.
-  if (latestRun && !hasRunBlobs && summary?.hasWorkflow) {
+  // Prefer server workflowSummary only when no active run is in flight — otherwise
+  // a stale summary from a prior locked run masks the new in-progress run.
+  const summaryRun = latestLockedRun ?? latestRun;
+  const summaryHasBlobs = summaryRun ? runHasCaptureBlobs(summaryRun) : false;
+  if (!activeRun && summaryRun && !summaryHasBlobs && summary?.hasWorkflow) {
     const summaryMissing = summary.missingItems ?? 0;
     const summaryEvidenceMissing = summary.evidenceStatus === "MissingData";
     if (summaryEvidenceMissing || summaryMissing > 0) {
       allStepsDone = true;
       missingMediaCount = Math.max(summaryMissing, summaryEvidenceMissing ? 1 : 0);
-    } else if (latestRun.isLocked || summary.latestRunLocked) {
+    } else if (summaryRun.isLocked || summary.latestRunLocked) {
       allStepsDone = true;
       missingMediaCount = 0;
     }
@@ -276,7 +281,7 @@ export function getWorkflowDisplayState(
   // R2: when the raw status is "Issue", display it as In Progress (the red
   // widget carries the issue signal).
   const statusKey = asset.status;
-  const status = effectiveMissing > 0 || summary?.evidenceStatus === "MissingData"
+  const status = effectiveMissing > 0
     ? {
         key: statusKey,
         label: "Missing",
