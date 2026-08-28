@@ -225,9 +225,11 @@ export async function secureRemove(key: string): Promise<void> {
   }).catch(() => {});
 }
 
-/** Wipe all auth keys — call on logout. */
 export async function secureClearAuth(): Promise<void> {
   await Promise.all(SECURE_KEYS.map((key) => secureRemove(key)));
+  try {
+    window.dispatchEvent(new Event("sse:disconnect"));
+  } catch { /* non-browser */ }
 }
 
 /** True when initSecureStorage() has finished populating the cache. */

@@ -4,6 +4,8 @@ public record LoginRequest(string Email, string Password, string? TrustedDeviceT
 
 public record LoginResponse(string? Token, UserDto? User, bool IsFirstLogin, bool Requires2fa = false, string? TwoFactorToken = null, string? TrustedDeviceToken = null, bool PasswordExpired = false);
 
+public record SseTicketResponse(string Ticket, int ExpiresInSeconds);
+
 public record ForgotPasswordRequest(string Email);
 
 public record ResetPasswordRequest(string Token, string NewPassword);
