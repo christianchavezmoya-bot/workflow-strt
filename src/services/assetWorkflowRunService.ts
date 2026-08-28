@@ -654,6 +654,14 @@ function invalidateWebRunDetailCaches(runId: string, assetId?: string): void {
   }
 }
 
+/** Drop list + run-summary caches consumed by the Project Assets web page. */
+export function invalidateWebProjectAssetsListCaches(): void {
+  invalidateWebCacheByPrefix("/project-assets/");
+  invalidateWebCacheByPrefix("/asset-workflow-runs/by-project/");
+  invalidateWebCacheByPrefix("/asset-workflow-runs/by-projects/");
+  invalidateWebCacheByPrefix("/asset-workflow-runs/by-asset/");
+}
+
 /**
  * Surgical web cache invalidation after a run mutation.
  * Replaces blanket prefix wipes that forced project-wide refetches.
@@ -666,6 +674,7 @@ function invalidateWebRunMutationCaches(
   invalidateWebRunDetailCaches(runId, assetId);
   if (scope === "asset") {
     invalidateWebCache(`/project-assets/${assetId}`);
+    invalidateWebProjectAssetsListCaches();
   }
 }
 

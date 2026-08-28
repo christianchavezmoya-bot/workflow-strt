@@ -55,4 +55,31 @@ describe("myJobsCardChipFromDisplayState", () => {
     expect(chip.label).toBe("Pending sign");
     expect(chip.color).toBe("info");
   });
+
+  it("shows Add Missing Photos from server workflowSummary when run blobs are placeholders", () => {
+    const displayState = getWorkflowDisplayState(
+      asset({
+        status: "Pending",
+        workflowSummary: {
+          hasWorkflow: true,
+          evidenceStatus: "MissingData",
+          requiredItems: 3,
+          completedItems: 1,
+          missingItems: 2,
+          latestRunLocked: true,
+          hasOpenIssues: false,
+        },
+      }),
+      [lockedRun({
+        signatureStatus: "PendingInstaller",
+        customerSignedAt: undefined,
+        stepResultsJson: "[]",
+        workflowSnapshotJson: "{}",
+      })],
+      { hasRunnableWorkflowSource: true },
+    );
+    expect(displayState.action?.kind).toBe("add-missing-photos");
+    expect(displayState.action?.label).toBe("Add Missing Photos");
+    expect(displayState.gates.missingMediaCount).toBe(2);
+  });
 });

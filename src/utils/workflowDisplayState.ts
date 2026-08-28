@@ -18,6 +18,7 @@
 
 import type { ProjectAsset, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
+import { runHasCaptureBlobs } from "../types/assetWorkflowRunSummary";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "./workflowCompleteness";
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -210,8 +211,27 @@ export function getWorkflowDisplayState(
   const latestRun = sorted[0] ?? null;
   const latestLockedRun = sorted.find((r) => r.isLocked) ?? null;
 
-  const allStepsDone = Boolean(latestRun && runHasCompletedAllSteps(latestRun));
-  const missingMediaCount = latestRun ? countMissingWorkflowItems(latestRun) : 0;
+  const summary = asset.workflowSummary;
+  const runMissingFromBlobs = latestRun ? countMissingWorkflowItems(latestRun) : 0;
+  const hasRunBlobs = latestRun ? runHasCaptureBlobs(latestRun) : false;
+
+  let allStepsDone = Boolean(latestRun && runHasCompletedAllSteps(latestRun));
+  let missingMediaCount = runMissingFromBlobs;
+
+  // Web Project Assets loads slim run-summary placeholders (no step JSON).
+  // Prefer the server-computed workflowSummary on the asset DTO when present.
+  if (latestRun && !hasRunBlobs && summary?.hasWorkflow) {
+    const summaryMissing = summary.missingItems ?? 0;
+    const summaryEvidenceMissing = summary.evidenceStatus === "MissingData";
+    if (summaryEvidenceMissing || summaryMissing > 0) {
+      allStepsDone = true;
+      missingMediaCount = Math.max(summaryMissing, summaryEvidenceMissing ? 1 : 0);
+    } else if (latestRun.isLocked || summary.latestRunLocked) {
+      allStepsDone = true;
+      missingMediaCount = 0;
+    }
+  }
+
   // Missing media only counts as an actionable/visible gap once all steps done.
   const effectiveMissing = allStepsDone ? missingMediaCount : 0;
 
@@ -327,6 +347,12 @@ function computeAction(i: ActionInput): WorkflowDisplayState["action"] {
   if (i.awaitingCustomerSig) {
     return { kind: "customer-sign", label: "Customer Sign-off", tooltip: "Capture the customer signature", color: "warning" };
   }
+
+  // Missing required media blocks installer sign-off — surface photo recovery first (R3).
+  if (i.allStepsDone && i.missingMediaCount > 0) {
+    return { kind: "add-missing-photos", label: "Add Missing Photos", tooltip: "Capture the missing photo evidence", color: "warning" };
+  }
+
   if (i.awaitingInstallerSig) {
     return { kind: "installer-sign", label: "Installer Sign-off", tooltip: "Capture the installer signature", color: "warning" };
   }
@@ -343,11 +369,8 @@ function computeAction(i: ActionInput): WorkflowDisplayState["action"] {
     return { kind: "no-workflow", label: "no workflow", tooltip: "Assign a workflow to this asset first", color: "inherit" };
   }
 
-  // 3. Steps complete, pre-sign-off gates (R3 priority: photos first, then blocking).
+  // 3. Steps complete, pre-sign-off gates (R3 priority: blocking issues after photos).
   if (i.allStepsDone) {
-    if (i.missingMediaCount > 0) {
-      return { kind: "add-missing-photos", label: "Add Missing Photos", tooltip: "Capture the missing photo evidence", color: "warning" };
-    }
     if (i.blockingIssueCount > 0) {
       const label = i.blockingIssueCount === 1 ? "Resolve Blocking Issue" : `Resolve ${i.blockingIssueCount} Blocking Issues`;
       return { kind: "resolve-blocking", label, tooltip: "Resolve the blocking issue(s) before sign-off", color: "error" };

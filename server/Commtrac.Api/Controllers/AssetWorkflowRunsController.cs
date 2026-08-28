@@ -1246,6 +1246,8 @@ public class AssetWorkflowRunsController : ControllerBase
                 notifyInstaller: true,
                 runId: run.Id);
         }
+        if (asset is not null)
+            await BroadcastAssetUpdatedAsync(asset.Id);
         return Ok(ToDto(run));
     }
 

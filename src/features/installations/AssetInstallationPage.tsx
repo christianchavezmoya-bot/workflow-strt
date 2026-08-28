@@ -60,7 +60,7 @@ import { productConfigService, type ProductConfig } from "../../services/product
 import { workflowTemplateService } from "../../services/workflowTemplateService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
-import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun, isPendingCustomerSignature, isPendingInstallerSignature } from "../../services/assetWorkflowRunService";
+import { assetWorkflowRunService, deriveOfflineAssetStatusFromRun, invalidateWebProjectAssetsListCaches, isPendingCustomerSignature, isPendingInstallerSignature } from "../../services/assetWorkflowRunService";
 import { RunHydrationPriority } from "../../services/runHydrationQueue";
 import { signatureService } from "../../services/signatureService";
 import { workflowTypeService } from "../../services/workflowTypeService";
@@ -295,6 +295,7 @@ const AssetInstallationPage = () => {
   const docCountLoadIdRef = useRef(0);
   const lastRefreshTsRef = useRef(0);
   const isRefreshingRef = useRef(false);   // in-flight guard — prevents concurrent refreshAssets calls
+  const assetsRefreshPendingRef = useRef(false); // follow-up refresh queued while one is in flight
   const [allProjectsExplicit, setAllProjectsExplicit] = useState(() => {
     try {
       return sessionStorage.getItem(INSTALLATIONS_ALL_PROJECTS_SESSION_KEY) === "1";
@@ -1279,10 +1280,26 @@ const AssetInstallationPage = () => {
   }, [assetsKey]);
 
   const refreshAssets = useCallback(async () => {
-    // Collapse concurrent calls — only one refresh runs at a time.
-    if (isRefreshingRef.current) return;
+    // Collapse concurrent calls — queue one follow-up instead of dropping it.
+    if (isRefreshingRef.current) {
+      assetsRefreshPendingRef.current = true;
+      return;
+    }
     isRefreshingRef.current = true;
+
+    const finishRefreshCycle = () => {
+      isRefreshingRef.current = false;
+      if (assetsRefreshPendingRef.current) {
+        assetsRefreshPendingRef.current = false;
+        void refreshAssets();
+      }
+    };
+
     try {
+      if (!isNativePlatform) {
+        invalidateWebProjectAssetsListCaches();
+      }
+
       // Phase F — Tier 1 (local): show what we already have instantly so the
       // page is responsive while the network refresh is in flight. The
       // local-first service call returns from IndexedDB without touching
@@ -1349,9 +1366,7 @@ const AssetInstallationPage = () => {
             fetchRemote: () => projectAssetService.listByProduct(p.id, archiveMode),
           }));
 
-      // Fire the runs fetch off the LOCAL asset list so it starts
-      // immediately with projectIds from local — the runs service is
-      // itself local-first internally, so warm caches return instantly.
+      // Fire the runs fetch — on web, fall back to visible assets when local is empty.
       const localForRuns = localPromise;
       const remoteAssetsPromise = Promise.all(
         remoteScopes.map((s) =>
@@ -1361,9 +1376,15 @@ const AssetInstallationPage = () => {
         ),
       );
       const runsPromise = localForRuns.then((localAssets) => {
+        const visibleProjectIds = isNativePlatform
+          ? []
+          : [...new Set(assetsRef.current.map((asset) => asset.projectId).filter(Boolean))];
         const projectIds = selectedProjectId
           ? [selectedProjectId]
-          : [...new Set(localAssets.map((asset) => asset.projectId).filter(Boolean))];
+          : [...new Set([
+            ...localAssets.map((asset) => asset.projectId).filter(Boolean),
+            ...visibleProjectIds,
+          ])];
         if (isNativePlatform) {
           const hydrateDetails = projectIds.length === 1;
           return Promise.all(
@@ -1376,98 +1397,89 @@ const AssetInstallationPage = () => {
         return assetWorkflowRunService.listRunSummariesByProjects(projectIds);
       });
 
-      // Apply Tier 1 (local) to the UI immediately.
+      // Apply Tier 1 (local) to the UI immediately — native only, or web when local is warm.
       const a = await localPromise;
-      setAssets(a);
-      lastRefreshTsRef.current = Date.now();
-      setLastFetchedAt(new Date());
-      if (activeProduct?.id) {
-        setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+      if (isNativePlatform || a.length > 0) {
+        setAssets(a);
+        lastRefreshTsRef.current = Date.now();
+        setLastFetchedAt(new Date());
+        if (activeProduct?.id) {
+          setHealthMap((prev) => ({ ...prev, [activeProduct.id]: computeHealth(a) }));
+        }
       }
 
-      // Release the concurrency guard as soon as Tier 1 has applied — the
-      // remaining Tier 2 work is fire-and-forget, so a follow-up pull-to-
-      // refresh or mutation should be able to trigger another refresh
-      // without piling up behind a slow server call.
-      isRefreshingRef.current = false;
-
-      // Tier 2: replace each scope's slice with fresh server data as it
-      // arrives (each scope is independent, so the slowest one decides
-      // when the page is fully consistent, but the UI is responsive
-      // throughout).
-      remoteAssetsPromise
-        .then((results) => {
-          setAssets((prev) => {
-            let next = prev;
-            for (const r of results) {
-              if (r.assets.length === 0) continue;
-              const others = next.filter((a2) =>
-                r.scope.scopeKind === "project"
-                  ? a2.projectId !== r.scope.scopeId
-                  : a2.productId !== r.scope.scopeId,
-              );
-              next = [...others, ...r.assets];
-            }
-            if (activeProduct?.id) {
-              setHealthMap((hmPrev) => ({ ...hmPrev, [activeProduct.id]: computeHealth(next) }));
-            }
-            return next;
-          });
-          setLastFetchedAt(new Date());
-        })
-        .catch(() => {/* non-blocking */});
-
-      // Re-load runs so signature chips stay current — fire-and-forget, non-blocking.
-      void runsPromise
-        .then((runs) => {
-          const runMap: Record<string, AssetWorkflowRun[]> = {};
-          runs.forEach((run) => {
-            if (!runMap[run.assetId]) runMap[run.assetId] = [];
-            runMap[run.assetId].push(run);
-          });
-          setRunsMap((prev) => {
-            const merged = { ...runMap };
-            Object.keys(prev).forEach((id) => {
-              const prevRuns = prev[id];
-              if (!prevRuns?.length) return;
-              const freshRuns = merged[id] ?? [];
-              const freshById = new Map(freshRuns.map((r) => [r.id, r]));
-              // Merge by id, keeping whichever copy has the latest updatedAt.
-              // Never discard fresher server signature status because an asset
-              // had multiple cached runs (the old `prevRuns.length > 1` bail-out).
-              const combinedIds = new Set([
-                ...prevRuns.map((r) => r.id),
-                ...freshRuns.map((r) => r.id),
-              ]);
-              const mergedRuns: AssetWorkflowRun[] = [];
-              combinedIds.forEach((runId) => {
-                const localRun = prevRuns.find((r) => r.id === runId);
-                const freshRun = freshById.get(runId);
-                const localDirty = (localRun as AssetWorkflowRun & { dirty?: boolean })?.dirty === true;
-                if (localDirty && localRun) {
-                  mergedRuns.push(localRun);
-                  return;
-                }
-                if (localRun && freshRun) {
-                  const localTs = new Date(localRun.updatedAt).getTime();
-                  const freshTs = new Date(freshRun.updatedAt).getTime();
-                  mergedRuns.push(freshTs >= localTs ? freshRun : localRun);
-                } else {
-                  mergedRuns.push(freshRun ?? localRun!);
-                }
-              });
-              mergedRuns.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
-              merged[id] = mergedRuns;
+      // Tier 2 + runs: replace slices with fresh server data and merge run state.
+      await Promise.all([
+        remoteAssetsPromise
+          .then((results) => {
+            setAssets((prev) => {
+              let next = prev;
+              for (const r of results) {
+                if (r.assets.length === 0) continue;
+                const others = next.filter((a2) =>
+                  r.scope.scopeKind === "project"
+                    ? a2.projectId !== r.scope.scopeId
+                    : a2.productId !== r.scope.scopeId,
+                );
+                next = [...others, ...r.assets];
+              }
+              if (activeProduct?.id) {
+                setHealthMap((hmPrev) => ({ ...hmPrev, [activeProduct.id]: computeHealth(next) }));
+              }
+              return next;
             });
-            return merged;
-          });
-        })
-        .catch(() => {/* non-blocking */});
+            setLastFetchedAt(new Date());
+          })
+          .catch(() => {/* non-blocking */}),
+        runsPromise
+          .then((runs) => {
+            const runMap: Record<string, AssetWorkflowRun[]> = {};
+            runs.forEach((run) => {
+              if (!runMap[run.assetId]) runMap[run.assetId] = [];
+              runMap[run.assetId].push(run);
+            });
+            setRunsMap((prev) => {
+              const merged = { ...runMap };
+              Object.keys(prev).forEach((id) => {
+                const prevRuns = prev[id];
+                if (!prevRuns?.length) return;
+                const freshRuns = merged[id] ?? [];
+                const freshById = new Map(freshRuns.map((r) => [r.id, r]));
+                const combinedIds = new Set([
+                  ...prevRuns.map((r) => r.id),
+                  ...freshRuns.map((r) => r.id),
+                ]);
+                const mergedRuns: AssetWorkflowRun[] = [];
+                combinedIds.forEach((runId) => {
+                  const localRun = prevRuns.find((r) => r.id === runId);
+                  const freshRun = freshById.get(runId);
+                  const localDirty = (localRun as AssetWorkflowRun & { dirty?: boolean })?.dirty === true;
+                  if (localDirty && localRun) {
+                    mergedRuns.push(localRun);
+                    return;
+                  }
+                  if (localRun && freshRun) {
+                    const localTs = new Date(localRun.updatedAt).getTime();
+                    const freshTs = new Date(freshRun.updatedAt).getTime();
+                    mergedRuns.push(freshTs >= localTs ? freshRun : localRun);
+                  } else {
+                    mergedRuns.push(freshRun ?? localRun!);
+                  }
+                });
+                mergedRuns.sort((a, b) => new Date(b.startedAt).getTime() - new Date(a.startedAt).getTime());
+                merged[id] = mergedRuns;
+              });
+              return merged;
+            });
+          })
+          .catch(() => {/* non-blocking */}),
+      ]);
     } catch {
       // Defensive — release the guard on any unexpected error.
-      isRefreshingRef.current = false;
+    } finally {
+      finishRefreshCycle();
     }
-  }, [selectedProjectId, archiveMode, productsKey, activeProduct?.id, paginatedWebProject]);
+  }, [selectedProjectId, archiveMode, productsKey, activeProduct?.id, paginatedWebProject, isNativePlatform]);
 
   // Fix 1 — Listen for background refresh event from AssetRepository.
   // IMPORTANT: must read from local IndexedDB only here — calling refreshAssets() would
@@ -1614,6 +1626,53 @@ const AssetInstallationPage = () => {
     window.addEventListener("sse:assets:updated", handler as EventListener);
     return () => window.removeEventListener("sse:assets:updated", handler as EventListener);
   }, [isNativePlatform, products, scheduleRefreshAssets, selectedProjectId]);
+
+  // Web live refresh — run-state and asset mutations (network refresh, not IndexedDB).
+  useEffect(() => {
+    if (isNativePlatform) return;
+
+    const onRunStateChanged = () => {
+      scheduleRefreshAssets();
+    };
+
+    const onRepoAssetsUpdated = (e: Event) => {
+      const detail = (e as CustomEvent<{ productId?: string; projectId?: string; assetId?: string }>).detail ?? {};
+      const productIds = new Set(products.map((p) => p.id));
+      if (
+        (detail.productId && productIds.has(detail.productId)) ||
+        (detail.projectId && detail.projectId === selectedProjectId) ||
+        (!detail.productId && !detail.projectId) ||
+        (detail.assetId && assetsRef.current.some((a) => a.id === detail.assetId))
+      ) {
+        scheduleRefreshAssets();
+      }
+    };
+
+    window.addEventListener("notifications:run-state-changed", onRunStateChanged);
+    window.addEventListener("repo:assets:updated", onRepoAssetsUpdated as EventListener);
+    return () => {
+      window.removeEventListener("notifications:run-state-changed", onRunStateChanged);
+      window.removeEventListener("repo:assets:updated", onRepoAssetsUpdated as EventListener);
+    };
+  }, [isNativePlatform, products, scheduleRefreshAssets, selectedProjectId]);
+
+  // Web: refresh when the tab regains focus (e.g. phone synced while browser stayed open).
+  useEffect(() => {
+    if (isNativePlatform) return;
+    let focusTimer: number | null = null;
+    const onFocus = () => {
+      if (focusTimer !== null) window.clearTimeout(focusTimer);
+      focusTimer = window.setTimeout(() => {
+        focusTimer = null;
+        scheduleRefreshAssets();
+      }, 1500);
+    };
+    window.addEventListener("focus", onFocus);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      if (focusTimer !== null) window.clearTimeout(focusTimer);
+    };
+  }, [isNativePlatform, scheduleRefreshAssets]);
 
   useEffect(() => {
     const handler = (e: Event) => {
