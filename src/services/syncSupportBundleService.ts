@@ -71,13 +71,13 @@ export function sanitizeUrl(url: string | undefined): string {
   if (!url) return "";
   try {
     const parsed = new URL(url, "http://local.invalid");
-    for (const key of ["token", "access_token", "refresh_token", "auth"]) {
+    for (const key of ["token", "ticket", "access_token", "refresh_token", "auth"]) {
       parsed.searchParams.delete(key);
     }
     const path = parsed.pathname + parsed.search;
     return path.startsWith("//") ? path.slice(1) : path.replace(/^http:\/\/local\.invalid/, "") || url;
   } catch {
-    return url.replace(/([?&])(token|access_token|refresh_token)=[^&]*/gi, "$1redacted=1");
+    return url.replace(/([?&])(token|ticket|access_token|refresh_token)=[^&]*/gi, "$1redacted=1");
   }
 }
 

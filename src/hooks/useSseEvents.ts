@@ -9,12 +9,16 @@
  *
  * The hook is safe to mount at the app-shell level. It:
  *   - Does nothing if no auth token is present (not logged in)
+ *   - Mints a short-lived opaque SSE ticket (POST /api/sse/ticket) before each connect
  *   - Reconnects automatically after any error (with exponential backoff, max 30 s)
  *   - Stops reconnecting while offline, resumes when online
+ *   - Stops reconnecting on 401 (logged out / revoked session)
  *   - Cleans up on unmount
  */
 
 import { useEffect, useRef } from "react";
+import axios from "axios";
+import api from "../services/api";
 import { secureGet } from "../services/secureStorage";
 import { getApiBaseUrl } from "../services/apiBase";
 import { invalidateWebCacheByPrefix } from "../services/webFreshCache";
@@ -40,12 +44,23 @@ function currentUserId(): string | null {
   }
 }
 
+function ticketRetryDelayMs(retryAfterHeader: string | undefined, retryCount: number): number {
+  if (retryAfterHeader) {
+    const parsed = Number.parseInt(retryAfterHeader, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return parsed * 1000;
+    }
+  }
+  return Math.min(BASE_RETRY_MS * 2 ** retryCount, MAX_RETRY_MS);
+}
+
 export function useSseEvents() {
   const esRef        = useRef<EventSource | null>(null);
   const retryRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefetchRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryCount   = useRef(0);
   const activeRef    = useRef(true);
+  const connectGen   = useRef(0);
 
   useEffect(() => {
     activeRef.current = true;
@@ -89,22 +104,60 @@ export function useSseEvents() {
       esRef.current = null;
     };
 
-    const connect = () => {
+    const scheduleReconnect = (delayMs: number) => {
+      if (!activeRef.current) return;
+      clearRetry();
+      retryRef.current = setTimeout(() => {
+        retryRef.current = null;
+        void connect();
+      }, delayMs);
+    };
+
+    const connect = async () => {
       if (!activeRef.current) return;
 
       const token = secureGet("auth_token");
-      if (!token || token === "local") return; // not logged in
+      if (!token || token === "local") return;
 
-      close(); // close any previous connection before opening a new one
+      close();
+
+      const generation = ++connectGen.current;
+
+      let ticket: string;
+      try {
+        const res = await api.post<{ ticket: string; expiresInSeconds: number }>("/sse/ticket");
+        ticket = res.data.ticket;
+      } catch (err) {
+        if (!activeRef.current || generation !== connectGen.current) return;
+
+        if (axios.isAxiosError(err)) {
+          const status = err.response?.status;
+          if (status === 401) return;
+
+          if (status === 429) {
+            const delay = ticketRetryDelayMs(err.response?.headers["retry-after"] as string | undefined, retryCount.current);
+            retryCount.current += 1;
+            scheduleReconnect(delay);
+            return;
+          }
+        }
+
+        const delay = Math.min(BASE_RETRY_MS * 2 ** retryCount.current, MAX_RETRY_MS);
+        retryCount.current += 1;
+        scheduleReconnect(delay);
+        return;
+      }
+
+      if (!activeRef.current || generation !== connectGen.current) return;
 
       const base = getApiBaseUrl().replace(/\/api$/i, "");
-      const url  = `${base}/api/sse/events?token=${encodeURIComponent(token)}`;
+      const url  = `${base}/api/sse/events?ticket=${encodeURIComponent(ticket)}`;
 
       const es = new EventSource(url);
       esRef.current = es;
 
       es.addEventListener("connected", () => {
-        retryCount.current = 0; // successful connection — reset backoff
+        retryCount.current = 0;
       });
 
       es.addEventListener("assets:updated", (e: MessageEvent) => {
@@ -153,7 +206,6 @@ export function useSseEvents() {
         } catch { /* malformed JSON — ignore */ }
       });
 
-      // heartbeat — no action needed, just keeps the socket alive
       es.addEventListener("heartbeat", () => {});
 
       es.onerror = () => {
@@ -161,10 +213,9 @@ export function useSseEvents() {
         esRef.current = null;
         if (!activeRef.current) return;
 
-        // Exponential backoff: 3 s → 6 s → 12 s → … → 30 s
         const delay = Math.min(BASE_RETRY_MS * 2 ** retryCount.current, MAX_RETRY_MS);
         retryCount.current += 1;
-        retryRef.current = setTimeout(connect, delay);
+        scheduleReconnect(delay);
       };
     };
 
@@ -183,27 +234,32 @@ export function useSseEvents() {
 
     window.addEventListener("repo:assets:updated", onRepoAssetsUpdated as EventListener);
 
-    // Pause reconnects while offline or backgrounded; resume when active again
     const handleOffline = () => clearRetry();
     const handleOnline  = () => {
       retryCount.current = 0;
-      connect();
+      void connect();
     };
     const handleBackground = () => close();
     const handleForeground = () => {
       retryCount.current = 0;
-      connect();
+      void connect();
+    };
+    const handleDisconnect = () => {
+      connectGen.current += 1;
+      close();
     };
 
     window.addEventListener("offline", handleOffline);
     window.addEventListener("online",  handleOnline);
     window.addEventListener("app-backgrounded", handleBackground);
     window.addEventListener("app-foregrounded", handleForeground);
+    window.addEventListener("sse:disconnect", handleDisconnect);
 
-    connect();
+    void connect();
 
     return () => {
       activeRef.current = false;
+      connectGen.current += 1;
       clearPrefetchDebounce();
       close();
       window.removeEventListener("repo:assets:updated", onRepoAssetsUpdated as EventListener);
@@ -211,6 +267,7 @@ export function useSseEvents() {
       window.removeEventListener("online",  handleOnline);
       window.removeEventListener("app-backgrounded", handleBackground);
       window.removeEventListener("app-foregrounded", handleForeground);
+      window.removeEventListener("sse:disconnect", handleDisconnect);
     };
-  }, []); // mount once — token and URL are read on every connect() call
+  }, []);
 }

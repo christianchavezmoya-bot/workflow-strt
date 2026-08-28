@@ -6,6 +6,10 @@ describe("sanitizeUrl", () => {
     expect(sanitizeUrl("/api/sse/events?token=secret&foo=bar")).toBe("/api/sse/events?foo=bar");
   });
 
+  it("removes ticket query params", () => {
+    expect(sanitizeUrl("/api/sse/events?ticket=opaque-value&foo=bar")).toBe("/api/sse/events?foo=bar");
+  });
+
   it("preserves path-only URLs", () => {
     expect(sanitizeUrl("/api/project-assets/abc")).toBe("/api/project-assets/abc");
   });

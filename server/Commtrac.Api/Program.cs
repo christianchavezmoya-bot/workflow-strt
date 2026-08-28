@@ -99,6 +99,7 @@ builder.Services.AddScoped<PaperCompletionService>();
 builder.Services.AddScoped<WorkflowCompletenessService>();
 builder.Services.AddScoped<RolePermissionService>();
 builder.Services.AddSingleton<SseHub>();
+builder.Services.AddSingleton<SseTicketStore>();
 builder.Services.AddSingleton<SqliteBackupService>();
 if (!string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase))
 {
