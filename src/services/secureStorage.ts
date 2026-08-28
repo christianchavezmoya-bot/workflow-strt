@@ -23,6 +23,7 @@ type SecureStoragePluginHandle = {
     get(options: { key: string }): Promise<{ value: string | null }>;
     set(options: { key: string; value: string }): Promise<unknown>;
     remove(options: { key: string }): Promise<unknown>;
+    keys(): Promise<{ value: string[] }>;
   };
 };
 
@@ -37,6 +38,13 @@ const SECURE_KEYS = [
   "just_authenticated",    // flag to skip biometric on fresh login (cleared after app opens)
 ] as const;
 
+/** Keys whose values must never appear in logs (JWT, hashes, device tokens). */
+const SECRET_VALUE_KEYS = new Set<string>([
+  "auth_token",
+  "trusted_device_token",
+  "app_pin_hash",
+]);
+
 // In-memory cache — always up-to-date, populated by initSecureStorage()
 const cache = new Map<string, string | null>();
 
@@ -44,6 +52,14 @@ let _initDone = false;
 let _initPromise: Promise<void> | null = null;
 
 const KEYCHAIN_READ_TIMEOUT_MS = 2_000;
+
+function logSecureKeyAction(key: string, action: string): void {
+  if (SECRET_VALUE_KEYS.has(key)) {
+    console.log(`[SecureStorage] ${action} (secret key)`);
+    return;
+  }
+  console.log(`[SecureStorage] ${action} ${key}`);
+}
 
 // Lazy-load the plugin so it doesn't break on web where the native layer is absent
 async function getPlugin(): Promise<SecureStoragePluginHandle | null> {
@@ -88,6 +104,22 @@ async function readKeychainValue(
   }
 }
 
+async function readExistingKeychainKeys(
+  plugin: SecureStoragePluginHandle["plugin"],
+): Promise<Set<string>> {
+  try {
+    const result = await Promise.race([
+      plugin.keys(),
+      new Promise<{ value: string[] }>((resolve) =>
+        setTimeout(() => resolve({ value: [] }), KEYCHAIN_READ_TIMEOUT_MS)
+      ),
+    ]);
+    return new Set(result.value ?? []);
+  } catch {
+    return new Set();
+  }
+}
+
 /**
  * Call once before the app renders (in App.tsx).
  * On native: loads Keychain first (authoritative), then mirrors to localStorage.
@@ -115,21 +147,25 @@ export async function initSecureStorage(): Promise<void> {
 
     if (plugin) {
       console.log("[SecureStorage] Loading secure keys from Keychain...");
+      const existingKeys = await readExistingKeychainKeys(plugin);
       for (const key of SECURE_KEYS) {
-        const keychainValue = await readKeychainValue(plugin, key);
-        if (keychainValue !== null) {
-          cache.set(key, keychainValue);
-          try { localStorage.setItem(key, keychainValue); } catch { /* ignore */ }
-          console.log(`[SecureStorage] Loaded ${key} from Keychain`);
-          continue;
+        if (existingKeys.has(key)) {
+          const keychainValue = await readKeychainValue(plugin, key);
+          if (keychainValue !== null) {
+            cache.set(key, keychainValue);
+            try { localStorage.setItem(key, keychainValue); } catch { /* ignore */ }
+            logSecureKeyAction(key, "Loaded from Keychain");
+            continue;
+          }
         }
+
         const localValue = readLocalStorage(key);
         cache.set(key, localValue);
         if (localValue !== null) {
           // One-time migration: push legacy localStorage values into Keychain.
           try {
             await plugin.set({ key, value: localValue });
-            console.log(`[SecureStorage] Migrated ${key} from localStorage → Keychain`);
+            logSecureKeyAction(key, "Migrated from localStorage → Keychain");
           } catch (e) {
             console.warn(`[SecureStorage] Keychain migration failed for ${key}:`, e);
           }
@@ -167,7 +203,7 @@ export async function secureSet(key: string, value: string): Promise<void> {
     if (!plugin) return;
     try {
       await plugin.set({ key, value });
-      console.log(`[SecureStorage] Saved ${key} to Keychain`);
+      logSecureKeyAction(key, "Saved to Keychain");
     } catch (e) {
       console.warn(`[SecureStorage] Keychain save failed for ${key}:`, e);
     }

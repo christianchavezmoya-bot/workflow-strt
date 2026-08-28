@@ -2,6 +2,7 @@ import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import type { MediaItem, Workflow } from "../types/workflow";
 import { configMediaGet, configMediaGetByConfig, configMediaPut } from "./localDB";
+import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { getApiBaseUrl } from "./apiBase";
 
@@ -91,15 +92,7 @@ async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<
 }
 
 async function ensureDir(configId: string): Promise<void> {
-  try {
-    await Filesystem.mkdir({
-      path: `${CONFIG_MEDIA_ROOT}/${configId}`,
-      directory: Directory.Data,
-      recursive: true,
-    });
-  } catch {
-    // Already exists — ignore.
-  }
+  await ensureNativeDataDir(`${CONFIG_MEDIA_ROOT}/${configId}`);
 }
 
 function blobToBase64(blob: Blob): Promise<{ base64: string; mime: string }> {
