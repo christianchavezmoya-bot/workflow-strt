@@ -19,6 +19,7 @@
 import type { ProjectAsset, ProjectAssetStatus, AssetIssue } from "../types/projectAsset";
 import type { AssetWorkflowRun, RunIssue } from "../types/assetWorkflowRun";
 import { runHasCaptureBlobs } from "../types/assetWorkflowRunSummary";
+import { pickCaptureRun } from "./captureSpreadsheet";
 import { countMissingWorkflowItems, runHasCompletedAllSteps } from "./workflowCompleteness";
 
 // ── Public types ────────────────────────────────────────────────────────────
@@ -208,7 +209,7 @@ export function getWorkflowDisplayState(
   opts: DisplayStateOptions
 ): WorkflowDisplayState {
   const sorted = sortRuns(runs);
-  const latestRun = sorted[0] ?? null;
+  const latestRun = pickCaptureRun(sorted) ?? sorted[0] ?? null;
   const latestLockedRun = sorted.find((r) => r.isLocked) ?? null;
 
   const summary = asset.workflowSummary;
@@ -275,11 +276,17 @@ export function getWorkflowDisplayState(
   // R2: when the raw status is "Issue", display it as In Progress (the red
   // widget carries the issue signal).
   const statusKey = asset.status;
-  const status = {
-    key: statusKey,
-    label: STATUS_LABELS[statusKey],
-    color: STATUS_COLORS[statusKey],
-  };
+  const status = effectiveMissing > 0 || summary?.evidenceStatus === "MissingData"
+    ? {
+        key: statusKey,
+        label: "Missing",
+        color: "error" as ChipColor,
+      }
+    : {
+        key: statusKey,
+        label: STATUS_LABELS[statusKey],
+        color: STATUS_COLORS[statusKey],
+      };
 
   // ── Action (simplified cascade; first match wins) ─────────────────────────
   const action = computeAction({
