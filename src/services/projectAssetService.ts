@@ -561,6 +561,20 @@ export const projectAssetService = {
     }
   },
 
+  /** Web: bypass cached asset row and fetch latest workflowSummary + status. */
+  async refreshFromServer(id: string): Promise<ProjectAsset | null> {
+    if (!isMobileNativePlatform()) {
+      invalidateWebCache(`/project-assets/${id}`);
+      try {
+        const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+        return fromDto(res.data);
+      } catch {
+        return null;
+      }
+    }
+    return this.getById(id);
+  },
+
   async update(id: string, patch: Partial<CreateProjectAssetInput> & { status?: string; workOrderId?: string }): Promise<ProjectAsset> {
     if (!isMobileNativePlatform()) {
       const res = await api.put<ProjectAsset>(`/project-assets/${id}`, patch);
