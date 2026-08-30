@@ -42,6 +42,25 @@ describe("staleAssetIds", () => {
     expect(isKnownMissingAssetId("ghost-2")).toBe(true);
   });
 
+  it("persists the reversal so a reappeared asset stays un-blocked across restart", async () => {
+    markKnownMissingAssetId("ghost-1");
+    await new Promise((r) => setTimeout(r, 0));
+    vi.mocked(offlineStore.saveCache).mockClear();
+
+    reconcileKnownMissingAssetIds(["ghost-1"]);
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(offlineStore.saveCache).toHaveBeenCalledWith("stale-missing-asset-ids", []);
+
+    // Simulate a fresh app restart: reset in-memory state, then hydrate from
+    // whatever was actually persisted — the reversal must survive it.
+    resetKnownMissingAssetIdsForTests();
+    vi.mocked(offlineStore.getCache).mockResolvedValue([]);
+    await hydrateKnownMissingAssetIds();
+
+    expect(isKnownMissingAssetId("ghost-1")).toBe(false);
+  });
+
   it("persists missing ids to offlineStore on native", async () => {
     markKnownMissingAssetId("ghost-1");
     await new Promise((r) => setTimeout(r, 0));

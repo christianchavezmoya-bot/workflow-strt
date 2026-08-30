@@ -6,6 +6,10 @@ vi.mock("../utils/platform", () => ({
 
 vi.mock("../services/localDB", () => ({
   entityDeleteAsset: vi.fn().mockResolvedValue(undefined),
+  entityGetAsset: vi.fn().mockResolvedValue(null),
+  entityGetWorkflowRunsByAsset: vi.fn().mockResolvedValue([]),
+  pendingGetAll: vi.fn().mockResolvedValue([]),
+  pendingMarkConflict: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock("../services/offlineStore", () => ({
