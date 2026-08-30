@@ -142,4 +142,68 @@ describe("getWorkflowDisplayState slim-run + summary fallback", () => {
     expect(displayState.status.label).toBe("In Progress");
     expect(displayState.action?.kind).toBe("continue");
   });
+
+  it("shows Add Missing Photos from summary when the only run is an unlocked slim placeholder", () => {
+    const displayState = getWorkflowDisplayState(
+      asset({
+        status: "InProgress",
+        workflowSummary: {
+          hasWorkflow: true,
+          evidenceStatus: "MissingData",
+          requiredItems: 3,
+          completedItems: 3,
+          missingItems: 2,
+          latestRunLocked: false,
+          hasOpenIssues: false,
+        },
+      }),
+      [slimRun()],
+      { hasRunnableWorkflowSource: true },
+    );
+    expect(displayState.action?.kind).toBe("add-missing-photos");
+    expect(displayState.gates.missingMediaCount).toBe(2);
+  });
+
+  it("shows Resolve Blocking Issue from summary when the only run is an unlocked slim placeholder", () => {
+    const displayState = getWorkflowDisplayState(
+      asset({
+        status: "InProgress",
+        workflowSummary: {
+          hasWorkflow: true,
+          evidenceStatus: "Complete",
+          requiredItems: 3,
+          completedItems: 3,
+          missingItems: 0,
+          latestRunLocked: false,
+          hasOpenIssues: true,
+        },
+      }),
+      [slimRun()],
+      { hasRunnableWorkflowSource: true },
+    );
+    expect(displayState.action?.kind).toBe("resolve-blocking");
+    expect(displayState.gates.blockingIssueCount).toBe(1);
+  });
+
+  it("prefers Add Missing Photos over Resolve Blocking Issue when both apply (action cascade)", () => {
+    const displayState = getWorkflowDisplayState(
+      asset({
+        status: "InProgress",
+        workflowSummary: {
+          hasWorkflow: true,
+          evidenceStatus: "MissingData",
+          requiredItems: 3,
+          completedItems: 3,
+          missingItems: 1,
+          latestRunLocked: false,
+          hasOpenIssues: true,
+        },
+      }),
+      [slimRun()],
+      { hasRunnableWorkflowSource: true },
+    );
+    expect(displayState.action?.kind).toBe("add-missing-photos");
+    expect(displayState.gates.missingMediaCount).toBe(1);
+    expect(displayState.gates.blockingIssueCount).toBe(1);
+  });
 });
