@@ -13,6 +13,7 @@ import {
   BiometricCheckResult,
 } from "../services/biometricAuth";
 import { initSecureStorage, secureGet, secureRemove } from "../services/secureStorage";
+import { hydrateKnownMissingAssetIds } from "../utils/staleAssetIds";
 import BiometricLockScreen from "../components/BiometricLockScreen";
 import Login from "../features/auth/Login";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -118,6 +119,7 @@ const App = () => {
       try {
         console.log("[App] Initializing secure storage...");
         await initSecureStorage();
+        await hydrateKnownMissingAssetIds();
         console.log("[App] Secure storage initialized");
 
         const mode = await getLaunchAuthModeAsync();

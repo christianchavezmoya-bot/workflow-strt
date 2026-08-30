@@ -19,6 +19,16 @@ vi.mock("./localDB", () => ({
   entityGetWorkflowRunsByAsset: vi.fn(),
 }));
 
+vi.mock("../utils/staleAssetIds", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../utils/staleAssetIds")>();
+  return {
+    ...actual,
+    hydrateKnownMissingAssetIds: vi.fn().mockResolvedValue(undefined),
+    seedKnownMissingAssetIdsForTests: actual.seedKnownMissingAssetIdsForTests,
+  };
+});
+
+import { seedKnownMissingAssetIdsForTests } from "../utils/staleAssetIds";
 import offlineStore from "./offlineStore";
 import { entityGetAllAssets, entityGetAllProjects, entityGetWorkflowRunsByAsset } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -47,6 +57,7 @@ const snapshotWorkspace: DashboardWorkspace = {
 
 describe("dashboardWorkspaceOfflineFirst", () => {
   beforeEach(() => {
+    seedKnownMissingAssetIdsForTests([]);
     vi.mocked(isMobileNativePlatform).mockReturnValue(true);
     vi.mocked(offlineStore.getCache).mockReset();
     vi.mocked(entityGetAllAssets).mockReset();
@@ -63,6 +74,23 @@ describe("dashboardWorkspaceOfflineFirst", () => {
     expect(result.currentInstalls).toHaveLength(1);
     expect(result.currentInstalls[0]?.id).toBe("new-1");
     expect(entityGetAllAssets).not.toHaveBeenCalled();
+  });
+
+  it("filters known-missing asset ids from persisted snapshot", async () => {
+    seedKnownMissingAssetIdsForTests(["ghost-1"]);
+    vi.mocked(offlineStore.getCache).mockResolvedValue({
+      currentInstalls: [
+        { ...snapshotWorkspace.currentInstalls[0]!, id: "new-1" },
+        { ...snapshotWorkspace.currentInstalls[0]!, id: "ghost-1" },
+      ],
+      currentInspections: [],
+      installHistory: [],
+      inspectionHistory: [],
+    });
+
+    const result = await projectAssetService.dashboardWorkspaceOfflineFirst("user-1");
+
+    expect(result.currentInstalls.map((r) => r.id)).toEqual(["new-1"]);
   });
 
   it("falls back to entity rebuild when snapshot is missing", async () => {

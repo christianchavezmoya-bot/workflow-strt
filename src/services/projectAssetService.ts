@@ -2,7 +2,7 @@ import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityGetWorkflowRunsByAsset, entityListAssetRecords, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityGetWorkflowRunsByAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
@@ -20,18 +20,14 @@ import { dashboardWorkspaceHasRows, dedupeDashboardWorkspaceItemsById, dashboard
 import { bucketDashboardWorkspaceItems } from "../utils/dashboardWorkspaceBucket";
 import type { PaginatedResult, ProjectAssetPageQuery } from "../types/paginatedList";
 import {
+  hydrateKnownMissingAssetIds,
   isKnownMissingAssetId,
-  markKnownMissingAssetId,
   reconcileKnownMissingAssetIds,
 } from "../utils/staleAssetIds";
+import { filterKnownMissingFromWorkspace } from "../utils/staleAssetWorkspace";
+import { purgeStaleAssetOnAuthoritative404 } from "../utils/staleAssetPurge";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
-
-/** Native: server returned 404 — drop ghost IndexedDB row and skip repeat GETs this session. */
-async function purgeStaleLocalAsset(id: string): Promise<void> {
-  markKnownMissingAssetId(id);
-  await entityDeleteAsset(id);
-}
 
 function collectWorkspaceAssetIds(workspace: DashboardWorkspace): Set<string> {
   const ids = new Set<string>();
@@ -44,24 +40,6 @@ function collectWorkspaceAssetIds(workspace: DashboardWorkspace): Set<string> {
     if (item.id) ids.add(item.id);
   }
   return ids;
-}
-
-/**
- * After a staging DB re-seed, IndexedDB can hold asset ids that no longer exist on the server.
- * Purge non-dirty locals that are absent from the fresh dashboard-workspace snapshot *before*
- * hydrate/prefetch fire background GET /project-assets/{id} (404 storm on phone debug panel).
- */
-async function purgeLocalAssetsOutsideWorkspace(workspace: DashboardWorkspace): Promise<void> {
-  if (!isMobileNativePlatform()) return;
-
-  const validIds = collectWorkspaceAssetIds(workspace);
-  reconcileKnownMissingAssetIds(validIds);
-
-  const records = await entityListAssetRecords();
-  await Promise.all(records.map(async (row) => {
-    if (!row.id || validIds.has(row.id) || row.dirty) return;
-    await purgeStaleLocalAsset(row.id);
-  }));
 }
 
 const NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS = 5_000;
@@ -590,7 +568,7 @@ export const projectAssetService = {
           })
           .catch(async (err) => {
             if (axios.isAxiosError(err) && err.response?.status === 404) {
-              await purgeStaleLocalAsset(id);
+              await purgeStaleAssetOnAuthoritative404(id);
             }
           });
       }
@@ -609,9 +587,42 @@ export const projectAssetService = {
       return asset;
     } catch (err) {
       if (axios.isAxiosError(err) && err.response?.status === 404) {
-        await purgeStaleLocalAsset(id);
+        await purgeStaleAssetOnAuthoritative404(id);
       }
       return null;
+    }
+  },
+
+  /**
+   * Native prefetch gate: one blocking GET when online so stale cached rows with productId
+   * still hit the 404 path. Network/timeout errors preserve local rows (no purge).
+   */
+  async verifyAssetExistsOnline(id: string): Promise<boolean> {
+    if (!isMobileNativePlatform()) return true;
+    if (isKnownMissingAssetId(id)) return false;
+    if (shouldSkipBlockingFetch()) {
+      const local = await entityGetAsset(id);
+      return !!local;
+    }
+    try {
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`, {
+        timeout: NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS,
+      });
+      const asset = fromDto(res.data);
+      await entityPutAsset({
+        id: asset.id,
+        productId: asset.productId,
+        projectId: asset.projectId,
+        data: asset,
+      });
+      return true;
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        await purgeStaleAssetOnAuthoritative404(id);
+        return false;
+      }
+      const local = await entityGetAsset(id);
+      return !!local;
     }
   },
 
@@ -1041,10 +1052,13 @@ export const projectAssetService = {
       };
     }
 
+    await hydrateKnownMissingAssetIds();
+
     if (userId) {
       const cached = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
       if (cached && dashboardWorkspaceHasRows(cached)) {
-        return await reconcileWorkspaceWithLocalStatus(cached);
+        const filtered = filterKnownMissingFromWorkspace(cached);
+        return await reconcileWorkspaceWithLocalStatus(filtered);
       }
     }
 
@@ -1066,7 +1080,7 @@ export const projectAssetService = {
       // no offline copy at all once dashboardCache's in-memory, restart-clearing cache is gone.
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
-        await purgeLocalAssetsOutsideWorkspace(res.data);
+        reconcileKnownMissingAssetIds(collectWorkspaceAssetIds(res.data));
         await hydrateAssetsFromWorkspaceSnapshot(res.data);
         // Light workspace is for first paint only — do not fan out per-asset
         // GETs. Full response defers enrichment so Dashboard effects and
@@ -1074,7 +1088,8 @@ export const projectAssetService = {
         if (!options?.light) {
           void import("./assetPrefetchService").then(({ prefetchAssignedAssetsFromWorkspace }) => {
             const run = () => {
-              void prefetchAssignedAssetsFromWorkspace(res.data, userId, { includeDocuments: false });
+              const filtered = filterKnownMissingFromWorkspace(res.data);
+              void prefetchAssignedAssetsFromWorkspace(filtered, userId, { includeDocuments: false });
             };
             if (typeof requestIdleCallback === "function") {
               requestIdleCallback(run, { timeout: 2000 });
