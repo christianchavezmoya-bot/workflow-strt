@@ -4,6 +4,7 @@
 
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldDeferPerAssetBackgroundRefresh } from "../utils/nativeReconnectCoordinator";
+import { isKnownMissingAssetId } from "../utils/staleAssetIds";
 import { clearServerChangeFlag } from "../utils/bootstrapFreshness";
 import { entityGetAsset } from "./localDB";
 import { assetWorkflowAssignmentService } from "./assetWorkflowAssignmentService";
@@ -64,6 +65,7 @@ async function prefetchAssetWorkflowDataInner(
   options?: PrefetchAssetOptions,
 ): Promise<void> {
   if (shouldDeferPerAssetBackgroundRefresh()) return;
+  if (isKnownMissingAssetId(assetId)) return;
   const { projectAssetService } = await import("./projectAssetService");
   const cached = await entityGetAsset(assetId);
   const cachedAsset = cached?.data as ProjectAsset | undefined;
@@ -113,7 +115,8 @@ export async function prefetchAssetIds(
   options?: PrefetchAssetOptions,
 ): Promise<void> {
   if (!isMobileNativePlatform() || assetIds.length === 0) return;
-  const unique = [...new Set(assetIds)];
+  const unique = [...new Set(assetIds)].filter((id) => !isKnownMissingAssetId(id));
+  if (unique.length === 0) return;
   await runPool(unique, PREFETCH_CONCURRENCY, async (id) => {
     await prefetchAssetWorkflowData(id, options);
   });

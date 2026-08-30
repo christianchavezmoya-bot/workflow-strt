@@ -19,8 +19,21 @@ import offlineStore from "./offlineStore";
 import { dashboardWorkspaceHasRows, dedupeDashboardWorkspaceItemsById, dashboardWorkspaceLayoutEqual } from "../utils/dashboardWorkspaceMerge";
 import { bucketDashboardWorkspaceItems } from "../utils/dashboardWorkspaceBucket";
 import type { PaginatedResult, ProjectAssetPageQuery } from "../types/paginatedList";
+import {
+  isKnownMissingAssetId,
+  markKnownMissingAssetId,
+  reconcileKnownMissingAssetIds,
+} from "../utils/staleAssetIds";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
+
+/** Native: server returned 404 — drop ghost IndexedDB row and skip repeat GETs this session. */
+async function purgeStaleLocalAsset(id: string): Promise<void> {
+  markKnownMissingAssetId(id);
+  await entityDeleteAsset(id);
+}
+
+const NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS = 5_000;
 
 function isOfflineNetworkError(error: unknown): boolean {
   return isOfflineNetworkErrorShape(error);
@@ -436,6 +449,7 @@ export const projectAssetService = {
         projectId,
         res.data.map((a) => ({ id: a.id, productId: a.productId, projectId: a.projectId, data: fromDto(a) })),
       );
+      reconcileKnownMissingAssetIds(res.data.map((a) => a.id));
       await syncMetaSet("assets");
       window.dispatchEvent(new CustomEvent("repo:assets:updated", { detail: { projectId } }));
       return res.data.map(fromDto);
@@ -516,6 +530,8 @@ export const projectAssetService = {
   },
 
   async getById(id: string): Promise<ProjectAsset | null> {
+    if (isKnownMissingAssetId(id)) return null;
+
     if (!isMobileNativePlatform()) {
       return webCachedGet(`/project-assets/${id}`, async () => {
         const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
@@ -533,7 +549,7 @@ export const projectAssetService = {
       // Matches the guard already used by workflowConfigService, userService and
       // officesService for their background refreshes.
       if (!shouldSkipBlockingFetch()) {
-        void api.get<ProjectAsset>(`/project-assets/${id}`)
+        void api.get<ProjectAsset>(`/project-assets/${id}`, { timeout: NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS })
           .then(async (res) => {
             const asset = fromDto(res.data);
             await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
@@ -541,7 +557,11 @@ export const projectAssetService = {
               detail: { assetId: asset.id, productId: asset.productId, projectId: asset.projectId },
             }));
           })
-          .catch(() => {});
+          .catch(async (err) => {
+            if (axios.isAxiosError(err) && err.response?.status === 404) {
+              await purgeStaleLocalAsset(id);
+            }
+          });
       }
       return fromDto(local.data as ProjectAsset);
     }
@@ -552,11 +572,14 @@ export const projectAssetService = {
     if (shouldSkipBlockingFetch()) return null;
 
     try {
-      const res = await api.get<ProjectAsset>(`/project-assets/${id}`);
+      const res = await api.get<ProjectAsset>(`/project-assets/${id}`, { timeout: NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS });
       const asset = fromDto(res.data);
       await entityPutAsset({ id: asset.id, productId: asset.productId, projectId: asset.projectId, data: asset });
       return asset;
-    } catch {
+    } catch (err) {
+      if (axios.isAxiosError(err) && err.response?.status === 404) {
+        await purgeStaleLocalAsset(id);
+      }
       return null;
     }
   },

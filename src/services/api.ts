@@ -456,7 +456,11 @@ api.interceptors.response.use(
       url: config.url,
       status,
       durationMs,
-      error: error?.message,
+      error: status
+        ? (status === 404 && (config.url ?? "").includes("/project-assets/")
+          ? "Not found (stale local id — purged from cache)"
+          : error?.message)
+        : error?.message,
       payloadBytes: syncMeta?.payloadBytes,
       payloadSizeFormatted: syncMeta?.payloadBytes != null
         ? formatPayloadSize(syncMeta.payloadBytes)
