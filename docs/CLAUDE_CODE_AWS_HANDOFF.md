@@ -70,7 +70,9 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 | Container | `Main` · port **80** · `ASPNETCORE_URLS=http://+:80` |
 | CPU / memory | 1024 / 2048 |
 | Execution role | `arn:aws:iam::920154935299:role/service-role/ecsTaskExecutionRole` |
-| Task role | **Required for S3 uploads** — create `commtrac-staging-ecs-s3` with `s3:GetObject/PutObject/DeleteObject/ListBucket` on `strata-ngo-media-staging`. Staging currently **missing** this role → uploads return 503 *Unable to get IAM security credentials from EC2 Instance Metadata Service*. See **`docs/ECS_S3_TASK_ROLE_FIX.md`**. |
+| Task role | `arn:aws:iam::920154935299:role/commtrac-staging-ecs-s3` — **live rev :22**; uploads PASS — **do not change** |
+| Current ECS revision | **`default-commtrac-api-ae2c:22`** |
+| GitHub `main` | **`f2fc7920`** (+ docs); baseline sync: **`docs/MAC_AGENT_BASELINE_SYNC_MAIN_PROMPT.md`** |
 | ECR | `920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging` |
 | RDS | `strata-ngo-staging` (PostgreSQL, private) |
 | S3 media | `strata-ngo-media-staging` |
