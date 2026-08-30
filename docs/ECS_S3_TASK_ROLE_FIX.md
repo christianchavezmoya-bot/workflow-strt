@@ -1,5 +1,7 @@
 # ECS S3 task role fix — staging upload blocker
 
+> **Status: RESOLVED (2026-08-30)** — IAM role `commtrac-staging-ecs-s3` live on ECS rev **:22**. Christian confirmed PASS: asset-row 3-document upload + Documents page upload. **Do not change upload/backend/S3 logic further** unless a new defect is reported.
+
 **Symptom (Christian, 2026-08-30):** Document upload, asset document attach, and Closed & Signed Assets → Save PDF all fail with:
 
 > File storage unavailable: Unable to get IAM security credentials from EC2 Instance Metadata Service.
