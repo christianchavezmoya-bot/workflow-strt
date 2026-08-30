@@ -930,6 +930,15 @@ export async function entityGetAllAssets(): Promise<unknown[]> {
   } catch { return []; }
 }
 
+/** Asset store keys for native stale-id purge (id + dirty flag only). */
+export async function entityListAssetRecords(): Promise<Array<{ id: string; dirty?: boolean }>> {
+  try {
+    const db = await getDB();
+    const records = await db.getAll("assets");
+    return records.map((r) => ({ id: r.id, dirty: r.dirty }));
+  } catch { return []; }
+}
+
 // ── Issue entity helpers ──────────────────────────────────────────────────────
 
 export async function entityPutIssue(record: { id: string; assetId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {

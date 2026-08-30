@@ -8,6 +8,8 @@ vi.mock("../utils/platform", () => ({
 vi.mock("./localDB", () => ({
   entityGetAsset: vi.fn(),
   entityPutAsset: vi.fn(),
+  entityDeleteAsset: vi.fn().mockResolvedValue(undefined),
+  entityListAssetRecords: vi.fn().mockResolvedValue([]),
   entityGetWorkflowRunsByAsset: vi.fn().mockResolvedValue([]),
   entityGetAllAssets: vi.fn().mockResolvedValue([]),
   entityGetAllProjects: vi.fn().mockResolvedValue([]),
@@ -29,7 +31,7 @@ vi.mock("./api", () => ({
   default: { get: vi.fn() },
 }));
 
-import { entityGetAsset, entityPutAsset } from "./localDB";
+import { entityDeleteAsset, entityGetAsset, entityListAssetRecords, entityPutAsset } from "./localDB";
 import { projectAssetService } from "./projectAssetService";
 
 const workspace: DashboardWorkspace = {
@@ -58,6 +60,9 @@ describe("dashboardWorkspace hydrate", () => {
   beforeEach(() => {
     vi.mocked(entityGetAsset).mockReset();
     vi.mocked(entityPutAsset).mockReset();
+    vi.mocked(entityDeleteAsset).mockReset();
+    vi.mocked(entityListAssetRecords).mockReset();
+    vi.mocked(entityListAssetRecords).mockResolvedValue([]);
   });
 
   it("hydrates existing asset entities from a successful workspace fetch", async () => {
@@ -83,6 +88,22 @@ describe("dashboardWorkspace hydrate", () => {
     const data = putCall?.data as { assetTag?: string; status?: string };
     expect(data.assetTag).toBe("NEW-001");
     expect(data.status).toBe("NotStarted");
+  });
+
+  it("purges ghost asset rows not in workspace before hydrate", async () => {
+    vi.mocked(entityListAssetRecords).mockResolvedValue([
+      { id: "ghost-asset", dirty: false },
+      { id: "asset-1", dirty: false },
+    ]);
+    vi.mocked(entityGetAsset).mockResolvedValue(null);
+
+    const api = (await import("./api")).default;
+    vi.mocked(api.get).mockResolvedValue({ data: workspace });
+
+    await projectAssetService.dashboardWorkspace("user-1");
+
+    expect(entityDeleteAsset).toHaveBeenCalledWith("ghost-asset");
+    expect(entityDeleteAsset).not.toHaveBeenCalledWith("asset-1");
   });
 
   it("does not overwrite dirty asset rows during hydrate", async () => {

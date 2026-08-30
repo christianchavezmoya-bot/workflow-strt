@@ -2,7 +2,7 @@ import axios from "axios";
 import api from "./api";
 import type { ProjectAsset, CreateProjectAssetInput, ProjectAssetStatus } from "../types/projectAsset";
 import type { Project } from "../types/project";
-import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityGetWorkflowRunsByAsset, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
+import { entityDeleteAsset, entityGetAllAssets, entityGetAllProjects, entityGetAsset, entityGetWorkflowRunsByAsset, entityListAssetRecords, entityPutAsset, entityReplaceIssuesForAsset, pendingGetAll, referenceDataGet } from "./localDB";
 import type { AssetWorkflowRun } from "../types/assetWorkflowRun";
 import type { OfflineRun } from "./offlineStore";
 import syncQueue from "./syncQueue";
@@ -31,6 +31,37 @@ const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:$
 async function purgeStaleLocalAsset(id: string): Promise<void> {
   markKnownMissingAssetId(id);
   await entityDeleteAsset(id);
+}
+
+function collectWorkspaceAssetIds(workspace: DashboardWorkspace): Set<string> {
+  const ids = new Set<string>();
+  for (const item of [
+    ...workspace.currentInstalls,
+    ...workspace.currentInspections,
+    ...workspace.installHistory,
+    ...workspace.inspectionHistory,
+  ]) {
+    if (item.id) ids.add(item.id);
+  }
+  return ids;
+}
+
+/**
+ * After a staging DB re-seed, IndexedDB can hold asset ids that no longer exist on the server.
+ * Purge non-dirty locals that are absent from the fresh dashboard-workspace snapshot *before*
+ * hydrate/prefetch fire background GET /project-assets/{id} (404 storm on phone debug panel).
+ */
+async function purgeLocalAssetsOutsideWorkspace(workspace: DashboardWorkspace): Promise<void> {
+  if (!isMobileNativePlatform()) return;
+
+  const validIds = collectWorkspaceAssetIds(workspace);
+  reconcileKnownMissingAssetIds(validIds);
+
+  const records = await entityListAssetRecords();
+  await Promise.all(records.map(async (row) => {
+    if (!row.id || validIds.has(row.id) || row.dirty) return;
+    await purgeStaleLocalAsset(row.id);
+  }));
 }
 
 const NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS = 5_000;
@@ -1035,6 +1066,7 @@ export const projectAssetService = {
       // no offline copy at all once dashboardCache's in-memory, restart-clearing cache is gone.
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
+        await purgeLocalAssetsOutsideWorkspace(res.data);
         await hydrateAssetsFromWorkspaceSnapshot(res.data);
         // Light workspace is for first paint only — do not fan out per-asset
         // GETs. Full response defers enrichment so Dashboard effects and
