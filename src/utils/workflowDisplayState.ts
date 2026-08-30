@@ -223,23 +223,38 @@ export function getWorkflowDisplayState(
 
   // Web Project Assets uses slim run-summary placeholders (no step JSON on the client).
   // Prefer server workflowSummary when present and the client run row is a placeholder.
+  //
+  // A placeholder run can still satisfy the activeRun heuristic above (unlocked,
+  // status InProgress/Paused/Issue, empty stepResultsJson/issuesJson) — Project
+  // Assets' paginated endpoint returns exactly one such row per asset. That kind
+  // of activeRun carries no more authority than having none at all, so it alone
+  // must not block the summary fallback.
+  //
+  // The one case that *does* need to win over the summary is a genuinely new run
+  // that has started since the summary was computed — detectable when the run
+  // list also contains an older, real locked run (Dashboard's fuller run history
+  // can surface both) and the active run started after it. There the summary
+  // reflects stale data about that older locked run, not the live one.
+  const activeRunSupersedesKnownLockedRun = Boolean(
+    activeRun
+    && latestLockedRun
+    && new Date(activeRun.startedAt).getTime() > new Date(latestLockedRun.startedAt).getTime()
+  );
+  const activeRunIsAuthoritative = (activeRun !== null && hasRunBlobs) || activeRunSupersedesKnownLockedRun;
+
   const summaryRun = latestLockedRun ?? latestRun;
   const summaryHasBlobs = summaryRun ? runHasCaptureBlobs(summaryRun) : false;
-  if (!activeRun && summaryRun && !summaryHasBlobs && summary?.hasWorkflow) {
+  if (!activeRunIsAuthoritative && summaryRun && !summaryHasBlobs && summary?.hasWorkflow) {
     const summaryMissing = summary.missingItems ?? 0;
     const summaryEvidenceMissing = summary.evidenceStatus === "MissingData";
+    const summaryStepsComplete = summary.evidenceStatus === "Complete"
+      || (summary.requiredItems > 0 && summary.completedItems >= summary.requiredItems);
     if (summaryEvidenceMissing || summaryMissing > 0) {
       allStepsDone = true;
       missingMediaCount = Math.max(summaryMissing, summaryEvidenceMissing ? 1 : 0);
-    } else if (summaryRun.isLocked || summary.latestRunLocked) {
+    } else if (summaryRun.isLocked || summary.latestRunLocked || summaryStepsComplete) {
       allStepsDone = true;
       missingMediaCount = 0;
-    } else if (
-      summary.latestRunLocked
-      || summaryRun.isLocked
-      || summary.evidenceStatus === "Complete"
-    ) {
-      allStepsDone = true;
     }
   }
 
