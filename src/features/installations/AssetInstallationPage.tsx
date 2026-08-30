@@ -1683,6 +1683,12 @@ const AssetInstallationPage = () => {
           setAssets((prev) => prev.map((a) => (
             a.id === assetId && a.status !== derivedStatus ? { ...a, status: derivedStatus } : a
           )));
+          if (!isNativePlatform) {
+            void projectAssetService.refreshFromServer(assetId).then((fresh) => {
+              if (!fresh) return;
+              setAssets((prev) => prev.map((a) => (a.id === assetId ? fresh : a)));
+            });
+          }
         }
       }
     };
@@ -2312,11 +2318,13 @@ const AssetInstallationPage = () => {
   async function confirmBulkDelete() {
     setBulkDeleting(true);
     const ids = Array.from(selectedAssetIds);
+    const idSet = new Set(ids);
     try {
       await Promise.all(ids.map((id) => projectAssetService.remove(id)));
+      setAssets((prev) => prev.filter((a) => !idSet.has(a.id)));
       setSelectedAssetIds(new Set());
       setBulkDeleteOpen(false);
-      refreshAssets();
+      await refreshAssets();
     } catch {
       toast.error("One or more assets could not be deleted.");
     } finally {

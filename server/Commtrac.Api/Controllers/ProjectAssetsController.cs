@@ -1172,7 +1172,9 @@ public class ProjectAssetsController : ControllerBase
         DateTime? CompletedAt,
         DateTime UpdatedAt,
         string WorkflowConfigId,
-        string IssuesJson);
+        string IssuesJson,
+        string StepResultsJson,
+        string WorkflowSnapshotJson);
 
     private async Task<Dictionary<string, AssetWorkflowRunEntity>> GetLatestRunSummariesByAssetAsync(IEnumerable<string> assetIds)
     {
@@ -1206,13 +1208,14 @@ public class ProjectAssetsController : ControllerBase
                 r.CompletedAt,
                 r.UpdatedAt,
                 r.WorkflowConfigId,
-                r.IssuesJson))
+                r.IssuesJson,
+                r.StepResultsJson ?? "[]",
+                r.WorkflowSnapshotJson ?? "{}"))
             .AsNoTracking()
             .ToListAsync();
 
-        // Everything except the two large JSON blobs. StepResultsJson /
-        // WorkflowSnapshotJson are only read by the non-lightweight evidence counters,
-        // so callers that pass lightweight/light must not pay to hydrate them.
+        // Slim list DTOs still omit JSON blobs on the wire, but evidence counters
+        // (missing photos, step completion) need them server-side for correct labels.
         return rows.ToDictionary(
             r => r.AssetId,
             r => new AssetWorkflowRunEntity
@@ -1227,8 +1230,8 @@ public class ProjectAssetsController : ControllerBase
                 UpdatedAt = r.UpdatedAt,
                 WorkflowConfigId = r.WorkflowConfigId,
                 IssuesJson = r.IssuesJson,
-                StepResultsJson = "[]",
-                WorkflowSnapshotJson = "{}",
+                StepResultsJson = r.StepResultsJson,
+                WorkflowSnapshotJson = r.WorkflowSnapshotJson,
             });
     }
 
@@ -1412,38 +1415,6 @@ public class ProjectAssetsController : ControllerBase
         }
 
         var hasOpenIssues = HasOpenIssues(latestRun.IssuesJson) || HasOpenIssues(asset.IssuesJson);
-
-        if (lightweight)
-        {
-            var lightweightEvidenceStatus = "Pending";
-            if (string.Equals(latestRun.Status, "Paused", StringComparison.OrdinalIgnoreCase))
-            {
-                lightweightEvidenceStatus = "Paused";
-            }
-            else if (!latestRun.IsLocked || string.Equals(latestRun.Status, "InProgress", StringComparison.OrdinalIgnoreCase))
-            {
-                lightweightEvidenceStatus = "Running";
-            }
-            else
-            {
-                lightweightEvidenceStatus = "Complete";
-            }
-
-            return new ProjectAssetWorkflowSummaryDto(
-                true,
-                lightweightEvidenceStatus,
-                0,
-                0,
-                0,
-                latestRun.Id,
-                latestRun.Status,
-                latestRun.IsLocked,
-                latestRun.SignatureStatus,
-                hasOpenIssues,
-                latestRun.StartedAt,
-                latestRun.CompletedAt
-            );
-        }
 
         var counts = CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var allStepsCompleted = HasCompletedAllWorkflowSteps(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson, latestRun.IsLocked);

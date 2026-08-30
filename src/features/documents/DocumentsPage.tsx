@@ -459,8 +459,17 @@ export default function DocumentsPage() {
               record = await documentService.updateDocument(record.id, { ...record, name: displayName, notes, customValues });
             }
             uploaded.push({ ...record, name: displayName });
-          } catch {
-            firstError = `Failed to upload "${bf.file.name}". Other files may have been saved.`;
+          } catch (err: unknown) {
+            const e = err as { response?: { data?: unknown; status?: number } };
+            let detail = "";
+            const data = e?.response?.data;
+            if (typeof data === "string" && data.length < 300) detail = data;
+            else if (data && typeof data === "object" && typeof (data as Record<string, unknown>).message === "string") {
+              detail = (data as Record<string, string>).message;
+            }
+            firstError = detail
+              ? `Failed to upload "${bf.file.name}": ${detail}`
+              : `Failed to upload "${bf.file.name}". Other files may have been saved.`;
           }
         }
 

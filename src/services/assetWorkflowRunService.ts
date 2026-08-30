@@ -645,6 +645,7 @@ function signalLocalRunUpdate(run: AssetWorkflowRun): void {
   window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
     detail: { assetId: run.assetId, runs: [run], mergeById: true },
   }));
+  window.dispatchEvent(new Event("notifications:run-state-changed"));
 }
 
 function invalidateWebRunDetailCaches(runId: string, assetId?: string): void {
@@ -674,6 +675,7 @@ export function emitWebRunCacheUpdated(run: AssetWorkflowRun): void {
   window.dispatchEvent(new CustomEvent("workflow-runs-cache-updated", {
     detail: { assetId: run.assetId, runs: [run], mergeById: true },
   }));
+  window.dispatchEvent(new Event("notifications:run-state-changed"));
 }
 
 /** Surgical web cache invalidation + UI merge after a run mutation response. */

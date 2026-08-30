@@ -97,7 +97,14 @@ public class DocumentsController : ControllerBase
         var storedName = $"{Guid.NewGuid()}{extension}";
         var relativePath = _files.BuildRelativePath("Storage", "Documents", storedName);
 
-        await _files.SaveAsync(relativePath, request.File.OpenReadStream());
+        try
+        {
+            await _files.SaveAsync(relativePath, request.File.OpenReadStream());
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(503, $"File storage unavailable: {ex.Message}");
+        }
 
         var doc = new DocumentEntity
         {

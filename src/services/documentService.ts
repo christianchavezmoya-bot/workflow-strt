@@ -531,9 +531,7 @@ export const documentService = {
     if (notes)     formData.append("notes", notes);
     if (customValues && Object.keys(customValues).length > 0)
       formData.append("customValuesJson", JSON.stringify(customValues));
-    const response = await api.post<DocumentRecord>("/documents/upload", formData, {
-      headers: { "Content-Type": "multipart/form-data" }
-    });
+    const response = await api.post<DocumentRecord>("/documents/upload", formData);
     invalidateWebCache("/documents");
     return hydrateCustomValues(response.data);
   },
@@ -553,10 +551,7 @@ export const documentService = {
     const formData = new FormData();
     formData.append("file", file);
     if (options?.keepName) formData.append("keepName", "true");
-    const response = await api.post<DocumentRecord>(`/documents/${id}/file`, formData, {
-      headers: { "Content-Type": "multipart/form-data" },
-      timeout: 0,
-    });
+    const response = await api.post<DocumentRecord>(`/documents/${id}/file`, formData);
     invalidateWebCache("/documents");
     return hydrateCustomValues(response.data);
   },
