@@ -12,6 +12,7 @@ import { assetWorkflowRunService } from "./assetWorkflowRunService";
 import { assetDocumentLinkService } from "./assetDocumentLinkService";
 import { workflowConfigService } from "./workflowConfigService";
 import { prefetchAssetLinkedDocuments } from "./documentService";
+import { filterKnownMissingFromWorkspace } from "../utils/staleAssetWorkspace";
 import offlineStore from "./offlineStore";
 import type { DashboardWorkspace } from "./projectAssetService";
 import type { ProjectAsset } from "../types/projectAsset";
@@ -66,26 +67,10 @@ async function prefetchAssetWorkflowDataInner(
 ): Promise<void> {
   if (shouldDeferPerAssetBackgroundRefresh()) return;
   if (isKnownMissingAssetId(assetId)) return;
+
   const { projectAssetService } = await import("./projectAssetService");
-  const cached = await entityGetAsset(assetId);
-  const cachedAsset = cached?.data as ProjectAsset | undefined;
-  if (!cachedAsset?.productId) {
-    try {
-      const full = await projectAssetService.getById(assetId);
-      if (full) {
-        const { entityPutAsset } = await import("./localDB");
-        await entityPutAsset({
-          id: full.id,
-          productId: full.productId,
-          projectId: full.projectId,
-          data: full,
-          dirty: false,
-        });
-      }
-    } catch {
-      // Continue — assignments/documents may still cache.
-    }
-  }
+  const exists = await projectAssetService.verifyAssetExistsOnline(assetId);
+  if (!exists) return;
 
   const assignments = await assetWorkflowAssignmentService.listByAsset(assetId);
   await assetWorkflowRunService.listByAssetFresh(assetId);
@@ -143,14 +128,15 @@ export async function prefetchAssignedAssetsFromWorkspace(
   options?: PrefetchAssetOptions,
 ): Promise<void> {
   if (!isMobileNativePlatform()) return;
+  const filtered = filterKnownMissingFromWorkspace(workspace);
   const projectIds = [...new Set([
-    ...workspace.currentInstalls,
-    ...workspace.currentInspections,
-    ...workspace.installHistory,
-    ...workspace.inspectionHistory,
+    ...filtered.currentInstalls,
+    ...filtered.currentInspections,
+    ...filtered.installHistory,
+    ...filtered.inspectionHistory,
   ].map((row) => row.projectId).filter(Boolean))];
 
-  const assetIds = projectIds.flatMap((projectId) => assignedAssetIdsFromWorkspace(workspace, projectId, userId));
+  const assetIds = projectIds.flatMap((projectId) => assignedAssetIdsFromWorkspace(filtered, projectId, userId));
   await prefetchAssetIds(assetIds, options);
 }
 
@@ -159,7 +145,8 @@ export async function prefetchAssignedAssetsInProject(projectId: string, userId:
 
   const workspace = await offlineStore.getCache<DashboardWorkspace>(DASHBOARD_WORKSPACE_CACHE_KEY(userId));
   if (workspace) {
-    const fromWorkspace = assignedAssetIdsFromWorkspace(workspace, projectId, userId);
+    const filtered = filterKnownMissingFromWorkspace(workspace);
+    const fromWorkspace = assignedAssetIdsFromWorkspace(filtered, projectId, userId);
     if (fromWorkspace.length > 0) {
       await prefetchAssetIds(fromWorkspace);
       return;
