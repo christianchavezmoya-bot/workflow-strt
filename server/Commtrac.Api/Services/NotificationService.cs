@@ -102,6 +102,12 @@ public sealed class NotificationService
             return [];
         }
 
+        var schedule = ParseScheduledReport(project.ScheduledReportJson);
+        if (schedule?.AssetClosedNotificationEnabled != true)
+        {
+            return [];
+        }
+
         var recipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pmNameOrEmail = project.ProjectManager?.Trim();
         if (!string.IsNullOrWhiteSpace(pmNameOrEmail))
@@ -124,15 +130,11 @@ public sealed class NotificationService
             }
         }
 
-        var schedule = ParseScheduledReport(project.ScheduledReportJson);
-        if (schedule?.AssetClosedNotificationEnabled == true)
+        foreach (var email in schedule.RecipientEmails ?? [])
         {
-            foreach (var email in schedule.RecipientEmails ?? [])
+            if (!string.IsNullOrWhiteSpace(email))
             {
-                if (!string.IsNullOrWhiteSpace(email))
-                {
-                    recipients.Add(email.Trim());
-                }
+                recipients.Add(email.Trim());
             }
         }
 
