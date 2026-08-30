@@ -189,6 +189,18 @@ const Topbar = () => {
     return proj?.jobNumber ? `Site · ${proj.jobNumber}` : "Site";
   }, [projectIdFromUrl, projects]);
 
+  /** Avoid three wide clock chips crowding admin/documents and list pages. */
+  const diagnosticClockMode = useMemo((): "hidden" | "office" | "site" => {
+    const path = location.pathname;
+    if (path.startsWith("/admin") || path.startsWith("/documents") || path.startsWith("/settings")) {
+      return "hidden";
+    }
+    if (projectIdFromUrl && path.startsWith("/installations/")) {
+      return "site";
+    }
+    return "office";
+  }, [location.pathname, projectIdFromUrl]);
+
   const [starAnchor, setStarAnchor] = useState<null | HTMLElement>(null);
   const [favLabel, setFavLabel] = useState("");
 
@@ -441,11 +453,15 @@ const Topbar = () => {
                 <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
                   {appName}
                 </Typography>
-                <DiagnosticClockBar
-                  variant="inline"
-                  projectTimeZoneId={projectTimeZoneFromUrl}
-                  projectLabel={projectLabelFromUrl}
-                />
+                {diagnosticClockMode !== "hidden" && (
+                  <DiagnosticClockBar
+                    variant="inline"
+                    projectTimeZoneId={projectTimeZoneFromUrl}
+                    projectLabel={projectLabelFromUrl}
+                    siteOnly={diagnosticClockMode === "site"}
+                    officeOnly={diagnosticClockMode === "office"}
+                  />
+                )}
               </Stack>
               <Typography variant="body2" color="text.secondary">
                 {autoLabel}

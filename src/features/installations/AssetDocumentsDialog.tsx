@@ -374,7 +374,10 @@ export default function AssetDocumentsDialog({
         }
       }
       const status = e?.response?.status;
-      setSnack({ msg: status === 400 ? msg : `Upload failed (${status ?? "network error"}).`, sev: "error" });
+      setSnack({
+        msg: status && status < 500 ? msg : (status === 503 ? msg : `Upload failed (${status ?? "network error"}).`),
+        sev: "error",
+      });
     } finally {
       setUploading(false);
     }

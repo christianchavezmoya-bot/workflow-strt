@@ -156,7 +156,14 @@ public class AssetDocumentLinksController : ControllerBase
         var storedName = $"{Guid.NewGuid()}{extension}";
         var relativePath = _files.BuildRelativePath("Storage", "Documents", storedName);
 
-        await _files.SaveAsync(relativePath, request.File.OpenReadStream());
+        try
+        {
+            await _files.SaveAsync(relativePath, request.File.OpenReadStream());
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(503, $"File storage unavailable: {ex.Message}");
+        }
 
         // Create the library document record
         var doc = new DocumentEntity

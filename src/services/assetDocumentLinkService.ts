@@ -269,9 +269,7 @@ export const assetDocumentLinkService = {
       if (notes)            form.append("notes", notes);
       if (attachedBy)       form.append("attachedBy", attachedBy);
       if (customValuesJson) form.append("customValuesJson", customValuesJson);
-      const res = await api.post<AssetDocumentLink>("/asset-document-links/upload", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await api.post<AssetDocumentLink>("/asset-document-links/upload", form);
       return res.data;
     }
 
@@ -286,9 +284,7 @@ export const assetDocumentLinkService = {
     if (customValuesJson) form.append("customValuesJson", customValuesJson);
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
-      const res = await api.post<AssetDocumentLink>("/asset-document-links/upload", form, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
+      const res = await api.post<AssetDocumentLink>("/asset-document-links/upload", form);
       await appendCachedLink(assetId, res.data);
       return res.data;
     } catch (error) {

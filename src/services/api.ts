@@ -299,6 +299,23 @@ api.interceptors.request.use(async (config) => {
     config.headers.Authorization = `Bearer ${token}`;
   }
 
+  // FormData uploads must NOT set a bare multipart Content-Type — the browser/axios
+  // needs to append the boundary or ASP.NET receives an empty file and uploads fail
+  // with a browser-side "network error" (no parseable response).
+  if (typeof FormData !== "undefined" && config.data instanceof FormData) {
+    if (config.headers) {
+      const headers = config.headers as Record<string, unknown> & { delete?: (name: string) => void };
+      if (typeof headers.delete === "function") {
+        headers.delete("Content-Type");
+        headers.delete("content-type");
+      } else {
+        delete headers["Content-Type"];
+        delete headers["content-type"];
+      }
+    }
+    config.timeout = 0;
+  }
+
   // Auth endpoints must never time out — give them unlimited time.
   // The 8s timeout only applies to data GETs so the cache kicks in quickly.
   if (url.includes("/auth/")) {
