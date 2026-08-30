@@ -9,6 +9,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormControlLabel,
   FormHelperText,
@@ -1648,10 +1649,6 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                         />
                       </Stack>
 
-                      <Typography variant="caption" color="text.secondary">
-                        Email will be sent until the project scheduled finish date.
-                      </Typography>
-
                       <FormControlLabel
                         control={
                           <Checkbox
@@ -1662,11 +1659,24 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                                 assetClosedNotificationEnabled: event.target.checked,
                               }))
                             }
-                            disabled={!scheduledReport.enabled}
                           />
                         }
-                        label="Asset closed email notification"
+                        label="Workflow completion email"
                       />
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mt: -0.5, mb: 1 }}>
+                        When enabled, emails the project manager (and optional recipients below) each time a field
+                        workflow is completed — e.g. &quot;Workflow completed — CC001-B (mel01)&quot;. Independent of
+                        the periodic summary schedule.
+                      </Typography>
+
+                      <Divider sx={{ my: 1.5 }} />
+
+                      <Typography variant="body2" color="text.secondary" sx={{ fontWeight: 600 }}>
+                        Periodic summary schedule
+                      </Typography>
+                      <Typography variant="caption" color="text.secondary" sx={{ display: "block", mb: 1 }}>
+                        Separate digest email until the project scheduled finish date. Requires Enable above-right.
+                      </Typography>
 
                       <Grid container spacing={1.5}>
                         <Grid item xs={12} sm={5}>
@@ -1740,8 +1750,8 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                             label="Add more recipients"
                             value={scheduledRecipientsInput}
                             onChange={(event) => setScheduledRecipientsInput(event.target.value)}
-                            disabled={!scheduledReport.enabled}
-                            helperText="Enter one email per line, or separate multiple emails with commas."
+                            disabled={!scheduledReport.enabled && !scheduledReport.assetClosedNotificationEnabled}
+                            helperText="Used for periodic summary (when enabled) and/or workflow completion emails (when checked above). One email per line or comma-separated."
                           />
                         </Grid>
                       </Grid>
