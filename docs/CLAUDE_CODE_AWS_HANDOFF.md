@@ -180,8 +180,8 @@ Use **`--profile strata-agent`** for all AWS CLI from Claude Code.
 4. Code change + `npm run build` / `dotnet build` as needed  
 5. `docker build -t commtrac-api:staging .` — **only after cleanup PASS**  
 6. ECR login + push `commtrac-api:staging`  
-7. Register new task definition revision (if env/config changed) OR force new deployment (image-only)  
-8. `ecs update-service --cluster default --service commtrac-api-ae2c --force-new-deployment`  
+7. Register new task definition revision with updated **image digest** after ECR push (see below — `force-new-deployment` alone is **not** sufficient when the task def pins `@sha256:…`)  
+8. `ecs update-service --cluster default --service commtrac-api-ae2c --task-definition …:<NEW_REV> --force-new-deployment`  
 9. Sync ALB priority-10 rule to match rule 44990  
 10. Wait for stable deployment + healthy target  
 11. `curl` health endpoint  

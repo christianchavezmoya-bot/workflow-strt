@@ -138,7 +138,7 @@ docker tag commtrac-api:staging 920154935299.dkr.ecr.ap-southeast-2.amazonaws.co
 docker push 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging
 ```
 
-Record image digest from push output.
+Record image digest from push output → `IMAGE_DIGEST=sha256:…`
 
 | ID | PASS if |
 |----|---------|
@@ -146,18 +146,39 @@ Record image digest from push output.
 
 ---
 
-## Step 5 — ECS deploy + verify API
+## Step 5 — ECS task definition + deploy + verify API
 
-Ensure task env includes `ASPNETCORE_ENVIRONMENT=Staging` (unchanged).
+**Critical:** Staging task definitions pin the container **image by immutable digest** (`commtrac-api@sha256:…`), not the mutable `:staging` tag. **`force-new-deployment` alone does NOT pick up a new ECR push** — it only restarts the same digest. After every ECR push you must:
+
+1. Resolve the new digest (from push output or `aws ecr describe-images …`)
+2. **Register a new task definition revision** with only the container `image` field updated (copy prior rev verbatim — task role, env, secrets unchanged)
+3. `update-service --task-definition …:<NEW_REV>` (optionally also `--force-new-deployment`)
 
 ```bash
+# After push — get digest (example)
+IMAGE_DIGEST=$(aws ecr describe-images \
+  --repository-name commtrac-api \
+  --image-ids imageTag=staging \
+  --profile strata-agent --region ap-southeast-2 \
+  --query 'imageDetails[0].imageDigest' --output text)
+echo "IMAGE_DIGEST=$IMAGE_DIGEST"
+
+# Fetch current task def, patch image to digest, register new rev — use AWS MCP or:
+# aws ecs describe-task-definition --task-definition default-commtrac-api-ae2c \
+#   --query taskDefinition > /tmp/td.json
+# (strip status/revision/compat fields, set containerDefinitions[0].image to $ECR@$IMAGE_DIGEST)
+# aws ecs register-task-definition --cli-input-json file:///tmp/td-register.json
+
 aws ecs update-service \
   --cluster default \
   --service commtrac-api-ae2c \
+  --task-definition default-commtrac-api-ae2c:<NEW_REV> \
   --force-new-deployment \
   --profile strata-agent \
   --region ap-southeast-2
 ```
+
+Ensure task env includes `ASPNETCORE_ENVIRONMENT=Staging` (unchanged).
 
 Wait until service stable and ALB target **Healthy**.
 
