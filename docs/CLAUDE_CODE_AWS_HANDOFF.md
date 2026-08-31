@@ -103,7 +103,7 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - Target group health path `/api/health`, success 200
 - AWS MCP + `StrataClaudeAgentRole` + deployment policy
 - **ECS S3 task role** — `commtrac-staging-ecs-s3` live; uploads PASS (see `ECS_S3_TASK_ROLE_FIX.md`)
-- **Phase C CLOSED (2026-08-31):** canonical DEV web at **`https://staging.strata-ngo.com`**; `www` still serves same DEV app until Phase F
+- **Phase C CLOSED / PASS (2026-08-31):** canonical DEV web at **`https://staging.strata-ngo.com`**; Christian acceptance L1–L5 all PASS; `www` still serves same DEV app until Phase F
 - **CloudFront `E1YN5XTWDWRHYP`:** both `staging.strata-ngo.com` and `www.strata-ngo.com` aliases deployed
 - **Phase C ECS env:** `Email__FrontendBaseUrl=https://staging.strata-ngo.com`; CORS allows staging + www
 - **API `/api/version`:** `gitSha=96e4e797…` matches main
@@ -112,7 +112,8 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - **Native first-login perf** — rebuild iOS app after relevant merges if dashboard slow on cold start
 - **iPhone build** against `https://api.staging.strata-ngo.com/api` (no Phase C native rebuild required)
 - **APNs/FCM** push on server
-- **Phase C Christian follow-ups:** optional L2 invite send + L4/L5 click-through; notify team to use **`staging.strata-ngo.com`** for DEV testing
+- **Phase C:** CLOSED / PASS — Christian acceptance L1–L5 complete (2026-08-31)
+- **Optional:** C5 team comms — notify team to use **`staging.strata-ngo.com`** for DEV testing
 - **Phase D/F** — do not start without explicit approval
 
 ### Invite / password-reset email links — RESOLVED (Phase C, 2026-08-31)

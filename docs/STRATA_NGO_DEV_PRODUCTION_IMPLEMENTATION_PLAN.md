@@ -135,12 +135,12 @@ curl -sf https://api.staging.strata-ngo.com/api/health
 | C1 | Cloudflare: add `staging.strata-ngo.com` → same DEV S3/CloudFront origin (or path-based origin) | **Christian** | DNS resolves |
 | C2 | Update DEV deploy docs + `Email__FrontendBaseUrl` for DEV to use `staging.strata-ngo.com` when cutover complete | Cursor | Docs PR |
 | C3 | Claude: deploy DEV web; verify both hosts during transition | Claude Code | 200 on both URLs |
-| C4 | Update invite/QR smoke (L1–L5 from rebuild prompt) on DEV host | Claude Code | Links use correct host |
-| C5 | Communicate to team: use `staging.strata-ngo.com` for DEV testing | Christian | Email/slack |
+| C4 | Update invite/QR smoke (L1–L5 from rebuild prompt) on DEV host | Claude Code + Christian | **PASS** (2026-08-31 acceptance) |
+| C5 | Communicate to team: use `staging.strata-ngo.com` for DEV testing | Christian | Email/slack (optional post-close) |
 
 **Christian prompt — Phase C DNS:** see [Appendix C1](#appendix-c1--christian--phase-c-dns).
 
-**Phase C gate:** DEV acceptance on `staging.strata-ngo.com` PASS; `www` still serves DEV until Phase F (or holding page).
+**Phase C gate:** **CLOSED / PASS (2026-08-31)** — Christian acceptance L1–L5 + infrastructure verified. See `docs/MAC_AGENT_PHASE_C_DEV_DNS_PROMPT.md`. `www` still serves DEV until Phase F.
 
 ---
 

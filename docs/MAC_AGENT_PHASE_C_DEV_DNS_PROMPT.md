@@ -1,8 +1,24 @@
 # Phase C — DEV DNS clarity (`staging.strata-ngo.com`)
 
-**Status: CLOSED / PASS (2026-08-31)** — AWS deploy complete. Christian follow-ups: optional L2 invite send, L4/L5 click-through, team comms (C5).
+**Status: CLOSED / PASS (2026-08-31)** — AWS deploy + Christian acceptance complete. All L1–L5 and infrastructure gates satisfied.
 
 **Goal:** Canonical DEV web at **`https://staging.strata-ngo.com`**. **`www.strata-ngo.com`** keeps serving the same DEV app until Phase F, then flips to production.
+
+## Acceptance sign-off (Christian, 2026-08-31)
+
+| Test | Result | Evidence |
+|------|--------|----------|
+| L1 — Public frontend base | ✅ PASS | Backend configured for `staging.strata-ngo.com` |
+| L2 — Invitation email | ✅ PASS | Real invitation received with staging URL |
+| L3 — Invitation link | ✅ PASS | Link opens password activation screen |
+| L4 — Photo/QR public link | ✅ PASS | QR link confirmed working |
+| L5 — Customer signature link | ✅ PASS | Real email with `/sign/…` staging URL |
+| DEV web | ✅ PASS | Staging website operational |
+| DEV API | ✅ PASS | Phase C API verified (`96e4e797…`) |
+| www transition host | ✅ PASS | Still available as intended |
+| **Phase C** | **✅ CLOSED / PASS** | All acceptance criteria satisfied |
+
+**Optional post-close:** C5 team comms — notify team to use `https://staging.strata-ngo.com` for DEV testing.
 
 ## Final deploy record
 
@@ -17,15 +33,15 @@
 | staging host | HTTPS 200 · login loads |
 | www host | HTTPS 200 · same bundle/manifest as staging |
 
-### L1–L5
+### L1–L5 (Christian acceptance)
 
 | ID | Result |
 |----|--------|
 | L1 | **PASS** — `frontendBaseUrl: https://staging.strata-ngo.com` |
-| L2 | **NOT RUN** — invite send (Christian/Mac, on request) |
-| L3 | **PARTIAL PASS** — staging login page loads; token page needs L2 |
-| L4 | **PASS** (host derivation) — click-through for Christian |
-| L5 | **PASS** (host derivation) — click-through for Christian |
+| L2 | **PASS** — real invite email with staging URL |
+| L3 | **PASS** — invite link opens password activation screen |
+| L4 | **PASS** — QR link confirmed working on staging |
+| L5 | **PASS** — signature email with `/sign/…` staging URL |
 
 **Prerequisites (met):** Phase B **CLOSED / PASS** · main at **`96e4e797…`** (#331 merged) · Christian **DNS C done** · Mac AWS deploy **PASS**.
 
@@ -35,11 +51,9 @@
 
 ---
 
-## Christian — remaining (optional)
+## Christian — post-close (optional)
 
 1. **C5:** Notify team — use **`https://staging.strata-ngo.com`** for DEV web testing; `www` still works but is reserved for production (Phase F).
-2. **L2:** Re-send a test invite from Settings → Users (optional sanity check).
-3. **L4/L5:** One QR scan + one signature link click-through on staging (authenticated session).
 
 Do **not** start Phase D/F or repoint `www` to production.
 
