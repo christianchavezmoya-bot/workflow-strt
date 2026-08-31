@@ -21,6 +21,8 @@ export type NativeForegroundSyncSessionInput = {
   bootstrapping: boolean;
   /** True when the device cannot reach the server (offline / unreachable). */
   cannotFlush: boolean;
+  /** Queue has not drained for long enough — release the blocking overlay. */
+  queueStuck?: boolean;
 };
 
 export type NativeForegroundSyncSessionMode = "focused" | "upload";
@@ -58,7 +60,7 @@ export function isNativeSyncSessionComplete(
 ): boolean {
   if (!isNativeSyncSessionNetworkIdle(input)) return false;
 
-  if (input.cannotFlush) {
+  if (input.cannotFlush || input.queueStuck) {
     return true;
   }
 
@@ -74,7 +76,7 @@ export function isUploadSyncSessionComplete(
   input: NativeForegroundSyncSessionInput,
 ): boolean {
   if (input.flushing) return false;
-  if (input.cannotFlush) return true;
+  if (input.cannotFlush || input.queueStuck) return true;
   return input.pendingCount === 0 && input.conflictCount === 0;
 }
 
@@ -102,7 +104,7 @@ export function deriveForegroundSyncSessionState(
   let keepAwake = shouldKeepAwakeDuringSession(input);
 
   if (mode === "upload") {
-    if (input.cannotFlush) {
+    if (input.cannotFlush || input.queueStuck) {
       overlayVisible = false;
       keepAwake = false;
     } else if (input.flushing) {

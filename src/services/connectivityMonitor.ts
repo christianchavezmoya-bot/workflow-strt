@@ -208,8 +208,14 @@ export function startConnectivityMonitor(): void {
       }
     };
     onApiServerUnreachable = (event) => {
-      const detail = (event as CustomEvent<{ isTimeout?: boolean }>).detail;
+      const detail = (event as CustomEvent<{ isTimeout?: boolean; source?: string }>).detail;
       const isTimeout = Boolean(detail?.isTimeout);
+      // Advisory /health pings must not open the axios circuit before any real API
+      // attempt on a cold start — otherwise failed LAN pings block sync forever at
+      // serverReachable=null even though the server may respond to POSTs.
+      if (detail?.source === "health-ping" && currentValue === null) {
+        return;
+      }
       // A slow endpoint timing out while other calls succeed is not "server down".
       if (isTimeout && hadRecentApiSuccess()) {
         consecutiveTimeoutSignals = 0;
@@ -293,6 +299,9 @@ export { isCircuitOpen, shouldSkipBlockingNetworkRead } from "../utils/circuitBr
 export function shouldSkipInteractiveWrite(): boolean {
   if (shouldSkipBlockingFetch()) return true;
   if (getServerReachable() === false) return true;
+  // Fail open while reachability is still unknown — circuit may be tripped by /health
+  // timeouts before any axios call proves the server is actually up.
+  if (getServerReachable() === null) return false;
   return isCircuitOpen();
 }
 

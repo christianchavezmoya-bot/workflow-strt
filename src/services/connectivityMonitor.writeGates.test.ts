@@ -62,10 +62,17 @@ describe("interactive write vs background sync gates", () => {
     expect(shouldDeferBackgroundSync()).toBe(true);
   });
 
-  it("skips when circuit is open even if radio is up", () => {
+  it("does not skip on open circuit while reachability is still unknown (fail open)", () => {
     vi.mocked(isCircuitOpen).mockReturnValue(true);
     _setServerReachableForTests(null);
     expect(shouldSkipBlockingFetch()).toBe(false);
+    expect(shouldSkipInteractiveWrite()).toBe(false);
+    expect(shouldDeferBackgroundSync()).toBe(false);
+  });
+
+  it("skips when circuit is open after server was confirmed reachable", () => {
+    vi.mocked(isCircuitOpen).mockReturnValue(true);
+    _setServerReachableForTests(true);
     expect(shouldSkipInteractiveWrite()).toBe(true);
     expect(shouldDeferBackgroundSync()).toBe(true);
   });

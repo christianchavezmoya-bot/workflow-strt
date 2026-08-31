@@ -148,6 +148,7 @@ const COPY_ALLOWLIST: Array<keyof PendingAction> = [
   "lastApiHost",
   "nextRetryAt",
   "createdAt",
+  "dependsOnOpId",
 ];
 
 /** Safe JSON for clipboard — no body, tokens, or step content. */

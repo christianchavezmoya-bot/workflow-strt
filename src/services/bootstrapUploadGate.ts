@@ -26,12 +26,24 @@ function sleep(ms: number): Promise<void> {
  */
 export async function waitForActiveUploadDrain(maxWaitMs = DEFAULT_MAX_WAIT_MS): Promise<void> {
   const deadline = Date.now() + maxWaitMs;
+  let lastActiveCount = -1;
+  let idlePasses = 0;
 
   const drainOnce = async (): Promise<boolean> => {
     const active = await pendingActiveUploadCount();
     if (active === 0 && !isSyncFlushing()) return true;
+
     if (active > 0 && !isSyncFlushing()) {
-      window.dispatchEvent(new Event("sync-request-flush-now"));
+      if (active === lastActiveCount) {
+        idlePasses += 1;
+      } else {
+        idlePasses = 0;
+        lastActiveCount = active;
+      }
+      // Stop hammering flush when the queue is not draining (e.g. dependency deadlock).
+      if (idlePasses < 3) {
+        window.dispatchEvent(new Event("sync-request-flush-now"));
+      }
     }
     return false;
   };
