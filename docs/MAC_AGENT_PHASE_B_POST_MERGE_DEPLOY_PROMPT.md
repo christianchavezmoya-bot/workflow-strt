@@ -1,0 +1,308 @@
+# Mac agent — Phase B post-merge DEV deploy (#328)
+
+**Copy everything between PROMPT START and PROMPT END into Claude Code on the Mac.**
+
+**When to use:** Immediately after **PR #328** merges to `main` (Phase B build separation). Christian approved merge; execute DEV API + web + iPhone **N-Go DEV** install. **Do not start Phase C** (DNS cutover).
+
+**Prerequisites:** AWS MCP + profile **`strata-agent`**. Handoff: [`CLAUDE_CODE_AWS_HANDOFF.md`](./CLAUDE_CODE_AWS_HANDOFF.md).
+
+**Expected merged main SHA:** `839b7376933c6c4ba6f8be95a196d9578bf1a01f` (verify with `git rev-parse HEAD` after pull).
+
+**Do not commit:** `.env.staging.local`, secrets, LAN IPs, `dist/`.
+
+---
+
+## PROMPT START
+
+You are the **Mac Phase B DEV deploy agent** for Commtrac / **Strata N-Go**.
+
+### Your job
+
+1. Pull merged `main` (#328).
+2. Redeploy **DEV API** with `GIT_SHA` + `BUILD_TIME` build args.
+3. Deploy **DEV web** with `npm run build:dev-web` only.
+4. Build/install **N-Go DEV** native (`npm run build:dev-native`) on Christian's iPhone.
+5. Hand off device acceptance checklist to Christian.
+6. Fill in the report at the end.
+
+**Deploy order:** `API → web → native install`
+
+**Do not:** change DNS, deploy prod artifacts, or start Phase C.
+
+---
+
+## Step 0 — Docker / disk cleanup (mandatory before `docker build`)
+
+Follow **`docs/MAC_AGENT_DOCKER_CLEANUP_BEFORE_REBUILD.md`** (full PROMPT START…END).
+
+| ID | PASS if |
+|----|---------|
+| D1 | ≥ **8 GB free** on `/` |
+| D2 | Docker build cache pruned |
+| D3 | Cleanup completed **before** API docker build |
+
+---
+
+## Step 1 — Sync repo
+
+```bash
+cd "$(git rev-parse --show-toplevel)"
+git fetch origin
+git checkout main
+git pull --no-rebase origin main
+git log -1 --oneline
+export MAIN_SHA="$(git rev-parse HEAD)"
+echo "MAIN_SHA=$MAIN_SHA"
+```
+
+| ID | PASS if |
+|----|---------|
+| G1 | On `main`, pull succeeded |
+| G2 | `MAIN_SHA` matches expected merge commit (839b7376… or newer if additional merges) |
+
+---
+
+## Step 2 — Preflight API health (before deploy)
+
+```bash
+export STAGING_API="https://api.staging.strata-ngo.com/api"
+curl -sf "${STAGING_API%/}/health" | head -c 500
+echo
+```
+
+| ID | PASS if |
+|----|---------|
+| P0 | JSON contains `"status":"healthy"` and `"database":"connected"` |
+
+---
+
+## Step 3 — Build API Docker image (Phase B identity)
+
+**Only after Step 0 PASS.**
+
+```bash
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+docker build \
+  --build-arg GIT_SHA="$MAIN_SHA" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  -t commtrac-api:staging .
+```
+
+| ID | PASS if |
+|----|---------|
+| B1 | `docker build` exits 0 |
+
+---
+
+## Step 4 — Push to ECR
+
+```bash
+aws ecr get-login-password --region ap-southeast-2 --profile strata-agent \
+  | docker login --username AWS --password-stdin 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com
+
+docker tag commtrac-api:staging 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging
+docker push 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging
+```
+
+Record image digest from push output.
+
+| ID | PASS if |
+|----|---------|
+| E1 | Push exits 0 |
+
+---
+
+## Step 5 — ECS deploy + verify API
+
+Ensure task env includes `ASPNETCORE_ENVIRONMENT=Staging` (unchanged).
+
+```bash
+aws ecs update-service \
+  --cluster default \
+  --service commtrac-api-ae2c \
+  --force-new-deployment \
+  --profile strata-agent \
+  --region ap-southeast-2
+```
+
+Wait until service stable and ALB target **Healthy**.
+
+**ALB:** Sync priority‑10 custom-domain rule weights to match rule 44990 (see handoff).
+
+Record ECS task definition revision:
+
+```bash
+aws ecs describe-services \
+  --cluster default \
+  --services commtrac-api-ae2c \
+  --profile strata-agent \
+  --region ap-southeast-2 \
+  --query 'services[0].taskDefinition' \
+  --output text
+```
+
+**Post-deploy API verification:**
+
+```bash
+curl -sf "${STAGING_API%/}/health"
+echo
+curl -sf "${STAGING_API%/}/version"
+echo
+```
+
+| ID | PASS if |
+|----|---------|
+| S1 | ECS stable, task Running |
+| S2 | `/api/health` → `"status":"healthy"`, `"database":"connected"` |
+| S3 | `/api/version` → `gitSha` **exactly equals** `$MAIN_SHA` |
+| S4 | `/api/version` → `builtAt` populated (non-empty) |
+| S5 | `/api/version` → `environment` is **`Staging`** |
+| S6 | CloudWatch logs — no fatal startup errors |
+
+**STOP if S3 fails** — do not proceed to web/native until API identity matches main.
+
+---
+
+## Step 6 — DEV web build + S3/CloudFront
+
+**Use canonical Phase B command only:**
+
+```bash
+npm run build:dev-web
+```
+
+Verify build identity before upload:
+
+```bash
+cat dist/build-manifest.json
+npm run check:artifact-isolation -- --profile dev --dist dist
+grep -oE 'index-[A-Za-z0-9_-]+\.js' dist/index.html | head -1
+```
+
+| ID | PASS if |
+|----|---------|
+| W0 | `build-manifest.json` → `profile=dev`, `appEnv=dev`, `buildSha=$MAIN_SHA`, `apiBase` = staging API, `debugFeaturesEnabled=true` |
+| W0b | `check:artifact-isolation` PASS |
+| W0c | No LAN/private IP in `dist/assets/*.js` |
+
+Upload `dist/` to bucket **`strata-ngo-web-staging`** (immutable `/assets/*`, no-cache `index.html`). Invalidate CloudFront **`E1YN5XTWDWRHYP`** for `/*` or at minimum `/index.html`.
+
+**Live verification** (www still serves DEV until Phase C — expected):
+
+```bash
+curl -sS https://www.strata-ngo.com/ | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1
+curl -sS https://www.strata-ngo.com/build-manifest.json
+```
+
+Browser checks on `https://www.strata-ngo.com`:
+
+| ID | PASS if |
+|----|---------|
+| W1 | Login page loads (HTTP 200) |
+| W2 | **DEV badge** visible in top bar |
+| W3 | Network tab → API host is `api.staging.strata-ngo.com` |
+| W4 | Debug tools available (bug icon / debug panel — DEV only) |
+| W5 | `build-manifest.json` identifies DEV + exact build SHA |
+| W6 | No localhost/LAN IP in loaded JS |
+
+---
+
+## Step 7 — N-Go DEV native build + iPhone install
+
+```bash
+npm run build:dev-native
+npx cap sync ios
+```
+
+**Pre-install verification:**
+
+```bash
+/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' ios/App/App/Info.plist
+/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' ios/App/App/Info.plist 2>/dev/null || \
+  grep PRODUCT_BUNDLE_IDENTIFIER ios/App/App.xcodeproj/project.pbxproj | head -1
+cat dist/build-manifest.json
+grep -o 'api.staging.strata-ngo.com' dist/assets/index-*.js | head -1
+```
+
+| ID | PASS if |
+|----|---------|
+| N1 | Bundle ID = **`com.strata.ngo.field.dev`** |
+| N2 | Display name = **`N-Go DEV`** |
+| N3 | API = staging (`api.staging.strata-ngo.com`) |
+| N4 | Manifest profile = **dev**, buildSha = `$MAIN_SHA` |
+
+```bash
+open ios/App/App.xcworkspace
+```
+
+Xcode → physical iPhone → **Product → Run**.
+
+| ID | PASS if |
+|----|---------|
+| N5 | App installs as **N-Go DEV** (separate from legacy Kinet app) |
+| N6 | Login screen loads |
+
+**Note:** Fresh sandbox — absence of legacy Kinet IndexedDB/queue is **expected**, not data loss.
+
+---
+
+## Step 8 — Christian device acceptance (handoff)
+
+Christian performs concise clean-baseline test:
+
+1. Launch **N-Go DEV** — confirm DEV identification visible.
+2. Login.
+3. Confirm field data downloads → **Ready for offline**.
+4. Complete one workflow **online** (photos + installer signature).
+5. Complete one workflow **offline** with multiple time-state changes (photos + signature).
+6. Reconnect → queue drains to **Pending: 0 actions**.
+7. Force-close and reopen → **Pending: 0** remains; cached offline assets usable.
+
+**STOP conditions (report immediately):**
+
+- `/api/version.gitSha` ≠ deployed main
+- N-Go DEV sees legacy Kinet local data
+- Wrong bundle ID or API in native build
+- PROD identity in DEV build
+- Sync queue won't drain
+- Valid offline data disappears
+- DEV loses diagnostics
+
+---
+
+## Report template (return to Christian)
+
+```
+Phase B post-merge DEV deploy — report
+Date:
+Git MAIN_SHA:
+BUILD_TIME (API):
+Disk cleanup D1-D3:
+
+G1-G2 git:              PASS / FAIL
+P0 preflight health:    PASS / FAIL
+B1 docker build:        PASS / FAIL
+E1 ECR push:            PASS / FAIL
+Image digest:
+ECS task definition rev:
+S1-S6 API verify:       PASS / FAIL
+/api/version JSON:
+
+W0-W6 web:              PASS / FAIL
+Live web bundle:
+build-manifest.json:
+
+N1-N6 native:           PASS / FAIL
+Bundle ID:
+Display name:
+Native build SHA:
+
+iPhone install:         PASS / FAIL / PENDING
+Christian acceptance:   PASS / FAIL / PENDING
+
+Blockers:
+Notes:
+Phase C started:        NO (must remain NO unless Christian explicitly requests)
+```
+
+## PROMPT END

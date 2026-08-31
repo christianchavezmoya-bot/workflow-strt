@@ -146,7 +146,7 @@ Wait until deployment stable and target **Healthy**.
 **If disk was tight, run Step 0 cleanup again before `npm run build`.**
 
 ```bash
-VITE_API_BASE=https://api.staging.strata-ngo.com/api npm run build:cloud-web
+npm run build:dev-web
 ```
 
 Upload `dist/` to bucket **`strata-ngo-web-staging`** with cache headers (immutable `/assets/*`, no-cache `index.html`). Invalidate CloudFront **`E1YN5XTWDWRHYP`** for `/*` or at minimum `/index.html`.
