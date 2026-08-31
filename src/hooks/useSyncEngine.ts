@@ -84,7 +84,7 @@ import { markOfflinePerf } from "../utils/offlinePerf";
 import { isOfflineModeActive, isManualOfflineModeActive } from "../services/offlineModeState";
 import { getSyncOpTimeoutMs, FIELD_SYNC_FORCE_HEADER, FIELD_SYNC_FORCE_VALUE, isPhoneWinsFieldSync } from "../utils/syncPolicy";
 import { classifySyncFailure, syncDiagnosticAppend } from "../services/syncDiagnosticsLog";
-import { buildRunSyncBundleRequest, collectBundledActionIds, isRunBundleCandidate } from "../services/runSyncBundleService";
+import { buildRunSyncBundleRequest, collectBundledActionIds, isRunBundleCandidate, markRunSyncBundleUnsupported } from "../services/runSyncBundleService";
 import {
   fromWorkInstructionDto,
   removeLocalWorkInstruction,
@@ -1124,6 +1124,16 @@ export function useSyncEngine(): SyncState {
           window.dispatchEvent(new Event("api-auth-error"));
           anyError = true;
           authExpired = true;
+        } else if (httpStatus === 404 && bundledActionIds.length > 0) {
+          // Older API builds lack /sync-bundle — fall back to per-op flush instead of dropping.
+          await markRunSyncBundleUnsupported(action.entityId);
+          await pendingSetStatus(action.id, "pending");
+          await Promise.all(
+            bundledActionIds
+              .filter((id) => id !== action.id)
+              .map((id) => pendingSetStatus(id, "pending")),
+          );
+          anyError = true;
         } else if (httpStatus && httpStatus !== 429 && httpStatus >= 400 && httpStatus < 500) {
           const isWorkflowRunOp = action.entityType === "workflow-run";
           const isRejectableStatus = httpStatus === 422 || httpStatus === 400;

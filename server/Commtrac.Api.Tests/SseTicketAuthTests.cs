@@ -85,6 +85,25 @@ public class SseTicketAuthTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task Legacy_token_query_auth_is_rejected_outside_development()
+    {
+        var devClient = _factory.CreateClient();
+        var loginResp = await devClient.PostAsJsonAsync("/api/auth/login", new
+        {
+            email = "admin@commtrac.local",
+            password = "Admin123!",
+        });
+        Assert.Equal(HttpStatusCode.OK, loginResp.StatusCode);
+        using var loginDoc = JsonDocument.Parse(await loginResp.Content.ReadAsStringAsync());
+        var token = loginDoc.RootElement.GetProperty("token").GetString();
+
+        await using var prodFactory = new ProductionSseTestFactory();
+        var sseClient = prodFactory.CreateClient();
+        var resp = await sseClient.GetAsync($"/api/sse/events?token={Uri.EscapeDataString(token!)}");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
     public async Task Revoked_session_cannot_mint_ticket()
     {
         var client = await CreateAuthedClientAsync();

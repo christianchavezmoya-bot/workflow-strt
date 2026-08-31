@@ -23,6 +23,7 @@ import strataLogo from "../../assets/strata_transparent.png";
 import { APP_NAME } from "../../constants/branding";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { resolvePostLoginRoute } from "../../utils/postLoginRoute";
+import { debugLog } from "../../utils/appEnvironment";
 
 // Must be outside Login so it doesn't remount on every keystroke
 const PageWrapper = ({ children }: { children: React.ReactNode }) => (
@@ -68,7 +69,7 @@ const Login = () => {
   useEffect(() => {
     const checkNetwork = async () => {
       const status = await getNetworkStatus();
-      console.log("[Login] Network status:", status);
+      debugLog("[Login] Network status:", status);
       setNetworkStatus(status);
     };
     
@@ -97,11 +98,11 @@ const Login = () => {
   const [rememberDevice, setRememberDevice] = useState(false);
 
   const handleLoginSuccess = async (result: { token?: string; user?: unknown; isFirstLogin: boolean; trustedDeviceToken?: string; passwordExpired?: boolean }) => {
-    console.log("[Login] handleLoginSuccess called", { 
-      hasToken: !!result.token, 
+    debugLog("[Login] handleLoginSuccess", {
+      hasToken: !!result.token,
       hasUser: !!result.user,
       isFirstLogin: result.isFirstLogin,
-      passwordExpired: result.passwordExpired 
+      passwordExpired: result.passwordExpired,
     });
     
     if (!result.token) {
@@ -113,7 +114,7 @@ const Login = () => {
     // Set just_authenticated flag FIRST (before any async operations)
     // This ensures the flag is in cache even if storage operations timeout
     await secureSet("just_authenticated", "true");
-    console.log("[Login] Set just_authenticated flag");
+    debugLog("[Login] Set just_authenticated flag");
     
     try {
       // Save all auth data in parallel with timeout protection
@@ -130,7 +131,7 @@ const Login = () => {
         new Promise((_, reject) => setTimeout(() => reject(new Error("Storage timeout")), 5000))
       ]);
       
-      console.log("[Login] All data saved successfully");
+      debugLog("[Login] All data saved successfully");
       if (isMobileNativePlatform()) {
         localStorage.removeItem("test_mode_original_auth");
       }
@@ -192,11 +193,11 @@ const Login = () => {
     setLoading(true);
     setError(null);
     try {
-      console.log("[Login] Verifying 2FA code...");
+      debugLog("[Login] Verifying 2FA code...");
       const result = await authService.verify2fa(twoFactorToken, totpCode, rememberDevice);
-      console.log("[Login] 2FA verify response:", result);
+      debugLog("[Login] 2FA verify succeeded", { hasToken: !!result.token, hasUser: !!result.user });
       await handleLoginSuccess(result);
-      console.log("[Login] handleLoginSuccess completed");
+      debugLog("[Login] handleLoginSuccess completed");
     } catch (err: any) {
       console.error("[Login] 2FA verify error:", err);
       setError(err?.response?.status === 429

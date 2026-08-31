@@ -8,6 +8,7 @@ import {
   shouldSkipInteractiveWrite,
 } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
+import { isDebugFeaturesEnabled } from "../utils/appEnvironment";
 import { randomId } from "../utils/randomId";
 import { formatPayloadSize } from "../utils/syncDiagnostics";
 import { isCircuitOpen, resetCircuitBreaker } from "../utils/circuitBreaker";
@@ -117,6 +118,7 @@ if (typeof resolvedAdapter === "function") {
 }
 
 const pushDebugLog = (log: ApiDebugLog) => {
+  if (!isDebugFeaturesEnabled()) return;
   const anyWindow = window as typeof window & { __apiDebugLogs?: ApiDebugLog[] };
   if (!anyWindow.__apiDebugLogs) {
     anyWindow.__apiDebugLogs = [];

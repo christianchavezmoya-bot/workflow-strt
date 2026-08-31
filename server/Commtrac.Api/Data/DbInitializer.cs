@@ -255,9 +255,19 @@ public static class DbInitializer
         string.Equals(config["SeedProfile"], "Demo", StringComparison.OrdinalIgnoreCase)
         || config.GetValue("SeedDemoData", false);
 
-    private static string ResolveSeedAdminPassword(IConfiguration config)
+    internal static string ResolveSeedAdminPassword(IConfiguration config) =>
+        ResolveSeedPassword(config, "SeedAdmin:Password", "Admin123!", "SeedAdmin:Password");
+
+    internal static string ResolveSeedProjectManagerPassword(IConfiguration config) =>
+        ResolveSeedPassword(config, "SeedProjectManager:Password", "Pm123!", "SeedProjectManager:Password");
+
+    private static string ResolveSeedPassword(
+        IConfiguration config,
+        string configKey,
+        string developmentFallback,
+        string settingName)
     {
-        var configured = config["SeedAdmin:Password"];
+        var configured = config[configKey];
         if (!string.IsNullOrWhiteSpace(configured))
         {
             return configured;
@@ -270,11 +280,11 @@ public static class DbInitializer
 
         if (isDevelopment)
         {
-            return "Admin123!";
+            return developmentFallback;
         }
 
         throw new InvalidOperationException(
-            "SeedAdmin:Password must be configured before the first run in non-Development environments.");
+            $"{settingName} must be configured before the first run in non-Development environments.");
     }
 
     /// <summary>

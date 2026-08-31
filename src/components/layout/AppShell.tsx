@@ -2,6 +2,7 @@
 import { Outlet } from "react-router-dom";
 import Sidebar from "./Sidebar";
 import Topbar from "./Topbar";
+import { isDebugFeaturesEnabled } from "../../utils/appEnvironment";
 import DebugPanel from "./DebugPanel";
 import FieldNotificationBar from "../FieldNotificationBar";
 import BottomTabBar from "./BottomTabBar";
@@ -121,7 +122,7 @@ const AppShell = () => {
         {/* Bottom tab bar: mobile only (shown via CSS) */}
         <BottomTabBar />
         <SyncBusyOverlay />
-        <DebugPanel />
+        {isDebugFeaturesEnabled() && <DebugPanel />}
         <OnboardingLayer />
       </Box>
     </FavoritesProvider>

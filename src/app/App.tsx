@@ -17,6 +17,7 @@ import { hydrateKnownMissingAssetIds } from "../utils/staleAssetIds";
 import BiometricLockScreen from "../components/BiometricLockScreen";
 import Login from "../features/auth/Login";
 import { isMobileNativePlatform } from "../utils/platform";
+import { debugLog } from "../utils/appEnvironment";
 import { isAuthTokenExpired } from "../utils/authToken";
 import { useNativeSyncLifecycle } from "../hooks/useNativeSyncLifecycle";
 import { useSyncKeepAlive } from "../hooks/useSyncKeepAlive";
@@ -49,33 +50,33 @@ const App = () => {
   useRouteBreadcrumbs();
 
   const forceLogin = useCallback(() => {
-    console.log("[App] Forcing Login — JWT expired while online");
+    debugLog("[App] Forcing Login — JWT expired while online");
     setAuthState("no-session");
   }, []);
 
   const applyAuthMode = useCallback((mode: BiometricCheckResult) => {
-    console.log("[App] Auth mode:", mode);
+    debugLog("[App] Auth mode:", mode);
     setAuthState(mode);
   }, []);
 
   const refreshAuthState = useCallback(async () => {
     const justAuth = secureGet("just_authenticated");
     if (justAuth === "true") {
-      console.log("[App] User just authenticated, skipping biometric screen");
+      debugLog("[App] User just authenticated, skipping biometric screen");
       secureRemove("just_authenticated");
       setAuthState("session-unlocked");
       return;
     }
 
     const mode = await getLaunchAuthModeAsync();
-    console.log("[App] Refreshed auth mode:", mode);
+    debugLog("[App] Refreshed auth mode:", mode);
     applyAuthMode(mode);
   }, [applyAuthMode]);
 
   const handleBiometricUnlocked = useCallback(async () => {
     const allowed = await canEnterAppWithStoredSession();
     if (!allowed) {
-      console.log("[App] Biometric unlock rejected — session invalid, showing Login");
+      debugLog("[App] Biometric unlock rejected — session invalid, showing Login");
       applyAuthMode("no-session");
       return;
     }
@@ -84,16 +85,16 @@ const App = () => {
 
   useEffect(() => {
     const handleStorageChange = () => {
-      console.log("[App] Storage change detected, refreshing auth state");
+      debugLog("[App] Storage change detected, refreshing auth state");
       void refreshAuthState();
     };
 
     const handleAuthError = () => {
       if (isMobileNativePlatform() && !isOnlineForAuthSync() && isOfflineGraceValid()) {
-        console.log("[App] Auth error while offline within grace — keeping cached session");
+        debugLog("[App] Auth error while offline within grace — keeping cached session");
         return;
       }
-      console.log("[App] Auth error — switching to Login");
+      debugLog("[App] Auth error — switching to Login");
       forceLogin();
       // Do not call refreshAuthState here — it can revert to biometric-needed when
       // Capacitor Network briefly reports offline, leaving a zombie dashboard.
@@ -117,10 +118,10 @@ const App = () => {
 
     const init = async () => {
       try {
-        console.log("[App] Initializing secure storage...");
+        debugLog("[App] Initializing secure storage...");
         await initSecureStorage();
         await hydrateKnownMissingAssetIds();
-        console.log("[App] Secure storage initialized");
+        debugLog("[App] Secure storage initialized");
 
         const mode = await getLaunchAuthModeAsync();
         applyAuthMode(mode);

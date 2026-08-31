@@ -102,6 +102,13 @@ public class SseController : ControllerBase
         }
         else if (!string.IsNullOrWhiteSpace(token))
         {
+            if (!_environment.IsDevelopment())
+            {
+                Response.StatusCode = 401;
+                await Response.WriteAsync("Unauthorized", ct);
+                return;
+            }
+
             var principal = ValidateLegacyJwt(token);
             if (principal is null)
             {

@@ -1,5 +1,4 @@
-// Onboarding feature flags — flip these to enable/disable onboarding modules globally.
-// Can be overridden at runtime via localStorage key "onboarding_flags_override" (JSON).
+import { isProdAppBuild } from "../../utils/appEnvironment";
 
 export const APP_VERSION = "1.2.0"; // bump this with each release to trigger What's New
 
@@ -25,6 +24,7 @@ const defaults: OnboardingFlags = {
 };
 
 function loadOverrides(): Partial<OnboardingFlags> {
+  if (isProdAppBuild()) return {};
   try {
     const raw = localStorage.getItem("onboarding_flags_override");
     if (raw) return JSON.parse(raw) as Partial<OnboardingFlags>;

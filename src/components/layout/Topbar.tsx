@@ -32,6 +32,7 @@ import { isDesktopLikePlatform, isMobileNativePlatform } from "../../utils/platf
 import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { formatInstant } from "../../utils/datetime";
+import { isDebugFeaturesEnabled } from "../../utils/appEnvironment";
 
 function getRolesFromCache(): string[] {
   try {
@@ -44,6 +45,7 @@ function getRolesFromCache(): string[] {
 }
 
 function setDevRoleOverride(role: string | null) {
+  if (!isDebugFeaturesEnabled()) return;
   if (role) {
     localStorage.setItem("dev_role_override", role);
   } else {
@@ -742,7 +744,7 @@ const Topbar = () => {
             </Stack>
           </MenuItem>
           <Divider />
-          {!isMobileNativePlatform() && isAdminUser && (
+          {!isMobileNativePlatform() && isAdminUser && isDebugFeaturesEnabled() && (
             <>
           <MenuItem onClick={openTestUserDialog} sx={{ justifyContent: "space-between" }}>
             <Stack direction="row" spacing={1} alignItems="center">

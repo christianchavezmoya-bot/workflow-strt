@@ -17,6 +17,7 @@
  */
 
 import { isMobileNativePlatform } from "../utils/platform";
+import { debugLog, isDebugFeaturesEnabled } from "../utils/appEnvironment";
 
 type SecureStoragePluginHandle = {
   plugin: {
@@ -54,11 +55,12 @@ let _initPromise: Promise<void> | null = null;
 const KEYCHAIN_READ_TIMEOUT_MS = 2_000;
 
 function logSecureKeyAction(key: string, action: string): void {
+  if (!isDebugFeaturesEnabled()) return;
   if (SECRET_VALUE_KEYS.has(key)) {
-    console.log(`[SecureStorage] ${action} (secret key)`);
+    debugLog(`[SecureStorage] ${action} (secret key)`);
     return;
   }
-  console.log(`[SecureStorage] ${action} ${key}`);
+  debugLog(`[SecureStorage] ${action} ${key}`);
 }
 
 // Lazy-load the plugin so it doesn't break on web where the native layer is absent
@@ -130,14 +132,14 @@ export async function initSecureStorage(): Promise<void> {
   if (_initPromise) return _initPromise;
 
   _initPromise = (async () => {
-    console.log("[SecureStorage] Starting initialization...");
+    debugLog("[SecureStorage] Starting initialization...");
 
     if (!isMobileNativePlatform()) {
       for (const key of SECURE_KEYS) {
         cache.set(key, readLocalStorage(key));
       }
       _initDone = true;
-      console.log("[SecureStorage] Loaded from localStorage (web)");
+      debugLog("[SecureStorage] Loaded from localStorage (web)");
       return;
     }
 
@@ -146,7 +148,7 @@ export async function initSecureStorage(): Promise<void> {
     const plugin = handle?.plugin;
 
     if (plugin) {
-      console.log("[SecureStorage] Loading secure keys from Keychain...");
+      debugLog("[SecureStorage] Loading secure keys from Keychain...");
       const existingKeys = await readExistingKeychainKeys(plugin);
       for (const key of SECURE_KEYS) {
         if (existingKeys.has(key)) {
@@ -179,7 +181,7 @@ export async function initSecureStorage(): Promise<void> {
     }
 
     _initDone = true;
-    console.log("[SecureStorage] Initialization complete");
+    debugLog("[SecureStorage] Initialization complete");
   })();
 
   return _initPromise;
