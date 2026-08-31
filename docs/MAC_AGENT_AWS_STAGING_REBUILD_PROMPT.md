@@ -114,8 +114,9 @@ Ensure task env includes (register new revision if missing):
 
 | Env var | Value |
 |---------|--------|
-| `Email__FrontendBaseUrl` | `https://www.strata-ngo.com` |
-| `Cors__AllowedOrigins__0` | `https://www.strata-ngo.com` |
+| `Email__FrontendBaseUrl` | `https://staging.strata-ngo.com` |
+| `Cors__AllowedOrigins__0` | `https://staging.strata-ngo.com` |
+| `Cors__AllowedOrigins__1` | `https://www.strata-ngo.com` |
 | `ASPNETCORE_ENVIRONMENT` | `Staging` |
 
 Then:
@@ -163,11 +164,11 @@ Upload `dist/` to bucket **`strata-ngo-web-staging`** with cache headers (immuta
 
 | ID | Check | PASS if |
 |----|-------|---------|
-| L1 | Settings → Notifications → Public frontend URL | Shows `https://www.strata-ngo.com` (or fix + save) |
-| L2 | Re-send test user invite | Email link host is **`www.strata-ngo.com`**, not `staging.` |
+| L1 | Settings → Notifications → Public frontend URL | Shows `https://staging.strata-ngo.com` (or fix + save) |
+| L2 | Re-send test user invite | Email link host is **`staging.strata-ngo.com`**, not bare `www` |
 | L3 | Open invite link | Create-password page loads |
-| L4 | Dashboard → workflow → phone upload QR | QR URL starts with `https://www.strata-ngo.com/mobile-upload` |
-| L5 | Request customer signature (test) | Email or copy link uses `www.strata-ngo.com/sign/…` |
+| L4 | Dashboard → workflow → phone upload QR | QR URL starts with `https://staging.strata-ngo.com/mobile-upload` |
+| L5 | Request customer signature (test) | Email or copy link uses `staging.strata-ngo.com/sign/…` |
 
 ---
 

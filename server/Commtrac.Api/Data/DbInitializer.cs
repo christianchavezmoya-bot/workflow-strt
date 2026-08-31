@@ -309,9 +309,9 @@ public static class DbInitializer
     }
 
     /// <summary>
-    /// Staging DBs may still have the pre-www frontend URL from early seeds or admin saves.
-    /// When env/appsettings provides a different public URL, align the stored value so invite
-    /// and password-reset emails link to the live web app.
+    /// Staging DBs may still have the interim www frontend URL from Phase B.
+    /// When env/appsettings provides staging.strata-ngo.com, align the stored value so invite
+    /// and password-reset emails link to the canonical DEV web app.
     /// </summary>
     private static void EnsureNotificationSettingsFrontendBaseUrl(AppDbContext db, IConfiguration config)
     {
@@ -335,22 +335,12 @@ public static class DbInitializer
             return;
         }
 
-        if (IsDeprecatedStagingWebHost(current)
+        if (FrontendBaseUrlPolicy.IsLegacyInterimDevWebHost(current)
             && !current.Equals(configuredFallback, StringComparison.OrdinalIgnoreCase))
         {
             entity.FrontendBaseUrl = configuredFallback;
             db.SaveChanges();
         }
-    }
-
-    private static bool IsDeprecatedStagingWebHost(string url)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-        {
-            return false;
-        }
-
-        return uri.Host.Equals("staging.strata-ngo.com", StringComparison.OrdinalIgnoreCase);
     }
 
     private static void EnsurePushDeviceTokensTable(AppDbContext db)
