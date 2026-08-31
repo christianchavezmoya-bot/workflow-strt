@@ -112,8 +112,8 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - **Native first-login perf** — rebuild iOS app after relevant merges if dashboard slow on cold start
 - **iPhone build** against `https://api.staging.strata-ngo.com/api` (no Phase C native rebuild required)
 - **APNs/FCM** push on server
-- **Phase C:** CLOSED / PASS — Christian acceptance L1–L5 complete (2026-08-31)
-- **Optional:** C5 team comms — notify team to use **`staging.strata-ngo.com`** for DEV testing
+- **Phase C:** CLOSED / PASS — Christian acceptance L1–L5 + C5 team comms (2026-08-31)
+- **Phase D:** **NEXT** — isolated prod AWS stack; see `docs/MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md`
 - **Phase D/F** — do not start without explicit approval
 
 ### Invite / password-reset email links — RESOLVED (Phase C, 2026-08-31)

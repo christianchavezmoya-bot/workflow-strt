@@ -1,8 +1,10 @@
 # Phase C — DEV DNS clarity (`staging.strata-ngo.com`)
 
-**Status: CLOSED / PASS (2026-08-31)** — AWS deploy + Christian acceptance complete. All L1–L5 and infrastructure gates satisfied.
+**Status: CLOSED / PASS (2026-08-31)** — AWS deploy + Christian acceptance + **C5 team comms sent**.
 
 **Goal:** Canonical DEV web at **`https://staging.strata-ngo.com`**. **`www.strata-ngo.com`** keeps serving the same DEV app until Phase F, then flips to production.
+
+**Next phase:** [Phase D — Production AWS](./MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md) (isolated stack, no traffic).
 
 ## Acceptance sign-off (Christian, 2026-08-31)
 
@@ -18,7 +20,7 @@
 | www transition host | ✅ PASS | Still available as intended |
 | **Phase C** | **✅ CLOSED / PASS** | All acceptance criteria satisfied |
 
-**Optional post-close:** C5 team comms — notify team to use `https://staging.strata-ngo.com` for DEV testing.
+**Optional post-close:** ~~C5 team comms~~ **DONE** — see [`docs/TEAM_DEV_ENVIRONMENT_UPDATE.md`](./TEAM_DEV_ENVIRONMENT_UPDATE.md).
 
 ## Final deploy record
 
@@ -51,11 +53,13 @@
 
 ---
 
-## Christian — post-close (optional)
+## Christian — post-close
 
-1. **C5:** Notify team — use **`https://staging.strata-ngo.com`** for DEV web testing; `www` still works but is reserved for production (Phase F).
+C5 team communication sent 2026-08-31 — [`docs/TEAM_DEV_ENVIRONMENT_UPDATE.md`](./TEAM_DEV_ENVIRONMENT_UPDATE.md).
 
-Do **not** start Phase D/F or repoint `www` to production.
+Do **not** start Phase D/F DNS cutover or repoint `www` to production until Phase D stack is ready and Phase F gate passes.
+
+**Phase D next:** [`docs/MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md`](./MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md)
 
 ---
 
