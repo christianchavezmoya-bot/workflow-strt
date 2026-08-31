@@ -2,121 +2,132 @@
 
 **Goal:** Canonical DEV web at **`https://staging.strata-ngo.com`**. **`www.strata-ngo.com`** keeps serving the same DEV app until Phase F, then flips to production.
 
-**Prerequisites:** Phase B **CLOSED / PASS** · main at `509a3cdf…` or newer · PR with Phase C URL policy merged.
+**Prerequisites:** Phase B **CLOSED / PASS** · main at **`96e4e797…`** (#331 merged) · Christian **DNS C done**.
 
-**Order:** Christian DNS + CloudFront alias → Mac API ECS env redeploy → Mac web deploy → verify both hosts → link smoke on staging host.
+**DNS (confirmed 2026-08-31):**
+- `staging.strata-ngo.com` → CNAME → **`d1cd0cll7o925f.cloudfront.net`** (Proxy ON)
+- `www.strata-ngo.com` unchanged
+- Until CloudFront alternate domain is added, staging may return **Cloudflare 530** — expected.
+
+**Order:** CloudFront alias + ACM → Mac API ECS env redeploy → Mac web deploy → verify both hosts → link smoke on staging host.
 
 ---
 
-## Christian — DNS (do first)
+## Christian — DNS ✅ DONE (2026-08-31)
 
-Copy into Cloudflare for **strata-ngo.com**:
+| Record | Value |
+|--------|--------|
+| Name | `staging.strata-ngo.com` |
+| Type | CNAME |
+| Target | **`d1cd0cll7o925f.cloudfront.net`** |
+| Proxy | ON |
+| `www` | **unchanged** |
 
-```
-PHASE C — Christian DNS only
-
-1. In Cloudflare DNS, add:
-   staging.strata-ngo.com  →  CNAME  →  (same CloudFront target as www today)
-   Proxy: ON (orange cloud) · SSL: Full (strict)
-
-2. Tell the Mac agent the CloudFront domain name if asked (from www CNAME target).
-
-3. Do NOT repoint www to production yet — that is Phase F.
-
-4. Reply "DNS C done" when saved.
-
-5. After Mac agent adds staging to CloudFront alternate domains, confirm:
-   https://staging.strata-ngo.com loads the login page (same app as www).
-```
+Mac agent: proceed from **Step 1 (CloudFront alternate domain)** below.
 
 ---
 
 ## Mac agent — paste into Claude Code
 
 ```
-PHASE C — DEV DNS deploy agent (Strata N-Go)
+PHASE C — DEV DNS deploy (DNS C DONE — execute now)
+
+Main SHA: 96e4e7972ad8836f879c005779fb7f77582c483b
+CloudFront distribution: E1YN5XTWDWRHYP
+CloudFront domain: d1cd0cll7o925f.cloudfront.net
+DNS: staging.strata-ngo.com CNAME → d1cd0cll7o925f.cloudfront.net (Proxy ON) ✅
+
+Current state: https://staging.strata-ngo.com returns Cloudflare 530 until Step 1 completes.
+https://www.strata-ngo.com returns 200 (unchanged DEV).
 
 AWS profile: strata-agent · region ap-southeast-2
-Do NOT start Phase D/F. www stays on DEV origin until Phase F.
+Do NOT start Phase D/F. Do not move www to production.
 
 ═══════════════════════════════════════════════════════════════
-STEP 0 — Sync + wait for Christian
+STEP 0 — Sync repo
 ═══════════════════════════════════════════════════════════════
 git checkout main && git pull origin main
-git log -1 --oneline
-
-STOP until Christian confirms "DNS C done" AND staging.strata-ngo.com resolves.
-If DNS not live, proceed with CloudFront alias prep only.
+export MAIN_SHA="$(git rev-parse HEAD)"
+echo "MAIN_SHA=$MAIN_SHA"   # must be 96e4e797…
 
 ═══════════════════════════════════════════════════════════════
-STEP 1 — CloudFront alternate domain (required for HTTPS)
+STEP 1 — CloudFront alternate domain + ACM (us-east-1)
 ═══════════════════════════════════════════════════════════════
-Distribution: E1YN5XTWDWRHYP · bucket strata-ngo-web-staging
+Distribution ID: E1YN5XTWDWRHYP
 
-Add alternate domain name: staging.strata-ngo.com
-Attach ACM cert (us-east-1) covering staging.strata-ngo.com (request if missing).
-Do NOT remove www alias — both hosts serve DEV during Phase C.
+1. ACM (us-east-1): ensure cert covers staging.strata-ngo.com (request/DNS-validate if missing).
+2. Update distribution alternate domain names:
+   - ADD staging.strata-ngo.com
+   - KEEP existing www.strata-ngo.com alias
+3. Attach ACM cert to distribution; wait for Deployed.
 
-Verify:
-  curl -sS -o /dev/null -w "%{http_code}\n" https://staging.strata-ngo.com/
-  curl -sS https://staging.strata-ngo.com/build-manifest.json
-
-PASS: HTTP 200, same build-manifest profile=dev as www.
+Verify (530 must become 200):
+  curl -sS -o /dev/null -w "staging:%{http_code}\n" https://staging.strata-ngo.com/
+  curl -sS -o /dev/null -w "www:%{http_code}\n" https://www.strata-ngo.com/
 
 ═══════════════════════════════════════════════════════════════
-STEP 2 — ECS API env (backend Phase C — register new task def)
+STEP 2 — Build + push API (Phase C code on main)
 ═══════════════════════════════════════════════════════════════
-Update task definition (copy prior rev verbatim except env):
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+docker build \
+  --build-arg GIT_SHA="$MAIN_SHA" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  -t commtrac-api:staging .
 
-  Email__FrontendBaseUrl=https://staging.strata-ngo.com
-  Cors__AllowedOrigins__0=https://staging.strata-ngo.com
-  Cors__AllowedOrigins__1=https://www.strata-ngo.com
-  ASPNETCORE_ENVIRONMENT=Staging
+aws ecr get-login-password --region ap-southeast-2 --profile strata-agent \
+  | docker login --username AWS --password-stdin 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com
+docker tag commtrac-api:staging 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging
+docker push 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging
 
-Register new revision with NEW image digest if code PR merged (Phase C URL policy).
-If image unchanged, env-only new revision is fine.
+Record IMAGE_DIGEST from push output.
 
-Deploy: update-service with new task-definition rev (NOT force-new-deployment alone — use digest-pinned image update pattern from Phase B).
+═══════════════════════════════════════════════════════════════
+STEP 3 — ECS task def (digest-pinned + Phase C env)
+═══════════════════════════════════════════════════════════════
+Fetch current rev (default-commtrac-api-ae2c), copy verbatim except:
+
+  container image → 920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api@$IMAGE_DIGEST
+  Email__FrontendBaseUrl → https://staging.strata-ngo.com
+  Cors__AllowedOrigins__0 → https://staging.strata-ngo.com
+  Cors__AllowedOrigins__1 → https://www.strata-ngo.com
+  ASPNETCORE_ENVIRONMENT → Staging (unchanged)
+
+Register new revision. update-service with --task-definition …:<NEW_REV> (NOT force-new-deployment alone).
+Sync ALB priority-10 weights after deploy (handoff doc).
 
 Verify:
   curl -sf https://api.staging.strata-ngo.com/api/health
   curl -sf https://api.staging.strata-ngo.com/api/version
-
-Settings → Notifications → Public frontend URL should show staging.strata-ngo.com after boot patch.
+  gitSha must equal MAIN_SHA (96e4e797…)
 
 ═══════════════════════════════════════════════════════════════
-STEP 3 — DEV web (both hosts)
+STEP 4 — DEV web deploy
 ═══════════════════════════════════════════════════════════════
 npm run build:dev-web
 npm run check:artifact-isolation -- --profile dev --dist dist
+cat dist/build-manifest.json   # buildSha = MAIN_SHA
+
 aws s3 sync dist/ s3://strata-ngo-web-staging/ --delete --profile strata-agent --region ap-southeast-2
-aws cloudfront create-invalidation --distribution-id E1YN5XTWDWRHYP --paths "/*" --profile strata-agent
+aws cloudfront create-invalidation --distribution-id E1YN5XTWDWRHYP --paths "/*" --profile strata-agent --region ap-southeast-2
 
-Verify BOTH:
-  https://staging.strata-ngo.com — DEV badge, login, Admin dashboard
-  https://www.strata-ngo.com — still loads (transition), same bundle hash
-
-═══════════════════════════════════════════════════════════════
-STEP 4 — Link smoke on STAGING host (L1–L5)
-═══════════════════════════════════════════════════════════════
-Browse https://staging.strata-ngo.com as Admin:
-
-| ID | Check | PASS if |
-|----|-------|---------|
-| L1 | Settings → Notifications → Public frontend URL | staging.strata-ngo.com |
-| L2 | Re-send test invite | Email link host is staging.strata-ngo.com |
-| L3 | Open invite link | Create-password page loads |
-| L4 | Workflow phone upload QR | URL starts https://staging.strata-ngo.com/mobile-upload |
-| L5 | Customer signature copy link | staging.strata-ngo.com/sign/… |
+Verify BOTH hosts (same bundle hash):
+  curl -sS https://staging.strata-ngo.com/ | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1
+  curl -sS https://staging.strata-ngo.com/build-manifest.json
+  curl -sS https://www.strata-ngo.com/build-manifest.json
 
 ═══════════════════════════════════════════════════════════════
-STEP 5 — Optional native
+STEP 5 — L1–L5 on https://staging.strata-ngo.com
 ═══════════════════════════════════════════════════════════════
-No native rebuild required unless frontend changed again.
-API URL unchanged (api.staging.strata-ngo.com).
+L1 Public frontend URL = staging.strata-ngo.com
+L2 Invite email link host = staging.strata-ngo.com
+L3 Invite link loads
+L4 QR = https://staging.strata-ngo.com/mobile-upload…
+L5 Signature link = staging.strata-ngo.com/sign/…
 
-Report: main SHA, CF alias status, ECS rev, /api/version, live bundles on staging+www, L1–L5, Phase C PASS/FAIL
+Report: ECS rev, IMAGE_DIGEST, /api/version JSON, CF/ACM status, live bundles, L1–L5, Phase C PASS/FAIL
 ```
+
+**One-shot automation (Mac):** `./scripts/deploy-phase-c-aws.sh` — runs Steps 1–4 + partial L1 when `ADMIN_PASS` is set. Cloud agent pre-validated web build at `96e4e797…` (`index-B6Gt7K7t.js`).
 
 ---
 
