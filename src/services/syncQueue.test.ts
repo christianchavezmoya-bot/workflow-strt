@@ -56,4 +56,45 @@ describe("buildSyncIdempotencyKey", () => {
     expect(first).toBe(second);
     expect(first).toBe("ASSET_DOCUMENT_LINK_ATTACH:POST:asset-1:doc-1");
   });
+
+  it("gives distinct TIME_ENTRY actions on the same run distinct keys", () => {
+    const timeEntryBase = {
+      opType: "TIME_ENTRY" as const,
+      url: "/asset-workflow-runs/run-1/time-entry",
+      method: "POST" as const,
+      entityType: "workflow-run",
+      entityId: "run-1",
+    };
+    const start = buildSyncIdempotencyKey({
+      ...timeEntryBase,
+      body: { action: "StartProductive", startedAtUtc: "2026-01-01T00:00:00.000Z", endedAtUtc: null },
+    });
+    const stop = buildSyncIdempotencyKey({
+      ...timeEntryBase,
+      body: { action: "StopDowntime", startedAtUtc: "2026-01-01T00:05:00.000Z", endedAtUtc: "2026-01-01T00:05:00.000Z" },
+    });
+    // Regression guard: before this fix both resolved to the same base key
+    // (opType:method:entityType:entityId:url), which made a second time-tracking
+    // action for the same run upsert into the first one instead of queueing its own row.
+    expect(start).not.toBe(stop);
+  });
+
+  it("coalesces an exact-duplicate TIME_ENTRY replay (same action + same timestamp)", () => {
+    const timeEntryBase = {
+      opType: "TIME_ENTRY" as const,
+      url: "/asset-workflow-runs/run-1/time-entry",
+      method: "POST" as const,
+      entityType: "workflow-run",
+      entityId: "run-1",
+    };
+    const first = buildSyncIdempotencyKey({
+      ...timeEntryBase,
+      body: { action: "StartProductive", startedAtUtc: "2026-01-01T00:00:00.000Z", endedAtUtc: null },
+    });
+    const second = buildSyncIdempotencyKey({
+      ...timeEntryBase,
+      body: { action: "StartProductive", startedAtUtc: "2026-01-01T00:00:00.000Z", endedAtUtc: null },
+    });
+    expect(first).toBe(second);
+  });
 });

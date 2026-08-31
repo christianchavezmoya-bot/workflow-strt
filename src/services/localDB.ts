@@ -509,6 +509,62 @@ export async function pendingRecordTransientFailure(
   } catch { /* ignore */ }
 }
 
+/**
+ * Pure: for every pending action whose dependsOnOpId equals its own id (a queue-corruption
+ * state that permanently deadlocks flush() — the dependency lookup finds the action itself,
+ * "still pending" forever), compute a repaired dependency. Prefers the nearest earlier op of
+ * the same opType for the same entity, falling back to a pending RUN_CREATE for that entity,
+ * falling back to no dependency. Never touches body/payload — callers preserve everything
+ * else about the row.
+ */
+export function computeSelfDependencyRepairs(
+  all: PendingAction[],
+): Array<{ id: string; dependsOnOpId: string | undefined }> {
+  const selfDependent = all.filter((item) => item.dependsOnOpId === item.id);
+  if (selfDependent.length === 0) return [];
+
+  return selfDependent.map((item) => {
+    const priorSameType = all
+      .filter(
+        (other) =>
+          other.id !== item.id &&
+          other.entityId === item.entityId &&
+          other.opType === item.opType &&
+          new Date(other.createdAt).getTime() < new Date(item.createdAt).getTime(),
+      )
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
+    const priorRunCreate = all.find(
+      (other) => other.id !== item.id && other.entityId === item.entityId && other.opType === "RUN_CREATE",
+    );
+    return { id: item.id, dependsOnOpId: priorSameType?.id ?? priorRunCreate?.id ?? undefined };
+  });
+}
+
+/**
+ * Recovery migration for the self-dependency deadlock above. Runs at the start of every
+ * flush() pass (cheap no-op when there is nothing to repair) so a queue already stuck on a
+ * physical device self-heals on the next app launch/reconnect without losing the action.
+ */
+export async function pendingRepairSelfDependentActions(): Promise<void> {
+  try {
+    const all = await pendingGetAll();
+    const repairs = computeSelfDependencyRepairs(all);
+    if (repairs.length === 0) return;
+    const db = await getDB();
+    const byId = new Map(all.map((item) => [item.id, item]));
+    await Promise.all(
+      repairs.map(({ id, dependsOnOpId }) => {
+        const item = byId.get(id);
+        if (!item) return Promise.resolve();
+        return db.put("pending_actions", { ...item, dependsOnOpId });
+      }),
+    );
+    window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch {
+    // ignore
+  }
+}
+
 /** Reset one queued action for an immediate retry (clears backoff + conflict flags). */
 export async function pendingRetryNow(id: string): Promise<void> {
   try {

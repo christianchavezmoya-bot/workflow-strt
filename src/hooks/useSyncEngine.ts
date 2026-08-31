@@ -37,6 +37,7 @@ import {
   pendingRemove,
   pendingResetRetrySchedule,
   pendingResetStaleUploading,
+  pendingRepairSelfDependentActions,
   pendingRetryNow,
   pendingSetStatus,
   syncMetaSet,
@@ -244,13 +245,15 @@ function hasNetworkSignal(): boolean {
   return typeof navigator === "undefined" || navigator.onLine;
 }
 
-/** True when the sync engine should attempt uploads (radio up + server reachable). */
+/** True when the sync engine should attempt uploads (radio up; server not confirmed down). */
 function canAttemptSyncFlush(): boolean {
   if (isOfflineModeActive()) return false;
   if (!hasNetworkSignal()) return false;
   if (isMobileNativePlatform()) {
-    // Unknown (null) means ping has not confirmed the server yet — wait.
-    if (getServerReachable() !== true) return false;
+    // Fail open when reachability is unknown — same policy as interactive writes (#246).
+    // Waiting for /health to flip true first left queues stuck at retries:0 when the
+    // ping storm timed out but axios could still reach the LAN server.
+    if (getServerReachable() === false) return false;
     if (shouldDeferBackgroundSync()) return false;
   }
   return true;
@@ -831,6 +834,10 @@ export function useSyncEngine(): SyncState {
     let anyError = false;
     let networkFailureStoppedPass = false;
     try {
+      // Self-heal a stuck queue from before the self-dependency fix — cheap no-op
+      // once nothing is left to repair. Must run before the due list is read so a
+      // repaired action is eligible in this same pass.
+      await pendingRepairSelfDependentActions();
       due = await pendingGetDue();
       if (due.length === 0) {
         markOfflinePerf("queue_flush_end");

@@ -81,6 +81,17 @@ export function buildSyncIdempotencyKey(input: EnqueueSyncOpInput): string {
       return `${input.opType}:${input.method}:${assetId}:${documentId}`;
     }
   }
+  if (input.opType === "TIME_ENTRY" && input.body && typeof input.body === "object") {
+    // Each time-entry action (start/stop/pause) is a distinct, dated event — the
+    // base key alone (opType:method:entityType:entityId:url) is IDENTICAL for every
+    // action on the same run, since the action type lives in the body, not the URL.
+    // Without this, a second time-tracking action for the same run collapses into
+    // the first pending row via the upsert path below instead of creating its own
+    // row, which breaks assetWorkflowRunService's dependsOnOpId chaining (it can
+    // end up writing a row's own id into its own dependsOnOpId).
+    const { action, startedAtUtc } = input.body as { action?: string; startedAtUtc?: string };
+    if (action) return `${base}:${action}:${startedAtUtc ?? ""}`;
+  }
   return base;
 }
 
@@ -92,20 +103,27 @@ export const syncQueue = {
       (op) => op.idempotencyKey === idempotencyKey && op.status !== "uploading",
     );
     if (existing) {
+      // Invariant: a queued action must never depend on itself. The upsert below can
+      // reuse `existing.id` for a logically-new action; if the caller resolved its
+      // dependency against that same row (a stale queue snapshot pointing at the row
+      // about to be upserted-into), silently drop it rather than persist a self-loop
+      // that would deadlock flush() forever.
+      const resolvedDependsOnOpId = input.dependsOnOpId ?? existing.dependsOnOpId;
       await db.put("pending_actions", {
         ...existing,
         body: input.body,
         optimisticPatch: input.optimisticPatch ?? existing.optimisticPatch,
       serverEntityId: input.serverEntityId ?? existing.serverEntityId,
-      dependsOnOpId: input.dependsOnOpId ?? existing.dependsOnOpId,
+      dependsOnOpId: resolvedDependsOnOpId === existing.id ? undefined : resolvedDependsOnOpId,
       snapshotUpdatedAt: input.snapshotUpdatedAt ?? existing.snapshotUpdatedAt,
     });
       window.dispatchEvent(new Event("sync-pending-changed"));
       return existing;
     }
 
+    const newId = randomId();
     const op: SyncQueueOp = {
-      id: randomId(),
+      id: newId,
       opType: input.opType,
       url: input.url,
       method: input.method,
@@ -117,7 +135,7 @@ export const syncQueue = {
       retries: 0,
       status: "pending",
       serverEntityId: input.serverEntityId,
-      dependsOnOpId: input.dependsOnOpId,
+      dependsOnOpId: input.dependsOnOpId === newId ? undefined : input.dependsOnOpId,
       idempotencyKey,
       snapshotUpdatedAt: input.snapshotUpdatedAt,
     };

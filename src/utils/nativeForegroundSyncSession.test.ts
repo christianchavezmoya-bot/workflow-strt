@@ -35,6 +35,14 @@ describe("nativeForegroundSyncSession", () => {
       })).toBe(true);
     });
 
+    it("completes when the upload queue is stuck online (release user)", () => {
+      expect(isNativeSyncSessionComplete({
+        ...idle,
+        pendingCount: 3,
+        queueStuck: true,
+      })).toBe(true);
+    });
+
     it("does not complete while flushing even if offline", () => {
       expect(isNativeSyncSessionComplete({
         ...idle,

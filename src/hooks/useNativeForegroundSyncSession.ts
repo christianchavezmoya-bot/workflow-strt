@@ -25,8 +25,10 @@ import {
 import { useAppToast } from "../contexts/AppToastContext";
 
 const POLL_MS = 500;
+/** Release the blocking overlay when uploads make no progress while online. */
+const STUCK_QUEUE_MS = 45_000;
 
-async function readSessionInputs() {
+async function readSessionInputs(queueStuck: boolean) {
   const [pending, conflicted, bootstrapStatus] = await Promise.all([
     pendingCount(),
     pendingGetConflicted(),
@@ -40,6 +42,7 @@ async function readSessionInputs() {
     flushing: isSyncFlushing(),
     bootstrapping: bootstrapStatus.isRunning,
     cannotFlush: shouldDeferBackgroundSync(),
+    queueStuck,
   };
 }
 
@@ -51,6 +54,9 @@ export function useNativeForegroundSyncSession(): void {
   const interruptedRef = useRef(false);
   const pollTimerRef = useRef<number | null>(null);
   const lastStateRef = useRef<NativeForegroundSyncSessionState | null>(null);
+  const lastPendingRef = useRef<number | null>(null);
+  const lastProgressAtRef = useRef(Date.now());
+  const stuckNotifiedRef = useRef(false);
 
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
@@ -100,11 +106,42 @@ export function useNativeForegroundSyncSession(): void {
       });
     };
 
+    const isQueueStuck = (pending: number, flushing: boolean, bootstrapping: boolean, cannotFlush: boolean) => {
+      if (pending <= 0 || flushing || bootstrapping || cannotFlush) return false;
+      return Date.now() - lastProgressAtRef.current >= STUCK_QUEUE_MS;
+    };
+
+    const noteQueueProgress = (pending: number, syncedAny?: boolean) => {
+      if (syncedAny || (lastPendingRef.current !== null && pending < lastPendingRef.current)) {
+        lastProgressAtRef.current = Date.now();
+        stuckNotifiedRef.current = false;
+      }
+      lastPendingRef.current = pending;
+    };
+
     const evaluate = async () => {
       if (cancelled) return;
 
-      const inputs = await readSessionInputs();
+      const pendingOnly = await pendingCount();
       if (cancelled) return;
+
+      const queueStuck = isQueueStuck(
+        pendingOnly,
+        isSyncFlushing(),
+        offlineBootstrapService.isRunning(),
+        shouldDeferBackgroundSync(),
+      );
+
+      const inputs = await readSessionInputs(queueStuck);
+      if (cancelled) return;
+
+      if (queueStuck && !stuckNotifiedRef.current) {
+        stuckNotifiedRef.current = true;
+        toast.info(
+          "Sync is taking longer than expected. You can keep working — pending items stay in Sync Center.",
+          8000,
+        );
+      }
 
       if (!sessionActiveRef.current) {
         publish({
@@ -177,9 +214,17 @@ export function useNativeForegroundSyncSession(): void {
       if (sessionActiveRef.current) void evaluate();
     };
 
+    const onFlushComplete = (event: Event) => {
+      const detail = (event as CustomEvent<{ syncedAny?: boolean; pendingRemaining?: number }>).detail;
+      if (typeof detail?.pendingRemaining === "number") {
+        noteQueueProgress(detail.pendingRemaining, detail.syncedAny);
+      }
+      onSessionProgress();
+    };
+
     const onBackground = () => {
       if (!sessionActiveRef.current) return;
-      void readSessionInputs().then((inputs) => {
+      void readSessionInputs(false).then((inputs) => {
         if (!isNativeSyncSessionComplete(inputs)) {
           interruptedRef.current = true;
         }
@@ -189,7 +234,7 @@ export function useNativeForegroundSyncSession(): void {
     const onForeground = () => {
       if (!sessionActiveRef.current) return;
       if (interruptedRef.current) {
-        void readSessionInputs().then((inputs) => {
+        void readSessionInputs(false).then((inputs) => {
           if (!isNativeSyncSessionComplete(inputs)) {
             toast.info(
               "Sync paused when you left the app. Pending items will upload when you're back online.",
@@ -206,7 +251,7 @@ export function useNativeForegroundSyncSession(): void {
     window.addEventListener(NATIVE_SYNC_FOCUSED_REQUESTED_EVENT, onFocusedRequested);
     window.addEventListener("sync-engine:flush-start", onFlushStart);
     window.addEventListener("bootstrap:started", onBootstrapStarted);
-    window.addEventListener("sync-engine:flush-complete", onSessionProgress);
+    window.addEventListener("sync-engine:flush-complete", onFlushComplete);
     window.addEventListener("sync-engine:syncing", onSessionProgress);
     window.addEventListener("bootstrap:complete", onSessionProgress);
     window.addEventListener("bootstrap:error", onSessionProgress);
@@ -219,7 +264,7 @@ export function useNativeForegroundSyncSession(): void {
       window.removeEventListener(NATIVE_SYNC_FOCUSED_REQUESTED_EVENT, onFocusedRequested);
       window.removeEventListener("sync-engine:flush-start", onFlushStart);
       window.removeEventListener("bootstrap:started", onBootstrapStarted);
-      window.removeEventListener("sync-engine:flush-complete", onSessionProgress);
+      window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
       window.removeEventListener("sync-engine:syncing", onSessionProgress);
       window.removeEventListener("bootstrap:complete", onSessionProgress);
       window.removeEventListener("bootstrap:error", onSessionProgress);
