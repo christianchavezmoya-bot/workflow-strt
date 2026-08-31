@@ -104,8 +104,9 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
 - **Jwt__Key length** — if login returns 500 at token creation, update Secrets Manager key to ≥32 chars and force new ECS deployment (startup will now fail fast with a clear error instead of 500 on login).
 - **Native first-login perf** — iPhone login works against staging but dashboard was slow/errors before paint (request storm). PR defers push registration, bell inbox refresh, and duplicate catalog prefetch until first-login bootstrap completes. **Rebuild iOS app after merge** to pick up the fix.
-- **Web staging** at **`https://www.strata-ngo.com`** (S3/CloudFront) — `staging.strata-ngo.com` was never deployed; do not use it in email links
-- **Invite email links** — must use `Email__FrontendBaseUrl=https://www.strata-ngo.com` on ECS **and** DB `NotificationSettings.FrontendBaseUrl` aligned (auto-patched on API startup after PR merge + redeploy)
+- **Web DEV (canonical):** **`https://staging.strata-ngo.com`** (Phase C target)
+- **Web DEV (transition):** **`https://www.strata-ngo.com`** — same CloudFront origin until Phase F prod cutover
+- **Invite email links** — `Email__FrontendBaseUrl=https://staging.strata-ngo.com` on ECS **and** DB `NotificationSettings.FrontendBaseUrl` aligned (auto-patches legacy `www` on API startup)
 - **iPhone build** against `https://api.staging.strata-ngo.com/api`
 - **APNs/FCM** push on server
 
@@ -116,7 +117,7 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 **Root cause:** DB `NotificationSettings` row still has `FrontendBaseUrl = https://staging.strata-ngo.com` from early seed; env var alone does not override a non-empty DB value.
 
 **Fix (after PR merge):**
-1. Ensure ECS task env includes `Email__FrontendBaseUrl=https://www.strata-ngo.com` and `Cors__AllowedOrigins__0=https://www.strata-ngo.com`
+1. Ensure ECS task env includes `Email__FrontendBaseUrl=https://staging.strata-ngo.com`, `Cors__AllowedOrigins__0=https://staging.strata-ngo.com`, and `Cors__AllowedOrigins__1=https://www.strata-ngo.com` (transition)
 2. Build + push new API image + force ECS redeploy — startup patch updates DB automatically
 3. Re-send invite from **Settings → Users** (or use workaround below)
 
@@ -145,7 +146,7 @@ Single config source: **`NotificationSettings.FrontendBaseUrl`** (DB) with fallb
 
 **Not affected:** In-app routes, API download URLs, push notification payloads (no web deep links today), SMS (no URLs).
 
-**Frontend QR/copy links** use `resolvePublicFrontendBaseUrl()`: when browsing **`https://www.strata-ngo.com`**, links now use that origin immediately (no deploy wait). Deprecated hosts `staging.strata-ngo.com` and `api.*` are never used for QR codes.
+**Frontend QR/copy links** use `resolvePublicFrontendBaseUrl()`: when browsing **`https://staging.strata-ngo.com`** or **`https://www.strata-ngo.com`**, links use that page origin. Deprecated: `api.*` hosts only (never the web app).
 
 ---
 

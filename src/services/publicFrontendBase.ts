@@ -41,7 +41,6 @@ function getBrowserPublicOrigin(): string {
 function isDeprecatedPublicFrontendHost(url: string): boolean {
   try {
     const host = new URL(url).hostname.trim().toLowerCase();
-    if (host === "staging.strata-ngo.com") return true;
     // API subdomain is never the web app (e.g. api.staging.strata-ngo.com).
     if (host.startsWith("api.")) return true;
     return false;
