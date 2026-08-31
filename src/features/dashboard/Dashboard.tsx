@@ -85,7 +85,7 @@ import DashboardInspectionAttentionSection from "./DashboardInspectionAttentionS
 import DashboardRegionalSnapshotSection from "./DashboardRegionalSnapshotSection";
 import DashboardEvidenceHealthGrid from "./DashboardEvidenceHealthGrid";
 import DashboardWorkloadPanel, { type ScopedWorkloadItem, type WorkloadProjectBreakdown } from "./DashboardWorkloadPanel";
-import DashboardProjectStatusGrid, { type DashboardProjectScope } from "./DashboardProjectStatusGrid";
+import DashboardProjectStatusGrid from "./DashboardProjectStatusGrid";
 import DashboardManagerMobileHome from "./DashboardManagerMobileHome";
 import DashboardAdminInspectionWorkspace from "./DashboardAdminInspectionWorkspace";
 import DashboardAdminInstallWorkspace, { type AdminInstallFilter } from "./DashboardAdminInstallWorkspace";
@@ -167,6 +167,7 @@ import {
 import { isProjectReadyToCloseFromSummary } from "../projects/projectCloseReadiness";
 import { useDashboardWorkspace } from "./useDashboardWorkspace";
 import { useDashboardAttention } from "./useDashboardAttention";
+import { useDashboardProjectScope } from "./useDashboardProjectScope";
 
 const WorkOrderRunner = lazy(() => import("../workInstructions/WorkOrderRunner"));
 const PhotoUploadDialog = lazy(() => import("./PhotoUploadDialog"));
@@ -338,13 +339,14 @@ const Dashboard = () => {
   );
   const tabRoleCorrected = useRef(false);
   const fieldTabCorrected = useRef(false);
-  const dashboardProjectScopeCorrected = useRef(false);
   // If the role's viewScope is "own", always lock to "mine" — no dropdown shown.
   const canViewAllProjects = (can.projects?.viewScope ?? "own") === "all";
-  // Admin defaults to "all" (oversight view); every other role defaults to "mine".
-  const [dashboardProjectScope, setDashboardProjectScope] = useState<DashboardProjectScope>(
-    isAdmin ? "all" : "mine"
-  );
+  const { dashboardProjectScope, setDashboardProjectScope } = useDashboardProjectScope({
+    isAuthenticated,
+    isAdmin,
+    canViewAllProjects,
+    userId: user.id,
+  });
   const [selectedDashboardId, setSelectedDashboardId] = useState<string>(isAdmin ? ALL_DASHBOARDS_VALUE : user.id);
 
   // Admin: view another user's dashboard
@@ -2790,24 +2792,6 @@ const Dashboard = () => {
     fieldTabCorrected.current = true;
     setPmDashboardTab(nextTab);
   }, []);
-
-  useEffect(() => {
-    dashboardProjectScopeCorrected.current = false;
-  }, [user.id]);
-
-  // useAuth boots as Viewer first, so Admin can initialize to "mine" before
-  // the real role lands. Correct that once on web without overriding later
-  // manual scope changes.
-  useEffect(() => {
-    if (isNativePlatform || !isAuthenticated || !isAdmin || !canViewAllProjects) return;
-    if (dashboardProjectScopeCorrected.current) return;
-    if (dashboardProjectScope === "all") {
-      dashboardProjectScopeCorrected.current = true;
-      return;
-    }
-    setDashboardProjectScope("all");
-    dashboardProjectScopeCorrected.current = true;
-  }, [canViewAllProjects, dashboardProjectScope, isAdmin, isAuthenticated, isNativePlatform]);
 
   // Redirect to a valid tab when the current selection isn't available for this user.
   // Also corrects the initial tab for managers: useAuth starts with role="Viewer" so
