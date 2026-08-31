@@ -47,6 +47,11 @@ export async function hydrateKnownMissingAssetIds(): Promise<void> {
   await hydratePromise;
 }
 
+/** Read-only snapshot for diagnostics — does not affect the guard's behavior. */
+export function getKnownMissingAssetIdsSnapshot(): string[] {
+  return [...knownMissingAssetIds];
+}
+
 export function isKnownMissingAssetId(id: string): boolean {
   return knownMissingAssetIds.has(id);
 }

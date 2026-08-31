@@ -63,6 +63,17 @@ export interface PendingAction {
   lastConnectivity?: string;
   lastOpType?: string;
   lastApiHost?: string;
+  // ── Flush-eligibility diagnostics (read-only trace, never affects sync logic) ──
+  // Stamped every time flush() evaluates this op, whether or not it proceeds to
+  // an actual request — lets a support bundle show exactly why an op sitting at
+  // retries:0 was never attempted, instead of only ever recording real failures.
+  lastEligibilityCheckAt?: string;
+  lastEligible?: boolean;
+  lastSkipReason?: string;
+  lastDependencyExists?: boolean;
+  lastDependencyOpType?: string;
+  lastDependencyStatus?: string;
+  lastBundleCandidate?: boolean;
 }
 
 /** A sync action that permanently failed after exhausting all retries. */
@@ -506,6 +517,37 @@ export async function pendingRecordTransientFailure(
       nextRetryAt: undefined,
     });
     window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch { /* ignore */ }
+}
+
+export type PendingEligibilityPatch = Partial<Pick<PendingAction,
+  | "lastEligible"
+  | "lastSkipReason"
+  | "lastDependencyExists"
+  | "lastDependencyOpType"
+  | "lastDependencyStatus"
+  | "lastBundleCandidate"
+>>;
+
+/**
+ * Diagnostic-only trace of a single flush-pass eligibility decision for one op.
+ * Never changes status/retries/nextRetryAt and never dispatches sync-pending-changed
+ * — this must not add UI churn or influence sync behavior, only make the next
+ * support bundle able to show why an op sitting at retries:0 was never attempted.
+ */
+export async function pendingRecordEligibility(
+  id: string,
+  patch: PendingEligibilityPatch,
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (!item) return;
+    await db.put("pending_actions", {
+      ...item,
+      ...patch,
+      lastEligibilityCheckAt: new Date().toISOString(),
+    });
   } catch { /* ignore */ }
 }
 

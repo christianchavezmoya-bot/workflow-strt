@@ -23,9 +23,11 @@ import {
   hydrateKnownMissingAssetIds,
   isKnownMissingAssetId,
   reconcileKnownMissingAssetIds,
+  getKnownMissingAssetIdsSnapshot,
 } from "../utils/staleAssetIds";
 import { filterKnownMissingFromWorkspace } from "../utils/staleAssetWorkspace";
 import { purgeStaleAssetOnAuthoritative404 } from "../utils/staleAssetPurge";
+import { buildReconcileTrace, recordReconcilePass, recordFetchAttempt } from "../utils/staleAssetDiagnostics";
 
 const DASHBOARD_WORKSPACE_CACHE_KEY = (userId: string) => `dashboard-workspace:${userId}`;
 
@@ -558,6 +560,7 @@ export const projectAssetService = {
       // Matches the guard already used by workflowConfigService, userService and
       // officesService for their background refreshes.
       if (!shouldSkipBlockingFetch()) {
+        void recordFetchAttempt(id, isKnownMissingAssetId(id), "getById");
         void api.get<ProjectAsset>(`/project-assets/${id}`, { timeout: NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS })
           .then(async (res) => {
             const asset = fromDto(res.data);
@@ -580,6 +583,7 @@ export const projectAssetService = {
     // instead of paying the full API timeout to get there.
     if (shouldSkipBlockingFetch()) return null;
 
+    void recordFetchAttempt(id, isKnownMissingAssetId(id), "getById");
     try {
       const res = await api.get<ProjectAsset>(`/project-assets/${id}`, { timeout: NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS });
       const asset = fromDto(res.data);
@@ -604,6 +608,7 @@ export const projectAssetService = {
       const local = await entityGetAsset(id);
       return !!local;
     }
+    void recordFetchAttempt(id, isKnownMissingAssetId(id), "verifyAssetExistsOnline");
     try {
       const res = await api.get<ProjectAsset>(`/project-assets/${id}`, {
         timeout: NATIVE_BACKGROUND_ASSET_GET_TIMEOUT_MS,
@@ -1080,7 +1085,11 @@ export const projectAssetService = {
       // no offline copy at all once dashboardCache's in-memory, restart-clearing cache is gone.
       if (isMobileNativePlatform() && userId && dashboardWorkspaceHasRows(res.data)) {
         await offlineStore.saveCache(DASHBOARD_WORKSPACE_CACHE_KEY(userId), res.data);
+        // Diagnostic-only: trace exactly what this reconciliation pass did to each
+        // currently-known-missing id, without changing the reconcile call itself.
+        const preTrace = buildReconcileTrace(getKnownMissingAssetIdsSnapshot(), res.data);
         reconcileKnownMissingAssetIds(collectWorkspaceAssetIds(res.data));
+        void recordReconcilePass("dashboardWorkspace", preTrace, isKnownMissingAssetId);
         await hydrateAssetsFromWorkspaceSnapshot(res.data);
         // Light workspace is for first paint only — do not fan out per-asset
         // GETs. Full response defers enrichment so Dashboard effects and

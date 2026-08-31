@@ -31,6 +31,7 @@ import {
   pendingGetDue,
   pendingMarkRetry,
   pendingRecordTransientFailure,
+  pendingRecordEligibility,
   pendingMarkConflict,
   pendingClearConflict,
   pendingGetConflicted,
@@ -84,6 +85,8 @@ import { isOfflineModeActive, isManualOfflineModeActive } from "../services/offl
 import { getSyncOpTimeoutMs, FIELD_SYNC_FORCE_HEADER, FIELD_SYNC_FORCE_VALUE, isPhoneWinsFieldSync } from "../utils/syncPolicy";
 import { classifySyncFailure, syncDiagnosticAppend } from "../services/syncDiagnosticsLog";
 import { buildRunSyncBundleRequest, collectBundledActionIds, isRunBundleCandidate } from "../services/runSyncBundleService";
+import { recordFlushPassStart, recordFlushPassEnd } from "../services/flushPassDiagnostics";
+import { isCircuitOpen, getCircuitOpenUntilMs, getCircuitFailureCount } from "../utils/circuitBreaker";
 import {
   fromWorkInstructionDto,
   removeLocalWorkInstruction,
@@ -830,8 +833,20 @@ export function useSyncEngine(): SyncState {
     let syncedAny = false;
     let anyError = false;
     let networkFailureStoppedPass = false;
+    let attemptedCount = 0;
+    let syncedCount = 0;
     try {
       due = await pendingGetDue();
+      void recordFlushPassStart({
+        canAttemptSyncFlush: true, // flush() already passed this gate to reach here
+        serverReachable: getServerReachable(),
+        hasNetworkSignal: hasNetworkSignal(),
+        circuitOpen: isCircuitOpen(),
+        circuitOpenUntilMs: getCircuitOpenUntilMs(),
+        circuitFailureCount: getCircuitFailureCount(),
+        dueCount: due.length,
+        due: due.map((a) => ({ id: a.id, opType: a.opType, entityId: a.entityId, entityType: a.entityType, status: a.status })),
+      });
       if (due.length === 0) {
         markOfflinePerf("queue_flush_end");
         await refreshPending();
@@ -862,8 +877,18 @@ export function useSyncEngine(): SyncState {
       // Skip if the action this depends on hasn't been synced yet
       if (action.dependsOnOpId) {
         const all = await pendingGetAll();
-        const depStillPending = all.some((a) => a.id === action.dependsOnOpId);
-        if (depStillPending) continue;
+        const dep = all.find((a) => a.id === action.dependsOnOpId);
+        const depStillPending = dep !== undefined;
+        if (depStillPending) {
+          void pendingRecordEligibility(action.id, {
+            lastEligible: false,
+            lastSkipReason: "DEPENDENCY_PENDING",
+            lastDependencyExists: true,
+            lastDependencyOpType: dep.opType,
+            lastDependencyStatus: dep.status,
+          });
+          continue;
+        }
         const depWasDropped = await droppedActionExists(action.dependsOnOpId);
         if (depWasDropped) {
           const dropped = (await droppedActionsGetAll()).find((d) => d.id === action.dependsOnOpId);
@@ -887,12 +912,22 @@ export function useSyncEngine(): SyncState {
             await markRunSyncFailed(action.entityId, message);
           }
           anyError = true;
+          void pendingRecordEligibility(action.id, {
+            lastEligible: false,
+            lastSkipReason: "DEPENDENCY_DROPPED",
+            lastDependencyExists: false,
+          });
           continue;
         }
       }
 
       // Signatures for this run flush atomically with RUN_COMPLETE when both are queued.
       if (action.opType === "SIGNATURE_SUBMIT" && await isRunBundleCandidate(action.entityId)) {
+        void pendingRecordEligibility(action.id, {
+          lastEligible: false,
+          lastSkipReason: "BUNDLE_DEFERRED_TO_RUN_COMPLETE",
+          lastBundleCandidate: true,
+        });
         continue;
       }
 
@@ -900,6 +935,10 @@ export function useSyncEngine(): SyncState {
       // dependent ops (e.g. signatures after a rejected RUN_COMPLETE)
       // against a bad state.
       if (action.entityType === "workflow-run" && droppedRunEntityIds.has(action.entityId)) {
+        void pendingRecordEligibility(action.id, {
+          lastEligible: false,
+          lastSkipReason: "EARLIER_OP_DROPPED_THIS_PASS",
+        });
         continue;
       }
 
@@ -909,6 +948,10 @@ export function useSyncEngine(): SyncState {
           await pendingClearConflict(action.id);
         } else {
           anyError = true;
+          void pendingRecordEligibility(action.id, {
+            lastEligible: false,
+            lastSkipReason: "CONFLICT_BLOCKED",
+          });
           continue;
         }
       }
@@ -933,6 +976,10 @@ export function useSyncEngine(): SyncState {
               detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType },
             }));
             anyError = true;
+            void pendingRecordEligibility(action.id, {
+              lastEligible: false,
+              lastSkipReason: "ASSET_CONCURRENCY_CONFLICT",
+            });
             continue;
           }
         } catch {
@@ -940,6 +987,12 @@ export function useSyncEngine(): SyncState {
         }
       }
 
+      // Passed every skip check this pass — about to attempt the actual request.
+      void pendingRecordEligibility(action.id, {
+        lastEligible: true,
+        lastSkipReason: undefined,
+      });
+      attemptedCount += 1;
       const attemptStartedAt = Date.now();
       let mappedRunId: string | null = null;
       let requestUrl = action.url;
@@ -1072,6 +1125,7 @@ export function useSyncEngine(): SyncState {
         }
         await syncMetaSet(action.entityType);
         syncedAny = true;
+        syncedCount += 1;
       } catch (e: unknown) {
         const httpStatus = (e as { response?: { status?: number } }).response?.status;
         const errorCode = (e as { code?: string } | null)?.code;
@@ -1142,6 +1196,7 @@ export function useSyncEngine(): SyncState {
               await pendingRemove(action.id);
               await syncMetaSet(action.entityType);
               syncedAny = true;
+              syncedCount += 1;
             } else if (isWorkflowRunOp) {
               await pendingMarkConflict(action.id, {
                 conflictKind: "business_rule",
@@ -1225,6 +1280,11 @@ export function useSyncEngine(): SyncState {
             }
             setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
             networkFailureStoppedPass = true;
+            void recordFlushPassEnd({
+              stoppedEarly: true,
+              stoppedAtActionId: action.id,
+              stoppedReason: `NETWORK_ERROR_BROKE_LOOP:${action.opType ?? action.entityType ?? "unknown"}`,
+            });
             break;
           }
 
@@ -1236,6 +1296,15 @@ export function useSyncEngine(): SyncState {
         }
       }
     }
+
+      if (!networkFailureStoppedPass) {
+        void recordFlushPassEnd({
+          stoppedEarly: authExpired,
+          stoppedReason: authExpired ? "AUTH_EXPIRED" : undefined,
+          attemptedCount,
+          syncedCount,
+        });
+      }
 
       // pass — they don't listen to workflow-runs-cache-updated (that's the
       // Assets page's event), so without this they can stay stale post-sync

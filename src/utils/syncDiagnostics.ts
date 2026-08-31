@@ -148,6 +148,14 @@ const COPY_ALLOWLIST: Array<keyof PendingAction> = [
   "lastApiHost",
   "nextRetryAt",
   "createdAt",
+  "dependsOnOpId",
+  "lastEligibilityCheckAt",
+  "lastEligible",
+  "lastSkipReason",
+  "lastDependencyExists",
+  "lastDependencyOpType",
+  "lastDependencyStatus",
+  "lastBundleCandidate",
 ];
 
 /** Safe JSON for clipboard — no body, tokens, or step content. */
