@@ -52,6 +52,7 @@ e2e-results/
 # Temporary files
 *.tmp
 *.temp
+.tmp-artifact-fixtures/
 
 # Backend
 server/**/bin/

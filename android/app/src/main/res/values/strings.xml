@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Strata NGo</string>
+    <string name="app_name">N-Go DEV</string>
     <string name="title_activity_main">Strata NGo</string>
-    <string name="package_name">com.christianchavez.kinet</string>
-    <string name="custom_url_scheme">com.christianchavez.kinet</string>
+    <string name="package_name">com.strata.ngo.field.dev</string>
+    <string name="custom_url_scheme">com.strata.ngo.field.dev</string>
 </resources>

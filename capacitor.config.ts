@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.christianchavez.kinet',
-  appName: 'Strata NGo',
+  appId: 'com.strata.ngo.field.dev',
+  appName: 'N-Go DEV',
   webDir: 'dist',
   server: {
     androidScheme: 'http',

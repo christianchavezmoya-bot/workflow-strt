@@ -76,8 +76,13 @@ If P0 fails, inspect ECS/ALB before deploying (see handoff doc).
 **Only after Step 0 PASS.**
 
 ```bash
-docker build -t commtrac-api:staging .
+docker build \
+  --build-arg GIT_SHA="$(git rev-parse HEAD)" \
+  --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  -t commtrac-api:staging .
 ```
+
+After deploy, verify `/api/version` reports the same `gitSha` as `git rev-parse HEAD`.
 
 | ID | PASS if |
 |----|---------|

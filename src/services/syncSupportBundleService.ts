@@ -2,7 +2,7 @@
  * Builds a sanitized support bundle from Sync Center diagnostics — no tokens,
  * request bodies, or step/photo content.
  */
-import pkg from "../../package.json";
+import { getClientBuildIdentity, type ClientBuildIdentity } from "../utils/buildIdentity";
 import type { FaultReportDraft } from "./faultReporting/types";
 import type { ApiDebugLog } from "./api";
 import {
@@ -32,6 +32,7 @@ export interface SyncSupportBundle {
   schemaVersion: number;
   exportedAt: string;
   appVersion: string;
+  buildIdentity: ClientBuildIdentity;
   apiHost: string;
   platform: "web" | "native";
   userAgent: string;
@@ -158,10 +159,13 @@ export async function buildSyncSupportBundle(options?: {
   const conflicts = pending.filter((a) => a.conflictDetected);
   const nonConflictPending = pending.filter((a) => !a.conflictDetected);
 
+  const buildIdentity = getClientBuildIdentity();
+
   return {
     schemaVersion: SUPPORT_BUNDLE_SCHEMA_VERSION,
     exportedAt: new Date().toISOString(),
-    appVersion: pkg.version,
+    appVersion: buildIdentity.appVersion,
+    buildIdentity,
     apiHost: safeApiHost(),
     platform: isMobileNativePlatform() ? "native" : "web",
     userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "",
