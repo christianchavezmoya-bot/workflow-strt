@@ -37,6 +37,7 @@ import {
   pendingRemove,
   pendingResetRetrySchedule,
   pendingResetStaleUploading,
+  pendingRepairSelfDependentActions,
   pendingRetryNow,
   pendingSetStatus,
   syncMetaSet,
@@ -831,6 +832,10 @@ export function useSyncEngine(): SyncState {
     let anyError = false;
     let networkFailureStoppedPass = false;
     try {
+      // Self-heal a stuck queue from before the self-dependency fix — cheap no-op
+      // once nothing is left to repair. Must run before the due list is read so a
+      // repaired action is eligible in this same pass.
+      await pendingRepairSelfDependentActions();
       due = await pendingGetDue();
       if (due.length === 0) {
         markOfflinePerf("queue_flush_end");
