@@ -15,6 +15,7 @@ import {
   loadProfileEnv,
   resolveProfile,
   validateApiBaseForProfile,
+  validateAppEnvForProfile,
 } from "./build-profiles.mjs";
 import { writeBuildManifest } from "./write-build-manifest.mjs";
 
@@ -43,12 +44,12 @@ if (!profileId) {
 }
 
 const profile = resolveProfile(profileId);
-  loadProfileEnv(root, profile);
+loadProfileEnv(root, profile);
 
-  process.env.VITE_APP_ENV = process.env.VITE_APP_ENV ?? profile.appEnv;
+process.env.VITE_APP_ENV = validateAppEnvForProfile(process.env.VITE_APP_ENV, profile);
 
-  // Canonical cloud DEV builds always target staging API (ignore local Docker LAN env files).
-  if (profile.id === "dev" && process.env.BUILD_STRICT_PROFILE !== "false") {
+// Canonical cloud DEV builds always target staging API (ignore local Docker LAN env files).
+if (profile.id === "dev" && process.env.BUILD_STRICT_PROFILE !== "false") {
     const current = process.env.VITE_API_BASE?.trim() ?? "";
     if (!current.includes("api.staging.strata-ngo.com")) {
       if (current) {

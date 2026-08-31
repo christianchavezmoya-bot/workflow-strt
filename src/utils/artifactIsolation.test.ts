@@ -5,7 +5,7 @@ import { join } from "node:path";
 // @ts-expect-error — Node build scripts are plain ESM without TS declarations.
 import { analyzeArtifact } from "../../scripts/lib/artifact-isolation.mjs";
 // @ts-expect-error — Node build scripts are plain ESM without TS declarations.
-import { validateApiBaseForProfile, resolveProfile } from "../../scripts/build-profiles.mjs";
+import { validateApiBaseForProfile, resolveProfile, validateAppEnvForProfile } from "../../scripts/build-profiles.mjs";
 
 const FIXTURE_ROOT = join(process.cwd(), ".tmp-artifact-fixtures");
 
@@ -78,9 +78,11 @@ describe("build profile API validation", () => {
     ).toThrow(/staging/i);
   });
 
-  it("accepts staging API for dev profile", () => {
-    expect(
-      validateApiBaseForProfile("https://api.staging.strata-ngo.com/api", resolveProfile("dev")),
-    ).toBe("https://api.staging.strata-ngo.com/api");
+  it("rejects VITE_APP_ENV=dev for prod profile", () => {
+    expect(() => validateAppEnvForProfile("dev", resolveProfile("prod"))).toThrow(/not allowed/i);
+  });
+
+  it("accepts prod env for prod profile", () => {
+    expect(validateAppEnvForProfile("prod", resolveProfile("prod"))).toBe("prod");
   });
 });

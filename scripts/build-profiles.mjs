@@ -110,3 +110,17 @@ export function validateApiBaseForProfile(apiBase, profile) {
 
   return trimmed;
 }
+
+/** Fail closed when env files or shell vars conflict with the selected profile. */
+export function validateAppEnvForProfile(appEnv, profile) {
+  const trimmed = appEnv?.trim() ?? "";
+  if (!trimmed) {
+    return profile.appEnv;
+  }
+  if (trimmed !== profile.appEnv && trimmed !== "production" && !(profile.appEnv === "prod" && trimmed === "production")) {
+    throw new Error(
+      `VITE_APP_ENV=${trimmed} is not allowed for ${profile.id} builds (expected ${profile.appEnv}).`,
+    );
+  }
+  return profile.appEnv;
+}
