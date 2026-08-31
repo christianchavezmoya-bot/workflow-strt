@@ -33,6 +33,7 @@ import { useMobileWebLayout } from "../../hooks/useMobileWebLayout";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { formatInstant } from "../../utils/datetime";
 import { isDebugFeaturesEnabled } from "../../utils/appEnvironment";
+import DevEnvironmentBadge from "./DevEnvironmentBadge";
 
 function getRolesFromCache(): string[] {
   try {
@@ -432,6 +433,7 @@ const Topbar = () => {
                 flexShrink: 0,
               }}
             />
+            <DevEnvironmentBadge />
             <DataConsistencyIndicator />
           </Stack>
         ) : (
@@ -455,6 +457,7 @@ const Topbar = () => {
                 <Typography variant="h5" sx={{ fontFamily: "Sora" }}>
                   {appName}
                 </Typography>
+                <DevEnvironmentBadge />
                 {diagnosticClockMode !== "hidden" && (
                   <DiagnosticClockBar
                     variant="inline"

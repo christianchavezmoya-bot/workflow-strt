@@ -1,76 +1,86 @@
 #!/usr/bin/env node
 /**
- * Production/staging web build with VITE_API_BASE validation.
+ * Cloud web build with validated DEV/PROD profiles.
  *
  * Usage:
- *   VITE_API_BASE=https://api.staging.example.com/api node scripts/build-cloud-web.mjs
- *   node scripts/build-cloud-web.mjs --staging   # allows http + localhost (local Docker staging)
- *
- * Loads (in order): .env.production.local, .env.production, .env.staging.local, .env.staging
- * when --staging; otherwise production files only.
+ *   node scripts/build-cloud-web.mjs --profile dev
+ *   node scripts/build-cloud-web.mjs --profile prod
+ *   node scripts/build-cloud-web.mjs --staging   # alias for --profile dev
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { execSync } from "node:child_process";
+import {
+  loadProfileEnv,
+  resolveProfile,
+  validateApiBaseForProfile,
+} from "./build-profiles.mjs";
+import { writeBuildManifest } from "./write-build-manifest.mjs";
 
 const args = process.argv.slice(2);
-const isStaging = args.includes("--staging");
 const root = resolve(import.meta.dirname, "..");
+const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 
-function loadEnvFile(name) {
-  const path = resolve(root, name);
-  if (!existsSync(path)) return;
-  for (const line of readFileSync(path, "utf8").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eq = trimmed.indexOf("=");
-    if (eq <= 0) continue;
-    const key = trimmed.slice(0, eq).trim();
-    const value = trimmed.slice(eq + 1).trim().replace(/^["']|["']$/g, "");
-    if (!(key in process.env)) process.env[key] = value;
-  }
+function readArg(name) {
+  const idx = args.indexOf(name);
+  if (idx === -1) return null;
+  return args[idx + 1] ?? null;
 }
-
-if (isStaging) {
-  loadEnvFile(".env.staging.local");
-  loadEnvFile(".env.staging");
-  process.env.VITE_APP_ENV = process.env.VITE_APP_ENV ?? "dev";
-} else {
-  loadEnvFile(".env.production.local");
-  loadEnvFile(".env.production");
-  process.env.VITE_APP_ENV = process.env.VITE_APP_ENV ?? "prod";
-}
-
-console.log(`[build-cloud-web] VITE_APP_ENV=${process.env.VITE_APP_ENV}`);
-
-const apiBase = process.env.VITE_API_BASE?.trim() ?? "";
 
 function fail(msg) {
   console.error(`[build-cloud-web] ERROR: ${msg}`);
   process.exit(1);
 }
 
-if (!apiBase) {
-  fail(
-    isStaging
-      ? "VITE_API_BASE is required. Copy .env.staging.example → .env.staging.local"
-      : "VITE_API_BASE is required. Copy .env.production.example → .env.production.local"
-  );
+const profileId =
+  readArg("--profile")
+  ?? (args.includes("--staging") ? "dev" : null)
+  ?? (args.includes("--production") ? "prod" : null);
+
+if (!profileId) {
+  fail('Specify --profile dev|prod (or --staging / --production alias).');
 }
 
-if (!apiBase.endsWith("/api") && !apiBase.endsWith("/api/")) {
-  console.warn("[build-cloud-web] WARN: VITE_API_BASE should end with /api");
+const profile = resolveProfile(profileId);
+  loadProfileEnv(root, profile);
+
+  process.env.VITE_APP_ENV = process.env.VITE_APP_ENV ?? profile.appEnv;
+
+  // Canonical cloud DEV builds always target staging API (ignore local Docker LAN env files).
+  if (profile.id === "dev" && process.env.BUILD_STRICT_PROFILE !== "false") {
+    const current = process.env.VITE_API_BASE?.trim() ?? "";
+    if (!current.includes("api.staging.strata-ngo.com")) {
+      if (current) {
+        console.warn(
+          `[build-cloud-web] Overriding VITE_API_BASE=${current} → ${profile.defaultApiBase} (canonical DEV build)`,
+        );
+      }
+      process.env.VITE_API_BASE = profile.defaultApiBase;
+    }
+  }
+
+let gitSha = "unknown";
+try {
+  gitSha = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
+} catch {
+  // non-git environment
 }
 
-if (!isStaging && !apiBase.startsWith("https://")) {
-  fail("Production builds require HTTPS VITE_API_BASE (use --staging for http staging URLs)");
-}
+process.env.VITE_APP_VERSION = pkg.version;
+process.env.VITE_BUILD_SHA = process.env.VITE_BUILD_SHA ?? gitSha;
+process.env.VITE_BUILD_TIME = process.env.VITE_BUILD_TIME ?? new Date().toISOString();
 
-if (!isStaging && (apiBase.includes("localhost") || apiBase.includes("127.0.0.1"))) {
-  fail("Cloud web build must not use localhost — use staging/production API URL");
-}
+const apiBase = validateApiBaseForProfile(
+  process.env.VITE_API_BASE ?? profile.defaultApiBase,
+  profile,
+);
+process.env.VITE_API_BASE = apiBase;
 
+console.log(`[build-cloud-web] profile=${profile.id}`);
+console.log(`[build-cloud-web] VITE_APP_ENV=${process.env.VITE_APP_ENV}`);
 console.log(`[build-cloud-web] VITE_API_BASE=${apiBase}`);
+console.log(`[build-cloud-web] VITE_BUILD_SHA=${process.env.VITE_BUILD_SHA}`);
 console.log("[build-cloud-web] Running tsc -b && vite build…");
 
 const result = spawnSync("npm", ["run", "build"], {
@@ -80,4 +90,16 @@ const result = spawnSync("npm", ["run", "build"], {
   shell: true,
 });
 
-process.exit(result.status ?? 1);
+if ((result.status ?? 1) !== 0) {
+  process.exit(result.status ?? 1);
+}
+
+writeBuildManifest({
+  profile: profile.id,
+  appEnv: process.env.VITE_APP_ENV,
+  apiBase,
+  debugFeaturesEnabled: profile.debugFeaturesEnabled,
+});
+
+console.log("[build-cloud-web] build-manifest.json written");
+process.exit(0);
