@@ -5,6 +5,8 @@ import { pendingGetByEntityId, type PendingAction } from "./localDB";
 import type { SubmitSignaturePayload } from "./signatureService";
 import offlineStore from "./offlineStore";
 
+const BUNDLE_UNSUPPORTED_CACHE_PREFIX = "sync-bundle-unsupported:";
+
 export interface SyncRunBundleSignature {
   signerRole: "Installer" | "Customer";
   payload: SubmitSignaturePayload;
@@ -30,7 +32,17 @@ export interface BuiltRunSyncBundle {
 
 const BUNDLE_SIGNATURE_ROLES: Array<"Installer" | "Customer"> = ["Installer", "Customer"];
 
+export async function markRunSyncBundleUnsupported(runEntityId: string): Promise<void> {
+  await offlineStore.saveCache(`${BUNDLE_UNSUPPORTED_CACHE_PREFIX}${runEntityId}`, true);
+}
+
+export async function isRunSyncBundleUnsupported(runEntityId: string): Promise<boolean> {
+  const flagged = await offlineStore.getCache<boolean>(`${BUNDLE_UNSUPPORTED_CACHE_PREFIX}${runEntityId}`);
+  return flagged === true;
+}
+
 export async function isRunBundleCandidate(runEntityId: string): Promise<boolean> {
+  if (await isRunSyncBundleUnsupported(runEntityId)) return false;
   const pending = await pendingGetByEntityId(runEntityId);
   const hasComplete = pending.some((op) => op.opType === "RUN_COMPLETE" && op.status !== "uploading");
   const hasSignature = pending.some((op) => op.opType === "SIGNATURE_SUBMIT" && op.status !== "uploading");

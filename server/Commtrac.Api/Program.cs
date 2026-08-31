@@ -134,6 +134,18 @@ var configuredCorsOrigins = builder.Configuration.GetSection("Cors:AllowedOrigin
 // LAN IP. Staging opts in so devices can be tested; production keeps the explicit list only.
 var allowDeviceOrigins = builder.Configuration.GetValue("Cors:AllowDeviceOrigins", false);
 
+if (!builder.Environment.IsDevelopment() && (configuredCorsOrigins is not { Length: > 0 }))
+{
+    throw new InvalidOperationException(
+        "Cors:AllowedOrigins must be configured in non-Development environments.");
+}
+
+if (builder.Environment.IsProduction() && allowDeviceOrigins)
+{
+    throw new InvalidOperationException(
+        "Cors:AllowDeviceOrigins must be false in Production.");
+}
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("frontend", policy =>

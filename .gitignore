@@ -12,6 +12,7 @@ tempbuild/
 .env
 .env.local
 .env.*.local
+.env.production
 
 # Logs
 logs/
@@ -75,6 +76,7 @@ server/Commtrac.Api/Storage/
 server/Commtrac.Api/backups/
 server/**/objbuildcheck*/
 server/**/objbuildcheck2*/
+server/**/.tmp-build/
 
 # Windows oddities
 nul

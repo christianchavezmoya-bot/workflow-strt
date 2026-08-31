@@ -34,10 +34,14 @@ function loadEnvFile(name) {
 if (isStaging) {
   loadEnvFile(".env.staging.local");
   loadEnvFile(".env.staging");
+  process.env.VITE_APP_ENV = process.env.VITE_APP_ENV ?? "dev";
 } else {
   loadEnvFile(".env.production.local");
   loadEnvFile(".env.production");
+  process.env.VITE_APP_ENV = process.env.VITE_APP_ENV ?? "prod";
 }
+
+console.log(`[build-cloud-web] VITE_APP_ENV=${process.env.VITE_APP_ENV}`);
 
 const apiBase = process.env.VITE_API_BASE?.trim() ?? "";
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { authService } from "../services/authService";
 import { secureGet, secureSet } from "../services/secureStorage";
 import { User } from "../types/user";
+import { isDebugFeaturesEnabled } from "../utils/appEnvironment";
 
 const defaultUser: User = {
   id: "",
@@ -17,13 +18,23 @@ export const useAuth = () => {
   const [user, setUser] = useState<User>(defaultUser);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authReady, setAuthReady] = useState(false);
-  const [devRoleOverride, setDevRoleOverride] = useState<string | null>(
-    () => localStorage.getItem("dev_role_override")
-  );
+  const [devRoleOverride, setDevRoleOverride] = useState<string | null>(() => {
+    if (!isDebugFeaturesEnabled()) return null;
+    return localStorage.getItem("dev_role_override");
+  });
+
+  useEffect(() => {
+    if (!isDebugFeaturesEnabled()) {
+      localStorage.removeItem("dev_role_override");
+      setDevRoleOverride(null);
+    }
+  }, []);
 
   const effectiveUser = useMemo(
-    () => devRoleOverride ? { ...user, role: devRoleOverride as User["role"] } : user,
-    [user, devRoleOverride]
+    () => (isDebugFeaturesEnabled() && devRoleOverride)
+      ? { ...user, role: devRoleOverride as User["role"] }
+      : user,
+    [user, devRoleOverride],
   );
 
   const memoized = useMemo(() => ({ user: effectiveUser, isAuthenticated, authReady }), [effectiveUser, isAuthenticated, authReady]);

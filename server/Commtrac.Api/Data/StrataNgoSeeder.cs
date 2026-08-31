@@ -56,10 +56,10 @@ public static class StrataNgoSeeder
     private static void SeedUsers(AppDbContext db, IConfiguration config)
     {
         var adminEmail = config["SeedAdmin:Email"] ?? "admin@StrataNgo.local";
-        var adminPassword = config["SeedAdmin:Password"] ?? "Admin123!";
+        var adminPassword = DbInitializer.ResolveSeedAdminPassword(config);
         var adminFullName = config["SeedAdmin:FullName"] ?? "Strata Admin";
         var pmEmail = config["SeedProjectManager:Email"] ?? "project.manager@StrataNgo.local";
-        var pmPassword = config["SeedProjectManager:Password"] ?? "Pm123!";
+        var pmPassword = DbInitializer.ResolveSeedProjectManagerPassword(config);
         var pmFullName = config["SeedProjectManager:FullName"] ?? "Project Manager";
 
         db.Users.Add(new UserEntity
