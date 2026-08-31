@@ -8,6 +8,17 @@
 
 **Expected merged main SHA:** `839b7376933c6c4ba6f8be95a196d9578bf1a01f` (verify with `git rev-parse HEAD` after pull).
 
+**Authoritative source commit:** Every artifact in this deploy must trace to **`839b7376933c6c4ba6f8be95a196d9578bf1a01f`**. Do not deploy from a different commit unless Christian explicitly approves a newer merge.
+
+**Current gate status:**
+
+| Gate | Status |
+|------|--------|
+| Phase B code | **PASS / MERGED** (#328) |
+| Phase B deployment | **PENDING** (this runbook) |
+| Phase B device acceptance | **PENDING** |
+| Phase C | **BLOCKED** |
+
 **Do not commit:** `.env.staging.local`, secrets, LAN IPs, `dist/`.
 
 ---
@@ -26,6 +37,27 @@ You are the **Mac Phase B DEV deploy agent** for Commtrac / **Strata N-Go**.
 6. Fill in the report at the end.
 
 **Deploy order:** `API → web → native install`
+
+**Artifact alignment (primary gate):** After deploy, all identity chains must resolve to the same SHA:
+
+```
+Git main (839b7376…)
+  → Docker image (GIT_SHA build-arg)
+  → running ECS task
+  → GET /api/version.gitSha
+
+Git main (839b7376…)
+  → npm run build:dev-web
+  → dist/build-manifest.json.buildSha
+  → live www.strata-ngo.com/build-manifest.json
+
+Git main (839b7376…)
+  → npm run build:dev-native
+  → dist/build-manifest.json.buildSha
+  → installed N-Go DEV (com.strata.ngo.field.dev)
+```
+
+**STOP if any chain diverges** — do not proceed to the next deploy step.
 
 **Do not:** change DNS, deploy prod artifacts, or start Phase C.
 
@@ -58,7 +90,9 @@ echo "MAIN_SHA=$MAIN_SHA"
 | ID | PASS if |
 |----|---------|
 | G1 | On `main`, pull succeeded |
-| G2 | `MAIN_SHA` matches expected merge commit (839b7376… or newer if additional merges) |
+| G2 | `MAIN_SHA` equals **`839b7376933c6c4ba6f8be95a196d9578bf1a01f`** (or Christian-approved newer merge) |
+
+If `MAIN_SHA` differs from the authoritative commit, **stop** and confirm with Christian before building.
 
 ---
 
@@ -146,20 +180,28 @@ aws ecs describe-services \
 ```bash
 curl -sf "${STAGING_API%/}/health"
 echo
-curl -sf "${STAGING_API%/}/version"
-echo
+curl -sS -w "\nHTTP:%{http_code}\n" "${STAGING_API%/}/version"
 ```
+
+**`/api/version` auth note:** Pre-deploy, `/api/version` may return **HTTP 401** because the route does not exist on the live API yet — unknown routes hit the authenticated-by-default fallback policy in `Program.cs`. After deploying the Phase B image, `/api/version` **must** return **HTTP 200** without a JWT. The merged implementation marks `VersionController` with `[AllowAnonymous]` (same pattern as `/api/health`) and exposes only non-sensitive fields: `application`, `version`, `environment`, `gitSha`, `builtAt`.
+
+| If post-deploy | Action |
+|----------------|--------|
+| HTTP 200, correct JSON | PASS — proceed |
+| HTTP 401 | **Report as blocker** — do **not** change auth during this deploy; Christian decides separately |
+| HTTP 404 | Image likely not deployed or wrong service — inspect ECS task |
 
 | ID | PASS if |
 |----|---------|
 | S1 | ECS stable, task Running |
 | S2 | `/api/health` → `"status":"healthy"`, `"database":"connected"` |
-| S3 | `/api/version` → `gitSha` **exactly equals** `$MAIN_SHA` |
+| S2b | `/api/version` → **HTTP 200** (no auth header) |
+| S3 | `/api/version` → `gitSha` **exactly equals** `839b7376933c6c4ba6f8be95a196d9578bf1a01f` |
 | S4 | `/api/version` → `builtAt` populated (non-empty) |
 | S5 | `/api/version` → `environment` is **`Staging`** |
 | S6 | CloudWatch logs — no fatal startup errors |
 
-**STOP if S3 fails** — do not proceed to web/native until API identity matches main.
+**STOP if S2b or S3 fails** — do not proceed to web/native until API identity matches main.
 
 ---
 
@@ -202,8 +244,10 @@ Browser checks on `https://www.strata-ngo.com`:
 | W2 | **DEV badge** visible in top bar |
 | W3 | Network tab → API host is `api.staging.strata-ngo.com` |
 | W4 | Debug tools available (bug icon / debug panel — DEV only) |
-| W5 | `build-manifest.json` identifies DEV + exact build SHA |
+| W5 | `build-manifest.json` → `buildSha` = **`839b7376933c6c4ba6f8be95a196d9578bf1a01f`** |
 | W6 | No localhost/LAN IP in loaded JS |
+
+**Web artifact alignment:** Live `build-manifest.json.buildSha` must equal `$MAIN_SHA` and `/api/version.gitSha`.
 
 ---
 
@@ -242,21 +286,23 @@ Xcode → physical iPhone → **Product → Run**.
 | N5 | App installs as **N-Go DEV** (separate from legacy Kinet app) |
 | N6 | Login screen loads |
 
-**Note:** Fresh sandbox — absence of legacy Kinet IndexedDB/queue is **expected**, not data loss.
+**Note:** `com.strata.ngo.field.dev` is a **fresh sandbox**. An **empty local database on first launch** is expected — not a regression. Absence of legacy Kinet IndexedDB/queue is correct.
 
 ---
 
 ## Step 8 — Christian device acceptance (handoff)
 
-Christian performs concise clean-baseline test:
+Christian performs concise clean-baseline test on **N-Go DEV** (`com.strata.ngo.field.dev`):
 
-1. Launch **N-Go DEV** — confirm DEV identification visible.
-2. Login.
-3. Confirm field data downloads → **Ready for offline**.
+1. Launch **N-Go DEV** — confirm DEV identification visible (badge / app name).
+2. **First launch:** empty local store is expected (no legacy Kinet data).
+3. Login → bootstrap → confirm field data downloads → **Ready for offline**.
 4. Complete one workflow **online** (photos + installer signature).
-5. Complete one workflow **offline** with multiple time-state changes (photos + signature).
+5. **Decisive offline test:** create new field work **offline** with **multiple time-state transitions**, plus photos, installer signature, and completion.
 6. Reconnect → queue drains to **Pending: 0 actions**.
-7. Force-close and reopen → **Pending: 0** remains; cached offline assets usable.
+7. Force-close and reopen → **Pending: 0** remains; valid cached/offline assets still usable.
+
+Legacy Kinet app may remain installed for comparison — N-Go DEV must not inherit its data.
 
 **STOP conditions (report immediately):**
 
@@ -275,7 +321,8 @@ Christian performs concise clean-baseline test:
 ```
 Phase B post-merge DEV deploy — report
 Date:
-Git MAIN_SHA:
+Authoritative SHA: 839b7376933c6c4ba6f8be95a196d9578bf1a01f
+Git MAIN_SHA (actual):
 BUILD_TIME (API):
 Disk cleanup D1-D3:
 
@@ -286,11 +333,18 @@ E1 ECR push:            PASS / FAIL
 Image digest:
 ECS task definition rev:
 S1-S6 API verify:       PASS / FAIL
+/api/version HTTP code:
 /api/version JSON:
+
+Artifact alignment:
+  main == docker GIT_SHA:     PASS / FAIL
+  main == /api/version.gitSha: PASS / FAIL
+  main == web manifest SHA:   PASS / FAIL
+  main == native manifest SHA: PASS / FAIL
 
 W0-W6 web:              PASS / FAIL
 Live web bundle:
-build-manifest.json:
+Live build-manifest.json:
 
 N1-N6 native:           PASS / FAIL
 Bundle ID:
@@ -300,9 +354,12 @@ Native build SHA:
 iPhone install:         PASS / FAIL / PENDING
 Christian acceptance:   PASS / FAIL / PENDING
 
+Phase B deployment:     PASS / FAIL / PENDING
+Phase B acceptance:     PASS / FAIL / PENDING
+Phase C started:        NO (must remain NO)
+
 Blockers:
 Notes:
-Phase C started:        NO (must remain NO unless Christian explicitly requests)
 ```
 
 ## PROMPT END
