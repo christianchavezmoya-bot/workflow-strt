@@ -1,6 +1,8 @@
 # Development → Staging → Production roadmap
 
-**Status:** Planning — start **after** baseline sync PASS (`main` = AWS staging = iPhone source).
+**Status:** Superseded for **execution** by [`STRATA_NGO_DEV_PRODUCTION_IMPLEMENTATION_PLAN.md`](./STRATA_NGO_DEV_PRODUCTION_IMPLEMENTATION_PLAN.md). Keep this doc for background architecture.
+
+**Status (historical):** Planning — start **after** baseline sync PASS (`main` = AWS staging = iPhone source). **Baseline PASS @ `6e4018c3`.**
 
 **Problem today:** Staging (`www.strata-ngo.com` + `api.staging.strata-ngo.com`) is both the **test environment** and the **only shared environment** Christian's team uses. Day-to-day development and PR deploys target the same URLs real field testing uses. That worked for bootstrap; it does **not** scale once real N-Go users onboard.
 
@@ -128,7 +130,9 @@
 
 ## Related docs
 
-- Baseline sync (execute first): `docs/MAC_AGENT_BASELINE_SYNC_MAIN_PROMPT.md`
+- **Execution plan (agents):** `docs/STRATA_NGO_DEV_PRODUCTION_IMPLEMENTATION_PLAN.md`
+- **Readiness audit:** `docs/PRODUCTION_READINESS_AUDIT.md` (PR #325)
+- Baseline sync: `docs/MAC_AGENT_BASELINE_SYNC_MAIN_PROMPT.md`
 - AWS handoff: `docs/CLAUDE_CODE_AWS_HANDOFF.md`
 - Pre-deploy checklist: `docs/CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`
 - Full AWS plan: `docs/CLOUD_HOSTING_AWS_PLAN.md`
