@@ -1,33 +1,51 @@
 # Phase C — DEV DNS clarity (`staging.strata-ngo.com`)
 
+**Status: CLOSED / PASS (2026-08-31)** — AWS deploy complete. Christian follow-ups: optional L2 invite send, L4/L5 click-through, team comms (C5).
+
 **Goal:** Canonical DEV web at **`https://staging.strata-ngo.com`**. **`www.strata-ngo.com`** keeps serving the same DEV app until Phase F, then flips to production.
 
-**Prerequisites:** Phase B **CLOSED / PASS** · main at **`96e4e797…`** (#331 merged) · Christian **DNS C done**.
+## Final deploy record
 
-**DNS (confirmed 2026-08-31):**
+| Item | Value |
+|------|--------|
+| main SHA | `96e4e7972ad8836f879c005779fb7f77582c483b` |
+| CloudFront `E1YN5XTWDWRHYP` | Aliases: `www.strata-ngo.com`, `staging.strata-ngo.com` — Deployed |
+| ACM (us-east-1) | `e34a2977-d3e5-4979-92cb-d17d1e0e0dd0` ISSUED (staging + www SANs) |
+| ECS revision | `default-commtrac-api-ae2c:25` |
+| API image digest | `sha256:4eede100f8d68cad1627383fcaa118f9706bcfaac9ff86f59a567ba88e9f8445` |
+| DEV web bundle | `assets/index-D0SL7wSz.js` · buildSha `96e4e797…` |
+| staging host | HTTPS 200 · login loads |
+| www host | HTTPS 200 · same bundle/manifest as staging |
+
+### L1–L5
+
+| ID | Result |
+|----|--------|
+| L1 | **PASS** — `frontendBaseUrl: https://staging.strata-ngo.com` |
+| L2 | **NOT RUN** — invite send (Christian/Mac, on request) |
+| L3 | **PARTIAL PASS** — staging login page loads; token page needs L2 |
+| L4 | **PASS** (host derivation) — click-through for Christian |
+| L5 | **PASS** (host derivation) — click-through for Christian |
+
+**Prerequisites (met):** Phase B **CLOSED / PASS** · main at **`96e4e797…`** (#331 merged) · Christian **DNS C done** · Mac AWS deploy **PASS**.
+
+**DNS:**
 - `staging.strata-ngo.com` → CNAME → **`d1cd0cll7o925f.cloudfront.net`** (Proxy ON)
-- `www.strata-ngo.com` unchanged
-- Until CloudFront alternate domain is added, staging may return **Cloudflare 530** — expected.
-
-**Order:** CloudFront alias + ACM → Mac API ECS env redeploy → Mac web deploy → verify both hosts → link smoke on staging host.
+- `www.strata-ngo.com` unchanged (same CloudFront origin)
 
 ---
 
-## Christian — DNS ✅ DONE (2026-08-31)
+## Christian — remaining (optional)
 
-| Record | Value |
-|--------|--------|
-| Name | `staging.strata-ngo.com` |
-| Type | CNAME |
-| Target | **`d1cd0cll7o925f.cloudfront.net`** |
-| Proxy | ON |
-| `www` | **unchanged** |
+1. **C5:** Notify team — use **`https://staging.strata-ngo.com`** for DEV web testing; `www` still works but is reserved for production (Phase F).
+2. **L2:** Re-send a test invite from Settings → Users (optional sanity check).
+3. **L4/L5:** One QR scan + one signature link click-through on staging (authenticated session).
 
-Mac agent: proceed from **Step 1 (CloudFront alternate domain)** below.
+Do **not** start Phase D/F or repoint `www` to production.
 
 ---
 
-## Mac agent — paste into Claude Code
+## Mac agent — historical runbook (deploy complete)
 
 ```
 PHASE C — DEV DNS deploy (DNS C DONE — execute now)
