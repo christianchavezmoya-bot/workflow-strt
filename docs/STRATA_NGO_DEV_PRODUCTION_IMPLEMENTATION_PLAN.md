@@ -58,7 +58,16 @@ Phase G  Steady state        Promotion rules + monitoring
 | 0.4 | Confirm prod iOS: TestFlight internal first, then App Store | Christian **DECIDE** | Record choice |
 | 0.5 | Create/track GitHub Project or checklist from Phase A–F tables | Cursor | Optional |
 
-**Phase 0 gate:** Decisions 0.2–0.4 recorded in a comment on PR for this plan or in `#325` thread.
+### Phase 0 decisions — recorded 2026-08-31 (Christian)
+
+| Decision | Answer |
+|----------|--------|
+| Bundle ID prefix | **`com.strata.ngo.field`** with **`.dev`** suffix for DEV app → DEV: `com.strata.ngo.field.dev`, PROD: `com.strata.ngo.field` |
+| DEV web hostname | **`staging.strata-ngo.com`** for DEV; **`www.strata-ngo.com`** reserved for PRODUCTION |
+| Prod iOS path | **TestFlight internal first** |
+| First production users | **Internal pilot** |
+
+**Phase 0 gate:** **PASS** (decisions recorded). Merge #325 + #326 when ready; Phase A may proceed in parallel on code branch.
 
 ---
 
