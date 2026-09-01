@@ -7,7 +7,7 @@ What a database contains on boot is controlled by `SeedProfile`.
 | _(unset)_ | admin + project manager | Strata Connect / Strata Protect / Strata AI divisions, no products | none |
 | `Minimal` | admin + installer | same three divisions, no products | none |
 | `Demo` (or `SeedDemoData=true`) | admin + project manager | legacy Mining / Safety / Technology divisions + 6 products | `JOB-4021` + `INST-01` |
-| `StrataNgo` | admin + project manager | Strata divisions + staging products + Chambers workflow | none |
+| `StrataNgo` | admin + project manager | Strata Connect / Protect / AI + HazardAvert-Coal divisions; products **AIM-100**, **HA-Coal** (8 inventory features), **Chambers** | none |
 
 The `JOB-4021` sample project and the demo product catalog are **opt-in only**. A database
 created without a profile starts empty apart from users and the three default divisions.

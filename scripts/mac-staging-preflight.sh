@@ -16,7 +16,7 @@ ADMIN_EMAIL="${ADMIN_EMAIL:-admin@StrataNgo.local}"
 ADMIN_PASS="${ADMIN_PASS:-Admin123!}"
 PM_EMAIL="${PM_EMAIL:-project.manager@StrataNgo.local}"
 PM_PASS="${PM_PASS:-Pm123!}"
-CHAMBERS_PRODUCT_ID="${CHAMBERS_PRODUCT_ID:-prod-aim-100}"
+CHAMBERS_PRODUCT_ID="${CHAMBERS_PRODUCT_ID:-prod-chambers}"
 
 fail=0
 pass() { echo "PASS: $1"; }

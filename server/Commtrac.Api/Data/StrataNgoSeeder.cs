@@ -20,7 +20,11 @@ public static class StrataNgoSeeder
     public const string CustomerSecondId = "cust-strata-demo-mining";
     public const string DivisionHazardAvertCoalId = "div-hazard-avert-coal";
     public const string ProductAim100Id = "prod-aim-100";
+    public const string ProductHaCoalId = "prod-ha-coal";
+    public const string ProductChambersId = "prod-chambers";
     public const string WorkflowChambersDefaultId = "wf-chambers-default";
+
+    private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
     public static bool IsEnabled(IConfiguration config) =>
         string.Equals(config["SeedProfile"], ProfileName, StringComparison.OrdinalIgnoreCase);
@@ -34,6 +38,7 @@ public static class StrataNgoSeeder
         SeedCustomers(db);
         SeedDivisions(db);
         SeedProducts(db);
+        SeedHaCoalFeatures(db);
         SeedChambersWorkflow(db);
         SeedBrand(db);
     }
@@ -152,7 +157,66 @@ public static class StrataNgoSeeder
             Name = "AIM-100",
             DivisionId = DefaultCatalog.DivisionAiId,
             Description = "AI Proximity Detection",
+            FeaturesJson = "[]",
         });
+
+        db.Products.Add(new ProductEntity
+        {
+            Id = ProductHaCoalId,
+            Name = "HA-Coal",
+            DivisionId = DivisionHazardAvertCoalId,
+            Description = "HazardAvert coal proximity system",
+            FeaturesJson = "[]",
+        });
+
+        db.Products.Add(new ProductEntity
+        {
+            Id = ProductChambersId,
+            Name = "Chambers",
+            DivisionId = DefaultCatalog.DivisionProtectId,
+            Description = "Underground refuge chamber",
+            FeaturesJson = "[]",
+        });
+    }
+
+    private static void SeedHaCoalFeatures(AppDbContext db)
+    {
+        var seedPath = Path.Combine(AppContext.BaseDirectory, "SeedData", "ha-coal-features.json");
+        if (!File.Exists(seedPath))
+        {
+            Console.WriteLine($"[StrataNgoSeeder] WARN: HA-Coal features seed file missing: {seedPath}");
+            return;
+        }
+
+        var rows = JsonSerializer.Deserialize<List<HaCoalFeatureSeed>>(File.ReadAllText(seedPath), JsonOpts)
+                   ?? new List<HaCoalFeatureSeed>();
+
+        var sortOrder = 0;
+        foreach (var row in rows.Where(r => !string.IsNullOrWhiteSpace(r.Id) && !string.IsNullOrWhiteSpace(r.Name)))
+        {
+            db.Features.Add(new FeatureEntity
+            {
+                Id = row.Id,
+                Name = row.Name.Trim(),
+                Description = string.IsNullOrWhiteSpace(row.Description) ? row.Name.Trim() : row.Description.Trim(),
+                ValueType = "text",
+                OptionsJson = "[]",
+                SubPropertiesJson = "[]",
+                IsInventory = row.IsInventory,
+                CaptureFieldsJson = JsonSerializer.Serialize(row.CaptureFields ?? ["serialNo"], JsonOpts),
+                Brand = row.Brand,
+                Supplier = row.Supplier,
+                ManufacturerPartNumber = row.ManufacturerPartNumber,
+                AlternativePartNumber = row.AlternativePartNumber,
+            });
+
+            db.ProductFeatures.Add(new ProductFeatureEntity
+            {
+                ProductId = ProductHaCoalId,
+                FeatureId = row.Id,
+                SortOrder = sortOrder++,
+            });
+        }
     }
 
     private static void SeedChambersWorkflow(AppDbContext db)
@@ -169,12 +233,15 @@ public static class StrataNgoSeeder
         using var doc = JsonDocument.Parse(File.ReadAllText(seedPath));
         var root = doc.RootElement;
         var stepsJson = root.TryGetProperty("stepsJson", out var stepsEl) ? stepsEl.GetString() ?? "[]" : "[]";
-        stepsJson = stepsJson.Replace("323c7777-7af1-49ec-96f4-8b1d4fb7aa5a", ProductAim100Id, StringComparison.Ordinal);
+        const string legacyChambersProductId = "323c7777-7af1-49ec-96f4-8b1d4fb7aa5a";
+        stepsJson = stepsJson
+            .Replace(legacyChambersProductId, ProductChambersId, StringComparison.Ordinal)
+            .Replace(ProductAim100Id, ProductChambersId, StringComparison.Ordinal);
 
         db.WorkflowConfigs.Add(new WorkflowConfigEntity
         {
             Id = WorkflowChambersDefaultId,
-            ProductId = ProductAim100Id,
+            ProductId = ProductChambersId,
             Name = "Chambers_default",
             DisplayName = "Chambers 10 steps",
             ConfigType = root.TryGetProperty("configType", out var ct) ? ct.GetString() : "Inspection",
@@ -200,5 +267,18 @@ public static class StrataNgoSeeder
                 Value = "Strata N-Go",
             });
         }
+    }
+
+    private sealed class HaCoalFeatureSeed
+    {
+        public string Id { get; set; } = "";
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string? Brand { get; set; }
+        public string? Supplier { get; set; }
+        public string? ManufacturerPartNumber { get; set; }
+        public string? AlternativePartNumber { get; set; }
+        public bool IsInventory { get; set; } = true;
+        public List<string>? CaptureFields { get; set; }
     }
 }

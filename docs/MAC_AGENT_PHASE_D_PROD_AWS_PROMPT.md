@@ -85,8 +85,8 @@ From `StrataNgoSeeder.cs` + `docs/CLEAN_DATA_RESET.md`:
 | **Users** | Admin `admin@StrataNgo.local` + PM `project.manager@StrataNgo.local` (passwords from Secrets Manager) |
 | **Offices** | Newcastle + Perth |
 | **Customers** | BHP/Mining, Strata Demo Mining |
-| **Catalog** | Strata Connect / Protect / AI divisions + HazardAvert-Coal; product **AIM-100** |
-| **Workflow** | Published **Chambers_default** (10 steps) for AIM-100 |
+| **Products** | **AIM-100** (Strata AI) · **HA-Coal** (HazardAvert-Coal, 8 inventory features) · **Chambers** (Strata Protect) |
+| **Workflow** | Published **Chambers_default** (10 steps) for **Chambers** product |
 | **Sample project** | **None** (no JOB-4021 / INST-01 demo junk) |
 
 ### Phase D application
@@ -240,7 +240,7 @@ Verify via ALB DNS (direct, not api.strata-ngo.com until DNS test):
   curl -sf https://<prod-alb-or-test-host>/api/version
   environment=Production, gitSha=MAIN_SHA, database=connected
 
-First boot: confirm seed profile result (StrataNgo → admin+PM, offices, customers, AIM-100, Chambers_default; no sample projects).
+First boot: confirm seed profile result (StrataNgo → admin+PM, offices, customers, 3 products, 8 HA-Coal features, Chambers_default on Chambers; no sample projects).
 
 ═══════════════════════════════════════════════════════════════
 STEP 7 — CloudFront web (D7)
@@ -295,13 +295,13 @@ Phase F is separate — do not cut over DNS.
 
 ### Secrets (required before API boot)
 
-See Appendix C2 in `STRATA_NGO_DEV_PRODUCTION_IMPLEMENTATION_PLAN.md`.
+See Appendix C2 in `STRATA_NGO_DEV_PRODUCTION_IMPLEMENTATION_PLAN.md`. Include **`SeedProjectManager__Password`** for StrataNgo seed.
 
 ### Seed (recorded — no further decision needed)
 
 Phase D uses **`SeedProfile=StrataNgo`** — same as DEV (`appsettings.Staging.json`). See [Seed decision](#seed-decision--stratango-confirmed-2026-09-01) for contents.
 
-### Secrets (required before API boot)
+### IAM role (if Mac agent blocked)
 
 Create `commtrac-prod-ecs-s3` mirroring `commtrac-staging-ecs-s3` but `strata-ngo-media-prod` ARNs.
 
