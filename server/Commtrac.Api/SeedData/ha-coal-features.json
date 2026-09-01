@@ -1,0 +1,74 @@
+[
+  {
+    "id": "feat-ha-coal-cg2-generator",
+    "name": "Ex d Gen 2 Compact Generator",
+    "description": "Ex d Gen 2 Compact Generator",
+    "brand": "Repro",
+    "manufacturerPartNumber": "HA-CG2-CG-01",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-sz-cable-12m",
+    "name": "HA CG2 Silent Zone Cable Sub Assembly 12m",
+    "description": "HA CG2 Silent Zone Cable Sub Assembly 12m",
+    "brand": "Strata",
+    "manufacturerPartNumber": "HA-CG2-SZCBL-12",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-pod-10m",
+    "name": "Ex d POD with 10m cable",
+    "description": "Ex d POD with 10m cable",
+    "brand": "Repro",
+    "manufacturerPartNumber": "AUS-POD",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-flasher-siren",
+    "name": "Ex d Flasher Siren Combo",
+    "description": "Ex d Flasher Siren Combo",
+    "brand": "Strata",
+    "manufacturerPartNumber": "AUS-FSMULTI",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-jbox-ha363",
+    "name": "Ex d HA-363 J-Box 4 x 25mm entries",
+    "description": "Ex d HA-363 J-Box 4 x 25mm entries",
+    "brand": "Ampcontrol",
+    "manufacturerPartNumber": "HA-363",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-ontrak-enclosure",
+    "name": "Ontrak Flame Proof enclosure",
+    "description": "Ontrak Flame Proof enclosure",
+    "brand": "Ontrak",
+    "manufacturerPartNumber": "OEE 1351",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-interface-module",
+    "name": "CG2 INTERFACE MODULE",
+    "description": "CG2 INTERFACE MODULE",
+    "brand": "Strata",
+    "manufacturerPartNumber": "HA-CG2-IM-01",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  },
+  {
+    "id": "feat-ha-coal-antenna-coupler",
+    "name": "ISOLATED ANTENNA COUPLER",
+    "description": "ISOLATED ANTENNA COUPLER",
+    "brand": "Ampcontrol",
+    "manufacturerPartNumber": "RX1MS0200RX0",
+    "isInventory": true,
+    "captureFields": ["serialNo"]
+  }
+]

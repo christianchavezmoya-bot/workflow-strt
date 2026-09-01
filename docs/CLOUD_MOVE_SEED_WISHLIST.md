@@ -54,15 +54,17 @@ Fill this in **before** we re-run Docker/AWS staging with a fresh database. Impl
 
 | Product name | Division | Workflow config | Notes |
 |--------------|----------|-----------------|-------|
-| **AIM-100** | Strata AI | Chambers_default | **Only product** on fresh seed. Description: AI Proximity Detection |
+| **AIM-100** | Strata AI | — | AI Proximity Detection; AIM-100 features patched on boot via `EnsureAim100Features` |
+| **HA-Coal** | HazardAvert-Coal | — | 8 inventory features from `SeedData/ha-coal-features.json` (source: `features_HA_coal_2778.xlsx`) |
+| **Chambers** | Strata Protect | Chambers_default | Underground refuge chamber |
 
 ---
 
 ## Workflows
 
-| Config | Source file | Published? | Notes |
-|--------|-------------|------------|-------|
-| Chambers_default | `SeedData/chambers-default-workflow.json` | Yes | **Do not** change steps JSON |
+| Config | Source file | Published? | Product | Notes |
+|--------|-------------|------------|---------|-------|
+| Chambers_default | `SeedData/chambers-default-workflow.json` | Yes | **Chambers** | **Do not** change steps JSON |
 
 **Additional published workflows:** None.
 

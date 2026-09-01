@@ -70,9 +70,13 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 | Container | `Main` · port **80** · `ASPNETCORE_URLS=http://+:80` |
 | CPU / memory | 1024 / 2048 |
 | Execution role | `arn:aws:iam::920154935299:role/service-role/ecsTaskExecutionRole` |
-| Task role | `arn:aws:iam::920154935299:role/commtrac-staging-ecs-s3` — **live rev :22**; uploads PASS — **do not change** |
-| Current ECS revision | **`default-commtrac-api-ae2c:22`** |
-| GitHub `main` | **`f2fc7920`** (+ docs); baseline sync: **`docs/MAC_AGENT_BASELINE_SYNC_MAIN_PROMPT.md`** |
+| Task role | `arn:aws:iam::920154935299:role/commtrac-staging-ecs-s3` — uploads PASS — **do not change** |
+| Current ECS revision | **`default-commtrac-api-ae2c:25`** (Phase C deploy, 2026-08-31) |
+| GitHub `main` | **`96e4e797`** (#331 Phase C URL policy) |
+| ECR image digest | `sha256:4eede100f8d68cad1627383fcaa118f9706bcfaac9ff86f59a567ba88e9f8445` |
+| CloudFront | **`E1YN5XTWDWRHYP`** · aliases: `staging.strata-ngo.com`, `www.strata-ngo.com` |
+| ACM (us-east-1) | `e34a2977-d3e5-4979-92cb-d17d1e0e0dd0` (ISSUED; staging + www SANs) |
+| DEV web bundle | `assets/index-D0SL7wSz.js` · buildSha `96e4e797…` |
 | ECR | `920154935299.dkr.ecr.ap-southeast-2.amazonaws.com/commtrac-api:staging` |
 | RDS | `strata-ngo-staging` (PostgreSQL, private) |
 | S3 media | `strata-ngo-media-staging` |
@@ -98,32 +102,29 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 - ALB listener rule: Host `api.staging.strata-ngo.com` → healthy target group
 - Target group health path `/api/health`, success 200
 - AWS MCP + `StrataClaudeAgentRole` + deployment policy
+- **ECS S3 task role** — `commtrac-staging-ecs-s3` live; uploads PASS (see `ECS_S3_TASK_ROLE_FIX.md`)
+- **Phase C CLOSED / PASS (2026-08-31):** canonical DEV web at **`https://staging.strata-ngo.com`**; Christian acceptance L1–L5 all PASS; `www` still serves same DEV app until Phase F
+- **CloudFront `E1YN5XTWDWRHYP`:** both `staging.strata-ngo.com` and `www.strata-ngo.com` aliases deployed
+- **Phase C ECS env:** `Email__FrontendBaseUrl=https://staging.strata-ngo.com`; CORS allows staging + www
+- **API `/api/version`:** `gitSha=96e4e797…` matches main
 
 ### Pending
-- **ECS S3 task role (BLOCKER for uploads / Save PDF)** — attach `commtrac-staging-ecs-s3` to task definition; see **`docs/ECS_S3_TASK_ROLE_FIX.md`**. Christian console creates role; Mac agent registers task def + redeploys.
-- **Deploy task definition revision 10** — registered but service still on rev 9 (`Database__RunMigrationsOnStartup`: true → false). Approved: update service to `:10`.
-- **Jwt__Key length** — if login returns 500 at token creation, update Secrets Manager key to ≥32 chars and force new ECS deployment (startup will now fail fast with a clear error instead of 500 on login).
-- **Native first-login perf** — iPhone login works against staging but dashboard was slow/errors before paint (request storm). PR defers push registration, bell inbox refresh, and duplicate catalog prefetch until first-login bootstrap completes. **Rebuild iOS app after merge** to pick up the fix.
-- **Web DEV (canonical):** **`https://staging.strata-ngo.com`** (Phase C target)
-- **Web DEV (transition):** **`https://www.strata-ngo.com`** — same CloudFront origin until Phase F prod cutover
-- **Invite email links** — `Email__FrontendBaseUrl=https://staging.strata-ngo.com` on ECS **and** DB `NotificationSettings.FrontendBaseUrl` aligned (auto-patches legacy `www` on API startup)
-- **iPhone build** against `https://api.staging.strata-ngo.com/api`
+- **Native first-login perf** — rebuild iOS app after relevant merges if dashboard slow on cold start
+- **iPhone build** against `https://api.staging.strata-ngo.com/api` (no Phase C native rebuild required)
 - **APNs/FCM** push on server
+- **Phase C:** CLOSED / PASS — Christian acceptance L1–L5 + C5 team comms (2026-08-31)
+- **Phase D:** **NEXT** — isolated prod AWS stack; see `docs/MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md`
+- **Phase D/F** — do not start without explicit approval
 
-### Invite / password-reset email links (2026-08-27)
+### Invite / password-reset email links — RESOLVED (Phase C, 2026-08-31)
 
-**Symptom:** Invite email links point to `https://staging.strata-ngo.com/reset-password?...` — Safari cannot open (host not deployed).
+**Was:** Invite links pointed at `staging.strata-ngo.com` before host was live (Safari could not open).
 
-**Root cause:** DB `NotificationSettings` row still has `FrontendBaseUrl = https://staging.strata-ngo.com` from early seed; env var alone does not override a non-empty DB value.
+**Now:** Staging host serves HTTPS 200; ECS rev `:25` + startup DB patch set `NotificationSettings.FrontendBaseUrl` to `https://staging.strata-ngo.com`. L1 verified via GET `/api/settings/notifications`.
 
-**Fix (after PR merge):**
-1. Ensure ECS task env includes `Email__FrontendBaseUrl=https://staging.strata-ngo.com`, `Cors__AllowedOrigins__0=https://staging.strata-ngo.com`, and `Cors__AllowedOrigins__1=https://www.strata-ngo.com` (transition)
-2. Build + push new API image + force ECS redeploy — startup patch updates DB automatically
-3. Re-send invite from **Settings → Users** (or use workaround below)
+**Transition:** `https://www.strata-ngo.com` still serves the same DEV app (same CloudFront origin) until Phase F prod cutover.
 
-**Immediate workaround (no deploy):** Edit the link in the email — replace `staging.strata-ngo.com` with `www.strata-ngo.com` (token still valid for 24h).
-
-**Or:** Settings → Notifications → **Public frontend URL** → `https://www.strata-ngo.com` → Save → re-send invite.
+**Note:** ECS `runtime-frontend-base` may return a private IP (`http://172.31.x.x:5173`) — harmless; browser origin short-circuits first in `resolvePublicFrontendBaseUrl()`.
 
 ### Public link audit (all link types)
 

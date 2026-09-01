@@ -11,7 +11,7 @@
 
 | Name | URLs / resources | Notes |
 |------|------------------|-------|
-| **DEV** | Web: `staging.strata-ngo.com` *(target)* — today `www.strata-ngo.com` still serves DEV. API: `api.staging.strata-ngo.com`. AWS: existing `staging-*` resources, ECS `commtrac-api-ae2c`. | **Do not rename** `staging-*` AWS resources to “dev”. |
+| **DEV** | Web: **`staging.strata-ngo.com`**. API: `api.staging.strata-ngo.com`. AWS: existing `staging-*` resources, ECS `commtrac-api-ae2c`. | **Do not rename** `staging-*` AWS resources to “dev”. |
 | **PRODUCTION** | Web: `www.strata-ngo.com`. API: `api.strata-ngo.com`. AWS: **new** isolated stack (RDS, S3, ECS, Secrets Manager, CloudFront). | Real users only after Phase F gate. |
 | **LOCAL** | `localhost:5173` / `localhost:4000`, Docker staging, LAN IPs. | Day-to-day feature development. |
 
@@ -37,8 +37,8 @@
 Phase 0  Prerequisites     Christian decisions + merge audit PR
 Phase A  Code hardening      Cursor PRs → merge → Claude deploy DEV
 Phase B  Build lanes         Cursor PRs → merge
-Phase C  DEV DNS clarity     Christian DNS + Claude move DEV web host
-Phase D  Production AWS      Claude Code (new stack) + Christian secrets
+Phase C  DEV DNS clarity     ✅ CLOSED / PASS (2026-08-31)
+Phase D  Production AWS      Claude Code (new stack) + Christian secrets ← **NEXT**
 Phase E  Mobile identity     Christian corp accounts + Claude builds
 Phase F  Production go-live  Claude deploy + Christian acceptance
 Phase G  Steady state        Promotion rules + monitoring
@@ -135,12 +135,12 @@ curl -sf https://api.staging.strata-ngo.com/api/health
 | C1 | Cloudflare: add `staging.strata-ngo.com` → same DEV S3/CloudFront origin (or path-based origin) | **Christian** | DNS resolves |
 | C2 | Update DEV deploy docs + `Email__FrontendBaseUrl` for DEV to use `staging.strata-ngo.com` when cutover complete | Cursor | Docs PR |
 | C3 | Claude: deploy DEV web; verify both hosts during transition | Claude Code | 200 on both URLs |
-| C4 | Update invite/QR smoke (L1–L5 from rebuild prompt) on DEV host | Claude Code | Links use correct host |
-| C5 | Communicate to team: use `staging.strata-ngo.com` for DEV testing | Christian | Email/slack |
+| C4 | Update invite/QR smoke (L1–L5 from rebuild prompt) on DEV host | Claude Code + Christian | **PASS** (2026-08-31 acceptance) |
+| C5 | Communicate to team: use `staging.strata-ngo.com` for DEV testing | Christian | **DONE** (2026-08-31 — see `docs/TEAM_DEV_ENVIRONMENT_UPDATE.md`) |
 
 **Christian prompt — Phase C DNS:** see [Appendix C1](#appendix-c1--christian--phase-c-dns).
 
-**Phase C gate:** DEV acceptance on `staging.strata-ngo.com` PASS; `www` still serves DEV until Phase F (or holding page).
+**Phase C gate:** **CLOSED / PASS (2026-08-31)** — Christian acceptance L1–L5 + infrastructure verified. See `docs/MAC_AGENT_PHASE_C_DEV_DNS_PROMPT.md`. `www` still serves DEV until Phase F.
 
 ---
 
@@ -163,6 +163,8 @@ curl -sf https://api.staging.strata-ngo.com/api/health
 | D11 | `curl https://api.strata-ngo.com/api/health` + `/api/version` | Claude Code | healthy + connected |
 
 **Christian prompt — Phase D secrets:** see [Appendix C2](#appendix-c2--christian--phase-d-production-secrets).
+
+**Mac agent runbook:** [`docs/MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md`](./MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md)
 
 **Phase D gate:** Prod API healthy; **zero** prod web/mobile traffic yet; Christian confirms secrets rotated and not defaults.
 
@@ -404,7 +406,7 @@ Phase 0 decisions:
 | After A merged | Claude Code | Appendix A master prompt + "Deploy Phase A to DEV only" |
 | Start Phase B | Cursor Cloud | "Execute Phase B build lanes + /api/version — PR cursor/phase-b-build-lanes-cd21" |
 | Start Phase C | Christian | Appendix C1 DNS prompt |
-| Start Phase D | Claude Code | Appendix A + "Execute Phase D production AWS stack — read CLOUD_HOSTING_AWS_PLAN.md" |
+| Start Phase D | Claude Code | [`MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md`](./MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md) + Christian seed decision + Appendix C2 secrets |
 | Phase D secrets | Christian | Appendix C2 |
 | Start Phase E | Christian | Appendix C3; Cursor parallel for capacitor flavors |
 | Start Phase F | Christian | Appendix C4 after Claude pre-smoke |
@@ -420,6 +422,8 @@ Phase 0 decisions:
 | `docs/CLAUDE_CODE_AWS_HANDOFF.md` | Live DEV ARNs, ECS, buckets |
 | `docs/MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md` | DEV deploy steps |
 | `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md` | iOS install (use `npx cap open ios`) |
+| `docs/MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md` | Phase D prod AWS runbook (isolated stack) |
+| `docs/TEAM_DEV_ENVIRONMENT_UPDATE.md` | Phase C5 team comms (canonical DEV URLs) |
 | `docs/CLOUD_HOSTING_AWS_PLAN.md` | Prod AWS architecture reference |
 
 ---
