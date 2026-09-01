@@ -343,14 +343,18 @@ Agents will update Email__FrontendBaseUrl on DEV ECS after your confirmation if 
 ```
 Strata N-Go — Production secrets (Phase D) — your tasks only
 
-In AWS Secrets Manager (ap-southeast-2), create strata_ngo/production/app with:
-- Jwt__Key — random ≥32 UTF-8 bytes (NOT the staging key)
-- ConnectionStrings__DefaultConnection — from prod RDS (Claude will send host/db/user)
-- SeedAdmin__Password — strong unique password (save in password manager)
+In AWS Secrets Manager (ap-southeast-2), create **strata_ngo/production/app** with:
 
-Send Claude Code ONLY confirmation "secrets created" — never paste values in chat/email.
+| Key | Value |
+|-----|--------|
+| `Jwt__Key` | Random ≥32 UTF-8 bytes (**NOT** the staging key) |
+| `ConnectionStrings__DefaultConnection` | Prod RDS connection string (Mac agent sends host/db/user after D1) |
+| `SeedAdmin__Password` | Strong unique admin password |
+| `SeedProjectManager__Password` | Strong unique PM password (StrataNgo seed) |
 
-Optional: confirm corporate decision on first prod admin email (default admin@StrataNgo.local).
+Send Claude Code ONLY confirmation **"secrets created"** — never paste values in chat/email.
+
+Default emails: `admin@StrataNgo.local`, `project.manager@StrataNgo.local`
 ```
 
 ### Appendix C3 — Christian — Phase E corporate mobile
