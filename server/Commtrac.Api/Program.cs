@@ -305,10 +305,12 @@ if (app.Environment.IsDevelopment())
 
 if (!app.Environment.IsDevelopment())
 {
-    app.UseForwardedHeaders(new ForwardedHeadersOptions
-    {
-        ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto,
-    });
+    // Must stay first: everything downstream (HTTPS redirect, auth, audit-log/session IP
+    // capture) reads the scheme and RemoteIpAddress this establishes. Only the configured
+    // VPC network is trusted — see ForwardedHeadersConfigurator.
+    var forwardedHeadersOptions = new ForwardedHeadersOptions();
+    ForwardedHeadersConfigurator.Configure(forwardedHeadersOptions, app.Configuration);
+    app.UseForwardedHeaders(forwardedHeadersOptions);
     app.UseHttpsRedirection();
 }
 
