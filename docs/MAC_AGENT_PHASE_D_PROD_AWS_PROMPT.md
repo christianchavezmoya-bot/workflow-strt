@@ -2,7 +2,7 @@
 
 **Goal:** Stand up a **completely isolated** Production AWS stack — new RDS, S3, ECS, Secrets Manager, CloudFront, ALB — with a **clean database** and **approved seed data only**. **Zero user traffic** until Phase F.
 
-**Prerequisites:** Phase C **CLOSED / PASS** · main at **`96e4e797…`** or newer · Christian **Phase D seed decision** recorded below · **Do not start Phase F** in this phase.
+**Prerequisites:** Phase C **CLOSED / PASS** · main at **`96e4e797…`** or newer · **Seed decision: `StrataNgo`** (same as DEV — recorded 2026-09-01) · **Do not start Phase F** in this phase.
 
 **Region:** `ap-southeast-2` · AWS profile: **`strata-agent`** · Account: `920154935299`
 
@@ -63,23 +63,43 @@ Cloudflare (DNS — Phase F only for public cutover)
 
 ---
 
-## Seed decision (Christian — DECIDE before D9)
+## Seed decision — **StrataNgo** (confirmed 2026-09-01)
 
-Prod first boot must **not** inherit DEV field data. Choose **one**:
+**Same profile as DEV/AWS staging today.** Prod gets a **fresh empty RDS** + this seed on first boot — **not** a copy of DEV field data.
 
-| Option | ECS env | First-boot result | Recommended for |
-|--------|---------|-------------------|-----------------|
-| **A — Minimal (recommended)** | `SeedProfile=Minimal` | Admin + installer, Newcastle office, divisions only — **no projects/workflows** | Internal pilot, clean slate |
-| **B — Admin only** | *(no SeedProfile)* | Admin user + empty divisions catalog | Strictest empty prod |
-| **C — StrataNgo full** | `SeedProfile=StrataNgo` | Same rich seed as DEV Docker staging | **Not recommended** unless explicitly approved |
+### Last seed choice (DEV — what we used before)
 
-**Default if Christian does not specify:** **Option A (Minimal)**.
+| Source | Value |
+|--------|--------|
+| `server/Commtrac.Api/appsettings.Staging.json` | `"SeedProfile": "StrataNgo"` |
+| `server/Commtrac.Api/appsettings.StagingDocker.json` | `"SeedProfile": "StrataNgo"` |
+| `docs/CLOUD_MOVE_EXECUTION_PLAN.md` P0.2 | Locked **`StrataNgo`** for staging/prod fresh DB |
+| `docs/CLOUD_MOVE_SEED_WISHLIST.md` | Signed off — implemented in `StrataNgoSeeder` |
 
-Record decision:
+### What `SeedProfile=StrataNgo` creates on first boot
+
+From `StrataNgoSeeder.cs` + `docs/CLEAN_DATA_RESET.md`:
+
+| Category | Content |
+|----------|---------|
+| **Users** | Admin `admin@StrataNgo.local` + PM `project.manager@StrataNgo.local` (passwords from Secrets Manager) |
+| **Offices** | Newcastle + Perth |
+| **Customers** | BHP/Mining, Strata Demo Mining |
+| **Catalog** | Strata Connect / Protect / AI divisions + HazardAvert-Coal; product **AIM-100** |
+| **Workflow** | Published **Chambers_default** (10 steps) for AIM-100 |
+| **Sample project** | **None** (no JOB-4021 / INST-01 demo junk) |
+
+### Phase D application
+
 ```
-Phase D seed decision: Minimal / Admin-only / StrataNgo — YES
-Prod admin email: admin@StrataNgo.local (default)
+Phase D seed decision: StrataNgo — YES (2026-09-01, same as DEV)
+ECS env: SeedProfile=StrataNgo
+Prod admin email: admin@StrataNgo.local
+Prod PM email: project.manager@StrataNgo.local
+Secrets: SeedAdmin__Password, SeedProjectManager__Password (prod-only values)
 ```
+
+**Alternatives (not chosen):** `Minimal` (admin+installer only) · unset SeedProfile (admin only).
 
 ---
 
@@ -87,7 +107,7 @@ Prod admin email: admin@StrataNgo.local (default)
 
 | ID | Task | Owner | Gate |
 |----|------|-------|------|
-| D0 | Christian seed decision + secrets prep prompt sent | Christian | Decision recorded |
+| D0 | Seed decision **`StrataNgo`** + secrets prep | Christian | **DONE** (2026-09-01) |
 | D1 | RDS PostgreSQL `strata-ngo-prod` (private subnet, SG from VPC) | Mac agent | Instance available |
 | D2 | S3 `strata-ngo-media-prod` + `strata-ngo-web-prod` (block public access) | Mac agent | Buckets created |
 | D3 | Build + push `commtrac-api:prod` from main (`GIT_SHA`, digest-pinned) | Mac agent | ECR digest recorded |
@@ -119,9 +139,10 @@ Copy DEV task def pattern but **Production** profile:
 | `Email__FrontendBaseUrl` | `https://www.strata-ngo.com` |
 | `Cors__AllowedOrigins__0` | `https://www.strata-ngo.com` |
 | `Cors__AllowDeviceOrigins` | `false` |
-| `SeedProfile` | `Minimal` *(or per Christian decision)* |
+| `SeedProfile` | `StrataNgo` |
 | `SeedAdmin__Email` | `admin@StrataNgo.local` |
-| Secrets (ValueFrom) | `Jwt__Key`, `ConnectionStrings__DefaultConnection`, `SeedAdmin__Password` |
+| `SeedProjectManager__Email` | `project.manager@StrataNgo.local` |
+| Secrets (ValueFrom) | `Jwt__Key`, `ConnectionStrings__DefaultConnection`, `SeedAdmin__Password`, `SeedProjectManager__Password` |
 
 **Do not set** DEV URLs, `AllowDeviceOrigins=true`, or staging CORS origins on prod.
 
@@ -144,7 +165,7 @@ Do NOT point www or api.strata-ngo.com DNS at prod (Phase F).
 Do NOT copy DEV database into prod.
 
 STOP until Christian confirms:
-1. Phase D seed decision (default: SeedProfile=Minimal)
+1. ~~Phase D seed decision~~ **StrataNgo** (same as DEV) — confirmed 2026-09-01
 2. Secrets Manager strata_ngo/production/app created ("secrets created" — no values in chat)
 
 ═══════════════════════════════════════════════════════════════
@@ -219,7 +240,7 @@ Verify via ALB DNS (direct, not api.strata-ngo.com until DNS test):
   curl -sf https://<prod-alb-or-test-host>/api/version
   environment=Production, gitSha=MAIN_SHA, database=connected
 
-First boot: confirm seed profile result (Minimal → admin+installer only, no demo projects).
+First boot: confirm seed profile result (StrataNgo → admin+PM, offices, customers, AIM-100, Chambers_default; no sample projects).
 
 ═══════════════════════════════════════════════════════════════
 STEP 7 — CloudFront web (D7)
@@ -276,16 +297,11 @@ Phase F is separate — do not cut over DNS.
 
 See Appendix C2 in `STRATA_NGO_DEV_PRODUCTION_IMPLEMENTATION_PLAN.md`.
 
-### Seed decision (required before migrations)
+### Seed (recorded — no further decision needed)
 
-```
-Phase D seed decision for Production first boot:
-- Minimal (recommended): admin + installer, no demo projects — reply "seed Minimal"
-- Admin-only: single admin, empty catalog — reply "seed Admin-only"
-- StrataNgo full: same as DEV rich seed — reply "seed StrataNgo" (explicit approval only)
-```
+Phase D uses **`SeedProfile=StrataNgo`** — same as DEV (`appsettings.Staging.json`). See [Seed decision](#seed-decision--stratango-confirmed-2026-09-01) for contents.
 
-### IAM role (if Mac agent blocked)
+### Secrets (required before API boot)
 
 Create `commtrac-prod-ecs-s3` mirroring `commtrac-staging-ecs-s3` but `strata-ngo-media-prod` ARNs.
 

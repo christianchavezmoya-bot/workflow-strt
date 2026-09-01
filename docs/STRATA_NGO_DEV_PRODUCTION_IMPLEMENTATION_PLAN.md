@@ -424,6 +424,7 @@ Phase 0 decisions:
 | `docs/MAC_AGENT_AWS_STAGING_IOS_PROMPT.md` | iOS install (use `npx cap open ios`) |
 | `docs/MAC_AGENT_PHASE_D_PROD_AWS_PROMPT.md` | Phase D prod AWS runbook (isolated stack) |
 | `docs/TEAM_DEV_ENVIRONMENT_UPDATE.md` | Phase C5 team comms (canonical DEV URLs) |
+| `docs/CLOUD_HOSTING_AWS_PLAN.md` | Prod AWS architecture reference |
 
 ---
 
