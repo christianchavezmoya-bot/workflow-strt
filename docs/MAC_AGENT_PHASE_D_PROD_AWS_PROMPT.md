@@ -289,6 +289,8 @@ Report: all ARNs, ECS rev, image digest, CloudFront ID, ALB DNS, seed profile, P
 Phase F is separate — do not cut over DNS.
 ```
 
+**One-shot automation (Mac, after infra D1–D2/D6–D8):** `./scripts/deploy-phase-d-aws.sh` — see script header for `PROD_DB_CONNECTION`, `PROD_API_HOST`, `PROD_CF_DOMAIN`.
+
 ---
 
 ## Christian — Phase D prompts
