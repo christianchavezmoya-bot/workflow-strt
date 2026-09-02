@@ -47,6 +47,11 @@ public class SeededIdentityTests
         var pm = db.Users.Single(u => u.Role == "Project Manager");
         Assert.Equal("admin.dev@stratango.local", admin.Email);
         Assert.Equal("projectmanager.dev@stratango.local", pm.Email);
+
+        // Seeded content attribution must derive from the same resolved admin
+        // identity, not a second hard-coded literal — see SeedChambersWorkflow.
+        var workflow = db.WorkflowConfigs.Single(w => w.Id == StrataNgoSeeder.WorkflowChambersDefaultId);
+        Assert.Equal("admin.dev@stratango.local", workflow.CreatedBy);
     }
 
     [Fact]
@@ -71,6 +76,9 @@ public class SeededIdentityTests
         var pm = db.Users.Single(u => u.Role == "Project Manager");
         Assert.Equal("admin@stratango.local", admin.Email);
         Assert.Equal("projectmanager@stratango.local", pm.Email);
+
+        var workflow = db.WorkflowConfigs.Single(w => w.Id == StrataNgoSeeder.WorkflowChambersDefaultId);
+        Assert.Equal("admin@stratango.local", workflow.CreatedBy);
     }
 
     [Fact]

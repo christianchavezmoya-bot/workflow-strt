@@ -33,13 +33,13 @@ public static class StrataNgoSeeder
     {
         RemoveDemoMigrationData(db);
         RemoveDefaultCatalog(db);
-        SeedUsers(db, config);
+        var adminEmail = SeedUsers(db, config);
         SeedOffices(db);
         SeedCustomers(db);
         SeedDivisions(db);
         SeedProducts(db);
         SeedHaCoalFeatures(db);
-        SeedChambersWorkflow(db);
+        SeedChambersWorkflow(db, adminEmail);
         SeedBrand(db);
     }
 
@@ -58,7 +58,7 @@ public static class StrataNgoSeeder
         db.SaveChanges(); // flush before the division seed checks whether any remain
     }
 
-    private static void SeedUsers(AppDbContext db, IConfiguration config)
+    private static string SeedUsers(AppDbContext db, IConfiguration config)
     {
         var adminEmail = config["SeedAdmin:Email"] ?? "admin.dev@stratango.local";
         var adminPassword = DbInitializer.ResolveSeedAdminPassword(config);
@@ -88,6 +88,8 @@ public static class StrataNgoSeeder
             IsFirstLogin = true,
             PasswordHash = BCrypt.Net.BCrypt.HashPassword(pmPassword),
         });
+
+        return adminEmail;
     }
 
     private static void SeedOffices(AppDbContext db)
@@ -219,7 +221,7 @@ public static class StrataNgoSeeder
         }
     }
 
-    private static void SeedChambersWorkflow(AppDbContext db)
+    private static void SeedChambersWorkflow(AppDbContext db, string adminEmail)
     {
         if (db.WorkflowConfigs.Any(c => c.Id == WorkflowChambersDefaultId)) return;
 
@@ -251,7 +253,7 @@ public static class StrataNgoSeeder
             StepsJson = stepsJson,
             MediaJson = root.TryGetProperty("mediaJson", out var mj) ? mj.GetString() ?? "[]" : "[]",
             FeatureSelectionsJson = root.TryGetProperty("featureSelectionsJson", out var fj) ? fj.GetString() ?? "[]" : "[]",
-            CreatedBy = "admin.dev@stratango.local",
+            CreatedBy = adminEmail,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         });
