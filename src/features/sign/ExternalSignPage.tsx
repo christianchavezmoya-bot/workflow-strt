@@ -35,6 +35,7 @@ import {
   DownloadOutlined,
   GestureOutlined,
   KeyboardOutlined,
+  LockOutlined,
 } from "@mui/icons-material";
 import api from "../../services/api";
 import type { PublicRunSummary } from "../../types/signature";
@@ -50,6 +51,7 @@ const PAGE = {
   textMuted: "rgba(228,237,242,0.72)",
   border: "rgba(255,255,255,0.12)",
   accent: "#2dd4bf",
+  otpWaiting: "#e0a930",
 };
 
 // ─── Signature canvas ──────────────────────────────────────────────────────────
@@ -163,6 +165,7 @@ export default function ExternalSignPage() {
   const [drawnData, setDrawnData] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState("");
   const [needsOtp, setNeedsOtp] = useState(false);
+  const [otpFieldError, setOtpFieldError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [downloadingReport, setDownloadingReport] = useState(false);
@@ -222,6 +225,7 @@ export default function ExternalSignPage() {
     try {
       await api.post(`/public/sign/${tokenId}/request-otp`);
       setNeedsOtp(true);
+      setOtpFieldError(null);
     } catch {
       setSubmitError("Failed to send OTP code. Please try again.");
     }
@@ -243,7 +247,10 @@ export default function ExternalSignPage() {
       setStage("done");
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      if (msg?.toLowerCase().includes("otp")) setNeedsOtp(true);
+      if (msg?.toLowerCase().includes("otp")) {
+        setNeedsOtp(true);
+        setOtpFieldError(msg);
+      }
       setSubmitError(msg ?? "Failed to submit signature. Please try again.");
     } finally {
       setSubmitting(false);
@@ -521,14 +528,39 @@ export default function ExternalSignPage() {
           )}
 
           {needsOtp && (
-            <TextField
-              label="OTP code (sent to your email)"
-              value={otpCode}
-              onChange={(e) => setOtpCode(e.target.value)}
-              size="small"
-              fullWidth
-              inputProps={{ maxLength: 6 }}
-            />
+            <Box>
+              {!otpFieldError && (
+                <Typography
+                  variant="caption"
+                  sx={{ display: "block", mb: 0.5, color: PAGE.otpWaiting }}
+                >
+                  Verification code sent to your email.
+                </Typography>
+              )}
+              <TextField
+                label="Verification code (6 digits)"
+                value={otpCode}
+                onChange={(e) => {
+                  setOtpCode(e.target.value);
+                  setOtpFieldError(null);
+                }}
+                size="small"
+                fullWidth
+                error={Boolean(otpFieldError)}
+                helperText={otpFieldError ?? undefined}
+                inputProps={{ maxLength: 6, inputMode: "numeric" }}
+                sx={
+                  !otpFieldError
+                    ? {
+                        "& .MuiOutlinedInput-root fieldset": { borderColor: PAGE.otpWaiting },
+                        "& .MuiOutlinedInput-root:hover fieldset": { borderColor: PAGE.otpWaiting },
+                        "& .MuiOutlinedInput-root.Mui-focused fieldset": { borderColor: PAGE.otpWaiting },
+                        "& .MuiInputLabel-root.Mui-focused": { color: PAGE.otpWaiting },
+                      }
+                    : undefined
+                }
+              />
+            </Box>
           )}
 
           <FormControlLabel
@@ -544,7 +576,17 @@ export default function ExternalSignPage() {
 
           <Stack direction="row" spacing={1} justifyContent="flex-end">
             {!needsOtp && (
-              <Button size="small" variant="text" onClick={() => void handleRequestOtp()} sx={{ color: PAGE.accent }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<LockOutlined fontSize="small" />}
+                onClick={() => void handleRequestOtp()}
+                sx={{
+                  color: PAGE.accent,
+                  borderColor: "rgba(45,212,191,0.45)",
+                  "&:hover": { borderColor: PAGE.accent, bgcolor: "rgba(45,212,191,0.08)" },
+                }}
+              >
                 Require OTP verification
               </Button>
             )}
