@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 const API_BASE = process.env.WC_SMOKE_API ?? "http://localhost:4000/api";
-const EMAIL = process.env.WC_SMOKE_EMAIL ?? "admin@commtrac.local";
+const EMAIL = process.env.WC_SMOKE_EMAIL ?? "admin.dev@stratango.local";
 const PASSWORD = process.env.WC_SMOKE_PASSWORD ?? "Admin123!";
 
 const CAD_RUN_ID = "run-cad-0039-1";

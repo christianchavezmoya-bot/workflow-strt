@@ -109,7 +109,7 @@ public class PostgresMobileUploadTests
         var client = factory.CreateClient();
         var login = await client.PostAsJsonAsync("/api/auth/login", new
         {
-            email = "admin@commtrac.local",
+            email = "admin.dev@stratango.local",
             password = "Admin123!",
         });
         login.EnsureSuccessStatusCode();

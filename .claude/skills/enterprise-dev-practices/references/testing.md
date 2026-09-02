@@ -97,7 +97,7 @@ npx playwright install --with-deps chromium   # CI does this in the e2e job
 - **Next: the login→project→workflow-run flow.** This needs the API running and
   seeded, so it belongs in a separate backend-backed suite/CI job (start the API,
   wait for `:4000`, then run the browser flow). The fresh-DB blocker is fixed, so
-  a clean CI database now seeds. Automate: login (`admin@commtrac.local` /
+  a clean CI database now seeds. Automate: login (`admin.dev@stratango.local` /
   `Admin123!`) → open a project → start an asset workflow run → complete a step.
 
 ## Until the suite exists: verify by exercising the flow

@@ -6,7 +6,7 @@
 **Guide:** [`CLOUD_HOSTING_STAGING_STANDUP.md`](./CLOUD_HOSTING_STAGING_STANDUP.md)  
 **Pre-deploy (after this passes):** [`CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md`](./CLOUD_HOSTING_PRE_DEPLOY_CHECKLIST.md)  
 **Mac prompt (phone checks later):** [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md)  
-**Login:** `admin@commtrac.local` / `Admin123!`
+**Login:** `admin.dev@stratango.local` / `Admin123!`
 
 **Goal:** Confirm the **Docker “cloud-shaped” stack** runs correctly on this PC — Postgres + MinIO (S3) + API on **8080** + web on **5174**. This is **not** the old Sqlite + `dotnet run` on port 4000.
 
@@ -140,7 +140,7 @@ docker compose -f docker-compose.staging.yml logs postgres --tail 40
 
 Open **Chrome**, wide window. URL: **http://localhost:5174**
 
-Login: `admin@commtrac.local` / `Admin123!`
+Login: `admin.dev@stratango.local` / `Admin123!`
 
 Open DevTools → Network. Confirm API calls go to **`localhost:8080`**, not `:4000`.
 

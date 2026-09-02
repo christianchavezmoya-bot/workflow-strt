@@ -146,7 +146,7 @@ Still on Sqlite + local disk — confirms prep did not break dev:
 ```powershell
 cd server\Commtrac.Api && dotnet run
 npm run dev
-# login admin@commtrac.local / Admin123!
+# login admin.dev@stratango.local / Admin123!
 ```
 
 Docker parity (optional): `docker compose up -d postgres minio` → `PostgresLocal` / `S3Local` profiles (see `server/README.md`).

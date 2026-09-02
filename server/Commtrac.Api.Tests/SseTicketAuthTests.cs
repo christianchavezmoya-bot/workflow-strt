@@ -90,7 +90,7 @@ public class SseTicketAuthTests : IClassFixture<ApiTestFactory>
         var devClient = _factory.CreateClient();
         var loginResp = await devClient.PostAsJsonAsync("/api/auth/login", new
         {
-            email = "admin@commtrac.local",
+            email = "admin.dev@stratango.local",
             password = "Admin123!",
         });
         Assert.Equal(HttpStatusCode.OK, loginResp.StatusCode);
@@ -123,7 +123,7 @@ public class SseTicketAuthTests : IClassFixture<ApiTestFactory>
         var client = _factory.CreateClient();
         var loginResp = await client.PostAsJsonAsync("/api/auth/login", new
         {
-            email = "admin@commtrac.local",
+            email = "admin.dev@stratango.local",
             password = "Admin123!",
         });
         Assert.Equal(HttpStatusCode.OK, loginResp.StatusCode);

@@ -12,7 +12,7 @@ test.describe("login flow", () => {
     await page.goto("/");
 
     await expect(page.getByLabel("Email")).toBeVisible({ timeout: 30_000 });
-    await page.getByLabel("Email").fill("admin@commtrac.local");
+    await page.getByLabel("Email").fill("admin.dev@stratango.local");
     await page.getByLabel("Password").fill("Admin123!");
     await page.getByRole("button", { name: /sign in/i }).click();
 

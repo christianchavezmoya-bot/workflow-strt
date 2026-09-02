@@ -73,7 +73,7 @@ Maintenance policy: [`REPO_MAINTENANCE.md`](./REPO_MAINTENANCE.md).
 | Web URL | http://localhost:**5174** | http://localhost:**5173** |
 | API | http://localhost:**8080**/api | http://localhost:**4000**/api |
 | Native app name | **N-go** | **N-go** |
-| Admin (Strata seed) | `admin@StrataNgo.local` / `Admin123!` | `admin@commtrac.local` / `Admin123!` |
+| Admin (Strata seed) | `admin.dev@stratango.local` / `Admin123!` | `admin.dev@stratango.local` / `Admin123!` |
 
 Device LAN IP → **untracked** `.env.production.local` on Mac — never commit.
 

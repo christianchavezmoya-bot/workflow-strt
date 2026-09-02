@@ -43,7 +43,7 @@ test.describe("web perf smoke", () => {
 
     const loginStart = Date.now();
     await page.goto("/");
-    await page.getByLabel("Email").fill("admin@commtrac.local");
+    await page.getByLabel("Email").fill("admin.dev@stratango.local");
     await page.getByLabel("Password").fill("Admin123!");
     await page.getByRole("button", { name: /sign in/i }).click();
     await expect(page.locator(".app-shell")).toBeVisible({ timeout: 30_000 });
