@@ -17,10 +17,10 @@ public static class MinimalSeeder
 
     public static void SeedFreshDatabase(AppDbContext db, IConfiguration config)
     {
-        var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
+        var adminEmail = config["SeedAdmin:Email"] ?? "admin.dev@stratango.local";
         var adminPassword = config["SeedAdmin:Password"] ?? "Admin123!";
         var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
-        var installerEmail = config["SeedInstaller:Email"] ?? "installer@commtrac.local";
+        var installerEmail = config["SeedInstaller:Email"] ?? "installer.dev@stratango.local";
         var installerPassword = config["SeedInstaller:Password"] ?? "Installer123!";
         var installerFullName = config["SeedInstaller:FullName"] ?? "Field Installer";
 

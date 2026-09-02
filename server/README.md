@@ -6,7 +6,7 @@
 - Swagger: `http://localhost:4000/swagger`
 
 ## Seeded admin (Development only)
-- Email: `admin@commtrac.local`
+- Email: `admin.dev@stratango.local`
 - Password: `Admin123!` (from `appsettings.Development.json`)
 - Override via user-secrets: `dotnet user-secrets set "SeedAdmin:Password" "..." --project server/Commtrac.Api`
 

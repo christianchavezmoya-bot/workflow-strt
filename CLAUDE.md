@@ -45,7 +45,7 @@ CI jobs: `frontend` (build + bundle budget + vitest + lint), `backend` (build + 
 - Frontend reads the API URL from **`VITE_API_BASE`** (`.env`). On `localhost` browser dev it defaults to `http://localhost:4000/api` regardless; native/LAN builds use `VITE_API_BASE` verbatim (see `src/services/apiBase.ts`).
 - Native builds **cannot reach `localhost`** — set `VITE_API_BASE` to a LAN IP (e.g. `http://192.168.1.x:4000/api`) before `npm run build`. Keep committed env files generic; put device IPs in untracked `.env.production.local`.
 - `allow-network-access.ps1` (run as admin) opens Windows Firewall for ports 5173/4000 for LAN device testing.
-- Seeded admin on first run: `admin@commtrac.local` / `Admin123!` (`appsettings.json` → `SeedAdmin`).
+- Seeded admin on first run: `admin.dev@stratango.local` / `Admin123!` (`appsettings.json` → `SeedAdmin`).
 
 ## Architecture — the non-obvious parts
 

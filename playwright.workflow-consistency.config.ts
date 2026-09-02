@@ -6,7 +6,7 @@ import { defineConfig } from "@playwright/test";
  *
  * Env:
  *   WC_SMOKE_API      (default http://localhost:4000/api)
- *   WC_SMOKE_EMAIL    (default admin@commtrac.local)
+ *   WC_SMOKE_EMAIL    (default admin.dev@stratango.local)
  *   WC_SMOKE_PASSWORD (default Admin123!)
  */
 export default defineConfig({

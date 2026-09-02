@@ -6,7 +6,7 @@
 **Plan:** [`CLOUD_HOSTING_AWS_PLAN.md`](./CLOUD_HOSTING_AWS_PLAN.md)  
 **Windows prompt:** [`WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md`](./WINDOWS_AGENT_CLOUD_HOSTING_PROMPT.md)  
 **Native app:** **N-go** (Capacitor) · physical **iPhone**  
-**Login:** `admin@commtrac.local` / `Admin123!`
+**Login:** `admin.dev@stratango.local` / `Admin123!`
 
 **Goal:** Confirm cloud prep did **not** break native dev. Optionally verify prod API URL build. Mac does **not** own AWS deploy or `server/` Postgres/S3 profiles (Windows + Docker).
 

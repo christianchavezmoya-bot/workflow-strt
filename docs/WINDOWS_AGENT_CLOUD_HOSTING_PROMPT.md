@@ -6,7 +6,7 @@
 **Plan:** [`CLOUD_HOSTING_AWS_PLAN.md`](./CLOUD_HOSTING_AWS_PLAN.md)  
 **Server guide:** [`../server/README.md`](../server/README.md)  
 **Mac prompt:** [`IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md`](./IOS_MAC_AGENT_CLOUD_HOSTING_PROMPT.md)  
-**Login (dev profiles):** `admin@commtrac.local` / `Admin123!`
+**Login (dev profiles):** `admin.dev@stratango.local` / `Admin123!`
 
 **Goal:** (1) Quick-verify cloud prep on `main` without breaking default dev. (2) Continue implementing remaining AWS plan phases (4→5).
 
@@ -66,7 +66,7 @@ npm run dev
 | ID | Check | PASS if |
 |----|-------|---------|
 | D0 | Health | `curl http://localhost:4000/api/health` → 200, DB ok |
-| D1 | Login | Web login `admin@commtrac.local` / `Admin123!` → Dashboard loads |
+| D1 | Login | Web login `admin.dev@stratango.local` / `Admin123!` → Dashboard loads |
 | D2 | Upload | Tips or Documents: upload a small PDF/image → preview/download works |
 
 Post when ready:

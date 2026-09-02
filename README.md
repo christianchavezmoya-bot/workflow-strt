@@ -58,7 +58,7 @@ Runs on **http://localhost:5173**.
 ### 4. Sign in
 
 ```
-admin@commtrac.local
+admin.dev@stratango.local
 Admin123!
 ```
 

@@ -1,6 +1,6 @@
 import { test, expect, type Page } from "@playwright/test";
 
-const EMAIL = "admin@commtrac.local";
+const EMAIL = "admin.dev@stratango.local";
 const PASSWORD = "Admin123!";
 
 async function dismissVisibleOnboarding(page: Page) {

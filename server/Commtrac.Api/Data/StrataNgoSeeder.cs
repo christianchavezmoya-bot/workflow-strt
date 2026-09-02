@@ -60,10 +60,10 @@ public static class StrataNgoSeeder
 
     private static void SeedUsers(AppDbContext db, IConfiguration config)
     {
-        var adminEmail = config["SeedAdmin:Email"] ?? "admin@StrataNgo.local";
+        var adminEmail = config["SeedAdmin:Email"] ?? "admin.dev@stratango.local";
         var adminPassword = DbInitializer.ResolveSeedAdminPassword(config);
         var adminFullName = config["SeedAdmin:FullName"] ?? "Strata Admin";
-        var pmEmail = config["SeedProjectManager:Email"] ?? "project.manager@StrataNgo.local";
+        var pmEmail = config["SeedProjectManager:Email"] ?? "projectmanager.dev@stratango.local";
         var pmPassword = DbInitializer.ResolveSeedProjectManagerPassword(config);
         var pmFullName = config["SeedProjectManager:FullName"] ?? "Project Manager";
 
@@ -251,7 +251,7 @@ public static class StrataNgoSeeder
             StepsJson = stepsJson,
             MediaJson = root.TryGetProperty("mediaJson", out var mj) ? mj.GetString() ?? "[]" : "[]",
             FeatureSelectionsJson = root.TryGetProperty("featureSelectionsJson", out var fj) ? fj.GetString() ?? "[]" : "[]",
-            CreatedBy = "admin@StrataNgo.local",
+            CreatedBy = "admin.dev@stratango.local",
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
         });

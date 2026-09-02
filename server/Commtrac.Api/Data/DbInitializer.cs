@@ -92,7 +92,7 @@ public static class DbInitializer
             }
             else
             {
-                var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
+                var adminEmail = config["SeedAdmin:Email"] ?? "admin.dev@stratango.local";
                 var adminPassword = ResolveSeedAdminPassword(config);
                 var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
                 var passwordHash = BCrypt.Net.BCrypt.HashPassword(adminPassword);
@@ -110,7 +110,7 @@ public static class DbInitializer
 
                 db.Users.Add(new UserEntity
                 {
-                    Email = "pm@commtrac.local",
+                    Email = "projectmanager.dev@stratango.local",
                     FullName = "Project Manager",
                     Role = "Project Manager",
                     Office = "USA",
@@ -122,7 +122,7 @@ public static class DbInitializer
         }
         else if (!strataNgoSeed && !minimalSeed)
         {
-            var adminEmail = config["SeedAdmin:Email"] ?? "admin@commtrac.local";
+            var adminEmail = config["SeedAdmin:Email"] ?? "admin.dev@stratango.local";
             var adminFullName = config["SeedAdmin:FullName"] ?? "System Admin";
             var existingAdmin = db.Users.FirstOrDefault(u => u.Email == adminEmail);
             if (existingAdmin != null && existingAdmin.FullName != adminFullName)

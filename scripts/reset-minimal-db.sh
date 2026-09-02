@@ -75,7 +75,7 @@ fi
 echo "Done. Restart the API normally with SeedProfile=Minimal (or --launch-profile Minimal)."
 if [[ "$MODE" == "wipe" ]]; then
   echo "Default logins:"
-  echo "  admin@commtrac.local / Admin123!"
-  echo "  installer@commtrac.local / Installer123!"
+  echo "  admin.dev@stratango.local / Admin123!"
+  echo "  installer.dev@stratango.local / Installer123!"
   echo "Re-enter SMTP settings in Settings → Notifications."
 fi

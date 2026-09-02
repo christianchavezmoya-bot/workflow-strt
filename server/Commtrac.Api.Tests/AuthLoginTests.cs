@@ -29,7 +29,7 @@ public class AuthLoginTests : IClassFixture<ApiTestFactory>
 
         var resp = await client.PostAsJsonAsync("/api/auth/login", new
         {
-            email = "admin@commtrac.local",
+            email = "admin.dev@stratango.local",
             password = "Admin123!",
         });
 
@@ -47,7 +47,7 @@ public class AuthLoginTests : IClassFixture<ApiTestFactory>
 
         var resp = await client.PostAsJsonAsync("/api/auth/login", new
         {
-            email = "admin@commtrac.local",
+            email = "admin.dev@stratango.local",
             password = "definitely-wrong",
         });
 
