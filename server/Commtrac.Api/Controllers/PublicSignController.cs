@@ -5,6 +5,7 @@ using Commtrac.Api.Utils;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -26,17 +27,26 @@ public class PublicSignController : ControllerBase
     private readonly NotificationFeedService _feed;
     private readonly SseHub _sse;
     private readonly ProjectLifecycleService _projectLifecycle;
+    private readonly ResendEmailService _emailService;
+    private readonly IHostEnvironment _environment;
+    private readonly ILogger<PublicSignController> _logger;
 
     public PublicSignController(
         AppDbContext db,
         NotificationFeedService feed,
         SseHub sse,
-        ProjectLifecycleService projectLifecycle)
+        ProjectLifecycleService projectLifecycle,
+        ResendEmailService emailService,
+        IHostEnvironment environment,
+        ILogger<PublicSignController> logger)
     {
         _db = db;
         _feed = feed;
         _sse = sse;
         _projectLifecycle = projectLifecycle;
+        _emailService = emailService;
+        _environment = environment;
+        _logger = logger;
     }
 
     private async Task<(SignatureTokenEntity? token, string? error)> ResolveToken(string tokenId)
@@ -412,22 +422,65 @@ public class PublicSignController : ControllerBase
         }
     }
 
+    /// <summary>
+    /// True delivery only. "simulated" means no Resend key/SMTP host is configured — the
+    /// OTP was never actually sent anywhere, so it must not count as success outside
+    /// Development, where a working transport is not expected to be present.
+    /// </summary>
+    private static bool IsGenuineDelivery(ResendEmailService.EmailSendResult result) =>
+        result.Success && !string.Equals(result.Mode, "simulated", StringComparison.Ordinal);
+
     // POST /api/public/sign/{tokenId}/request-otp  — sends OTP to token's recipient email
     [HttpPost("{tokenId}/request-otp")]
-    public async Task<IActionResult> RequestOtp(string tokenId)
+    public async Task<IActionResult> RequestOtp(string tokenId, CancellationToken cancellationToken)
     {
         var (token, err) = await ResolveToken(tokenId);
         if (token is null) return BadRequest(new { message = err });
 
-        var otp = Random.Shared.Next(100000, 999999).ToString();
+        // RandomNumberGenerator, not Random.Shared: this code is a genuine second factor,
+        // not a UI nonce — it must not be predictable.
+        var otp = RandomNumberGenerator.GetInt32(100_000, 1_000_000).ToString();
         var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(otp)));
-        token.OtpHash          = hash;
-        token.OtpExpiresAtUtc  = DateTime.UtcNow.AddMinutes(15);
+        var expiresAtUtc = DateTime.UtcNow.AddMinutes(15);
+
+        if (_environment.IsDevelopment())
+        {
+            // Dev convenience only: a working email transport is not expected locally, so
+            // delivery is not required and the code is handed back directly. Never reachable
+            // outside Development — see the non-Development branch below, which requires a
+            // confirmed send before ever persisting/returning success.
+            token.OtpHash = hash;
+            token.OtpExpiresAtUtc = expiresAtUtc;
+            await _db.SaveChangesAsync();
+            return Ok(new { message = "OTP sent", devOtp = otp });
+        }
+
+        var subject = $"{AppBranding.AppName} sign-off verification code";
+        var body =
+            $"Your one-time verification code is: {otp}\n\n" +
+            "This code expires in 15 minutes. If you did not request this, you can ignore this email.\n\n" +
+            $"— {AppBranding.AppName}";
+
+        // Send BEFORE persisting: on failure, any previously-issued still-valid OTP for this
+        // token is left intact instead of being clobbered by one that was never delivered.
+        var result = await _emailService.SendNotificationWithResultAsync(
+            token.RecipientEmail, subject, body, cancellationToken);
+
+        if (!IsGenuineDelivery(result))
+        {
+            // Deliberately generic — no recipient, no failure detail, no token state change.
+            _logger.LogWarning(
+                "OTP dispatch did not complete for token {TokenId} (mode={Mode}, success={Success})",
+                token.Id, result.Mode, result.Success);
+            return StatusCode(StatusCodes.Status502BadGateway,
+                new { message = "Unable to send verification code. Please try again shortly." });
+        }
+
+        token.OtpHash = hash;
+        token.OtpExpiresAtUtc = expiresAtUtc;
         await _db.SaveChangesAsync();
 
-        // Email sending is wired at the infrastructure layer; return OTP in dev mode only.
-        // In production, this endpoint should dispatch via NotificationService.
-        return Ok(new { message = $"OTP sent to {token.RecipientEmail}. (dev: {otp})" });
+        return Ok(new { message = "OTP sent" });
     }
 
     private static string[] ParseJsonStringArray(string? json)

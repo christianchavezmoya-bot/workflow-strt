@@ -145,6 +145,15 @@ public sealed class ResendEmailService : IEmailService, IEmailSender
         return await SendWithResultAsync(toEmail, $"{AppBranding.AppName} test email", body, cancellationToken);
     }
 
+    /// <summary>
+    /// Generic result-returning send for security-sensitive flows (e.g. public-sign OTP)
+    /// that must know whether delivery actually succeeded rather than fire-and-forget.
+    /// Mirrors SendNotificationAsync's content but returns the transport outcome.
+    /// </summary>
+    internal Task<EmailSendResult> SendNotificationWithResultAsync(
+        string toEmail, string subject, string body, CancellationToken cancellationToken = default)
+        => SendWithResultAsync(toEmail, subject, body, cancellationToken);
+
     private async Task SendAsync(string toEmail, string subject, string body, CancellationToken cancellationToken)
     {
         try
