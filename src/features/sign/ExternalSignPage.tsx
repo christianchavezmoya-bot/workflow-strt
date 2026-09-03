@@ -165,6 +165,8 @@ export default function ExternalSignPage() {
   const [drawnData, setDrawnData] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState("");
   const [needsOtp, setNeedsOtp] = useState(false);
+  const [otpVerified, setOtpVerified] = useState(false);
+  const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [otpFieldError, setOtpFieldError] = useState<string | null>(null);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
@@ -225,9 +227,33 @@ export default function ExternalSignPage() {
     try {
       await api.post(`/public/sign/${tokenId}/request-otp`);
       setNeedsOtp(true);
+      setOtpVerified(false);
       setOtpFieldError(null);
+      // A tick from before OTP was required must not silently carry through: the
+      // acknowledgement step is about to be hidden, and re-revealing it after verification
+      // must present as a fresh, unacknowledged control — not one already checked.
+      setConsent(false);
     } catch {
       setSubmitError("Failed to send OTP code. Please try again.");
+    }
+  };
+
+  // Pre-check only, against the same backend validation Submit itself performs — this
+  // never persists anything or consumes the token. It exists purely to drive the UI
+  // sequencing (reveal the acknowledgement step only once the code is genuinely correct);
+  // Submit remains the sole authoritative, state-changing OTP check regardless of this.
+  const handleVerifyOtp = async () => {
+    setOtpFieldError(null);
+    setVerifyingOtp(true);
+    try {
+      await api.post(`/public/sign/${tokenId}/verify-otp`, { otpCode: otpCode.trim() });
+      setOtpVerified(true);
+    } catch (e: unknown) {
+      const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
+      setOtpVerified(false);
+      setOtpFieldError(msg ?? "Could not verify code. Please try again.");
+    } finally {
+      setVerifyingOtp(false);
     }
   };
 
@@ -249,7 +275,9 @@ export default function ExternalSignPage() {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
       if (msg?.toLowerCase().includes("otp")) {
         setNeedsOtp(true);
+        setOtpVerified(false);
         setOtpFieldError(msg);
+        setConsent(false);
       }
       setSubmitError(msg ?? "Failed to submit signature. Please try again.");
     } finally {
@@ -257,7 +285,14 @@ export default function ExternalSignPage() {
     }
   };
 
+  // Once OTP has been requested, the acknowledgement/submit step must stay gated until a
+  // code has actually been verified — ticking the acknowledgement box must never be able to
+  // substitute for OTP verification. When OTP was never requested for this link, it remains
+  // the pre-existing optional path with no gate at all.
+  const otpSatisfied = !needsOtp || otpVerified;
+
   const canSubmit =
+    otpSatisfied &&
     signerName.trim().length > 0 &&
     consent &&
     (reasonCode !== "Declined" || notes.trim().length > 0) &&
@@ -527,7 +562,7 @@ export default function ExternalSignPage() {
             />
           )}
 
-          {needsOtp && (
+          {needsOtp && !otpVerified && (
             <Box>
               {!otpFieldError && (
                 <Typography
@@ -537,42 +572,65 @@ export default function ExternalSignPage() {
                   Verification code sent to your email.
                 </Typography>
               )}
-              <TextField
-                label="Verification code (6 digits)"
-                value={otpCode}
-                onChange={(e) => {
-                  setOtpCode(e.target.value);
-                  setOtpFieldError(null);
-                }}
-                size="small"
-                fullWidth
-                error={Boolean(otpFieldError)}
-                helperText={otpFieldError ?? undefined}
-                inputProps={{ maxLength: 6, inputMode: "numeric" }}
-                sx={
-                  !otpFieldError
-                    ? {
-                        "& .MuiOutlinedInput-root fieldset": { borderColor: PAGE.otpWaiting },
-                        "& .MuiOutlinedInput-root:hover fieldset": { borderColor: PAGE.otpWaiting },
-                        "& .MuiOutlinedInput-root.Mui-focused fieldset": { borderColor: PAGE.otpWaiting },
-                        "& .MuiInputLabel-root.Mui-focused": { color: PAGE.otpWaiting },
-                      }
-                    : undefined
-                }
-              />
+              <Stack direction="row" spacing={1} alignItems="flex-start">
+                <TextField
+                  label="Verification code (6 digits)"
+                  value={otpCode}
+                  onChange={(e) => {
+                    setOtpCode(e.target.value);
+                    setOtpVerified(false);
+                    setOtpFieldError(null);
+                    setConsent(false);
+                  }}
+                  size="small"
+                  fullWidth
+                  error={Boolean(otpFieldError)}
+                  helperText={otpFieldError ?? undefined}
+                  inputProps={{ maxLength: 6, inputMode: "numeric" }}
+                  sx={
+                    !otpFieldError
+                      ? {
+                          "& .MuiOutlinedInput-root fieldset": { borderColor: PAGE.otpWaiting },
+                          "& .MuiOutlinedInput-root:hover fieldset": { borderColor: PAGE.otpWaiting },
+                          "& .MuiOutlinedInput-root.Mui-focused fieldset": { borderColor: PAGE.otpWaiting },
+                          "& .MuiInputLabel-root.Mui-focused": { color: PAGE.otpWaiting },
+                        }
+                      : undefined
+                  }
+                />
+                <Button
+                  variant="outlined"
+                  size="small"
+                  onClick={() => void handleVerifyOtp()}
+                  disabled={otpCode.trim().length !== 6 || verifyingOtp}
+                  sx={{ mt: 0.25, minWidth: 96, whiteSpace: "nowrap" }}
+                >
+                  {verifyingOtp ? <CircularProgress size={16} /> : "Verify code"}
+                </Button>
+              </Stack>
             </Box>
           )}
 
-          <FormControlLabel
-            control={<Checkbox checked={consent} onChange={(e) => setConsent(e.target.checked)} />}
-            label={
-              <Typography variant="body2" sx={{ color: PAGE.text }}>
-                {isInstallerSigner
-                  ? "I confirm the recorded time, captured fields, and workflow completion details are correct."
-                  : "I confirm that I am authorised to sign this document and the information is correct."}
-              </Typography>
-            }
-          />
+          {needsOtp && otpVerified && (
+            <Typography variant="caption" sx={{ display: "block", color: PAGE.accent }}>
+              Verification code confirmed.
+            </Typography>
+          )}
+
+          {/* Hidden — not merely disabled — until OTP verification is satisfied, so
+              acknowledging cannot be used to bypass entering a correct code. */}
+          {otpSatisfied && (
+            <FormControlLabel
+              control={<Checkbox checked={consent} onChange={(e) => setConsent(e.target.checked)} />}
+              label={
+                <Typography variant="body2" sx={{ color: PAGE.text }}>
+                  {isInstallerSigner
+                    ? "I confirm the recorded time, captured fields, and workflow completion details are correct."
+                    : "I confirm that I am authorised to sign this document and the information is correct."}
+                </Typography>
+              }
+            />
+          )}
 
           <Stack direction="row" spacing={1} justifyContent="flex-end">
             {!needsOtp && (

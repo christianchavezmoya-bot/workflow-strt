@@ -21,9 +21,16 @@ export interface AssetWorkflowRunSummary {
   customerSignedAt?: string;
 }
 
-/** True when a run carries enough JSON to derive capture / sign-off columns. */
+/**
+ * True when a run carries enough JSON to derive capture / sign-off columns. Both blobs must
+ * be present: `workflowSnapshotJson` (the frozen workflow definition) is long for essentially
+ * any real run regardless of whether `stepResultsJson` (the actual captured results) has been
+ * hydrated yet, so requiring only one of the two (the previous `||`) misclassified a
+ * snapshot-only run as "fully loaded" — skipping the hydration fetch that would have pulled
+ * the real step results, and generating reports/previews from an empty result set.
+ */
 export function runHasCaptureBlobs(run: Pick<AssetWorkflowRun, "stepResultsJson" | "workflowSnapshotJson">): boolean {
-  return (run.stepResultsJson?.length ?? 0) > 20 || (run.workflowSnapshotJson?.length ?? 0) > 20;
+  return (run.stepResultsJson?.length ?? 0) > 20 && (run.workflowSnapshotJson?.length ?? 0) > 20;
 }
 
 /** True when capture detail fetch can stop for this asset (no run, or full blobs already loaded). */

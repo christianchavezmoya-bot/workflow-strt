@@ -478,6 +478,49 @@ public class RateLimitingTests
         Assert.Equal(HttpStatusCode.TooManyRequests, last!.StatusCode);
     }
 
+    // ── verify-otp: shares Submit's token + IP limiters by design (see middleware) ─────
+
+    [Fact]
+    public async Task VerifyOtp_is_limited_by_tokenId()
+    {
+        using var factory = new RateLimitingTestFactory();
+        var tokenId = await SeedOtpTokenAsync(factory);
+        var client = ClientWithIp(factory, "203.0.113.63");
+
+        for (var i = 0; i < SecurityRateLimitPolicies.SubmitTokenPermitLimit; i++)
+        {
+            var resp = await client.PostAsJsonAsync($"/api/public/sign/{tokenId}/verify-otp", new { otpCode = "000000" });
+            Assert.NotEqual(HttpStatusCode.TooManyRequests, resp.StatusCode);
+        }
+
+        var limited = await client.PostAsJsonAsync($"/api/public/sign/{tokenId}/verify-otp", new { otpCode = "000000" });
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+    }
+
+    [Fact]
+    public async Task VerifyOtp_and_Submit_share_the_same_per_token_budget()
+    {
+        // Deliberate design: verify-otp must not be a cheaper, separately-budgeted way to
+        // guess an OTP ahead of Submit. Exhausting the shared budget via verify-otp alone
+        // must also block a subsequent Submit call for that same token.
+        using var factory = new RateLimitingTestFactory();
+        var tokenId = await SeedOtpTokenAsync(factory);
+        var client = ClientWithIp(factory, "203.0.113.64");
+
+        for (var i = 0; i < SecurityRateLimitPolicies.SubmitTokenPermitLimit; i++)
+        {
+            await client.PostAsJsonAsync($"/api/public/sign/{tokenId}/verify-otp", new { otpCode = "000000" });
+        }
+
+        var submitResp = await client.PostAsJsonAsync($"/api/public/sign/{tokenId}/submit", new
+        {
+            signerName = "Someone",
+            consentConfirmed = true,
+            reasonCode = "Completed",
+        });
+        Assert.Equal(HttpStatusCode.TooManyRequests, submitResp.StatusCode);
+    }
+
     // ── Authenticated, non-rate-limited traffic is unaffected ──────────────────────────
 
     [Fact]

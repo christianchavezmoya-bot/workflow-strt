@@ -47,6 +47,7 @@ import { divisionService } from "../../services/divisionService";
 import type { Division } from "../../types/division";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
+import { featureFlagToExportValue, parseFeatureImportRow, type FeatureImportRow } from "./featureImportExport";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
 import { productService } from "../../services/productService";
@@ -742,7 +743,7 @@ const Settings = () => {
   }, [features, featureSearch, featureFilterProduct, featureFilterInventory, featureSort]);
 
   // Bulk feature import state
-  interface ImportRow { name: string; description: string; valueType: string; supplier: string; partNumber: string; manufacturerPartNumber: string; unitPrice: string; brand: string; isInventory?: boolean; }
+  type ImportRow = FeatureImportRow;
   const [featureImportDialog, setFeatureImportDialog] = useState(false);
   const [featureImportRows, setFeatureImportRows] = useState<ImportRow[]>([]);
   const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
@@ -753,8 +754,8 @@ const Settings = () => {
   const [exportMenuAnchor, setExportMenuAnchor] = useState<HTMLElement | null>(null);
 
   function exportFeaturesCSV() {
-    const headers = ["name","description","valueType","brand","supplier","partNumber","manufacturerPartNumber","unitPrice"];
-    const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):""]);
+    const headers = ["name","description","valueType","brand","supplier","partNumber","manufacturerPartNumber","unitPrice","Feature"];
+    const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):"", featureFlagToExportValue(f.isInventory)]);
     const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
@@ -764,8 +765,8 @@ const Settings = () => {
   async function exportFeaturesXLSX() {
     try {
       const XLSX = await loadXlsx();
-      const headers = ["Name/Part#","Description","Type","Brand","Supplier","Business Part#","Mfr Part#","Unit Price"];
-      const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):""]);
+      const headers = ["Name/Part#","Description","Type","Brand","Supplier","Business Part#","Mfr Part#","Unit Price","Feature"];
+      const rows = features.map(f => [f.name, f.description??"", f.valueType, f.brand??"", f.supplier??"", f.alternativePartNumber??"", f.manufacturerPartNumber??"", f.unitPrice!=null?String(f.unitPrice):"", featureFlagToExportValue(f.isInventory)]);
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Features");
@@ -792,10 +793,11 @@ const Settings = () => {
         <td>${escapeHtml(f.alternativePartNumber ?? "")}</td>
         <td>${escapeHtml(f.manufacturerPartNumber ?? "")}</td>
         <td>${escapeHtml(f.unitPrice ?? "")}</td>
+        <td>${featureFlagToExportValue(f.isInventory)}</td>
       </tr>
     `).join("");
     if (!openPrintWindow(
-      `<html><head><title>Feature Library</title><style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f5f5f5}</style></head><body><h2>Feature Library</h2><table><thead><tr><th>Name/Part#</th><th>Description</th><th>Type</th><th>Brand</th><th>Supplier</th><th>Business Part#</th><th>Mfr Part#</th><th>Unit Price</th></tr></thead><tbody>${rows}</tbody></table></body></html>`,
+      `<html><head><title>Feature Library</title><style>table{border-collapse:collapse;width:100%}th,td{border:1px solid #ccc;padding:6px;font-size:12px}th{background:#f5f5f5}</style></head><body><h2>Feature Library</h2><table><thead><tr><th>Name/Part#</th><th>Description</th><th>Type</th><th>Brand</th><th>Supplier</th><th>Business Part#</th><th>Mfr Part#</th><th>Unit Price</th><th>Feature</th></tr></thead><tbody>${rows}</tbody></table></body></html>`,
       true
     )) {
       console.warn("[Settings] Print popup was blocked -- allow popups for this site to print.");
@@ -806,9 +808,9 @@ const Settings = () => {
     try {
       const XLSX = await loadXlsx();
       const ws = XLSX.utils.aoa_to_sheet([
-        ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice"],
-        ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00"],
-        ["* required", "optional", "optional (default: text)", "optional", "optional", "optional", "optional", "optional"],
+        ["name", "description", "valueType", "brand", "supplier", "partNumber", "manufacturerPartNumber", "unitPrice", "Feature"],
+        ["IP Camera 4MP", "Indoor dome camera", "text", "Hikvision", "AV Security", "DS-2CD2143G2-I", "MFR-DS-2143G2", "149.00", "Yes"],
+        ["* required", "optional", "optional (default: text)", "optional", "optional", "optional", "optional", "optional", "optional (Yes/No, default: No)"],
       ]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Features");
@@ -831,20 +833,9 @@ const Settings = () => {
         const wb = XLSX.read(data, { type: "array" });
         const ws = wb.Sheets[wb.SheetNames[0]];
         const rows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" });
-        const parsed: ImportRow[] = rows.map((r) => {
-          const invRaw = String(r["isInventory"] || r["is_inventory"] || r["inventory"] || r["Inventory"] || "").trim().toLowerCase();
-          return {
-            name: String(r["name"] || r["Name"] || "").trim(),
-            description: String(r["description"] || r["Description"] || "").trim(),
-            valueType: String(r["valueType"] || r["type"] || r["Type"] || "text").trim() || "text",
-            supplier: String(r["supplier"] || r["Supplier"] || "").trim(),
-            partNumber: String(r["partNumber"] || r["part_number"] || r["PartNumber"] || r["part#"] || "").trim(),
-            manufacturerPartNumber: String(r["manufacturerPartNumber"] || r["manufacturer_part_number"] || r["ManufacturerPartNumber"] || r["mfr_part"] || "").trim(),
-            unitPrice: String(r["unitPrice"] || r["unit_price"] || r["UnitPrice"] || r["price"] || "").trim(),
-            brand: String(r["brand"] || r["Brand"] || "").trim(),
-            isInventory: invRaw === "true" || invRaw === "yes" || invRaw === "1",
-          };
-        }).filter((r) => r.name && !r.name.trim().startsWith("*"));
+        const parsed: ImportRow[] = rows
+          .map((r) => parseFeatureImportRow(r))
+          .filter((r) => r.name && !r.name.trim().startsWith("*"));
         if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column and at least one data row (skip the grey hint row in the template)."); return; }
         setFeatureImportRows(parsed);
       } catch {
@@ -2529,8 +2520,8 @@ const Settings = () => {
                   onChange={(e) => setFeatureFilterInventory(e.target.value as "all" | "inventory" | "non-inventory")}
                 >
                   <MenuItem value="all">All types</MenuItem>
-                  <MenuItem value="inventory">Inventory only</MenuItem>
-                  <MenuItem value="non-inventory">Non-inventory only</MenuItem>
+                  <MenuItem value="inventory">Feature: Yes</MenuItem>
+                  <MenuItem value="non-inventory">Feature: No</MenuItem>
                 </Select>
               </FormControl>
               {(featureSearch || featureFilterProduct !== "all" || featureFilterInventory !== "all") && (
@@ -2577,7 +2568,7 @@ const Settings = () => {
                       { key: "name",                   label: "Name" },
                       { key: "valueType",              label: "Type" },
                       { key: "alternativePartNumber",  label: "Business Part #" },
-                      { key: "isInventory",            label: "Inventory" },
+                      { key: "isInventory",            label: "Feature" },
                       { key: "brand",                  label: "Brand" },
                       { key: "supplier",               label: "Supplier" },
                       { key: "manufacturerPartNumber", label: "Mfr. Part #" },
@@ -2636,7 +2627,7 @@ const Settings = () => {
                           <TableCell><Typography variant="body2" sx={{ wordBreak: "break-word" }}>{f.alternativePartNumber || "—"}</Typography></TableCell>
                           <TableCell>
                             <Chip size="small"
-                              label={f.isInventory ? "Inventory" : "Non-inventory"}
+                              label={f.isInventory ? "Yes" : "No"}
                               color={f.isInventory ? "primary" : "default"}
                               variant={f.isInventory ? "filled" : "outlined"}
                             />
@@ -4059,24 +4050,29 @@ const Settings = () => {
                   ))}
                 </Select>
               </FormControl>
-              {/* Inventory toggle */}
+              {/* Feature toggle (backed by the isInventory property) */}
               <Stack direction="row" alignItems="center" spacing={1}>
-                <Typography variant="body2">This feature is:</Typography>
+                <Typography variant="body2">Feature:</Typography>
                 <Chip
                   size="small"
-                  label="Non-inventory"
+                  label="No"
                   variant={!featureForm.isInventory ? "filled" : "outlined"}
                   color={!featureForm.isInventory ? "primary" : "default"}
                   onClick={() => setFeatureForm((p) => ({ ...p, isInventory: false, captureFields: [] }))}
                 />
                 <Chip
                   size="small"
-                  label="Inventory item"
+                  label="Yes"
                   variant={featureForm.isInventory ? "filled" : "outlined"}
                   color={featureForm.isInventory ? "primary" : "default"}
                   onClick={() => setFeatureForm((p) => ({ ...p, isInventory: true }))}
                 />
               </Stack>
+              <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+                Yes: this item is individually tracked (serial/IP/MAC, etc.) and captures the
+                fields below during installation. Every feature — Yes or No — remains
+                selectable when building workflows.
+              </Typography>
               {featureForm.isInventory && (
                 <FormControl size="small" fullWidth>
                   <Typography variant="caption" color="text.secondary" sx={{ mb: 0.5 }}>
