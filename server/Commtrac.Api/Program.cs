@@ -9,6 +9,7 @@ using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Commtrac.Api.Hosting;
 using Commtrac.Api.Middleware;
+using Commtrac.Api.RateLimiting;
 using Commtrac.Api.Services;
 using Commtrac.Api.Services.Storage;
 using Commtrac.Api.Swagger;
@@ -106,6 +107,7 @@ if (!string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase))
     builder.Services.AddHostedService(sp => sp.GetRequiredService<SqliteBackupService>());
 }
 builder.Services.AddScoped<RecoveryService>();
+builder.Services.AddSingleton<SecurityRateLimiterRegistry>();
 builder.Services.Configure<EmailSettings>(builder.Configuration.GetSection("Email"));
 builder.Services.AddHttpClient(nameof(ResendEmailService));
 builder.Services.AddScoped<ResendEmailService>();
@@ -313,6 +315,11 @@ if (!app.Environment.IsDevelopment())
     app.UseForwardedHeaders(forwardedHeadersOptions);
     app.UseHttpsRedirection();
 }
+
+// Must run after UseForwardedHeaders (needs the real, trust-boundary-checked client IP)
+// and before MapControllers (a rejected request must never reach a controller action —
+// in particular, must never reach ForgotPassword/RequestOtp's email-dispatch code).
+app.UseMiddleware<SecurityRateLimitingMiddleware>();
 
 app.UseCors("frontend");
 app.UseAuthentication();
