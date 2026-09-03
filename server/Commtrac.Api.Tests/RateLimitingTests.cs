@@ -136,6 +136,36 @@ public class RateLimitingTests
     }
 
     [Fact]
+    public async Task Rejection_log_contains_no_partition_derived_value()
+    {
+        using var factory = new RateLimitingTestFactory();
+        const string ip = "203.0.113.99";
+        const string emailLocalPart = "log-probe-marker";
+        var client = ClientWithIp(factory, ip);
+
+        for (var i = 0; i <= SecurityRateLimitPolicies.CredentialIpPermitLimit; i++)
+        {
+            var email = $"{emailLocalPart}-{i}@example.com";
+            var resp = await client.PostAsJsonAsync("/api/auth/login", new { email, password = "wrong" });
+            if (resp.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                break;
+            }
+        }
+
+        var logText = string.Join("\n", factory.LoggerProvider.Messages);
+        Assert.Contains("Rate limit exceeded for /api/auth/login", logText);
+
+        // Nothing derived from the partition key (IP, email, or a hash of either) may
+        // appear anywhere in the logs.
+        Assert.DoesNotContain(ip, logText);
+        Assert.DoesNotContain(emailLocalPart, logText);
+        Assert.DoesNotContain($"ip:v4:{ip}".GetHashCode().ToString(), logText);
+        Assert.DoesNotContain("dimension hash", logText, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("DimensionHash", logText, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public async Task One_IP_attacking_multiple_accounts_hits_IP_limiter()
     {
         // Different accounts each independently pass their own account-lockout dimension

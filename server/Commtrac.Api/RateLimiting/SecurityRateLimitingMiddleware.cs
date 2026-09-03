@@ -125,12 +125,10 @@ public sealed class SecurityRateLimitingMiddleware
         // policy constant, not internal limiter/request state.
         TimeSpan? retryAfter = lease.TryGetMetadata(MetadataName.RetryAfter, out var ra) ? ra : dimension.Window;
 
-        // Deliberately generic: no partition key, no indication of which dimension
-        // (account/email/token/IP) was hit, no internal limiter state.
-        _logger.LogWarning(
-            "Rate limit exceeded for {Path} (dimension hash {DimensionHash})",
-            context.Request.Path,
-            key.GetHashCode());
+        // Deliberately generic: no partition key or derivative of it (including a hash —
+        // not an appropriate anonymization boundary), no email/tokenId/IP, no internal
+        // limiter state.
+        _logger.LogWarning("Rate limit exceeded for {Path}", context.Request.Path);
 
         context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         context.Response.ContentType = "application/json";

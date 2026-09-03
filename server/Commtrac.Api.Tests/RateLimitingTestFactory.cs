@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
@@ -16,6 +17,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace Commtrac.Api.Tests;
 
@@ -36,6 +38,11 @@ internal sealed class RateLimitingTestFactory : WebApplicationFactory<Program>
 
     private readonly Func<HttpRequestMessage, HttpResponseMessage>? _resendResponder;
     public int ResendCallCount;
+
+    /// <summary>Captures every formatted log message emitted by the app, so tests can assert
+    /// on exactly what the rate limiter logs on rejection (and, more importantly, what it
+    /// does not log).</summary>
+    public readonly CapturingLoggerProvider LoggerProvider = new();
 
     private readonly string _dbPath =
         Path.Combine(Path.GetTempPath(), $"commtrac-ratelimit-test-{Guid.NewGuid():N}.db");
@@ -93,7 +100,38 @@ internal sealed class RateLimitingTestFactory : WebApplicationFactory<Program>
             }
 
             services.AddSingleton<IStartupFilter, ClientIpStartupFilter>();
+            services.AddLogging(logging => logging.AddProvider(LoggerProvider));
         });
+    }
+
+    public sealed class CapturingLoggerProvider : ILoggerProvider
+    {
+        private readonly ConcurrentQueue<string> _messages = new();
+        public IReadOnlyCollection<string> Messages => _messages;
+
+        public ILogger CreateLogger(string categoryName) => new CapturingLogger(_messages);
+
+        public void Dispose() { }
+
+        private sealed class CapturingLogger : ILogger
+        {
+            private readonly ConcurrentQueue<string> _messages;
+            public CapturingLogger(ConcurrentQueue<string> messages) => _messages = messages;
+
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+            public bool IsEnabled(LogLevel logLevel) => true;
+
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                _messages.Enqueue(formatter(state, exception));
+            }
+
+            private sealed class NullScope : IDisposable
+            {
+                public static readonly NullScope Instance = new();
+                public void Dispose() { }
+            }
+        }
     }
 
     private sealed class ClientIpStartupFilter : IStartupFilter
