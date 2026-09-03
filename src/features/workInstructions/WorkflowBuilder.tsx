@@ -73,6 +73,7 @@ import type { Feature } from "../../types/feature";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { randomId } from "../../utils/randomId";
 import { markWorkflowOpenTap } from "../../utils/workflowOpenPerf";
+import { isFeatureAvailableForNewSelection } from "../../utils/featureAvailability";
 import { loadWorkflowOpenPayload } from "../../services/workflowOpenService";
 import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
@@ -383,6 +384,15 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       return unchanged ? prev : merged;
     });
   }, [productFeatures]);
+
+  // Features offered for NEW selection (Feature: Yes, or already selected in this workflow).
+  // `productFeatures` itself stays the full, unfiltered list everywhere else in this
+  // component — every `.find((f) => f.id === ...)` lookup for an already-referenced feature
+  // must keep resolving even if that feature has since become Feature: No.
+  const availableProductFeatures = useMemo(
+    () => productFeatures.filter((feat) => isFeatureAvailableForNewSelection(feat, featureSelections)),
+    [productFeatures, featureSelections],
+  );
 
   const [publishSaving, setPublishSaving] = useState(false);
   const [publishDialogOpen, setPublishDialogOpen] = useState(false);
@@ -1223,14 +1233,14 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       <Grid container spacing={2}>
         {/* Left: feature qty panel + step list */}
         <Grid item xs={12} md={3}>
-          {productFeatures.length > 0 && (
+          {availableProductFeatures.length > 0 && (
             <Paper className="glass-card" sx={{ p: 1.5, mb: 1.5 }}>
               <Typography variant="caption" fontWeight={700} color="text.secondary"
                 sx={{ textTransform: "uppercase", letterSpacing: 0.8, display: "block", mb: 1 }}>
                 Installed Features
               </Typography>
               <Stack spacing={0.75}>
-                {productFeatures.map((feat) => {
+                {availableProductFeatures.map((feat) => {
                   const sel = featureSelections.find((s) => s.featureId === feat.id)
                     ?? { featureId: feat.id, included: false, activeCount: 0 };
                   return (
@@ -3002,8 +3012,11 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
   configId?: string | null;
 }) {
   const [tab, setTab] = React.useState(0);
-  const features = productFeatures ?? [];
   const sels = featureSelections ?? [];
+  // This is the "Features" tab's own new-selection picker (quantities + dependency
+  // inclusions) — same availability rule as the left-panel "Installed Features" list.
+  // productFeatures itself is never filtered; only this local render-facing list is.
+  const features = (productFeatures ?? []).filter((feat) => isFeatureAvailableForNewSelection(feat, sels));
   const includedCount = sels.filter((s) => s.activeCount > 0).length;
 
   // ── BOM Step Inclusion state ───────────────────────────────────────────────
