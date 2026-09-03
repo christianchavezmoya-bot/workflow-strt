@@ -9,6 +9,7 @@ import {
   DialogActions,
   DialogContent,
   DialogTitle,
+  Divider,
   FormControl,
   FormControlLabel,
   FormHelperText,
@@ -1662,11 +1663,21 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
                                 assetClosedNotificationEnabled: event.target.checked,
                               }))
                             }
-                            disabled={!scheduledReport.enabled}
                           />
                         }
-                        label="Asset closed email notification"
+                        label="Workflow completion email"
                       />
+                      <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
+                        Emails the Project Manager (and any recipients below) each time a
+                        workflow is completed. Independent of the scheduled report above —
+                        works whether or not "Enable" is checked.
+                      </Typography>
+
+                      <Divider sx={{ my: 0.5 }} />
+
+                      <Typography variant="caption" color="text.secondary">
+                        Periodic summary report — separate from the completion email above.
+                      </Typography>
 
                       <Grid container spacing={1.5}>
                         <Grid item xs={12} sm={5}>

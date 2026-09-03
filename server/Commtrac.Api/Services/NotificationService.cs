@@ -102,6 +102,18 @@ public sealed class NotificationService
             return [];
         }
 
+        // The workflow-completion email (PM + any additional recipients) is controlled
+        // entirely by this one toggle. It must be checked before the PM is ever added —
+        // previously the PM was added unconditionally and only the *additional* recipients
+        // were gated, so disabling the toggle never actually stopped the PM's email. The
+        // periodic/scheduled report itself is a separate `schedule.Enabled` flag on the same
+        // DTO, checked independently by ProjectScheduledReportWorker — untouched by this gate.
+        var schedule = ParseScheduledReport(project.ScheduledReportJson);
+        if (schedule?.AssetClosedNotificationEnabled != true)
+        {
+            return [];
+        }
+
         var recipients = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var pmNameOrEmail = project.ProjectManager?.Trim();
         if (!string.IsNullOrWhiteSpace(pmNameOrEmail))
@@ -124,15 +136,11 @@ public sealed class NotificationService
             }
         }
 
-        var schedule = ParseScheduledReport(project.ScheduledReportJson);
-        if (schedule?.AssetClosedNotificationEnabled == true)
+        foreach (var email in schedule.RecipientEmails ?? [])
         {
-            foreach (var email in schedule.RecipientEmails ?? [])
+            if (!string.IsNullOrWhiteSpace(email))
             {
-                if (!string.IsNullOrWhiteSpace(email))
-                {
-                    recipients.Add(email.Trim());
-                }
+                recipients.Add(email.Trim());
             }
         }
 

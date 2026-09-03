@@ -104,22 +104,39 @@ export const KNOWN_ROLE_DEFAULTS: Record<string, RolePermissions> = {
 export const getRoleTemplate = (roleName: string): RolePermissions =>
   KNOWN_ROLE_DEFAULTS[roleName] ?? KNOWN_ROLE_DEFAULTS.Viewer;
 
-export const normalizeRolePermissions = (roleName: string, permissions: RolePermissions): RolePermissions => ({
-  viewOnly: permissions.viewOnly,
-  createDeleteTables: permissions.createDeleteTables,
-  createUsers: permissions.createUsers,
-  editFields: permissions.editFields,
-  modifyData: permissions.modifyData,
-  editForms: permissions.editForms,
-  domains: permissions.domains ?? getRoleTemplate(roleName).domains ?? defaultDomains({
+export const normalizeRolePermissions = (roleName: string, permissions: RolePermissions): RolePermissions => {
+  const tier1: Omit<RolePermissions, "domains"> = {
     viewOnly: permissions.viewOnly,
     createDeleteTables: permissions.createDeleteTables,
     createUsers: permissions.createUsers,
     editFields: permissions.editFields,
     modifyData: permissions.modifyData,
     editForms: permissions.editForms,
-  }),
-});
+  };
+  const template = getRoleTemplate(roleName).domains ?? defaultDomains(tier1);
+  const saved = permissions.domains;
+
+  // Deep-merge per domain, not a single top-level `??`: a persisted domain object can be
+  // missing individual fields (e.g. saved before a permission checkbox existed, or edited
+  // via a partial PUT), and those must fall back to the role's template default rather than
+  // silently resolving to `undefined`/false forever. Every UI mutation re-normalizes and
+  // re-saves the whole config (buildNormalizedRolesConfig), so a gap here self-perpetuates —
+  // this was the root cause of Admin/PM document-upload 403s despite a correct backend
+  // authorization check. Fields the saved config does set (including explicit false) win.
+  const domains: DomainPermissions = {
+    projects: { ...template.projects, ...saved?.projects },
+    installationAssets: { ...template.installationAssets, ...saved?.installationAssets },
+    workInstructionsBuilder: { ...template.workInstructionsBuilder, ...saved?.workInstructionsBuilder },
+    documents: { ...template.documents, ...saved?.documents },
+    settings: { ...template.settings, ...saved?.settings },
+    admin: { ...template.admin, ...saved?.admin },
+    bomProject: { ...template.bomProject, ...saved?.bomProject },
+    tips: { ...template.tips, ...saved?.tips },
+    analytics: { ...template.analytics, ...saved?.analytics },
+  };
+
+  return { ...tier1, domains };
+};
 
 export const buildNormalizedRolesConfig = (
   current: Record<string, RolePermissions>,
