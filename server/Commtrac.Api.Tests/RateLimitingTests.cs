@@ -166,6 +166,58 @@ public class RateLimitingTests
     }
 
     [Fact]
+    public async Task RequestOtp_rejection_log_does_not_contain_the_tokenId_and_uses_the_sanitized_route_label()
+    {
+        // Deliberately distinctive so accidental leakage into the log would be obvious —
+        // this exact string must never appear in factory.LoggerProvider.Messages. This
+        // tokenId doesn't need to correspond to a seeded token: rate limiting matches on
+        // the raw path segment before any DB lookup happens.
+        const string tokenMarker = "UNIQUE-SECRET-TOKEN-MARKER-7f3a9c2e";
+        using var factory = new RateLimitingTestFactory();
+        var client = ClientWithIp(factory, "203.0.113.70");
+
+        for (var i = 0; i < SecurityRateLimitPolicies.RequestOtpTokenPermitLimit; i++)
+        {
+            await client.PostAsync($"/api/public/sign/{tokenMarker}/request-otp", null);
+        }
+        var limited = await client.PostAsync($"/api/public/sign/{tokenMarker}/request-otp", null);
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+
+        var logText = string.Join("\n", factory.LoggerProvider.Messages);
+        Assert.DoesNotContain(tokenMarker, logText);
+        Assert.Contains("Rate limit exceeded for /api/public/sign/{tokenId}/request-otp", logText);
+    }
+
+    [Fact]
+    public async Task Submit_rejection_log_does_not_contain_the_tokenId_and_uses_the_sanitized_route_label()
+    {
+        const string tokenMarker = "UNIQUE-SECRET-TOKEN-MARKER-b81de440";
+        using var factory = new RateLimitingTestFactory();
+        var client = ClientWithIp(factory, "203.0.113.71");
+
+        for (var i = 0; i < SecurityRateLimitPolicies.SubmitTokenPermitLimit; i++)
+        {
+            await client.PostAsJsonAsync($"/api/public/sign/{tokenMarker}/submit", new
+            {
+                signerName = "Someone",
+                consentConfirmed = true,
+                reasonCode = "Completed",
+            });
+        }
+        var limited = await client.PostAsJsonAsync($"/api/public/sign/{tokenMarker}/submit", new
+        {
+            signerName = "Someone",
+            consentConfirmed = true,
+            reasonCode = "Completed",
+        });
+        Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
+
+        var logText = string.Join("\n", factory.LoggerProvider.Messages);
+        Assert.DoesNotContain(tokenMarker, logText);
+        Assert.Contains("Rate limit exceeded for /api/public/sign/{tokenId}/submit", logText);
+    }
+
+    [Fact]
     public async Task One_IP_attacking_multiple_accounts_hits_IP_limiter()
     {
         // Different accounts each independently pass their own account-lockout dimension

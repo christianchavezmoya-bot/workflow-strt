@@ -26,6 +26,23 @@ namespace Commtrac.Api.RateLimiting;
 /// </summary>
 public sealed class SecurityRateLimitingMiddleware
 {
+    /// <summary>
+    /// Fixed, non-dynamic labels for rejection logging. Deliberately distinct from raw
+    /// <c>context.Request.Path</c>: the two public-sign routes embed the live signing
+    /// tokenId as a URL segment, so logging the path directly would leak it. These labels
+    /// are compile-time constants classified by route, never derived from request data.
+    /// </summary>
+    private static class RouteLabels
+    {
+        public const string Login = "/api/auth/login";
+        public const string TwoFactorLogin = "/api/auth/2fa/login";
+        public const string TwoFactorRecovery = "/api/auth/2fa/recovery";
+        public const string ForgotPassword = "/api/auth/forgot-password";
+        public const string ResetPassword = "/api/auth/reset-password";
+        public const string PublicSignRequestOtp = "/api/public/sign/{tokenId}/request-otp";
+        public const string PublicSignSubmit = "/api/public/sign/{tokenId}/submit";
+    }
+
     private readonly RequestDelegate _next;
     private readonly SecurityRateLimiterRegistry _limiters;
     private readonly ILogger<SecurityRateLimitingMiddleware> _logger;
@@ -48,11 +65,23 @@ public sealed class SecurityRateLimitingMiddleware
         var path = context.Request.Path;
         var ipKey = ClientIpKeyResolver.Resolve(context);
 
-        if (path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase)
-            || path.Equals("/api/auth/2fa/login", StringComparison.OrdinalIgnoreCase)
-            || path.Equals("/api/auth/2fa/recovery", StringComparison.OrdinalIgnoreCase))
+        if (path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase))
         {
-            if (!await TryAcquireAsync(context, _limiters.CredentialIp, ipKey))
+            if (!await TryAcquireAsync(context, _limiters.CredentialIp, ipKey, RouteLabels.Login))
+            {
+                return;
+            }
+        }
+        else if (path.Equals("/api/auth/2fa/login", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!await TryAcquireAsync(context, _limiters.CredentialIp, ipKey, RouteLabels.TwoFactorLogin))
+            {
+                return;
+            }
+        }
+        else if (path.Equals("/api/auth/2fa/recovery", StringComparison.OrdinalIgnoreCase))
+        {
+            if (!await TryAcquireAsync(context, _limiters.CredentialIp, ipKey, RouteLabels.TwoFactorRecovery))
             {
                 return;
             }
@@ -64,18 +93,18 @@ public sealed class SecurityRateLimitingMiddleware
 
             // Recipient dimension first: cheaper to reject on, and the more specific
             // "this recipient is being spammed" signal.
-            if (!await TryAcquireAsync(context, _limiters.ForgotPasswordEmail, emailKey))
+            if (!await TryAcquireAsync(context, _limiters.ForgotPasswordEmail, emailKey, RouteLabels.ForgotPassword))
             {
                 return;
             }
-            if (!await TryAcquireAsync(context, _limiters.EmailDispatchIp, ipKey))
+            if (!await TryAcquireAsync(context, _limiters.EmailDispatchIp, ipKey, RouteLabels.ForgotPassword))
             {
                 return;
             }
         }
         else if (path.Equals("/api/auth/reset-password", StringComparison.OrdinalIgnoreCase))
         {
-            if (!await TryAcquireAsync(context, _limiters.ResetPasswordIp, ipKey))
+            if (!await TryAcquireAsync(context, _limiters.ResetPasswordIp, ipKey, RouteLabels.ResetPassword))
             {
                 return;
             }
@@ -85,11 +114,11 @@ public sealed class SecurityRateLimitingMiddleware
             if (string.Equals(action, "request-otp", StringComparison.OrdinalIgnoreCase))
             {
                 var tokenKey = $"token:{tokenId}";
-                if (!await TryAcquireAsync(context, _limiters.RequestOtpToken, tokenKey))
+                if (!await TryAcquireAsync(context, _limiters.RequestOtpToken, tokenKey, RouteLabels.PublicSignRequestOtp))
                 {
                     return;
                 }
-                if (!await TryAcquireAsync(context, _limiters.EmailDispatchIp, ipKey))
+                if (!await TryAcquireAsync(context, _limiters.EmailDispatchIp, ipKey, RouteLabels.PublicSignRequestOtp))
                 {
                     return;
                 }
@@ -97,11 +126,11 @@ public sealed class SecurityRateLimitingMiddleware
             else if (string.Equals(action, "submit", StringComparison.OrdinalIgnoreCase))
             {
                 var tokenKey = $"token:{tokenId}";
-                if (!await TryAcquireAsync(context, _limiters.SubmitToken, tokenKey))
+                if (!await TryAcquireAsync(context, _limiters.SubmitToken, tokenKey, RouteLabels.PublicSignSubmit))
                 {
                     return;
                 }
-                if (!await TryAcquireAsync(context, _limiters.SubmitIp, ipKey))
+                if (!await TryAcquireAsync(context, _limiters.SubmitIp, ipKey, RouteLabels.PublicSignSubmit))
                 {
                     return;
                 }
@@ -111,7 +140,7 @@ public sealed class SecurityRateLimitingMiddleware
         await _next(context);
     }
 
-    private async Task<bool> TryAcquireAsync(HttpContext context, NamedLimiter dimension, string key)
+    private async Task<bool> TryAcquireAsync(HttpContext context, NamedLimiter dimension, string key, string routeLabel)
     {
         using var lease = await dimension.Limiter.AcquireAsync(key, permitCount: 1, context.RequestAborted);
         if (lease.IsAcquired)
@@ -125,10 +154,12 @@ public sealed class SecurityRateLimitingMiddleware
         // policy constant, not internal limiter/request state.
         TimeSpan? retryAfter = lease.TryGetMetadata(MetadataName.RetryAfter, out var ra) ? ra : dimension.Window;
 
-        // Deliberately generic: no partition key or derivative of it (including a hash —
-        // not an appropriate anonymization boundary), no email/tokenId/IP, no internal
-        // limiter state.
-        _logger.LogWarning("Rate limit exceeded for {Path}", context.Request.Path);
+        // Deliberately generic: routeLabel is always one of the fixed RouteLabels
+        // constants above, never context.Request.Path (which embeds the live tokenId for
+        // the two public-sign routes) and never the partition key or a derivative of it
+        // (including a hash — not an appropriate anonymization boundary). No email, IP,
+        // OTP, password, reset token, Authorization header, or internal limiter state.
+        _logger.LogWarning("Rate limit exceeded for {Route}", routeLabel);
 
         context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
         context.Response.ContentType = "application/json";
