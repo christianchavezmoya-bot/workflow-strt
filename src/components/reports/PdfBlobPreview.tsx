@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from "react";
 import { Box, CircularProgress, Stack, Typography } from "@mui/material";
 import * as pdfjsLib from "pdfjs-dist";
 import { usePinchZoom } from "../../hooks/usePinchZoom";
-import { shouldUsePdfJsPreview } from "../../utils/platform";
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = new URL(
   "pdfjs-dist/build/pdf.worker.min.mjs",
@@ -27,12 +26,12 @@ type Props = {
 /**
  * Scrollable PDF preview.
  *
- * Desktop web uses the browser's native PDF viewer (iframe) — stable on LAN/dev links.
- * Native mobile and mobile web browsers use pdf.js canvas rendering with pinch-to-zoom,
- * because embedded iframe/blob viewers cannot scroll or zoom multi-page PDFs reliably.
+ * Always renders every page as stacked pdf.js canvases with pinch/scroll support —
+ * a browser-native iframe viewer only reliably shows page 1 and doesn't scroll/zoom
+ * multi-page PDFs consistently across platforms. The iframe is kept only as a
+ * last-resort fallback when pdf.js itself fails to render (see the error branch below).
  */
 export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }: Props) {
-  const usePdfJs = shouldUsePdfJsPreview();
   const pagesRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const [pageCount, setPageCount] = useState(0);
@@ -46,7 +45,7 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
   const viewportRef = usePinchZoom<HTMLDivElement>({
     zoom: pinchZoom,
     onZoomChange: setPinchZoom,
-    enabled: usePdfJs && !loading,
+    enabled: !loading,
   });
 
   useEffect(() => {
@@ -60,12 +59,6 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
   }, [blob]);
 
   useEffect(() => {
-    if (!usePdfJs) {
-      setLoading(false);
-      setError(null);
-      return;
-    }
-
     let cancelled = false;
     setLoading(true);
     setError(null);
@@ -75,11 +68,9 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
       if (!cancelled) setError("Could not read PDF data.");
     });
     return () => { cancelled = true; };
-  }, [blob, usePdfJs]);
+  }, [blob]);
 
   useEffect(() => {
-    if (!usePdfJs) return;
-
     const node = viewportRef.current;
     if (!node) return;
     let frame = 0;
@@ -95,11 +86,9 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
     };
-  }, [usePdfJs, viewportRef]);
+  }, [viewportRef]);
 
   useEffect(() => {
-    if (!usePdfJs) return;
-
     let cancelled = false;
 
     async function renderPdf() {
@@ -171,41 +160,7 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
 
     void renderPdf();
     return () => { cancelled = true; };
-  }, [pdfData, containerWidth, effectiveZoom, usePdfJs]);
-
-  if (!usePdfJs && blobUrl) {
-    return (
-      <Box
-        sx={{
-          height: "100%",
-          overflow: "auto",
-          WebkitOverflowScrolling: "touch",
-          bgcolor: "#525659",
-          px: 1,
-          py: 1.5,
-        }}
-      >
-        {scrollHint && (
-          <Typography variant="caption" sx={{ display: "block", textAlign: "center", color: "rgba(255,255,255,0.75)", mb: 1 }}>
-            {scrollHint}
-          </Typography>
-        )}
-        <Box
-          component="iframe"
-          src={`${blobUrl}#view=FitH`}
-          title="PDF preview"
-          sx={{
-            width: "100%",
-            height: "100%",
-            minHeight: 640,
-            border: "none",
-            borderRadius: 2,
-            bgcolor: "#fff",
-          }}
-        />
-      </Box>
-    );
-  }
+  }, [pdfData, containerWidth, effectiveZoom]);
 
   const hintText = scrollHint ?? (pageCount > 1 ? "Scroll to view all pages. Pinch to zoom." : "Pinch to zoom.");
 
