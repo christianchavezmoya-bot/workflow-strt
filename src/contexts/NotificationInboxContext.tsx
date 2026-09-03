@@ -41,6 +41,21 @@ const RUN_STATE_EVENT_TYPES = new Set([
   "workflow-updated", "project-completed", "project-closed", "asset-deleted",
 ]);
 
+/**
+ * Cheap identity check so a poll tick that returns the same rows doesn't assign a new
+ * array reference to `notifications` — the Context `value` below is memoized on this
+ * array, and a fresh reference on every no-op poll forces every consumer (Topbar,
+ * NotificationBanner, and anything else reading the context) to re-render for nothing.
+ */
+function sameNotificationIdentity(a: AppNotification[], b: AppNotification[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i].id !== b[i].id || a[i].isRead !== b[i].isRead) return false;
+  }
+  return true;
+}
+
 type NotificationInboxContextValue = {
   notifications: AppNotification[];
   unreadNotifications: AppNotification[];
@@ -73,6 +88,18 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
   const [bannerNotification, setBannerNotification] = useState<AppNotification | null>(null);
   const seenUnreadIdsRef = useRef<Set<string>>(new Set());
   const initializedRef = useRef(false);
+  /**
+   * `api-server-reachable` fires on EVERY successful axios response, not just on
+   * recovery from an outage (see api.ts). Reacting to it unconditionally here is a
+   * self-sustaining loop: this refresh's own successful GET re-dispatches the event,
+   * which triggers another refresh, forever — observed live as dozens of back-to-back
+   * `/api/notifications` requests with no timer involved. Gate on an actual prior
+   * failure (set in refresh()'s catch below) so the handler only reacts to genuine
+   * reconnects, mirroring the established fix in AssetInstallationPage.tsx ("Fix 6b").
+   */
+  const serverWasOfflineRef = useRef(false);
+
+  const inFlightAbortRef = useRef<AbortController | null>(null);
 
   const refresh = useCallback(async (options?: { forceNetwork?: boolean }) => {
     const path = window.location.pathname;
@@ -100,9 +127,18 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     const forceNetwork = options?.forceNetwork === true;
     const offlineRead = !forceNetwork && shouldSkipBlockingFetch();
     if (!offlineRead) setLoading(true);
+
+    // Cancel a still-in-flight prior refresh — otherwise a slow request can resolve
+    // after a newer one and clobber fresher state, and both count against the
+    // browser's concurrent-connection limit for everything else on the page.
+    inFlightAbortRef.current?.abort();
+    const controller = new AbortController();
+    inFlightAbortRef.current = controller;
+
     try {
-      const next = await notificationService.list(true, 50, { forceNetwork });
-      setNotifications(next);
+      const next = await notificationService.list(true, 50, { forceNetwork, signal: controller.signal });
+      serverWasOfflineRef.current = false;
+      setNotifications((prev) => (sameNotificationIdentity(prev, next) ? prev : next));
       setFromCache(offlineRead);
 
       const unreadItems = next.filter((n) => !n.isRead);
@@ -141,10 +177,15 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
         }
       }
     } catch (error) {
+      // A superseded request being aborted is expected traffic control, not a failure.
+      if (controller.signal.aborted) return;
       console.error("Notification inbox refresh failed:", error);
+      serverWasOfflineRef.current = true;
       setFromCache(shouldSkipBlockingFetch());
     } finally {
-      setLoading(false);
+      // Only the still-current request should clear loading — an aborted/superseded
+      // one finishing late must not stomp on a newer request's in-progress state.
+      if (inFlightAbortRef.current === controller) setLoading(false);
     }
   }, [isAuthenticated, user?.id]);
 
@@ -242,11 +283,19 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     healTimer = window.setInterval(reconcilePolling, POLL_HEAL_MS);
 
     const handleApiServerReachable = () => {
+      // Gate on an actual prior failure — see serverWasOfflineRef's declaration above
+      // for why reacting unconditionally here is a self-sustaining request loop.
+      if (!serverWasOfflineRef.current) return;
+      serverWasOfflineRef.current = false;
       handleConnectivityResume({ forceNetwork: true });
     };
 
+    const markServerOffline = () => { serverWasOfflineRef.current = true; };
+
     window.addEventListener("focus", handleRefreshTrigger);
     window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", markServerOffline);
+    window.addEventListener("api-serving-cache", markServerOffline);
     window.addEventListener("auth-change", handleRefreshTrigger);
     window.addEventListener("auth-user-updated", handleRefreshTrigger);
     window.addEventListener("notifications:refresh", handleRefreshTrigger);
@@ -273,6 +322,8 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       if (debounceTimer !== undefined) window.clearTimeout(debounceTimer);
       window.removeEventListener("focus", handleRefreshTrigger);
       window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", markServerOffline);
+      window.removeEventListener("api-serving-cache", markServerOffline);
       window.removeEventListener("auth-change", handleRefreshTrigger);
       window.removeEventListener("auth-user-updated", handleRefreshTrigger);
       window.removeEventListener("notifications:refresh", handleRefreshTrigger);

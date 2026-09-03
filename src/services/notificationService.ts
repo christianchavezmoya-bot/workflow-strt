@@ -10,13 +10,14 @@ export const notificationService = {
   async list(
     includeRead = true,
     take = 50,
-    options?: { forceNetwork?: boolean },
+    options?: { forceNetwork?: boolean; signal?: AbortSignal },
   ): Promise<AppNotification[]> {
     const forceNetwork = options?.forceNetwork === true;
 
     if (!isMobileNativePlatform()) {
       const response = await api.get<AppNotification[]>("/notifications", {
         params: { includeRead, take },
+        signal: options?.signal,
       });
       return response.data;
     }
@@ -28,6 +29,7 @@ export const notificationService = {
       try {
         const response = await api.get<AppNotification[]>("/notifications", {
           params: { includeRead, take },
+          signal: options?.signal,
         });
         await cachePut(NOTIFICATIONS_CACHE_KEY, response.data);
         return response.data;
