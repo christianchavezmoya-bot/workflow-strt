@@ -28,6 +28,13 @@ export interface ProductFeatureDefinition {
   valueType: ProductFeatureValueType;
   options?: string[];
   subProperties?: FeatureSubProperty[];
+  /**
+   * Mirrors Feature.isInventory ("Feature: Yes/No" in Settings → Features). Already flowed
+   * through at runtime before this field was declared here (WorkInstructions.tsx read it via
+   * an inline cast) — this just gives it a real type so Workflow Builder can filter on it
+   * without a cast. No DB/API change; the underlying property is unchanged.
+   */
+  isInventory?: boolean;
 }
 
 export interface Product {

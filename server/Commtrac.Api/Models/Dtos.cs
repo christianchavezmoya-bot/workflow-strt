@@ -1407,6 +1407,8 @@ public record PublicSubmitSignatureRequest(
 
 public record RequestOtpRequest(string TokenId);
 
+public record PublicVerifyOtpRequest(string? OtpCode);
+
 // ─── Dispatch / Logistics ─────────────────────────────────────────────────────
 public record DispatchOrderDto(
     string Id,

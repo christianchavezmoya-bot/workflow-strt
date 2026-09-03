@@ -71,6 +71,7 @@ import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowType } from "../../types/workflowType";
 import { escapeHtml, openPrintWindow } from "../../utils/printWindow";
 import { isMobileNativePlatform } from "../../utils/platform";
+import { isFeatureAvailableForNewSelection } from "../../utils/featureAvailability";
 import WorkOrderRunner from "./WorkOrderRunner";
 import { jsPDF } from "jspdf";
 
@@ -1008,13 +1009,6 @@ const WorkInstructions = () => {
     return () => { cancelled = true; };
   }, [activeProduct]);
 
-  // Builder feature selection is sourced from the Features library. Only inventory
-  // features are installable units; non-inventory items flow through dependencies/BOM.
-  const inventoryFeatures = useMemo(
-    () => workflowFeatures.filter((feature) => feature.isInventory),
-    [workflowFeatures],
-  );
-
   useEffect(() => {
     // A product switch normally means "stop editing that product's config". The exception
     // is the product-first create flow, which switches tab *in order to* open a new draft.
@@ -1147,7 +1141,10 @@ const WorkInstructions = () => {
         workflowTypes.find((type) => type.name === cfg.configType)?.id ??
         "",
       notes: cfg.notes ?? "",
-      featureSelections: inventoryFeatures.map(
+      // Built from the full feature list, not just the current Feature: Yes subset — a
+      // feature already selected in this saved config must keep its selection even if it
+      // has since become Feature: No, or opening this dialog would silently drop it.
+      featureSelections: workflowFeatures.map(
         (f) => selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 },
       ),
     });
@@ -1712,10 +1709,13 @@ const WorkInstructions = () => {
             )}
           </Stack>
           <Suspense fallback={<Box sx={{ py: 6, display: "flex", justifyContent: "center" }}><CircularProgress /></Box>}>
+          {/* productFeatures is intentionally the full, unfiltered list — WorkflowBuilder
+              itself decides what's offered for NEW selection vs. what must still resolve
+              for already-referenced features (see isFeatureAvailableForNewSelection). */}
           <WorkflowBuilder
             productId={activeProduct.id}
             productName={activeProduct.name}
-            productFeatures={inventoryFeatures}
+            productFeatures={workflowFeatures}
             initialConfigId={selectedConfig?.id ?? null}
             configName={selectedConfig?.name}
             onConfigSaved={handleConfigSaved}
@@ -1855,13 +1855,18 @@ const WorkInstructions = () => {
               placeholder="Optional description or notes"
               InputLabelProps={{ shrink: true }}
             />
-            {inventoryFeatures.length > 0 && (
+            {(() => {
+              const availableFeatures = workflowFeatures.filter((feat) =>
+                isFeatureAvailableForNewSelection(feat, configForm.featureSelections),
+              );
+              if (availableFeatures.length === 0) return null;
+              return (
               <Stack spacing={1}>
                 <Typography variant="subtitle2">Installed Features</Typography>
                 <Typography variant="caption" color="text.secondary">
                   Set how many of each feature are installed. 0 = not included.
                 </Typography>
-                {inventoryFeatures.map((feat) => {
+                {availableFeatures.map((feat) => {
                   const sel = configForm.featureSelections.find((s) => s.featureId === feat.id);
                   const count = sel?.activeCount ?? 0;
                   const setCount = (n: number) =>
@@ -1889,7 +1894,8 @@ const WorkInstructions = () => {
                   );
                 })}
               </Stack>
-            )}
+              );
+            })()}
             {configError && (
               <Typography variant="body2" color="error">{configError}</Typography>
             )}

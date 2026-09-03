@@ -264,18 +264,10 @@ public class PublicSignController : ControllerBase
         if (req.ReasonCode == "Declined" && string.IsNullOrWhiteSpace(req.Notes))
             return BadRequest(new { message = "Notes required when declining." });
 
-        // OTP gate (if OTP was issued)
-        if (!string.IsNullOrWhiteSpace(token.OtpHash))
-        {
-            if (string.IsNullOrWhiteSpace(req.OtpCode))
-                return BadRequest(new { message = "OTP code is required for this link." });
-            if (token.OtpExpiresAtUtc.HasValue && token.OtpExpiresAtUtc.Value < DateTime.UtcNow)
-                return BadRequest(new { message = "OTP has expired. Request a new one." });
-
-            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(req.OtpCode.Trim())));
-            if (!string.Equals(hash, token.OtpHash, StringComparison.OrdinalIgnoreCase))
-                return BadRequest(new { message = "Incorrect OTP code." });
-        }
+        // OTP gate (if OTP was issued) — this is the actual security boundary; the frontend's
+        // /verify-otp pre-check below exists only to drive UI sequencing, never to replace this.
+        if (!TryValidateOtp(token, req.OtpCode, out var otpError))
+            return BadRequest(new { message = otpError });
 
         var now = DateTime.UtcNow;
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -481,6 +473,63 @@ public class PublicSignController : ControllerBase
         await _db.SaveChangesAsync();
 
         return Ok(new { message = "OTP sent" });
+    }
+
+    /// <summary>
+    /// Checks a submitted OTP code against the token's stored hash/expiry — the exact same
+    /// check <see cref="Submit"/> performs before persisting a signature. If no OTP was ever
+    /// issued for this token (<c>OtpHash</c> null), OTP is not required and this returns true.
+    /// </summary>
+    private static bool TryValidateOtp(SignatureTokenEntity token, string? otpCode, out string? error)
+    {
+        if (string.IsNullOrWhiteSpace(token.OtpHash))
+        {
+            error = null;
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(otpCode))
+        {
+            error = "OTP code is required for this link.";
+            return false;
+        }
+        if (token.OtpExpiresAtUtc.HasValue && token.OtpExpiresAtUtc.Value < DateTime.UtcNow)
+        {
+            error = "OTP has expired. Request a new one.";
+            return false;
+        }
+
+        var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(otpCode.Trim())));
+        if (!string.Equals(hash, token.OtpHash, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "Incorrect OTP code.";
+            return false;
+        }
+
+        error = null;
+        return true;
+    }
+
+    /// <summary>
+    /// Pre-check only — lets the frontend confirm a code is correct before revealing the
+    /// acknowledgement/submit step, without persisting anything or consuming the token. The
+    /// real, authoritative OTP enforcement happens again inside <see cref="Submit"/>
+    /// regardless of whether this endpoint was ever called; a client skipping straight to
+    /// Submit gains nothing, since that gate is independent and re-validates from scratch.
+    /// Rate-limited identically to Submit (same token/IP dimensions) since a successful call
+    /// here is exactly as informative to an attacker as a successful Submit would be.
+    /// </summary>
+    // POST /api/public/sign/{tokenId}/verify-otp
+    [HttpPost("{tokenId}/verify-otp")]
+    public async Task<IActionResult> VerifyOtp(string tokenId, [FromBody] PublicVerifyOtpRequest req)
+    {
+        var (token, err) = await ResolveToken(tokenId);
+        if (token is null) return BadRequest(new { message = err });
+
+        if (!TryValidateOtp(token, req.OtpCode, out var otpError))
+            return BadRequest(new { message = otpError });
+
+        return Ok(new { verified = true });
     }
 
     private static string[] ParseJsonStringArray(string? json)

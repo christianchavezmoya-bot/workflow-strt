@@ -40,6 +40,7 @@ public sealed class SecurityRateLimitingMiddleware
         public const string ForgotPassword = "/api/auth/forgot-password";
         public const string ResetPassword = "/api/auth/reset-password";
         public const string PublicSignRequestOtp = "/api/public/sign/{tokenId}/request-otp";
+        public const string PublicSignVerifyOtp = "/api/public/sign/{tokenId}/verify-otp";
         public const string PublicSignSubmit = "/api/public/sign/{tokenId}/submit";
     }
 
@@ -135,6 +136,23 @@ public sealed class SecurityRateLimitingMiddleware
                     return;
                 }
             }
+            else if (string.Equals(action, "verify-otp", StringComparison.OrdinalIgnoreCase))
+            {
+                // Deliberately shares Submit's limiters, not a separate dimension: a
+                // successful guess here is exactly as informative to an attacker as a
+                // successful Submit would be, so it must cost the same rate-limit budget —
+                // otherwise this pre-check would become a cheaper, unprotected way to brute
+                // force the OTP ahead of the real Submit call.
+                var tokenKey = $"token:{tokenId}";
+                if (!await TryAcquireAsync(context, _limiters.SubmitToken, tokenKey, RouteLabels.PublicSignVerifyOtp))
+                {
+                    return;
+                }
+                if (!await TryAcquireAsync(context, _limiters.SubmitIp, ipKey, RouteLabels.PublicSignVerifyOtp))
+                {
+                    return;
+                }
+            }
         }
 
         await _next(context);
@@ -193,6 +211,7 @@ public sealed class SecurityRateLimitingMiddleware
         tokenId = segments[0];
         action = segments[1];
         return string.Equals(action, "request-otp", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(action, "verify-otp", StringComparison.OrdinalIgnoreCase)
             || string.Equals(action, "submit", StringComparison.OrdinalIgnoreCase);
     }
 
