@@ -3,11 +3,11 @@
  * as "Feature: Yes/No". Extracted from Settings.tsx so the export→import round trip can be
  * unit-tested directly, without simulating an XLSX file upload through the full component.
  *
- * `isInventory` itself is unchanged — see Feature.isInventory's doc comment: it means "this
- * item is itself individually tracked (serial/IP/MAC/etc.)", not "is this usable when
- * building a workflow" (every Feature Library row is already selectable there regardless of
- * this flag). "Feature: Yes/No" is a presentation-layer label for the existing property, not
- * a new concept — see the DEV acceptance follow-up PR description for the full rationale.
+ * No new DB/API field — this reuses the existing `isInventory` property end to end. It now
+ * also governs Workflow Builder availability: Feature: Yes is offered as a new choice when
+ * building a workflow; Feature: No is not. An existing workflow that already references a
+ * Feature: No item keeps resolving and displaying it — only *new* selection is gated. See
+ * `src/utils/featureAvailability.ts` for the selection-availability rule itself.
  */
 
 export interface FeatureImportRow {

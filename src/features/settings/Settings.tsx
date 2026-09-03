@@ -4069,9 +4069,10 @@ const Settings = () => {
                 />
               </Stack>
               <Typography variant="caption" color="text.secondary" sx={{ mt: -1 }}>
-                Yes: this item is individually tracked (serial/IP/MAC, etc.) and captures the
-                fields below during installation. Every feature — Yes or No — remains
-                selectable when building workflows.
+                Yes: available for selection in Workflow Builder and can capture the fields
+                below (serial/IP/MAC, etc.) during installation. No: stays in the Feature
+                Library but is not offered for new workflow selection — an existing workflow
+                that already includes this feature keeps showing it.
               </Typography>
               {featureForm.isInventory && (
                 <FormControl size="small" fullWidth>
