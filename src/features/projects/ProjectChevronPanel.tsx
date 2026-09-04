@@ -504,6 +504,7 @@ export default function ProjectChevronPanel({
   const [reportIncludeAssetList, setReportIncludeAssetList] = useState(true);
   const [reportIncludeIssueList, setReportIncludeIssueList] = useState(true);
   const [signedAssetsOpen, setSignedAssetsOpen] = useState(false);
+  const [openingSignedAssets, setOpeningSignedAssets] = useState(false);
   const [exportingReport, setExportingReport] = useState(false);
 
   const buildExportData = async (withLogo: boolean): Promise<BomExportData> => {
@@ -883,9 +884,22 @@ export default function ProjectChevronPanel({
               <Button
                 size="small"
                 variant="outlined"
-                startIcon={<PictureAsPdfOutlined sx={{ fontSize: 14 }} />}
-                disabled={installAssets.length === 0}
-                onClick={() => setSignedAssetsOpen(true)}
+                startIcon={openingSignedAssets ? <CircularProgress size={12} /> : <PictureAsPdfOutlined sx={{ fontSize: 14 }} />}
+                disabled={openingSignedAssets || installAssets.length === 0}
+                onClick={async () => {
+                  // `latestRuns` here comes from the runs-summary list — slim placeholders with
+                  // no step results (see runHasCaptureBlobs). This dialog's Save action builds
+                  // its PDF straight from `row.run`, so without hydrating first it silently
+                  // generates a one-page report from empty step data for a run that was never
+                  // actually opened via the BOM/History tabs in this session.
+                  setOpeningSignedAssets(true);
+                  try {
+                    await ensureFullRunDetails();
+                  } finally {
+                    setOpeningSignedAssets(false);
+                  }
+                  setSignedAssetsOpen(true);
+                }}
                 sx={{ fontSize: "0.72rem", py: 0.25, px: 1 }}
               >
                 Closed & Signed Assets

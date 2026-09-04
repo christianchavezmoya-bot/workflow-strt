@@ -77,11 +77,16 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
     const resizeObserver = new ResizeObserver((entries) => {
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
-        setContainerWidth(entries[0]?.contentRect.width ?? 0);
+        const next = Math.round(entries[0]?.contentRect.width ?? 0);
+        // Guard against sub-pixel float jitter from getBoundingClientRect/ResizeObserver
+        // reporting a fractionally different width across ticks with no real layout change
+        // — rounding is standard hygiene here, not a debounce over the actual bug (see
+        // `scrollbarGutter: "stable"` below for the real fix).
+        setContainerWidth((prev) => (prev === next ? prev : next));
       });
     });
     resizeObserver.observe(node);
-    setContainerWidth(node.getBoundingClientRect().width);
+    setContainerWidth(Math.round(node.getBoundingClientRect().width));
     return () => {
       cancelAnimationFrame(frame);
       resizeObserver.disconnect();
@@ -170,6 +175,18 @@ export default function PdfBlobPreview({ blob, zoom: zoomProp = 1, scrollHint }:
       sx={{
         height: "100%",
         overflow: "auto",
+        // Root cause of the "flashes and never finishes rendering" bug: this element is
+        // both the ResizeObserver target above AND the scrollable container whose content
+        // (the rendered page canvases) grows as pages are appended. Without a reserved
+        // gutter, a vertical scrollbar appears once content overflows, narrowing this
+        // element's measured contentRect.width; the render effect below depends on that
+        // width and does a full host.innerHTML="" + rebuild on every change, which
+        // transiently empties the content, makes the scrollbar disappear, widens the
+        // element again, and re-triggers — an unbounded resize/render feedback loop.
+        // Reserving the scrollbar's space unconditionally keeps the measured width
+        // constant regardless of whether content currently overflows, breaking the loop
+        // at its source rather than masking it with a timer/debounce.
+        scrollbarGutter: "stable",
         WebkitOverflowScrolling: "touch",
         touchAction: "pan-x pan-y",
         bgcolor: "#525659",
