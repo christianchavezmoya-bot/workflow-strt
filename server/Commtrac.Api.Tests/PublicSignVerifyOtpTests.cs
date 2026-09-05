@@ -208,6 +208,64 @@ public class PublicSignVerifyOtpTests
         Assert.True(doc.RootElement.GetProperty("verified").GetBoolean());
     }
 
+    // ── GetSummary.otpRequired — the field the frontend uses to gate the acknowledgement
+    // step from the very first render, instead of only after the customer's own frontend
+    // state decides to request one (DEV acceptance follow-up: OTP UX). ──────────────────
+
+    [Fact]
+    public async Task GetSummary_reports_otpRequired_false_when_no_otp_has_ever_been_issued()
+    {
+        using var factory = new PublicSignOtpTestFactory(resendResponder: ResendSuccess);
+        var client = factory.CreateClient();
+        var (tokenId, _, _) = await SeedSignableRunAsync(factory);
+
+        var resp = await client.GetAsync($"/api/public/sign/{tokenId}");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.False(doc.RootElement.GetProperty("otpRequired").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetSummary_reports_otpRequired_true_once_an_otp_has_been_issued()
+    {
+        var (factory, client, tokenId, _) = await SeedWithIssuedOtpAsync();
+        using var _ = factory;
+
+        var resp = await client.GetAsync($"/api/public/sign/{tokenId}");
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        Assert.True(doc.RootElement.GetProperty("otpRequired").GetBoolean());
+    }
+
+    [Fact]
+    public async Task GetSummary_otpRequired_does_not_change_submit_or_verify_otp_enforcement()
+    {
+        // otpRequired is purely informational for the frontend — Submit's own independent
+        // TryValidateOtp check must be unaffected either way.
+        var (factory, client, tokenId, code) = await SeedWithIssuedOtpAsync();
+        using var _ = factory;
+
+        var wrongResp = await client.PostAsJsonAsync($"/api/public/sign/{tokenId}/submit", new
+        {
+            signerName = "Jane Signer",
+            consentConfirmed = true,
+            reasonCode = "Approved",
+            otpCode = "000000",
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, wrongResp.StatusCode);
+
+        var correctResp = await client.PostAsJsonAsync($"/api/public/sign/{tokenId}/submit", new
+        {
+            signerName = "Jane Signer",
+            consentConfirmed = true,
+            reasonCode = "Approved",
+            otpCode = code,
+        });
+        Assert.Equal(HttpStatusCode.OK, correctResp.StatusCode);
+    }
+
     [Fact]
     public async Task Invalid_token_returns_generic_error_and_no_verified_field()
     {

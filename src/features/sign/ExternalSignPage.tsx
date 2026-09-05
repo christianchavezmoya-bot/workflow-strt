@@ -165,6 +165,9 @@ export default function ExternalSignPage() {
   const [drawnData, setDrawnData] = useState<string | null>(null);
   const [otpCode, setOtpCode] = useState("");
   const [needsOtp, setNeedsOtp] = useState(false);
+  /** True once a code has actually been (re)sent in this browser session — distinct from
+   *  `needsOtp`, which reflects whether this link requires OTP at all (server truth). */
+  const [otpRequested, setOtpRequested] = useState(false);
   const [otpVerified, setOtpVerified] = useState(false);
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [otpFieldError, setOtpFieldError] = useState<string | null>(null);
@@ -199,6 +202,12 @@ export default function ExternalSignPage() {
       .then((r) => {
         setSummary(r.data);
         setSignerName(r.data.recipientName ?? "");
+        // Server truth, known from the very first render — not something the customer's own
+        // frontend state can decide. Previously this always started false and only became
+        // true after the customer voluntarily clicked a "require OTP" toggle themselves,
+        // which meant the acknowledgement/Submit step was available immediately regardless
+        // of whether OTP was actually required for this link.
+        setNeedsOtp(Boolean(r.data.otpRequired));
         setStage("review");
         void loadPreview(r.data);
       })
@@ -227,6 +236,7 @@ export default function ExternalSignPage() {
     try {
       await api.post(`/public/sign/${tokenId}/request-otp`);
       setNeedsOtp(true);
+      setOtpRequested(true);
       setOtpVerified(false);
       setOtpFieldError(null);
       // A tick from before OTP was required must not silently carry through: the
@@ -274,7 +284,11 @@ export default function ExternalSignPage() {
     } catch (e: unknown) {
       const msg = (e as { response?: { data?: { message?: string } } })?.response?.data?.message;
       if (msg?.toLowerCase().includes("otp")) {
+        // Defense in depth: if Submit disagrees with the client's belief about OTP state
+        // (e.g. a code expired between verify-otp and submit), fall back to the OTP-entry
+        // stage — never the "Request OTP" stage, since a code plainly already exists.
         setNeedsOtp(true);
+        setOtpRequested(true);
         setOtpVerified(false);
         setOtpFieldError(msg);
         setConsent(false);
@@ -285,10 +299,12 @@ export default function ExternalSignPage() {
     }
   };
 
-  // Once OTP has been requested, the acknowledgement/submit step must stay gated until a
-  // code has actually been verified — ticking the acknowledgement box must never be able to
-  // substitute for OTP verification. When OTP was never requested for this link, it remains
-  // the pre-existing optional path with no gate at all.
+  // `needsOtp` is server truth (from GetSummary), known before the customer touches anything —
+  // so for a link that actually requires OTP, this is false from the very first render, and
+  // the acknowledgement/submit step stays gated until a code has actually been verified.
+  // Ticking the acknowledgement box can never substitute for OTP verification. For a link
+  // that never had an OTP issued, `needsOtp` is false and this is the pre-existing,
+  // legitimate OTP-disabled path with no gate at all.
   const otpSatisfied = !needsOtp || otpVerified;
 
   const canSubmit =
@@ -562,7 +578,27 @@ export default function ExternalSignPage() {
             />
           )}
 
-          {needsOtp && !otpVerified && (
+          {/* State A: OTP is required for this link, but no code has been sent yet this
+              session — a real, prominent button, not a subtle toggle. */}
+          {needsOtp && !otpRequested && (
+            <Button
+              variant="contained"
+              startIcon={<LockOutlined fontSize="small" />}
+              onClick={() => void handleRequestOtp()}
+              sx={{
+                bgcolor: PAGE.accent,
+                color: "#0f2a33",
+                fontWeight: 700,
+                alignSelf: "flex-start",
+                "&:hover": { bgcolor: "#5eead4" },
+              }}
+            >
+              Request OTP
+            </Button>
+          )}
+
+          {/* State B: a code has been sent — enter it and verify. */}
+          {needsOtp && otpRequested && !otpVerified && (
             <Box>
               {!otpFieldError && (
                 <Typography
@@ -633,21 +669,6 @@ export default function ExternalSignPage() {
           )}
 
           <Stack direction="row" spacing={1} justifyContent="flex-end">
-            {!needsOtp && (
-              <Button
-                size="small"
-                variant="outlined"
-                startIcon={<LockOutlined fontSize="small" />}
-                onClick={() => void handleRequestOtp()}
-                sx={{
-                  color: PAGE.accent,
-                  borderColor: "rgba(45,212,191,0.45)",
-                  "&:hover": { borderColor: PAGE.accent, bgcolor: "rgba(45,212,191,0.08)" },
-                }}
-              >
-                Require OTP verification
-              </Button>
-            )}
             <Button
               variant="contained"
               color={reasonCode === "Declined" ? "error" : "primary"}

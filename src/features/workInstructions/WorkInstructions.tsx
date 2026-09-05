@@ -1007,7 +1007,14 @@ const WorkInstructions = () => {
     });
 
     return () => { cancelled = true; };
-  }, [activeProduct]);
+    // Deliberately activeProduct?.id, not activeProduct itself: `products` (and therefore
+    // `activeProduct = products[tab]`) is REPLACED with a brand-new array of brand-new
+    // object instances on every fetchProducts.fulfilled — including a refetch dispatched
+    // from a completely different page (e.g. Projects mounting while this page is also
+    // mounted, see the URL-restore effect's comment below). Depending on the object itself
+    // re-ran this effect — and re-fetched + re-set workflowFeatures — on every such refetch
+    // even when the active product's id and data were completely unchanged.
+  }, [activeProduct?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     // A product switch normally means "stop editing that product's config". The exception
