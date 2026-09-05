@@ -54,6 +54,8 @@ export interface PublicRunSummary {
   recipientName: string;
   recipientEmail: string;
   tokenValid: boolean;
+  /** True when this token already has an OTP hash (a code was already issued for it). */
+  otpRequired?: boolean;
   // Report generation fields
   workflowSnapshotJson: string;
   stepResultsJson: string;

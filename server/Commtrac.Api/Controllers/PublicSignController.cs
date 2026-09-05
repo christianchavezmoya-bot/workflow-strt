@@ -240,7 +240,8 @@ public class PublicSignController : ControllerBase
             businessLogo,
             customerLogo,
             companyName,
-            productFeaturesJson
+            productFeaturesJson,
+            OtpRequired: !string.IsNullOrWhiteSpace(token.OtpHash)
         ));
     }
 

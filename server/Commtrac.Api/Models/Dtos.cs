@@ -1392,7 +1392,13 @@ public record PublicRunSummaryDto(
     string? BusinessLogoBase64 = null,
     string? CustomerLogoBase64 = null,
     string? CompanyName = null,
-    string? ProductFeaturesJson = null
+    string? ProductFeaturesJson = null,
+    // Whether this token already has an OTP hash (i.e. a code was previously issued for it).
+    // Read-only signal so the frontend can gate the acknowledgement/submit step from the very
+    // first render instead of only after the customer voluntarily triggers a request in this
+    // session — see PublicSignController.GetSummary. Submit's own OTP enforcement (TryValidateOtp)
+    // is unrelated and unchanged: it re-validates independently of anything this flag drives.
+    bool OtpRequired = false
 );
 
 public record PublicSubmitSignatureRequest(
