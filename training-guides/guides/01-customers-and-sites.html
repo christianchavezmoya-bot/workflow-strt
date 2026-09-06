@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Customers &amp; Sites — Strata N-Go Training</title>
+  <link rel="stylesheet" href="../shared/guide.css" />
+</head>
+<body class="read-only">
+  <div class="guide-layout">
+    <nav class="guide-nav">
+      <div class="brand">
+        <img src="../assets/strata-logo.png" alt="Strata N-Go" />
+        <div>
+          <h1>Customers &amp; Sites</h1>
+          <div class="subtitle"><a href="../index.html">← All guides</a></div>
+        </div>
+      </div>
+      <ol>
+        <li><a class="step-link" href="#" data-step="step-1">1. Overview</a></li>
+        <li><a class="step-link" href="#" data-step="step-2">2. Open Admin → Customers</a></li>
+        <li><a class="step-link" href="#" data-step="step-3">3. Create a customer</a></li>
+        <li><a class="step-link" href="#" data-step="step-4">4. Edit customer &amp; logo</a></li>
+        <li><a class="step-link" href="#" data-step="step-5">5. Add sites</a></li>
+        <li><a class="step-link" href="#" data-step="step-6">6. Link to projects</a></li>
+      </ol>
+    </nav>
+
+    <main class="guide-main">
+      <header class="guide-header">
+        <div>
+          <h2>Customers &amp; sites</h2>
+          <p>Create customers in Admin, add physical sites, and understand how they connect to projects and field work.</p>
+        </div>
+        <div class="mode-toggle">
+          <button type="button" data-mode="read">Read</button>
+          <button type="button" data-mode="try">Try it</button>
+        </div>
+      </header>
+
+      <section id="step-1" class="step-panel glass-card">
+        <span class="step-num">Step 1</span>
+        <h3>Overview — why customers and sites matter</h3>
+        <p style="color:var(--text-2);line-height:1.6;">
+          Every external project is tied to a <strong>customer</strong> and usually a <strong>site</strong> (physical location).
+          Customers hold identity (name, industry, logo); sites hold location and contact details used on reports and in the field.
+        </p>
+        <div class="relationship-diagram">
+          <span class="rel-box">Customer</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Site(s)</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Project</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Assets / Inspections</span>
+        </div>
+        <ul>
+          <li><strong>Admin → Customers</strong> — manage customer records and navigate to sites.</li>
+          <li><strong>Cards view</strong> — one card per customer; flip to edit; <em>View Sites</em> opens the sites page.</li>
+          <li><strong>Table view</strong> — site-centric rows; useful when you manage many locations across customers.</li>
+        </ul>
+        <div class="tip">Sites are optional on a project (<em>No site</em>), but linking a site auto-fills location context on reports and helps field teams find the right address.</div>
+      </section>
+
+      <section id="step-2" class="step-panel glass-card">
+        <span class="step-num">Step 2</span>
+        <h3>Navigate to Admin → Customers</h3>
+        <p class="interactive-hint">Try it mode: click highlighted nav items to simulate navigation.</p>
+        <ol>
+          <li>Sign in as an admin or user with customer-management permissions.</li>
+          <li>Open the sidebar and choose <strong>Admin</strong>.</li>
+          <li>Select the <strong>Customers</strong> tab (URL: <code>/admin?tab=customers</code>).</li>
+          <li>Toggle between <strong>Cards</strong> and <strong>Table</strong> view as needed.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Admin</span><span class="mock-chip">Customers tab</span></div>
+          <div class="mock-body">
+            <div class="mock-sidebar-mini">
+              <div class="mock-nav-item">Dashboard</div>
+              <div class="mock-nav-item">Projects</div>
+              <div class="mock-nav-item highlight">Admin</div>
+              <div class="mock-nav-item">Settings</div>
+            </div>
+            <div class="mock-content">
+              <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <span class="mock-chip">Users</span>
+                <span class="mock-chip orange">Customers</span>
+                <span class="mock-chip">Global Offices</span>
+                <span class="mock-chip">Roles</span>
+              </div>
+              <button type="button" class="mock-btn secondary clickable" data-action="nav" data-feedback="You opened Admin → Customers. Use Cards or Table view below.">Simulate: open Customers tab</button>
+              <div class="feedback info"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-3" class="step-panel glass-card">
+        <span class="step-num">Step 3</span>
+        <h3>Create a customer</h3>
+        <p class="interactive-hint">Try it mode: click <strong>New Client</strong> to create a demo customer.</p>
+        <ol>
+          <li>In Cards view, click <strong>New Client</strong>.</li>
+          <li>A new customer card appears with an auto-generated ID (format <code>CUST-…</code>).</li>
+          <li>The card flips to edit mode — enter the customer name and industry.</li>
+          <li>Click <strong>Save</strong> to persist.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Customers — Cards</span></div>
+          <div class="mock-content">
+            <button type="button" class="mock-btn primary pulse clickable" data-action="new-client" data-feedback="Customer created: Acme Mining Corp (CUST-0042). Flip the card to edit details." data-next="step-4">New Client</button>
+            <div class="mock-dialog" style="margin-top:16px;">
+              <h4>New customer card (edit mode)</h4>
+              <div class="mock-field"><label>Customer Name</label><input type="text" value="Acme Mining Corp" readonly /></div>
+              <div class="mock-field"><label>Customer ID</label><input type="text" value="CUST-0042" readonly /></div>
+              <div class="mock-field"><label>Industry</label><input type="text" placeholder="Industry" value="Mining" /></div>
+              <button type="button" class="mock-btn primary clickable" data-action="save" data-feedback="Customer saved successfully.">Save</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-4" class="step-panel glass-card">
+        <span class="step-num">Step 4</span>
+        <h3>Edit customer details &amp; upload logo</h3>
+        <ol>
+          <li>On a customer card, use the edit control to flip the card.</li>
+          <li>Update <strong>Customer Name</strong> and <strong>Industry</strong> as needed.</li>
+          <li>Click the logo area to open <strong>Upload Customer Logo</strong>.</li>
+          <li>Choose shape (<em>No Shape</em>, <em>Round</em>, <em>Rectangular</em>) and adjust size sliders.</li>
+          <li>Upload an image and click <strong>Save</strong>.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-dialog">
+              <h4>Upload Customer Logo</h4>
+              <div class="mock-field"><label>Logo Shape</label>
+                <select><option>No Shape</option><option selected>Round</option><option>Rectangular</option></select>
+              </div>
+              <div class="mock-field"><label>Logo Size</label><input type="range" min="40" max="120" value="80" /></div>
+              <button type="button" class="mock-btn primary clickable" data-action="upload-logo" data-feedback="Logo uploaded. Customer branding will appear on cards and reports.">Upload logo</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-5" class="step-panel glass-card">
+        <span class="step-num">Step 5</span>
+        <h3>Add sites for a customer</h3>
+        <p class="interactive-hint">Try it mode: add a site on the dedicated sites page.</p>
+        <ol>
+          <li>From a customer card, click <strong>View Sites (N)</strong> — opens <code>/admin/customers/:id/sites</code>.</li>
+          <li>Page title: <em>Sites - {customer name}</em>; subtitle explains physical locations.</li>
+          <li>Click <strong>Add New Site</strong>.</li>
+          <li>Fill <strong>Site Name</strong>, <strong>City</strong>, <strong>State</strong>, <strong>Country</strong>, and contact fields.</li>
+          <li>Click <strong>Save</strong> on the site card.</li>
+        </ol>
+        <p style="color:var(--text-2);font-size:0.9rem;">Alternative: in Admin <strong>Table</strong> view, use <strong>New Site</strong> to add a site row and pick the customer from the dropdown.</p>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Sites — Acme Mining Corp</span></div>
+          <div class="mock-content">
+            <p style="color:var(--text-2);font-size:0.85rem;margin:0 0 12px;">Manage physical locations for this customer</p>
+            <button type="button" class="mock-btn primary clickable" data-action="add-site" data-feedback="Site added: North Pit — Brisbane, QLD, Australia. Contact: Jane Smith." data-next="step-6">Add New Site</button>
+            <div class="mock-dialog">
+              <h4>Site card</h4>
+              <div class="mock-field"><label>Site Name</label><input type="text" value="North Pit" /></div>
+              <div class="mock-field"><label>City</label><input type="text" value="Brisbane" /></div>
+              <div class="mock-field"><label>State</label><input type="text" value="QLD" /></div>
+              <div class="mock-field"><label>Country</label><input type="text" value="Australia" /></div>
+              <div class="mock-field"><label>Contact Name</label><input type="text" value="Jane Smith" /></div>
+              <button type="button" class="mock-btn primary clickable" data-action="save-site" data-feedback="Site saved.">Save</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-6" class="step-panel glass-card">
+        <span class="step-num">Step 6</span>
+        <h3>How customers &amp; sites link to projects</h3>
+        <p style="color:var(--text-2);line-height:1.6;">
+          When you create a project (<a href="03-projects.html">see Projects guide</a>), the <strong>Customer</strong> dropdown lists all customers.
+          Selecting a customer auto-fills <strong>Customer ID</strong> and filters the <strong>Site</strong> dropdown to that customer's locations.
+        </p>
+        <ul>
+          <li>Site format in the project form: <code>{Customer} - {Site Name}</code></li>
+          <li>Choosing a site can auto-switch the customer if you picked the site first.</li>
+          <li>If no site exists yet, choose <em>(No site)</em> and add the site in Admin later.</li>
+        </ul>
+        <div class="relationship-diagram">
+          <span class="rel-box">Admin: Customer</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Admin: Site</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Project form: Customer + Site</span>
+        </div>
+        <div class="step-controls">
+          <a class="mock-btn secondary" href="02-catalog-setup.html">Next: Catalog setup →</a>
+          <a class="mock-btn ghost" href="../pdf/01-customers-and-sites.pdf">Download PDF</a>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="../shared/guide.js"></script>
+</body>
+</html>

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Projects — Strata N-Go Training</title>
+  <link rel="stylesheet" href="../shared/guide.css" />
+</head>
+<body class="read-only">
+  <div class="guide-layout">
+    <nav class="guide-nav">
+      <div class="brand">
+        <img src="../assets/strata-logo.png" alt="Strata N-Go" />
+        <div>
+          <h1>Projects</h1>
+          <div class="subtitle"><a href="../index.html">← All guides</a></div>
+        </div>
+      </div>
+      <ol>
+        <li><a class="step-link" href="#" data-step="step-1">1. Overview</a></li>
+        <li><a class="step-link" href="#" data-step="step-2">2. Create a project</a></li>
+        <li><a class="step-link" href="#" data-step="step-3">3. Customer &amp; site</a></li>
+        <li><a class="step-link" href="#" data-step="step-4">4. Project type</a></li>
+        <li><a class="step-link" href="#" data-step="step-5">5. Workflow mode</a></li>
+        <li><a class="step-link" href="#" data-step="step-6">6. Product &amp; team</a></li>
+        <li><a class="step-link" href="#" data-step="step-7">7. Status &amp; submit</a></li>
+      </ol>
+    </nav>
+
+    <main class="guide-main">
+      <header class="guide-header">
+        <div>
+          <h2>Projects &amp; project types</h2>
+          <p>Installation, inspection, and mixed projects — how they connect to customers, sites, products, and field workflows.</p>
+        </div>
+        <div class="mode-toggle">
+          <button type="button" data-mode="read">Read</button>
+          <button type="button" data-mode="try">Try it</button>
+        </div>
+      </header>
+
+      <section id="step-1" class="step-panel glass-card">
+        <span class="step-num">Step 1</span>
+        <h3>What a project ties together</h3>
+        <div class="relationship-diagram">
+          <span class="rel-box">Customer + Site</span><span class="rel-arrow">+</span>
+          <span class="rel-box">Product</span><span class="rel-arrow">+</span>
+          <span class="rel-box">Team</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Project</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Assets / Inspections</span>
+        </div>
+        <p style="color:var(--text-2);line-height:1.6;">A project is the container for field work. Two independent axes define behaviour:</p>
+        <ul>
+          <li><strong>Project type</strong> — <em>Internal</em> vs <em>External</em> (approval workflow).</li>
+          <li><strong>Workflow mode</strong> — <em>Installation only</em>, <em>Inspection only</em>, or <em>Both (mixed)</em> (which modules appear on the project detail page).</li>
+        </ul>
+        <p style="color:var(--text-2);">Routes: list <code>/projects</code>, create <code>/projects/new</code>, detail <code>/projects/:id</code>.</p>
+      </section>
+
+      <section id="step-2" class="step-panel glass-card">
+        <span class="step-num">Step 2</span>
+        <h3>Start creating a project</h3>
+        <p class="interactive-hint">Try it mode: open the create-project form.</p>
+        <ol>
+          <li>Sidebar → <strong>Projects</strong>.</li>
+          <li>Click <strong>Create project</strong> (navigates to <code>/projects/new</code>).</li>
+          <li>Page title: <em>Create project</em> — subtitle explains identity, scheduling, and installation configuration.</li>
+          <li>Use <strong>Save draft</strong> to persist without submitting, or <strong>Submit project</strong> when ready.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Projects</span></div>
+          <div class="mock-body">
+            <div class="mock-sidebar-mini">
+              <div class="mock-nav-item">Dashboard</div>
+              <div class="mock-nav-item highlight">Projects</div>
+              <div class="mock-nav-item">Workflows</div>
+            </div>
+            <div class="mock-content">
+              <button type="button" class="mock-btn primary pulse clickable" data-action="create-project" data-feedback="Create project form opened." data-next="step-3">Create project</button>
+              <div class="feedback ok"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-3" class="step-panel glass-card">
+        <span class="step-num">Step 3</span>
+        <h3>Customer &amp; site selection</h3>
+        <ol>
+          <li><strong>Customer</strong> — dropdown: <em>Select existing customer</em>. Auto-fills <strong>Customer ID</strong> (read-only).</li>
+          <li><strong>Site</strong> — filtered by customer; format <code>{Customer} - {Site Name}</code>; or <em>(No site)</em>.</li>
+          <li>Also capture <strong>Job Number</strong>, <strong>Purchase Order Number</strong>, <strong>Office</strong>, <strong>Project Time Zone</strong>.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-field"><label>Customer</label>
+              <select><option>Select existing customer</option><option selected>Acme Mining Corp</option></select>
+            </div>
+            <div class="mock-field"><label>Customer ID</label><input type="text" value="CUST-0042" readonly /></div>
+            <div class="mock-field"><label>Site</label>
+              <select><option>(No site)</option><option selected>Acme Mining Corp - North Pit</option></select>
+            </div>
+            <div class="mock-field"><label>Job Number</label><input type="text" value="JOB-2026-118" /></div>
+            <button type="button" class="mock-btn secondary clickable" data-action="link-customer" data-feedback="Customer and site linked. Product and workflow mode come next.">Confirm customer &amp; site</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-4" class="step-panel glass-card">
+        <span class="step-num">Step 4</span>
+        <h3>Project type — Internal vs External</h3>
+        <table class="mock-table">
+          <thead><tr><th>Type</th><th>Behaviour</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Internal</strong></td><td>Skips approval; work can begin once the project is in progress.</td></tr>
+            <tr><td><strong>External</strong></td><td>Includes <strong>Pending Approval</strong> state; requires approval before execution.</td></tr>
+          </tbody>
+        </table>
+        <p style="color:var(--text-2);font-size:0.9rem;margin-top:12px;">External projects show an info alert about the approval workflow. When approved, set <strong>Approval Decision</strong> to <em>Approved</em> or <em>Rejected</em>.</p>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <label style="display:block;margin-bottom:8px;color:var(--text-2);font-size:0.85rem;">
+              <input type="radio" name="ptype" checked /> Internal — skips approval
+            </label>
+            <label style="display:block;color:var(--text-2);font-size:0.85rem;">
+              <input type="radio" name="ptype" /> External — Pending Approval workflow
+            </label>
+            <button type="button" class="mock-btn secondary clickable" data-action="set-type" data-feedback="Project type set to Internal." data-next="step-5">Apply project type</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-5" class="step-panel glass-card">
+        <span class="step-num">Step 5</span>
+        <h3>Workflow mode — installation, inspection, or mixed</h3>
+        <p style="color:var(--text-2);">Controls which modules are visible on the project detail page.</p>
+        <table class="mock-table">
+          <thead><tr><th>Mode</th><th>UI label</th><th>Use when</th></tr></thead>
+          <tbody>
+            <tr><td><code>INSTALLATION_ONLY</code></td><td><strong>Installation only</strong></td><td>New installs, commissioning, asset creation from workflows.</td></tr>
+            <tr><td><code>INSPECTION_ONLY</code></td><td><strong>Inspection only</strong></td><td>Recurring checks; uses project assets and inspection runs; no installation workspace sections.</td></tr>
+            <tr><td><code>MIXED</code></td><td><strong>Both (mixed)</strong></td><td>Projects needing both install and inspect capabilities on one site.</td></tr>
+          </tbody>
+        </table>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-field"><label>Workflow mode</label>
+              <select id="wf-mode">
+                <option value="INSTALLATION_ONLY">Installation only</option>
+                <option value="INSPECTION_ONLY">Inspection only</option>
+                <option value="MIXED">Both (mixed)</option>
+              </select>
+            </div>
+            <button type="button" class="mock-btn secondary clickable" data-action="set-mode" data-feedback="Workflow mode saved. Project detail will show matching modules." data-next="step-6">Set workflow mode</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+        <div class="tip">Inspection-only projects still need a product (for workflow assignment) but hide installation-specific workspace UI.</div>
+      </section>
+
+      <section id="step-6" class="step-panel glass-card">
+        <span class="step-num">Step 6</span>
+        <h3>Product &amp; project team members</h3>
+        <ol>
+          <li><strong>Product name</strong> — select the primary product from Settings catalog (e.g. HA-Coal Controller). Determines available workflows.</li>
+          <li><strong>Project Manager</strong> — single user responsible for the project.</li>
+          <li><strong>Project Team Members</strong> — multi-select active users. These names appear in workflow <em>User select (project team)</em> steps at run time.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-field"><label>Product name</label>
+              <select><option>Select a product</option><option selected>HA-Coal Controller</option><option>AIM-100</option><option>Chambers</option></select>
+            </div>
+            <div class="mock-field"><label>Project Manager</label>
+              <select><option selected>Chris PM</option></select>
+            </div>
+            <div class="mock-field"><label>Project Team Members</label>
+              <select multiple style="height:72px;">
+                <option selected>Alex Technician</option>
+                <option selected>Sam Inspector</option>
+                <option>Jordan Field</option>
+              </select>
+            </div>
+            <p style="color:var(--text-2);font-size:0.8rem;">Nominate users who can be selected in workflow team-member steps.</p>
+            <button type="button" class="mock-btn secondary clickable" data-action="set-team" data-feedback="Product HA-Coal and 2 team members assigned." data-next="step-7">Save product &amp; team</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-7" class="step-panel glass-card">
+        <span class="step-num">Step 7</span>
+        <h3>Status lifecycle &amp; submit</h3>
+        <p style="color:var(--text-2);">Typical status values:</p>
+        <p><span class="mock-chip">Draft</span> <span class="mock-chip">In Planning</span> <span class="mock-chip orange">Pending Approval</span> <span class="mock-chip">Approved</span> <span class="mock-chip">In Progress</span> <span class="mock-chip">On Hold</span> <span class="mock-chip">Completed</span> <span class="mock-chip">Closed</span></p>
+        <ul>
+          <li><strong>Save draft</strong> — keep editing without advancing status.</li>
+          <li><strong>Submit project</strong> — finalise creation; external projects may enter Pending Approval.</li>
+          <li>After save, optionally <strong>Copy assets from an existing project</strong> via the clone dialog.</li>
+          <li>Assign workflows to assets from the project detail page (see Workflows guide).</li>
+        </ul>
+        <div class="step-controls">
+          <button type="button" class="mock-btn primary clickable" data-action="submit" data-feedback="Project submitted — status In Planning. Assign workflows from project detail.">Submit project (demo)</button>
+          <a class="mock-btn secondary" href="04-workflows-builder.html">Next: Workflows →</a>
+          <a class="mock-btn ghost" href="../pdf/03-projects.pdf">Download PDF</a>
+        </div>
+        <div class="feedback ok"></div>
+      </section>
+    </main>
+  </div>
+  <script src="../shared/guide.js"></script>
+</body>
+</html>

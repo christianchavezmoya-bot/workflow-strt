@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Workflows &amp; Builder — Strata N-Go Training</title>
+  <link rel="stylesheet" href="../shared/guide.css" />
+</head>
+<body class="read-only">
+  <div class="guide-layout">
+    <nav class="guide-nav">
+      <div class="brand">
+        <img src="../assets/strata-logo.png" alt="Strata N-Go" />
+        <div>
+          <h1>Workflows</h1>
+          <div class="subtitle"><a href="../index.html">← All guides</a></div>
+        </div>
+      </div>
+      <ol>
+        <li><a class="step-link" href="#" data-step="step-1">1. Overview</a></li>
+        <li><a class="step-link" href="#" data-step="step-2">2. Create a workflow</a></li>
+        <li><a class="step-link" href="#" data-step="step-3">3. Builder &amp; steps</a></li>
+        <li><a class="step-link" href="#" data-step="step-4">4. Photos required/optional</a></li>
+        <li><a class="step-link" href="#" data-step="step-5">5. Project team selects</a></li>
+        <li><a class="step-link" href="#" data-step="step-6">6. Features &amp; quantities</a></li>
+        <li><a class="step-link" href="#" data-step="step-7">7. Publish &amp; assign</a></li>
+      </ol>
+    </nav>
+
+    <main class="guide-main">
+      <header class="guide-header">
+        <div>
+          <h2>Workflows &amp; builder</h2>
+          <p>Author work instructions, configure mandatory photos, team selects, and feature capture — then publish to the field.</p>
+        </div>
+        <div class="mode-toggle">
+          <button type="button" data-mode="read">Read</button>
+          <button type="button" data-mode="try">Try it</button>
+        </div>
+      </header>
+
+      <section id="step-1" class="step-panel glass-card">
+        <span class="step-num">Step 1</span>
+        <h3>How workflows connect to the catalog and projects</h3>
+        <div class="relationship-diagram">
+          <span class="rel-box">Product</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Workflow config</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Published workflow</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Asset run</span>
+        </div>
+        <ul>
+          <li>Sidebar label: <strong>Workflows</strong> — route <code>/work-instructions</code>.</li>
+          <li>One product tab per catalog product; workflows are scoped to that product.</li>
+          <li><strong>Workflow Type</strong> (from Settings) labels each config — Installation, Inspection, etc.</li>
+          <li><strong>Features</strong> linked to the product drive installed-feature quantities and BOM in the builder.</li>
+          <li><strong>Project team members</strong> nominated on the project populate <em>User select</em> inputs at run time.</li>
+        </ul>
+      </section>
+
+      <section id="step-2" class="step-panel glass-card">
+        <span class="step-num">Step 2</span>
+        <h3>Create a new workflow</h3>
+        <p class="interactive-hint">Try it mode: create a draft workflow for a product.</p>
+        <ol>
+          <li>Open <strong>Workflows</strong> → select a product tab (e.g. HA-Coal Controller).</li>
+          <li>Click <strong>+ New Workflow</strong>.</li>
+          <li>Enter <strong>Workflow Name</strong>, <strong>Workflow Type</strong>, <strong>Description</strong>.</li>
+          <li>Set <strong>Installed Features</strong> quantities (0 = not included).</li>
+          <li>Click <strong>Create Draft</strong> — status <span class="mock-chip orange">Draft</span>.</li>
+          <li>Open <strong>Builder</strong> from the list row to add steps.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Workflows — HA-Coal Controller</span><span class="mock-chip">List</span><span class="mock-chip orange">Builder</span></div>
+          <div class="mock-content">
+            <div class="mock-dialog">
+              <h4>New Workflow</h4>
+              <div class="mock-field"><label>Workflow Name</label><input type="text" placeholder="e.g. AIM-100 Front Camera Install" value="HA-Coal Zone Install" /></div>
+              <div class="mock-field"><label>Workflow Type</label>
+                <select><option>Unspecified</option><option selected>Installation</option><option>Inspection</option></select>
+              </div>
+              <div class="mock-field"><label>Description</label><textarea rows="2">Standard zone controller installation</textarea></div>
+              <p style="font-size:0.8rem;color:var(--text-2);">Installed Features: Zone Controller ×1, RF Antenna ×2</p>
+              <button type="button" class="mock-btn primary clickable" data-action="create-draft" data-feedback="Draft created. Open Builder to add steps." data-next="step-3">Create Draft</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-3" class="step-panel glass-card">
+        <span class="step-num">Step 3</span>
+        <h3>Builder — add and configure steps</h3>
+        <p style="color:var(--text-2);">Builder toolbar: <strong>New Workflow</strong>, <strong>Run</strong> (preview), <strong>Publish</strong>, Export/Import JSON, <strong>Reset</strong>.</p>
+        <p><strong>Step types</strong> (when adding a step):</p>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+          <span class="mock-chip">Preparation / Permits</span>
+          <span class="mock-chip">Installation</span>
+          <span class="mock-chip">Data Collection</span>
+          <span class="mock-chip">Test &amp; Acceptance</span>
+          <span class="mock-chip">Final Inspection</span>
+          <span class="mock-chip">Return to Service</span>
+          <span class="mock-chip">Custom</span>
+        </div>
+        <p style="color:var(--text-2);">Each step has sub-tabs: <strong>Decisions</strong>, <strong>Inputs</strong>, <strong>Content</strong>, <strong>Capture</strong>.</p>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Builder — HA-Coal Zone Install</span><span class="mock-chip">Saved · 4 steps</span></div>
+          <div class="mock-body">
+            <div class="mock-sidebar-mini" style="width:140px;">
+              <div style="font-size:0.75rem;color:var(--text-2);margin-bottom:6px;">Steps</div>
+              <div class="mock-nav-item highlight">1. Site prep</div>
+              <div class="mock-nav-item">2. Mount controller</div>
+              <div class="mock-nav-item">3. RF antenna install</div>
+              <div class="mock-nav-item">4. Final test</div>
+              <button type="button" class="mock-btn ghost clickable" style="width:100%;margin-top:8px;font-size:0.75rem;" data-action="add-step" data-feedback="Step added: Custom — configure inputs in the Inputs tab.">Add step</button>
+            </div>
+            <div class="mock-content">
+              <div style="display:flex;gap:8px;margin-bottom:12px;">
+                <span class="mock-chip orange">Inputs</span><span class="mock-chip">Content</span><span class="mock-chip">Capture</span>
+              </div>
+              <p style="font-size:0.85rem;color:var(--text-2);">Add inputs: Text, Number, Choice, Checkbox, Photo, Video, Signature, Note, <strong>User select (project team)</strong>.</p>
+              <div class="feedback ok"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-4" class="step-panel glass-card">
+        <span class="step-num">Step 4</span>
+        <h3>Photos — mandatory vs optional</h3>
+        <p style="color:var(--text-2);">There are two distinct photo mechanisms:</p>
+        <table class="mock-table">
+          <thead><tr><th>Mechanism</th><th>Where</th><th>Required?</th></tr></thead>
+          <tbody>
+            <tr><td><strong>Photo capture input</strong></td><td>Inputs tab → type Photo</td><td>Per-input toggle: <strong>Required</strong> / <strong>Optional</strong></td></tr>
+            <tr><td><strong>Reference media</strong></td><td>Content tab → Media library</td><td>Reference only — not validated at run time</td></tr>
+            <tr><td><strong>Capture fields</strong></td><td>Capture tab (structured as-built)</td><td>Separate Required/Optional toggle per field</td></tr>
+          </tbody>
+        </table>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-dialog">
+              <h4>Add an input — Photo capture</h4>
+              <div class="mock-field"><label>Label</label><input type="text" value="Pre-installation site photo" /></div>
+              <div class="mock-field"><label>Required</label>
+                <select><option selected>Required</option><option>Optional</option></select>
+              </div>
+              <button type="button" class="mock-btn primary clickable" data-action="add-photo-req" data-feedback="Required photo input added. Runner will block completion until photo is captured.">Add required photo</button>
+            </div>
+            <div class="mock-dialog" style="margin-top:12px;">
+              <h4>Add an input — Photo capture</h4>
+              <div class="mock-field"><label>Label</label><input type="text" value="Additional context photo" /></div>
+              <div class="mock-field"><label>Required</label>
+                <select><option>Required</option><option selected>Optional</option></select>
+              </div>
+              <button type="button" class="mock-btn secondary clickable" data-action="add-photo-opt" data-feedback="Optional photo added. Field teams may skip without blocking completion.">Add optional photo</button>
+            </div>
+            <p style="font-size:0.85rem;color:var(--text-2);margin-top:12px;">At run time, missing required photos show <em>Photo missing</em>, <em>Review Missing Photos</em>, and <em>Add Missing Photos</em>.</p>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-5" class="step-panel glass-card">
+        <span class="step-num">Step 5</span>
+        <h3>User select — project team members</h3>
+        <ol>
+          <li>On the project form, nominate users under <strong>Project Team Members</strong> (see Projects guide).</li>
+          <li>In the builder, add input type <strong>User select (project team)</strong>.</li>
+          <li>Default labels vary by workflow type: <em>Installed By</em> (install), <em>Inspected By</em> (inspect), or <em>Team Member</em>.</li>
+          <li>At run time, dropdown lists only nominated team members; falls back to all users if empty.</li>
+          <li>Set Required/Optional like any other input.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-dialog">
+              <h4>Input — User select (project team)</h4>
+              <div class="mock-field"><label>Label</label><input type="text" value="Installed By" /></div>
+              <div class="mock-field"><label>Required</label><select><option selected>Required</option></select></div>
+              <p style="font-size:0.8rem;color:var(--text-2);">Runner options from project team: Alex Technician, Sam Inspector</p>
+              <button type="button" class="mock-btn primary clickable" data-action="add-user-select" data-feedback="User select added. Only project team members appear in the runner dropdown." data-next="step-6">Add team select</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-6" class="step-panel glass-card">
+        <span class="step-num">Step 6</span>
+        <h3>Features, quantities &amp; BOM</h3>
+        <p style="color:var(--text-2);">Three layers connect features to a workflow run:</p>
+        <ol>
+          <li><strong>Catalog</strong> — features linked to product in Settings → Products.</li>
+          <li><strong>Workflow create / Installed Features panel</strong> — set quantity per feature (0 = excluded).</li>
+          <li><strong>Builder tabs</strong> — <em>Features (N)</em> and <em>BOM (N)</em> for dependency inclusion per step.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <p><strong>Installed Features</strong></p>
+            <table class="mock-table">
+              <thead><tr><th>Feature</th><th>Qty</th></tr></thead>
+              <tbody>
+                <tr><td>Zone Controller Module</td><td>1</td></tr>
+                <tr><td>RF Antenna</td><td>2</td></tr>
+                <tr><td>Power Supply</td><td>1</td></tr>
+              </tbody>
+            </table>
+            <div style="margin-top:12px;display:flex;gap:8px;">
+              <span class="mock-chip">Preview</span><span class="mock-chip orange">BOM (5)</span><span class="mock-chip">Features (3)</span>
+            </div>
+            <button type="button" class="mock-btn secondary clickable" data-action="set-features" data-feedback="Feature quantities saved. Installation steps can bind to specific feature units." data-next="step-7">Save feature quantities</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-7" class="step-panel glass-card">
+        <span class="step-num">Step 7</span>
+        <h3>Publish and assign to assets</h3>
+        <ol>
+          <li>In Builder, click <strong>Publish</strong> → confirm name, type, and description.</li>
+          <li>Published workflows are <strong>locked</strong> and assignable to project assets.</li>
+          <li>Status changes from <span class="mock-chip orange">Draft</span> to <span class="mock-chip">Published</span>.</li>
+          <li>From project detail, assign the published workflow to an asset; field users run it from the mobile or web runner.</li>
+          <li>Use <strong>Run</strong> in builder to preview before publishing.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-dialog">
+              <h4>Publish Workflow</h4>
+              <div class="mock-field"><label>Workflow Name</label><input type="text" value="HA-Coal Zone Install" /></div>
+              <div class="mock-field"><label>Workflow Type</label><select><option selected>Installation</option></select></div>
+              <p style="font-size:0.8rem;color:var(--accent);">Published workflows cannot be edited — create a new draft to change steps.</p>
+              <button type="button" class="mock-btn primary clickable" data-action="publish" data-feedback="Workflow published. Assign it to assets on the project detail page.">Confirm &amp; Publish</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+        <div class="step-controls">
+          <a class="mock-btn secondary" href="../index.html">← Back to all guides</a>
+          <a class="mock-btn ghost" href="../pdf/04-workflows-builder.pdf">Download PDF</a>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="../shared/guide.js"></script>
+</body>
+</html>

@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Strata N-Go Training Guides</title>
+  <link rel="stylesheet" href="shared/guide.css" />
+</head>
+<body class="read-only">
+  <div class="guide-layout">
+    <nav class="guide-nav">
+      <div class="brand">
+        <img src="assets/strata-logo.png" alt="Strata N-Go" />
+        <div>
+          <h1>Strata N-Go</h1>
+          <div class="subtitle">Training guides</div>
+        </div>
+      </div>
+      <p style="color:var(--text-2);font-size:0.85rem;line-height:1.5;">
+        Standalone documentation — not part of the live app. Open any guide in your browser or download the PDF.
+      </p>
+    </nav>
+    <main class="guide-main">
+      <header class="guide-header">
+        <div>
+          <h2>How-to guides</h2>
+          <p>Step-by-step instructions for customers, catalog setup, projects, and workflows. Each guide supports <strong>Read</strong> mode (documentation) and <strong>Try it</strong> mode (interactive UI recreation).</p>
+        </div>
+      </header>
+
+      <div class="hub-grid">
+        <a class="hub-card" href="guides/01-customers-and-sites.html" style="text-decoration:none;color:inherit;">
+          <h3>1 · Customers &amp; sites</h3>
+          <p>Create customers in Admin, add physical sites, and understand how they link to projects.</p>
+          <span class="mock-chip">Admin · Customers</span>
+        </a>
+        <a class="hub-card" href="guides/02-catalog-setup.html" style="text-decoration:none;color:inherit;">
+          <h3>2 · Divisions, products &amp; features</h3>
+          <p>Build the product catalog and feature library that workflows and projects depend on.</p>
+          <span class="mock-chip">Settings</span>
+        </a>
+        <a class="hub-card" href="guides/03-projects.html" style="text-decoration:none;color:inherit;">
+          <h3>3 · Projects &amp; project types</h3>
+          <p>Installation, inspection, and mixed projects — team members, products, and workflow modes.</p>
+          <span class="mock-chip">Projects</span>
+        </a>
+        <a class="hub-card" href="guides/04-workflows-builder.html" style="text-decoration:none;color:inherit;">
+          <h3>4 · Workflows &amp; builder</h3>
+          <p>Author work instructions, mandatory photos, team selects, and publish to the field.</p>
+          <span class="mock-chip">Workflows</span>
+        </a>
+      </div>
+
+      <div class="glass-card" style="margin-top:24px;">
+        <h3 style="margin:0 0 8px;font-family:Sora,sans-serif;">PDF versions</h3>
+        <p style="color:var(--text-2);margin:0 0 12px;">Print-ready PDFs live in <code>training-guides/pdf/</code>. Regenerate with <code>node training-guides/scripts/generate-pdfs.mjs</code> from the repo root.</p>
+        <ul style="color:var(--text-2);margin:0;">
+          <li><a href="pdf/01-customers-and-sites.pdf">01-customers-and-sites.pdf</a></li>
+          <li><a href="pdf/02-catalog-setup.pdf">02-catalog-setup.pdf</a></li>
+          <li><a href="pdf/03-projects.pdf">03-projects.pdf</a></li>
+          <li><a href="pdf/04-workflows-builder.pdf">04-workflows-builder.pdf</a></li>
+        </ul>
+      </div>
+
+      <div class="glass-card">
+        <h3 style="margin:0 0 8px;font-family:Sora,sans-serif;">Relationship overview</h3>
+        <div class="relationship-diagram">
+          <span class="rel-box">Customer</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Site</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Project</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Assets / Inspections</span>
+        </div>
+        <div class="relationship-diagram">
+          <span class="rel-box">Division</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Product</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Features</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Workflow</span>
+        </div>
+      </div>
+    </main>
+  </div>
+</body>
+</html>

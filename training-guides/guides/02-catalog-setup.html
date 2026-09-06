@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Catalog Setup — Strata N-Go Training</title>
+  <link rel="stylesheet" href="../shared/guide.css" />
+</head>
+<body class="read-only">
+  <div class="guide-layout">
+    <nav class="guide-nav">
+      <div class="brand">
+        <img src="../assets/strata-logo.png" alt="Strata N-Go" />
+        <div>
+          <h1>Catalog setup</h1>
+          <div class="subtitle"><a href="../index.html">← All guides</a></div>
+        </div>
+      </div>
+      <ol>
+        <li><a class="step-link" href="#" data-step="step-1">1. Overview</a></li>
+        <li><a class="step-link" href="#" data-step="step-2">2. Divisions</a></li>
+        <li><a class="step-link" href="#" data-step="step-3">3. Products</a></li>
+        <li><a class="step-link" href="#" data-step="step-4">4. Features library</a></li>
+        <li><a class="step-link" href="#" data-step="step-5">5. Link features to products</a></li>
+        <li><a class="step-link" href="#" data-step="step-6">6. Workflow types</a></li>
+        <li><a class="step-link" href="#" data-step="step-7">7. Feeds workflows</a></li>
+      </ol>
+    </nav>
+
+    <main class="guide-main">
+      <header class="guide-header">
+        <div>
+          <h2>Divisions, products &amp; features</h2>
+          <p>Build the product catalog that projects and workflows depend on. All catalog admin lives under <strong>Settings</strong>, not Admin.</p>
+        </div>
+        <div class="mode-toggle">
+          <button type="button" data-mode="read">Read</button>
+          <button type="button" data-mode="try">Try it</button>
+        </div>
+      </header>
+
+      <section id="step-1" class="step-panel glass-card">
+        <span class="step-num">Step 1</span>
+        <h3>Catalog hierarchy</h3>
+        <div class="relationship-diagram">
+          <span class="rel-box">Division</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Product</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Features (linked)</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Workflow</span>
+        </div>
+        <ul>
+          <li><strong>Division</strong> — top-level business unit (e.g. Strata AI, Strata Protect).</li>
+          <li><strong>Product</strong> — equipment type (e.g. AIM-100, HA-Coal); optionally assigned to a division.</li>
+          <li><strong>Feature</strong> — reusable parts/components in the global library; linked to one or more products.</li>
+          <li><strong>Workflow Type</strong> — category label (Installation, Inspection, Commissioning) used when publishing workflows.</li>
+        </ul>
+        <div class="tip">Settings tabs: <code>?tab=divisions</code>, <code>?tab=products</code>, <code>?tab=features</code>, <code>?tab=workflow-types</code></div>
+      </section>
+
+      <section id="step-2" class="step-panel glass-card">
+        <span class="step-num">Step 2</span>
+        <h3>Create a division</h3>
+        <p class="interactive-hint">Try it mode: add a division in the mock Settings panel.</p>
+        <ol>
+          <li>Sidebar → <strong>Settings</strong> → <strong>Divisions</strong> tab.</li>
+          <li>Click <strong>Add division</strong>.</li>
+          <li>Enter <strong>Name</strong> (required), optional <strong>Description</strong>, and <strong>Sort Order</strong>.</li>
+          <li>Save — division appears as <span class="mock-chip">Active</span> in the table.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Settings — Divisions</span></div>
+          <div class="mock-content">
+            <p style="color:var(--text-2);font-size:0.85rem;">Manage top-level business divisions (e.g. Strata AI, Strata Connect, Strata Protect).</p>
+            <button type="button" class="mock-btn primary clickable" data-action="add-division" data-feedback="Division added: Strata Protect (Active).">Add division</button>
+            <table class="mock-table" style="margin-top:12px;">
+              <thead><tr><th>Name</th><th>Description</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr><td>Strata AI</td><td>AI monitoring products</td><td><span class="mock-chip">Active</span></td></tr>
+                <tr><td>Strata Protect</td><td>Chamber &amp; refuge systems</td><td><span class="mock-chip">Active</span></td></tr>
+              </tbody>
+            </table>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-3" class="step-panel glass-card">
+        <span class="step-num">Step 3</span>
+        <h3>Create a product</h3>
+        <ol>
+          <li>Settings → <strong>Products</strong> tab (<code>?tab=products</code>).</li>
+          <li>Click <strong>Add product</strong>.</li>
+          <li>Enter <strong>Name</strong> (e.g. <em>AIM-100 Camera</em>), optional description.</li>
+          <li>Select a <strong>Division</strong> or leave as <em>No division</em>.</li>
+          <li>Save — product appears in the catalog table.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <div class="mock-dialog">
+              <h4>Add product</h4>
+              <div class="mock-field"><label>Name *</label><input type="text" placeholder="e.g. AIM-100 Camera, NVR-4000" value="HA-Coal Controller" /></div>
+              <div class="mock-field"><label>Description (optional)</label><textarea rows="2">HazardAvert coal zone controller</textarea></div>
+              <div class="mock-field"><label>Division</label>
+                <select><option>No division</option><option selected>Strata Protect</option><option>Strata AI</option></select>
+              </div>
+              <button type="button" class="mock-btn primary clickable" data-action="add-product" data-feedback="Product HA-Coal Controller created." data-next="step-4">Add product</button>
+            </div>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-4" class="step-panel glass-card">
+        <span class="step-num">Step 4</span>
+        <h3>Build the feature library</h3>
+        <ol>
+          <li>Settings → <strong>Features</strong> tab.</li>
+          <li>Click <strong>Add feature</strong> (or <strong>Import</strong> from CSV/Excel).</li>
+          <li>Set <strong>Name / Part Number</strong>, <strong>Type</strong> (text, number, component, etc.).</li>
+          <li>Mark as <strong>Inventory item</strong> or <strong>Non-inventory</strong>.</li>
+          <li>For inventory items, configure capture fields (serial, firmware, IP, etc.).</li>
+          <li>Optionally link to products at creation time.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-topbar"><span class="title">Feature Library</span></div>
+          <div class="mock-content">
+            <div class="mock-field"><label>Search</label><input type="text" placeholder="Search name, brand, supplier, part #…" /></div>
+            <table class="mock-table">
+              <thead><tr><th>Name</th><th>Type</th><th>Inventory</th><th>Products</th></tr></thead>
+              <tbody>
+                <tr><td>Zone Controller Module</td><td>component</td><td><span class="mock-chip">Inventory</span></td><td>HA-Coal</td></tr>
+                <tr><td>RF Antenna</td><td>component</td><td><span class="mock-chip">Inventory</span></td><td>HA-Coal</td></tr>
+                <tr><td>Pre-install checklist</td><td>text</td><td>Non-inventory</td><td>—</td></tr>
+              </tbody>
+            </table>
+            <button type="button" class="mock-btn primary clickable" data-action="add-feature" data-feedback="Feature added to library. Link it to products in the next step.">Add feature</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-5" class="step-panel glass-card">
+        <span class="step-num">Step 5</span>
+        <h3>Link features to products</h3>
+        <p class="interactive-hint">Try it mode: expand a product row and link a feature.</p>
+        <ol>
+          <li>In Settings → Products, expand a product row.</li>
+          <li>Section <strong>LINKED FEATURES (N)</strong> shows current links.</li>
+          <li>Click <strong>Link feature</strong> and pick from the global library.</li>
+          <li>Remove a link via the chip delete control on a linked feature.</li>
+          <li>Features can also show linked products in the Features tab <strong>Products</strong> column.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <p><strong>HA-Coal Controller</strong> — <span class="mock-chip orange">LINKED FEATURES (3)</span></p>
+            <div style="margin:8px 0;">
+              <span class="mock-chip">Zone Controller Module ×</span>
+              <span class="mock-chip">RF Antenna ×</span>
+              <span class="mock-chip">Power Supply ×</span>
+            </div>
+            <button type="button" class="mock-btn secondary clickable" data-action="link-feature" data-feedback="RF Repeater linked to HA-Coal Controller. Workflow builder will see 4 inventory features." data-next="step-6">Link feature</button>
+            <div class="feedback ok"></div>
+          </div>
+        </div>
+        <div class="tip">Dependencies (sub-parts per feature) are configured by expanding a feature row → <strong>DEPENDENCIES</strong> → <strong>Add dependency</strong>.</div>
+      </section>
+
+      <section id="step-6" class="step-panel glass-card">
+        <span class="step-num">Step 6</span>
+        <h3>Workflow types</h3>
+        <ol>
+          <li>Settings → <strong>Workflow Types</strong> tab.</li>
+          <li>Click <strong>Add type</strong>.</li>
+          <li>Enter <strong>Name</strong> (Installation, Inspection, Commissioning), <strong>Icon</strong>, <strong>Sort Order</strong>.</li>
+          <li>Types appear in the workflow create/publish dialogs as <strong>Workflow Type</strong>.</li>
+        </ol>
+        <div class="mock-shell">
+          <div class="mock-content">
+            <table class="mock-table">
+              <thead><tr><th>Name</th><th>Sort</th><th>Status</th></tr></thead>
+              <tbody>
+                <tr><td>Installation</td><td>1</td><td><span class="mock-chip">Active</span></td></tr>
+                <tr><td>Inspection</td><td>2</td><td><span class="mock-chip">Active</span></td></tr>
+                <tr><td>Commissioning</td><td>3</td><td><span class="mock-chip">Active</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section id="step-7" class="step-panel glass-card">
+        <span class="step-num">Step 7</span>
+        <h3>How the catalog feeds workflows &amp; projects</h3>
+        <ul>
+          <li><strong>Projects</strong> pick one primary <strong>Product name</strong> — determines which workflow tab and asset configuration apply.</li>
+          <li><strong>Workflows</strong> (<code>/work-instructions?product=…</code>) are scoped per product; linked features drive BOM and capture fields in the builder.</li>
+          <li><strong>Workflow Type</strong> from Settings labels each published workflow (Installation vs Inspection).</li>
+        </ul>
+        <div class="relationship-diagram">
+          <span class="rel-box">Product</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Project.productIds</span>
+          <span style="margin:0 8px;color:var(--text-2);">|</span>
+          <span class="rel-box">Product</span><span class="rel-arrow">→</span>
+          <span class="rel-box">Workflow configs</span>
+        </div>
+        <div class="step-controls">
+          <a class="mock-btn secondary" href="03-projects.html">Next: Projects →</a>
+          <a class="mock-btn ghost" href="../pdf/02-catalog-setup.pdf">Download PDF</a>
+        </div>
+      </section>
+    </main>
+  </div>
+  <script src="../shared/guide.js"></script>
+</body>
+</html>
