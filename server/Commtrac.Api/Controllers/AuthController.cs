@@ -420,14 +420,18 @@ public class AuthController : ControllerBase
             return NoContent();
         }
 
+        // Resolve the link (and fail safely if trusted config is missing) before persisting
+        // or committing anything, so a failure here leaves no orphaned token in the DB.
+        var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
+        var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
+
         var token = GenerateToken();
-        user.ResetToken = token;
+        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
+
+        user.ResetToken = HashToken(token);
         user.ResetTokenExpiresUtc = DateTime.UtcNow.AddHours(24);
         await _db.SaveChangesAsync();
 
-        var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
-        var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
-        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}";
         await _emailSender.SendPasswordResetAsync(user.Email, link);
         return NoContent();
     }
@@ -436,7 +440,16 @@ public class AuthController : ControllerBase
     [AllowAnonymous]
     public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordRequest request)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.ResetToken == request.Token);
+        var hashedToken = HashToken(request.Token);
+
+        // Tokens issued after this hardening are looked up by hash only. The second
+        // branch exists solely for tokens issued before this release, which were stored
+        // raw — it can only ever match a row still in that legacy (non-hash-length) shape,
+        // so a hash value alone (e.g. read from a DB compromise) can never satisfy it.
+        var user = await _db.Users.FirstOrDefaultAsync(u =>
+            u.ResetToken == hashedToken ||
+            (u.ResetToken != null && u.ResetToken.Length != HashedTokenLength && u.ResetToken == request.Token));
+
         if (user is null || !user.ResetTokenExpiresUtc.HasValue || user.ResetTokenExpiresUtc < DateTime.UtcNow)
         {
             return BadRequest();
@@ -833,6 +846,24 @@ public class AuthController : ControllerBase
         return Convert.ToBase64String(bytes);
     }
 
+    /// <summary>
+    /// Length of a hashed token as stored (SHA-256 hex digest). Used to tell hashed rows
+    /// apart from pre-hardening legacy rows, which stored the raw 44-character base64
+    /// bearer token directly — see <see cref="ResetToken"/> lookup in ResetPassword.
+    /// </summary>
+    private const int HashedTokenLength = 64;
+
+    /// <summary>
+    /// SHA-256 hex digest of a reset/invite bearer token, for storage/lookup only. The
+    /// high-entropy bearer token itself (from GenerateToken) is emailed to the user and
+    /// must never be persisted or logged in this form.
+    /// </summary>
+    private static string HashToken(string token)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
     // ── Session helpers ─────────────────────────────────────────────────
 
     private async Task<SessionEntity> CreateSession(UserEntity user)
@@ -884,6 +915,18 @@ public class AuthController : ControllerBase
             return configured;
         }
 
+        if (!_environment.IsDevelopment())
+        {
+            // Invitation/reset links are security-sensitive and must come from trusted
+            // server configuration only. Never derive one from Origin/Referer/Host —
+            // those are attacker-controlled on an anonymous request. Fail safely instead.
+            throw new InvalidOperationException(
+                "Email:FrontendBaseUrl is not configured for this environment.");
+        }
+
+        // Development-only convenience: local/LAN dev often runs without a fixed
+        // FrontendBaseUrl (native/LAN builds vary the frontend host), so fall back to
+        // the request's own origin to keep invite/reset links usable locally.
         var origin = Request.Headers.Origin.ToString().Trim().TrimEnd('/');
         if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
         {
