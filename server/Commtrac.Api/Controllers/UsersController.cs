@@ -5,9 +5,11 @@ using Commtrac.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 using System.Security.Claims;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
@@ -34,15 +36,18 @@ public class UsersController : ControllerBase
     private readonly AppDbContext _db;
     private readonly IEmailSender _emailSender;
     private readonly NotificationSettingsService _notificationSettings;
+    private readonly IHostEnvironment _environment;
 
     public UsersController(
         AppDbContext db,
         IEmailSender emailSender,
-        NotificationSettingsService notificationSettings)
+        NotificationSettingsService notificationSettings,
+        IHostEnvironment environment)
     {
         _db = db;
         _emailSender = emailSender;
         _notificationSettings = notificationSettings;
+        _environment = environment;
     }
 
     [HttpGet]
@@ -69,9 +74,13 @@ public class UsersController : ControllerBase
             FullName = request.FullName,
             Role = requestedRole,
             Office = request.Office,
-            IsActive = true,
+            // Inactive and unusable until the normal Invite() step issues a real reset
+            // token and the user activates via /api/auth/reset-password — a newly
+            // created account must never be reachable with a shared, source-visible
+            // default password if that follow-up invite is never sent or fails.
+            IsActive = false,
             IsFirstLogin = true,
-            PasswordHash = BCrypt.Net.BCrypt.HashPassword("Temp123!")
+            PasswordHash = BCrypt.Net.BCrypt.HashPassword(GenerateUnusablePassword())
         };
 
         _db.Users.Add(user);
@@ -198,16 +207,20 @@ public class UsersController : ControllerBase
             return NotFound();
         }
 
+        // Resolve the link (and fail safely if trusted config is missing) before persisting
+        // or committing anything, so a failure here leaves no orphaned token in the DB.
+        var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
+        var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
+
         var token = GenerateToken();
-        user.ResetToken = token;
+        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}&invite=true";
+
+        user.ResetToken = HashToken(token);
         user.ResetTokenExpiresUtc = DateTime.UtcNow.AddHours(24);
         user.IsFirstLogin = true;
         user.IsActive = false;
         await _db.SaveChangesAsync();
 
-        var emailSettings = await _notificationSettings.GetEmailSettingsAsync();
-        var baseUrl = ResolveFrontendBaseUrl(emailSettings.FrontendBaseUrl);
-        var link = $"{baseUrl}/reset-password?token={Uri.EscapeDataString(token)}&invite=true";
         await _emailSender.SendInviteAsync(user.Email, link);
         return NoContent();
     }
@@ -285,6 +298,20 @@ public class UsersController : ControllerBase
         return Convert.ToBase64String(bytes);
     }
 
+    /// <summary>SHA-256 hex digest of an invite/reset bearer token, for storage/lookup only. Mirrors AuthController.HashToken.</summary>
+    private static string HashToken(string token)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(hash).ToLowerInvariant();
+    }
+
+    /// <summary>A random, unusable credential for a newly created (not-yet-activated) account. Never emailed, never displayed — the account is IsActive=false until invite activation replaces it via /api/auth/reset-password.</summary>
+    private static string GenerateUnusablePassword()
+    {
+        var bytes = RandomNumberGenerator.GetBytes(32);
+        return Convert.ToBase64String(bytes);
+    }
+
     private async Task<HashSet<string>> GetAllowedRoleNamesAsync()
     {
         var allowedRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -348,6 +375,18 @@ public class UsersController : ControllerBase
             return configured;
         }
 
+        if (!_environment.IsDevelopment())
+        {
+            // Invitation/reset links are security-sensitive and must come from trusted
+            // server configuration only. Never derive one from Origin/Referer/Host —
+            // those are attacker-controlled on an anonymous request. Fail safely instead.
+            throw new InvalidOperationException(
+                "Email:FrontendBaseUrl is not configured for this environment.");
+        }
+
+        // Development-only convenience: local/LAN dev often runs without a fixed
+        // FrontendBaseUrl (native/LAN builds vary the frontend host), so fall back to
+        // the request's own origin to keep invite/reset links usable locally.
         var origin = Request.Headers.Origin.ToString().Trim().TrimEnd('/');
         if (Uri.TryCreate(origin, UriKind.Absolute, out var originUri))
         {
