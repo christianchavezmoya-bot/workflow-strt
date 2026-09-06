@@ -454,6 +454,20 @@ public class AuthController : ControllerBase
         user.IsActive = true;
         user.ResetToken = null;
         user.ResetTokenExpiresUtc = null;
+
+        // A password reset/invite activation must not leave a session an attacker already
+        // holds (e.g. from a compromised account) still valid — otherwise resetting the
+        // password gives the legitimate user a false sense of having regained control.
+        // Same convention as RevokeAllSessions below: mark IsRevoked, never delete rows.
+        // No "current session" to exclude here — the caller is anonymous at this point.
+        var sessionsToRevoke = await _db.Sessions
+            .Where(s => s.UserId == user.Id && !s.IsRevoked)
+            .ToListAsync();
+        foreach (var session in sessionsToRevoke)
+        {
+            session.IsRevoked = true;
+        }
+
         await _db.SaveChangesAsync();
 
         return NoContent();
