@@ -65,6 +65,8 @@ Do **not** start Phase D/F DNS cutover or repoint `www` to production until Phas
 
 ## Mac agent — historical runbook (deploy complete)
 
+> **Historical record — do not follow literally.** This runbook reflects the staging ALB architecture as of Phase C (2026-08-31), which included a manually-created priority-10 custom-domain rule requiring a weight sync after every deploy (see Step 3, "Sync ALB priority-10 weights after deploy"). **That architecture no longer exists.** As of 2026-09-08, the custom domain is a Host-header value directly on ECS-managed rule 44990, and ECS auto-manages traffic weights during every CANARY deployment. Do not perform a priority-10 rule sync for any future deploy — see `CLAUDE_CODE_AWS_HANDOFF.md` → Routing architecture (staging) for the current procedure.
+
 ```
 PHASE C — DEV DNS deploy (DNS C DONE — execute now)
 

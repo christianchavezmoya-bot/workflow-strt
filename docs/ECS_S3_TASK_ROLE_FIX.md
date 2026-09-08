@@ -101,7 +101,7 @@ aws ecs update-service \
 ```
 
 5. Wait for deployment **COMPLETED**, target **Healthy**, `/api/health` → 200.
-6. Sync ALB priority-10 rule if canary tg mismatch recurs (see `CLAUDE_CODE_AWS_HANDOFF.md`).
+6. **(Obsolete — do not perform.)** Rule 10 no longer exists; the custom domain now lives on ECS-managed rule 44990, and ECS manages that rule's weights automatically during every deployment. If a target-group mismatch recurs, investigate the ECS deployment/rule 44990 configuration — see `CLAUDE_CODE_AWS_HANDOFF.md` → Routing architecture (staging). Do not manually edit ALB rules or recreate a priority-10 rule.
 
 ---
 
