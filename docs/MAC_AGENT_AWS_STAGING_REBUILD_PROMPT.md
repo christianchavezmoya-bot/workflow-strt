@@ -16,7 +16,9 @@ You are the **Mac AWS staging rebuild agent** for Commtrac / **Strata NGo**.
 
 ### Your job
 
-Deploy merged `main` to **AWS staging**: new API image to ECR + ECS, new web build to S3/CloudFront if frontend changed, sync ALB priority‑10 rule after ECS deploy, verify health and public links.
+Deploy merged `main` to **AWS staging**: new API image to ECR + ECS, new web build to S3/CloudFront if frontend changed, verify health and public links.
+
+**ALB routing note:** the custom domain (`api.staging.strata-ngo.com`) is a Host-header value directly on ECS-managed rule **44990** — there is no separate priority-10 rule to sync anymore. Do not touch ALB rules or weights (see `CLAUDE_CODE_AWS_HANDOFF.md` → Routing architecture).
 
 **Execute every command yourself.** Use AWS MCP + `--profile strata-agent`. Fill in the report at the end.
 
@@ -132,13 +134,14 @@ aws ecs update-service \
 
 Wait until deployment stable and target **Healthy**.
 
-**ALB:** After every ECS deploy, sync **priority‑10** custom-domain rule weights to match rule **44990** (see handoff — `ModifyRule` on scoped ARN only).
+**ALB (do not touch):** Traffic weighting on rule **44990** is managed automatically by ECS during the native CANARY deployment (baseline → ~95/5 canary → 0/100 full cutover → old task drained). This is normal — **do not manually edit rule 44990's weights or conditions**, and do not create a separate priority-10 custom-domain rule; it was removed, and the custom domain now lives on 44990 as a second Host-header value. If the public custom domain looks unhealthy, investigate the ECS deployment/rule 44990 configuration rather than recreating a duplicate rule. See `CLAUDE_CODE_AWS_HANDOFF.md` → Routing architecture (staging).
 
 | ID | PASS if |
 |----|---------|
 | S1 | Service stable, task Running |
 | S2 | ALB target healthy, `/api/health` 200 |
 | S3 | CloudWatch logs — no fatal startup errors |
+| S4 | Rule 44990 weights settled at steady state (e.g. `100/0`) with no manual edits made |
 
 ---
 

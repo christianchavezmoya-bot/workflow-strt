@@ -83,12 +83,34 @@ Claude **cannot read secret values** — diagnose from config names, logs, and `
 | Secrets | `strata_ngo/staging/app` (refs: `Jwt__Key`, `ConnectionStrings__DefaultConnection`, `SeedAdmin__Password`) — **`Jwt__Key` must be ≥32 UTF-8 bytes** (HS256); API now **fails fast at startup** if too short |
 | CloudWatch | `/aws/ecs/default/commtrac-api-ae2c-219a` |
 | ALB | `ecs-express-gateway-alb-02b54f25` |
-| Healthy TG | `ecs-gateway-tg-189cba27392c2044c` |
+| Target groups (blue/green) | `ecs-gateway-tg-189cba27392c2044c`, `ecs-gateway-tg-ad0f64ab1794c600d` — Express Mode alternates which one is active (weight 100) vs standby (weight 0) on every deploy; **do not delete either one** just because it's temporarily at weight 0 |
 | Health check | HTTP GET **`/api/health`** port 80 → expect **200** (not 401) |
 
 **API URLs:**
 - **Primary (use for phone/web builds):** `https://api.staging.strata-ngo.com/api`
 - **ECS Express hostname (cert mismatch on strict TLS):** `https://co-7c80ff093f614e849c3eb733fb76c42c.ecs.ap-southeast-2.on.aws/api` — ALB cert is for `api.staging.strata-ngo.com` only; `curl` without `-k` fails exit 60. Routing is fine; use custom domain for production-like testing.
+
+---
+
+## Routing architecture (staging) — ECS Express Mode CANARY
+
+**Current authoritative state (verified end-to-end 2026-09-08):**
+
+- `commtrac-api-ae2c` is an **ECS Express Mode** service using the native **CANARY** deployment strategy (`canaryPercent: 5`, `canaryBakeTimeInMinutes: 3`).
+- The public custom domain `api.staging.strata-ngo.com` is a **second Host-header value directly on the ECS-managed ALB listener rule at priority 44990** — alongside the ECS-managed hostname (`co-7c80ff093f614e849c3eb733fb76c42c.ecs.ap-southeast-2.on.aws`).
+- The previous manually-created **priority-10 custom-domain rule no longer exists** — deleted after rule 44990 was confirmed to correctly serve the custom domain.
+- **ECS automatically manages `TargetGroups[].Weight` on rule 44990 during every deployment.** A verified same-release `force-new-deployment` showed the exact progression: baseline `100/0` → canary step `95/5` → full cutover `0/100` → steady state, entirely without manual intervention.
+- **No manual ALB weight synchronization is required or should be performed.** There is only one rule now — nothing to keep "in sync."
+
+**Rules for anyone (human or agent) touching staging ALB/ECS:**
+
+1. **Never manually edit rule 44990's `Conditions` or `Actions`/weights** during a normal deployment. ECS owns this rule's traffic-shifting; a manual edit will race with or corrupt the next CANARY deployment.
+2. **The custom domain must remain a Host-header value on rule 44990.** Do not recreate a separate priority-10 (or any other) rule for the custom domain — that reintroduces the old dual-rule drift problem this migration eliminated.
+3. **Both target groups (`ecs-gateway-tg-189cba27392c2044c` and `ecs-gateway-tg-ad0f64ab1794c600d`) are permanent, expected infrastructure.** ECS Express Mode alternates which one is "active" (weight 100) vs "standby" (weight 0) on every deploy. A target group at weight 0 or with zero registered targets is normal, not orphaned — **do not delete it**.
+4. **During a deployment, observe — don't synchronize.** Use `elbv2 DescribeRules` / `DescribeTargetHealth` to watch a canary shift progress; don't call `ModifyRule` yourself.
+5. **If public staging routing looks unhealthy** (wrong SHA, 5xx, stuck weights), investigate the **ECS service deployment state and rule 44990's configuration** first (`ecs DescribeServices`, `elbv2 DescribeRules`) — do not "fix" it by recreating a duplicate custom-domain rule or manually rebalancing weights.
+
+Any staging runbook step that says "sync priority-10" or "sync ALB weights after deploy" is **obsolete** — remove it if you find it. This doc and `MAC_AGENT_AWS_STAGING_REBUILD_PROMPT.md` were updated (2026-09-08) to drop that step.
 
 ---
 
@@ -184,7 +206,7 @@ Use **`--profile strata-agent`** for all AWS CLI from Claude Code.
 6. ECR login + push `commtrac-api:staging`  
 7. Register new task definition revision (if env/config changed) OR force new deployment (image-only)  
 8. `ecs update-service --cluster default --service commtrac-api-ae2c --force-new-deployment`  
-9. Sync ALB priority-10 rule to match rule 44990  
+9. Observe rule 44990's CANARY weight progression (baseline → ~95/5 canary → 0/100 cutover) — do not manually edit it; see Routing architecture section above  
 10. Wait for stable deployment + healthy target  
 11. `curl` health endpoint  
 12. Tail CloudWatch logs  
