@@ -89,7 +89,7 @@ public static class WorkflowMediaValidator
         if (!ExtensionMatchesDetected(extension, detectedExtension!))
             return WorkflowMediaValidationResult.Fail("File extension does not match the file's actual content.");
 
-        if (!IsContentTypeConsistent(file.ContentType, kind.Value))
+        if (!IsContentTypeConsistent(file.ContentType, detectedMime!))
             return WorkflowMediaValidationResult.Fail("File content does not match the declared content type.");
 
         if (kind == WorkflowMediaKind.Video && file.Length > MaxVideoBytes)
@@ -195,20 +195,22 @@ public static class WorkflowMediaValidator
         return normalized.Equals(detectedExtension, StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsContentTypeConsistent(string? contentType, WorkflowMediaKind kind)
+    /// <summary>
+    /// When the client declares a Content-Type at all, it must equal the exact MIME
+    /// derived from the binary signature — not merely share the same image/video family.
+    /// Only a genuinely absent/empty Content-Type is treated as "no declaration made"
+    /// (extension + signature are authoritative in that case); any declared value,
+    /// including generic ones like application/octet-stream or text/plain, is compared
+    /// exactly and rejected on mismatch.
+    /// </summary>
+    private static bool IsContentTypeConsistent(string? contentType, string detectedMime)
     {
-        if (string.IsNullOrWhiteSpace(contentType)) return true; // absent/generic — extension+signature are authoritative
+        if (string.IsNullOrWhiteSpace(contentType)) return true;
 
         var normalized = contentType.Trim().ToLowerInvariant();
-        var claimsImage = normalized.StartsWith("image/");
-        var claimsVideo = normalized.StartsWith("video/");
-        if (!claimsImage && !claimsVideo) return true; // e.g. application/octet-stream — not a spoof signal by itself
+        var parameterStart = normalized.IndexOf(';');
+        if (parameterStart >= 0) normalized = normalized[..parameterStart].Trim();
 
-        return kind switch
-        {
-            WorkflowMediaKind.Image => claimsImage,
-            WorkflowMediaKind.Video => claimsVideo,
-            _ => true,
-        };
+        return normalized == detectedMime;
     }
 }

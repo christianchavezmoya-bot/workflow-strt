@@ -288,6 +288,84 @@ public class WorkflowConfigMediaTests : IClassFixture<ApiTestFactory>
         Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 
+    // ── Content-Type must equal the exact detected MIME, not merely share the same
+    // image/video family (review correction — see WorkflowMediaValidator.IsContentTypeConsistent) ──
+
+    [Fact]
+    public async Task Valid_mp4_with_octet_stream_content_type_is_rejected()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/media",
+            BuildUpload(ValidMp4Bytes(), "clip.mp4", "application/octet-stream"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_jpeg_with_text_plain_content_type_is_rejected()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/media",
+            BuildUpload(ValidJpegBytes(), "photo.jpg", "text/plain"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_png_with_image_jpeg_content_type_is_rejected()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/media",
+            BuildUpload(ValidPngBytes(), "photo.png", "image/jpeg"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_jpeg_with_image_png_content_type_is_rejected()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/media",
+            BuildUpload(ValidJpegBytes(), "photo.jpg", "image/png"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Valid_mp4_with_image_jpeg_content_type_is_rejected()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/media",
+            BuildUpload(ValidMp4Bytes(), "clip.mp4", "image/jpeg"));
+
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Genuinely_absent_content_type_with_valid_extension_and_signature_is_still_accepted()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/media",
+            BuildUpload(ValidJpegBytes(), "photo.jpg", contentType: null));
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var mediaItem = await SingleMediaItemAsync(resp);
+        Assert.Equal("image", mediaItem.GetProperty("type").GetString());
+        Assert.Equal("image/jpeg", mediaItem.GetProperty("mime").GetString());
+    }
+
     // ══════════════════════════ MIME / SERVING ══════════════════════════
 
     [Fact]
@@ -554,6 +632,17 @@ public class WorkflowConfigMediaTests : IClassFixture<ApiTestFactory>
         File.Move(match, newPath);
     }
 
+    // This class exercises many upload scenarios and calls this per test. A fresh
+    // /api/auth/login per call was fine at the original test count but comfortably
+    // exceeds the app's own credential-endpoint rate limiter (30 requests/5 minutes,
+    // IP-dimension — SecurityRateLimitPolicies.CredentialIpPermitLimit) once the MIME
+    // regression tests were added. The limiter is working correctly; the fix belongs
+    // here, not in production rate-limiting config: log in once per test-class run
+    // (xUnit guarantees the same ApiTestFactory instance for the whole class via
+    // IClassFixture) and reuse the authenticated client.
+    private static HttpClient? _cachedAuthenticatedClient;
+    private static readonly SemaphoreSlim CachedClientLock = new(1, 1);
+
     private static async Task<HttpClient> CreateAuthenticatedClientAsync(ApiTestFactory factory)
     {
         var client = factory.CreateClient();
@@ -569,7 +658,21 @@ public class WorkflowConfigMediaTests : IClassFixture<ApiTestFactory>
         return client;
     }
 
-    private Task<HttpClient> CreateAuthenticatedClientAsync() => CreateAuthenticatedClientAsync(_factory);
+    private async Task<HttpClient> CreateAuthenticatedClientAsync()
+    {
+        if (_cachedAuthenticatedClient is not null) return _cachedAuthenticatedClient;
+
+        await CachedClientLock.WaitAsync();
+        try
+        {
+            _cachedAuthenticatedClient ??= await CreateAuthenticatedClientAsync(_factory);
+            return _cachedAuthenticatedClient;
+        }
+        finally
+        {
+            CachedClientLock.Release();
+        }
+    }
 
     private async Task<string> SeedDraftConfigAsync(string? idOverride = null)
     {
