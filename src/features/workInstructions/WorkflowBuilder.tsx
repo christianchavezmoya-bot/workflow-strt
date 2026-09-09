@@ -2,7 +2,6 @@ import React, { type ReactNode, useEffect, useMemo, useRef, useState } from "rea
 import {
   AccountTreeOutlined,
   AddOutlined,
-  AttachFileOutlined,
   CancelOutlined,
   CheckCircleOutlined,
   ContentCopyOutlined,
@@ -10,17 +9,12 @@ import {
   DescriptionOutlined,
   DragIndicatorOutlined,
   DownloadOutlined,
-  EditOutlined,
-  ImageOutlined,
-  PersonOutlined,
   PlayArrowOutlined,
   PublishOutlined,
-  QrCodeScannerOutlined,
   RemoveOutlined,
   RestartAltOutlined,
   SwapHorizOutlined,
   UploadOutlined,
-  VideocamOutlined,
   WarningOutlined,
 } from "@mui/icons-material";
 import {
@@ -61,8 +55,6 @@ import { usePermissions } from "../../hooks/usePermissions";
 import { useAppToast } from "../../contexts/AppToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { workflowTypeService } from "../../services/workflowTypeService";
-import QRUploadButton from "../../components/QRUploadButton";
-import WheelPicker from "../../components/ui/WheelPicker";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
@@ -77,6 +69,8 @@ import { isFeatureAvailableForNewSelection } from "../../utils/featureAvailabili
 import { loadWorkflowOpenPayload } from "../../services/workflowOpenService";
 import type { WorkflowType } from "../../types/workflowType";
 import WorkOrderRunner from "./WorkOrderRunner";
+import { MediaLibraryPanel } from "./MediaLibraryPanel";
+import { WorkerPreviewPanel } from "./WorkerPreviewPanel";
 
 // ------------------------------------------------------------------
 // Helpers
@@ -86,35 +80,6 @@ const uid = () => randomId();
 
 function deepCopy<T>(obj: T): T {
   return JSON.parse(JSON.stringify(obj));
-}
-
-const IMAGE_MAX_DIM = 1920;
-const IMAGE_JPEG_QUALITY = 0.85;
-/** Builder template library upload — multipart path, not stepResultsJson data URLs. */
-const VIDEO_MAX_BYTES = 100 * 1024 * 1024; // 100 MB
-
-function resizeImage(file: File, maxDim: number, quality: number): Promise<File> {
-  return new Promise((resolve) => {
-    const img = new Image();
-    const objUrl = URL.createObjectURL(file);
-    img.onload = () => {
-      URL.revokeObjectURL(objUrl);
-      const scale = Math.min(1, maxDim / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-      canvas.toBlob(
-        (blob) => resolve(blob ? new File([blob], file.name.replace(/\.[^.]+$/, ".jpg"), { type: "image/jpeg" }) : file),
-        "image/jpeg",
-        quality,
-      );
-    };
-    img.onerror = () => { URL.revokeObjectURL(objUrl); resolve(file); };
-    img.src = objUrl;
-  });
 }
 
 function normalizeOrders(steps: WorkflowStep[]): WorkflowStep[] {
@@ -2849,150 +2814,6 @@ function ReportPreviewInline({ step }: { step: WorkflowStep }) {
 }
 
 // ------------------------------------------------------------------
-// WorkerPreviewPanel
-// ------------------------------------------------------------------
-
-function WorkerPreviewPanel({
-  workflow,
-  stepsSorted,
-  selectedStepId,
-  onSelectStep,
-}: {
-  workflow: Workflow;
-  stepsSorted: WorkflowStep[];
-  selectedStepId: string | null;
-  onSelectStep: (stepId: string | null) => void;
-}) {
-  const [history, setHistory] = useState<string[]>([]);
-  const currentStepId = selectedStepId && workflow.steps.some((s) => s.id === selectedStepId)
-    ? selectedStepId
-    : (stepsSorted[0]?.id || null);
-  const step = stepsSorted.find((s) => s.id === currentStepId) || null;
-
-  function goTo(stepId: string | null) {
-    if (!stepId) return;
-    setHistory((prev) => (currentStepId ? [...prev, currentStepId] : prev));
-    onSelectStep(stepId);
-  }
-
-  function goBack() {
-    setHistory((prev) => {
-      if (!prev.length) return prev;
-      onSelectStep(prev[prev.length - 1]);
-      return prev.slice(0, -1);
-    });
-  }
-
-  return (
-    <Paper className="glass-card" sx={{ p: 2 }}>
-      <Stack spacing={2}>
-        <Stack direction="row" alignItems="center" justifyContent="space-between">
-          <Typography variant="subtitle1" fontWeight={600}>
-            Worker Preview
-          </Typography>
-          <Chip label="Simulation" size="small" />
-        </Stack>
-        <Typography variant="caption" color="text.secondary">
-          Simulated technician view. Navigate with the buttons below.
-        </Typography>
-
-        {!step ? (
-          <Alert severity="info" sx={{ fontSize: 12 }}>
-            No steps available. Add a step to begin.
-          </Alert>
-        ) : (
-          <Stack spacing={2}>
-            <Paper variant="outlined" sx={{ p: 2 }}>
-              <Stack direction="row" alignItems="flex-start" justifyContent="space-between" spacing={1}>
-                <Typography variant="subtitle2">
-                  {String(step.order).padStart(2, "0")} · {step.title || "(Untitled step)"}
-                </Typography>
-                {step.decisionsEnabled && <Chip label="Branching" size="small" color="primary" />}
-              </Stack>
-              {step.description && (
-                <Typography variant="body2" sx={{ mt: 1 }}>
-                  {step.description}
-                </Typography>
-              )}
-            </Paper>
-
-            {(step.inputs || []).length > 0 && (
-              <Stack spacing={1}>
-                <Typography variant="caption" fontWeight={600} color="text.secondary">
-                  Inputs
-                </Typography>
-                {step.inputs.map((inp) => (
-                  <Paper key={inp.id} variant="outlined" sx={{ p: 1.5 }}>
-                    <Stack direction="row" alignItems="center" justifyContent="space-between" mb={0.75}>
-                      <Typography variant="caption" color="text.secondary">
-                        {inp.label || "Input"}
-                        {inp.required && (
-                          <Typography component="span" variant="caption" color="error" sx={{ ml: 0.5 }}>
-                            *
-                          </Typography>
-                        )}
-                      </Typography>
-                      <Chip label={inp.type.toUpperCase()} size="small" variant="outlined" />
-                    </Stack>
-                    <InputPreview inp={inp} />
-                  </Paper>
-                ))}
-              </Stack>
-            )}
-
-            {step.decisionsEnabled && (step.decisions || []).length > 0 && (
-              <Stack spacing={1}>
-                <Typography variant="caption" fontWeight={600} color="text.secondary">
-                  Decision buttons
-                </Typography>
-                <Stack direction="row" flexWrap="wrap" gap={1} useFlexGap>
-                  {step.decisions.map((d) => (
-                    <Button
-                      key={d.id}
-                      variant="contained"
-                      size="small"
-                      disabled={!d.targetStepId}
-                      onClick={() => goTo(d.targetStepId)}
-                    >
-                      {d.label || "Decision"}
-                    </Button>
-                  ))}
-                </Stack>
-              </Stack>
-            )}
-
-            <Stack direction="row" spacing={1} flexWrap="wrap" gap={0.5} useFlexGap>
-              <Button variant="outlined" size="small" onClick={goBack} disabled={history.length === 0}>
-                Back
-              </Button>
-              <Button
-                variant="contained"
-                size="small"
-                color="success"
-                onClick={() => goTo(step.nextStepId)}
-                disabled={!step.nextStepId}
-              >
-                Next step
-              </Button>
-              <Button
-                variant="outlined"
-                size="small"
-                onClick={() => {
-                  setHistory([]);
-                  onSelectStep(stepsSorted[0]?.id || null);
-                }}
-              >
-                Start over
-              </Button>
-            </Stack>
-          </Stack>
-        )}
-      </Stack>
-    </Paper>
-  );
-}
-
-// ------------------------------------------------------------------
 // RightPanel — Preview tab + BOM tab
 // ------------------------------------------------------------------
 
@@ -3364,285 +3185,6 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
       )}
     </Stack>
   );
-}
-
-// ------------------------------------------------------------------
-// MediaLibraryPanel
-// ------------------------------------------------------------------
-
-interface MediaLibraryPanelProps {
-  workflow: Workflow;
-  step: WorkflowStep;
-  templateId: string | null;
-  ensureConfigId: () => Promise<string | null>;
-  onStepChange: (patch: Partial<WorkflowStep>) => void;
-  onWorkflowUpdate: (wf: Workflow) => void;
-}
-
-function MediaLibraryPanel({ workflow, step, templateId, ensureConfigId, onStepChange, onWorkflowUpdate }: MediaLibraryPanelProps) {
-  const [uploading, setUploading] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  const media: MediaItem[] = Array.isArray(workflow.media) ? workflow.media : [];
-  const attachedIds = new Set(step.mediaIds || []);
-
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // Auto-create config if not saved yet
-    const cfgId = templateId || await ensureConfigId();
-    if (!cfgId) { setUploadError("Could not create workflow config. Save the workflow name first."); return; }
-    setUploadError(null);
-
-    let fileToUpload = file;
-    if (file.type.startsWith("image/")) {
-      fileToUpload = await resizeImage(file, IMAGE_MAX_DIM, IMAGE_JPEG_QUALITY);
-    } else if (file.type.startsWith("video/")) {
-      if (file.size > VIDEO_MAX_BYTES) {
-        setUploadError("Video exceeds the 100 MB limit. Please compress it before uploading.");
-        e.target.value = "";
-        return;
-      }
-    }
-
-    setUploading(true);
-    try {
-      const updatedConfig = await workflowConfigService.uploadMedia(cfgId, fileToUpload);
-      const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
-      onWorkflowUpdate({ ...workflow, media: updatedMedia });
-    } catch {
-      setUploadError("Upload failed. Check file size and try again.");
-    } finally {
-      setUploading(false);
-      e.target.value = "";
-    }
-  }
-
-  async function handleDelete(mediaId: string) {
-    const cfgId = templateId || await ensureConfigId();
-    if (!cfgId) return;
-    try {
-      const updatedConfig = await workflowConfigService.deleteMedia(cfgId, mediaId);
-      // Also detach from step if attached
-      if (attachedIds.has(mediaId)) {
-        onStepChange({ mediaIds: (step.mediaIds || []).filter((id) => id !== mediaId) });
-      }
-      const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
-      onWorkflowUpdate({ ...workflow, media: updatedMedia });
-    } catch {
-      setUploadError("Delete failed.");
-    }
-  }
-
-  function toggleAttach(mediaId: string) {
-    const current = step.mediaIds || [];
-    if (current.includes(mediaId)) {
-      onStepChange({ mediaIds: current.filter((id) => id !== mediaId) });
-    } else {
-      onStepChange({ mediaIds: [...current, mediaId] });
-    }
-  }
-
-  function formatSize(bytes: number) {
-    if (bytes < 1024) return `${bytes} B`;
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  }
-
-  return (
-    <Stack spacing={2}>
-      <Stack direction="row" alignItems="center" justifyContent="space-between">
-        <Typography variant="body2" color="text.secondary">
-          Attach images or videos to this step.{" "}
-          <Typography component="span" variant="caption" color="text.disabled">
-            Images auto-resized to max {IMAGE_MAX_DIM} px · Videos max 100 MB.
-          </Typography>
-        </Typography>
-        <Stack direction="row" spacing={1} alignItems="center">
-          {uploading && <CircularProgress size={14} />}
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,video/*"
-            style={{ display: "none" }}
-            onChange={handleFileChange}
-          />
-          <Button
-            size="small"
-            variant="contained"
-            startIcon={<UploadOutlined />}
-            onClick={() => fileInputRef.current?.click()}
-            disabled={uploading}
-          >
-            Upload
-          </Button>
-          <QRUploadButton
-            docType="workflow-media"
-            linkedTo={templateId ?? "new"}
-            label="Phone"
-            onUploaded={() => {}}
-            onUploadedWithData={async (_docId, dataUrl) => {
-              const cfgId = await ensureConfigId();
-              if (!cfgId) { return; }
-              // Convert base64 dataUrl to File
-              const [meta, b64] = dataUrl.split(",");
-              const mime = meta.match(/:(.*?);/)?.[1] ?? "image/jpeg";
-              const bytes = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
-              const file = new File([bytes], "phone-upload", { type: mime });
-              setUploading(true);
-              try {
-                const updatedConfig = await workflowConfigService.uploadMedia(cfgId, file);
-                const updatedMedia = (() => { try { return JSON.parse(updatedConfig.mediaJson); } catch { return []; } })();
-                onWorkflowUpdate({ ...workflow, media: updatedMedia });
-              } catch {
-                setUploadError("Upload failed.");
-              } finally {
-                setUploading(false);
-              }
-            }}
-            disabled={uploading}
-          />
-        </Stack>
-      </Stack>
-
-      {uploadError && (
-        <Alert severity="error" sx={{ fontSize: 12 }} onClose={() => setUploadError(null)}>
-          {uploadError}
-        </Alert>
-      )}
-
-      {media.length === 0 ? (
-        <Alert severity="info" sx={{ fontSize: 12 }}>
-          No media uploaded yet. Use the Upload button to add images or videos.
-        </Alert>
-      ) : (
-        <Stack spacing={1}>
-          {media.map((item) => {
-            const isAttached = attachedIds.has(item.id);
-            return (
-              <Paper
-                key={item.id}
-                variant="outlined"
-                sx={{
-                  p: 1.25,
-                  borderColor: isAttached ? "primary.main" : undefined,
-                  bgcolor: isAttached ? "action.selected" : undefined,
-                }}
-              >
-                <Stack direction="row" spacing={1.5} alignItems="center">
-                  {/* Thumbnail */}
-                  <Box sx={{ width: 48, height: 48, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "action.hover", borderRadius: 1, overflow: "hidden" }}>
-                    {item.type === "image" ? (
-                      <img src={item.url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                    ) : (
-                      <VideocamOutlined fontSize="small" color="action" />
-                    )}
-                  </Box>
-
-                  {/* Info */}
-                  <Box sx={{ flexGrow: 1, minWidth: 0 }}>
-                    <Typography variant="caption" fontWeight={600} noWrap display="block">{item.name}</Typography>
-                    <Typography variant="caption" color="text.secondary">
-                      {item.type.toUpperCase()} · {formatSize(item.size)}
-                    </Typography>
-                  </Box>
-
-                  {/* Attach toggle */}
-                  <Tooltip title={isAttached ? "Detach from step" : "Attach to step"}>
-                    <IconButton
-                      size="small"
-                      color={isAttached ? "primary" : "default"}
-                      onClick={() => toggleAttach(item.id)}
-                    >
-                      <AttachFileOutlined fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-
-                  {/* Delete */}
-                  <Tooltip title="Delete from library">
-                    <IconButton size="small" color="error" onClick={() => handleDelete(item.id)}>
-                      <DeleteOutline fontSize="small" />
-                    </IconButton>
-                  </Tooltip>
-                </Stack>
-              </Paper>
-            );
-          })}
-        </Stack>
-      )}
-
-      {attachedIds.size > 0 && (
-        <Typography variant="caption" color="primary.main" sx={{ display: "flex", alignItems: "center", gap: 0.5 }}>
-          <CheckCircleOutlined sx={{ fontSize: 13 }} />
-          {attachedIds.size} item{attachedIds.size === 1 ? "" : "s"} attached to this step
-        </Typography>
-      )}
-    </Stack>
-  );
-}
-
-function InputPreview({ inp }: { inp: StepInput }) {
-  if (inp.type === "text") return <TextField size="small" fullWidth disabled placeholder="Enter text" />;
-  if (inp.type === "number") return <TextField size="small" fullWidth disabled type="number" placeholder="Enter a number" />;
-  if (inp.type === "note") return <TextField size="small" fullWidth disabled multiline rows={2} placeholder="Enter notes" />;
-  if (inp.type === "scan") return (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <QrCodeScannerOutlined fontSize="small" color="action" />
-      <TextField size="small" fullWidth disabled placeholder="Scan or enter value" />
-    </Stack>
-  );
-  if (inp.type === "date") return <TextField size="small" fullWidth disabled type="date" InputLabelProps={{ shrink: true }} />;
-  if (inp.type === "checkbox") {
-    return (
-      <Stack direction="row" alignItems="center" spacing={1}>
-        <Switch size="small" disabled />
-        <Typography variant="caption">Unchecked</Typography>
-      </Stack>
-    );
-  }
-  if (inp.type === "choice") {
-    return (
-      <Stack direction="row" flexWrap="wrap" gap={0.5} useFlexGap>
-        {(inp.options || []).length === 0 ? (
-          <Typography variant="caption" color="text.secondary">No options set</Typography>
-        ) : (
-          inp.options!.map((opt, idx) => <Chip key={idx} label={opt} size="small" variant="outlined" />)
-        )}
-      </Stack>
-    );
-  }
-  if (inp.type === "dropdown") {
-    const opts = inp.options ?? [];
-    return (
-      <FormControl size="small" fullWidth disabled>
-        <Select value={opts[0] ?? ""} displayEmpty>
-          {opts.length === 0 ? (
-            <MenuItem value="" disabled>No options set</MenuItem>
-          ) : (
-            opts.map((opt, idx) => <MenuItem key={idx} value={opt}>{opt}</MenuItem>)
-          )}
-        </Select>
-      </FormControl>
-    );
-  }
-  if (inp.type === "wheel") {
-    const opts = inp.options ?? [];
-    if (opts.length === 0) {
-      return <Typography variant="caption" color="text.secondary">No options set</Typography>;
-    }
-    return <WheelPicker options={opts} value={opts[Math.min(1, opts.length - 1)] ?? opts[0]} onChange={() => {}} />;
-  }
-  if (inp.type === "photo") return <Button disabled size="small" startIcon={<ImageOutlined />}>Capture photo</Button>;
-  if (inp.type === "video") return <Button disabled size="small" startIcon={<VideocamOutlined />}>Capture video</Button>;
-  if (inp.type === "signature") return <Button disabled size="small" startIcon={<EditOutlined />}>Capture signature</Button>;
-  if (inp.type === "user-select") return (
-    <Stack direction="row" spacing={1} alignItems="center">
-      <PersonOutlined fontSize="small" color="action" />
-      <Typography variant="caption" color="text.secondary">Select from project team</Typography>
-    </Stack>
-  );
-  return <Typography variant="caption" color="text.secondary">Unsupported input type</Typography>;
 }
 
 export default WorkflowBuilder;

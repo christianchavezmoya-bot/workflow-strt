@@ -65,6 +65,7 @@ import { fetchProducts } from "../../store/productsSlice";
 import type { Feature } from "../../types/feature";
 import type { ProductFeatureDefinition } from "../../types/product";
 import type { Workflow } from "../../types/workflow";
+import { parseWorkflowFromConfig, mergeWorkflowConfigMedia } from "../../utils/workflowOpenCache";
 import type { CaptureField, StepInput, WorkflowStep } from "../../types/workflow";
 import { isOptionListInputType } from "../../types/workflow";
 import type { WorkflowConfig } from "../../types/workflowConfig";
@@ -87,15 +88,14 @@ function formatDate(iso: string) {
   }
 }
 
-function parseSteps(cfg: WorkflowConfig): Workflow | null {
-  try {
-    const parsed = JSON.parse(cfg.stepsJson);
-    if (parsed && Array.isArray(parsed.steps)) return parsed as Workflow;
-    if (Array.isArray(parsed)) {
-      return { id: cfg.id, name: cfg.name, productId: cfg.productId, createdAt: Date.now(), steps: parsed, media: [] };
-    }
-  } catch {}
-  return null;
+// Delegates to the same parser/merge helpers the real workflow-run path uses
+// (src/utils/workflowOpenCache.ts) rather than a fourth near-duplicate
+// stepsJson parser — this is also what makes reference Content (workflow.media)
+// available to this file's Preview dialog, which previously always got media: [].
+export function parseSteps(cfg: WorkflowConfig): Workflow | null {
+  const workflow = parseWorkflowFromConfig(cfg);
+  if (!workflow) return null;
+  return mergeWorkflowConfigMedia(workflow, cfg);
 }
 
 function downloadJson(cfg: WorkflowConfig, productName: string) {

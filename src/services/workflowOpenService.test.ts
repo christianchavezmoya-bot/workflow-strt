@@ -46,7 +46,7 @@ import {
   OFFLINE_CONFIG_MISSING_MESSAGE,
 } from "./workflowOpenService";
 
-function sampleConfig(id = "cfg-1"): WorkflowConfig {
+function sampleConfig(id = "cfg-1", mediaJson = "[]"): WorkflowConfig {
   return {
     id,
     name: "Install",
@@ -54,9 +54,9 @@ function sampleConfig(id = "cfg-1"): WorkflowConfig {
     version: 1,
     status: "Published",
     stepsJson: JSON.stringify({
-      steps: [{ id: "s1", title: "Step 1", order: 1, inputs: [] }],
+      steps: [{ id: "s1", title: "Step 1", order: 1, inputs: [], mediaIds: ["photoA"] }],
     }),
-    mediaJson: "[]",
+    mediaJson,
     featureSelectionsJson: "[]",
     configType: "Install",
     displayName: "Install",
@@ -64,6 +64,10 @@ function sampleConfig(id = "cfg-1"): WorkflowConfig {
     updatedAt: new Date().toISOString(),
   };
 }
+
+const NON_EMPTY_MEDIA_JSON = JSON.stringify([
+  { id: "photoA", type: "image", name: "photoA.jpg", size: 100, mime: "image/jpeg", url: "/media/photoA", createdAt: 1 },
+]);
 
 describe("loadWorkflowOpenPayload", () => {
   beforeEach(() => {
@@ -163,6 +167,31 @@ describe("loadWorkflowOpenPayload", () => {
 
     expect(payload).toBeNull();
     expect(getById).not.toHaveBeenCalled();
+  });
+
+  it("merges non-empty config media into workflow.media by default, without an explicit mergeMedia flag (TEST F)", async () => {
+    getByIdLocalFirst.mockResolvedValue(sampleConfig("cfg-media", NON_EMPTY_MEDIA_JSON));
+
+    const payload = await loadWorkflowOpenPayload("cfg-media", { id: "asset-1" });
+
+    expect(payload?.workflow.media).toHaveLength(1);
+    expect(payload?.workflow.media?.[0]?.id).toBe("photoA");
+  });
+
+  it("still merges media when mergeMedia is explicitly true (existing callers keep working)", async () => {
+    getByIdLocalFirst.mockResolvedValue(sampleConfig("cfg-media-2", NON_EMPTY_MEDIA_JSON));
+
+    const payload = await loadWorkflowOpenPayload("cfg-media-2", { id: "asset-1" }, { mergeMedia: true });
+
+    expect(payload?.workflow.media).toHaveLength(1);
+  });
+
+  it("respects an explicit mergeMedia: false and leaves workflow.media empty", async () => {
+    getByIdLocalFirst.mockResolvedValue(sampleConfig("cfg-media-3", NON_EMPTY_MEDIA_JSON));
+
+    const payload = await loadWorkflowOpenPayload("cfg-media-3", { id: "asset-1" }, { mergeMedia: false });
+
+    expect(payload?.workflow.media ?? []).toHaveLength(0);
   });
 
   it("supports preview mode without asset run lookup", async () => {
