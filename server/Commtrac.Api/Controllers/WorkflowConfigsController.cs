@@ -1,5 +1,6 @@
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
+using Commtrac.Api.Services;
 using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -25,6 +26,21 @@ public class WorkflowConfigsController : ControllerBase
 
     private string WorkflowMediaDirectory(string workflowId)
         => _files.BuildRelativePath("Storage", "WorkflowMedia", workflowId);
+
+    /// <summary>Defense-in-depth for the media routes only. mediaId is always a
+    /// server-generated GUID (Guid.TryParse accepts both hyphenated and "N" formats
+    /// used across this codebase), so it's validated strictly.</summary>
+    private static bool IsValidMediaId(string? value)
+        => !string.IsNullOrWhiteSpace(value) && Guid.TryParse(value, out _);
+
+    /// <summary>Workflow config ids are normally GUIDs but at least one legacy seeded
+    /// config uses a non-GUID id ("wf-chambers-default", StrataNgoSeeder.cs) — so this
+    /// is a charset allowlist rather than a strict GUID check, which still rejects "..",
+    /// "/", "\", and any encoded traversal fragment before it reaches path construction.</summary>
+    private static bool IsPathSafeConfigId(string? value)
+        => !string.IsNullOrWhiteSpace(value)
+        && value.Length <= 200
+        && value.All(c => char.IsLetterOrDigit(c) || c is '-' or '_');
 
     private static WorkflowConfigDto ToDto(WorkflowConfigEntity e) => new(
         e.Id, e.ProductId, e.Name, e.DisplayName, e.ConfigType, e.WorkflowTypeId, e.Status, e.Version,
@@ -337,31 +353,38 @@ public class WorkflowConfigsController : ControllerBase
     }
 
     // POST api/workflow-configs/{id}/media  — upload media file
+    // Explicit request ceiling backs up (does not replace) the IFormFile.Length check
+    // inside WorkflowMediaValidator, which enforces the precise, type-aware policy.
     [HttpPost("{id}/media")]
     [Authorize(Roles = "Admin,Project Manager")]
+    [RequestSizeLimit(WorkflowMediaValidator.MaxRequestBytes)]
     public async Task<IActionResult> UploadMedia(string id, IFormFile file)
     {
+        if (!IsPathSafeConfigId(id)) return NotFound();
+
         var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
         if (entity is null) return NotFound();
 
-        var ext      = Path.GetExtension(file.FileName);
+        var validation = await WorkflowMediaValidator.ValidateAsync(file, HttpContext.RequestAborted);
+        if (!validation.IsValid)
+            return BadRequest(new { message = validation.Error });
+
         var mediaId  = Guid.NewGuid().ToString();
-        var fileName = $"{mediaId}{ext}";
+        var fileName = $"{mediaId}{validation.Extension}";
         var relativePath = _files.BuildRelativePath("Storage", "WorkflowMedia", id, fileName);
 
-        await _files.SaveAsync(relativePath, file.OpenReadStream());
+        await _files.SaveAsync(relativePath, file!.OpenReadStream());
 
         var mediaUrl = $"/api/workflow-configs/{id}/media/{mediaId}/file";
-        var isImage  = file.ContentType.StartsWith("image/");
 
         // Append to MediaJson array
         var mediaList = System.Text.Json.JsonSerializer.Deserialize<List<System.Text.Json.JsonElement>>(
             entity.MediaJson, new System.Text.Json.JsonSerializerOptions()) ?? new();
         var newItem = System.Text.Json.JsonSerializer.SerializeToElement(new
         {
-            id = mediaId, type = isImage ? "image" : "video",
+            id = mediaId, type = validation.Kind == WorkflowMediaKind.Image ? "image" : "video",
             name = file.FileName, size = file.Length,
-            mime = file.ContentType, url = mediaUrl,
+            mime = validation.Mime, url = mediaUrl,
             createdAt = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
         });
         mediaList.Add(newItem);
@@ -372,17 +395,23 @@ public class WorkflowConfigsController : ControllerBase
     }
 
     // GET api/workflow-configs/{id}/media/{mediaId}/file
+    // AllowAnonymous is unchanged in this phase (Phase 1 is upload/serve validation only).
+    // Auth tightening is a later phase, deferred until Runner rendering no longer depends
+    // on a bare <img src>/<video src> pointed directly at this URL.
     [HttpGet("{id}/media/{mediaId}/file")]
     [AllowAnonymous]
     public IActionResult ServeMedia(string id, string mediaId)
     {
+        if (!IsPathSafeConfigId(id) || !IsValidMediaId(mediaId)) return NotFound();
+
         var mediaDir = WorkflowMediaDirectory(id);
         var files    = _files.ListFileNames(mediaDir, mediaId);
         if (files.Count == 0) return NotFound();
         var storedName = files[0];
         var relativePath = _files.BuildRelativePath(mediaDir, storedName);
-        var ext      = Path.GetExtension(storedName).TrimStart('.');
-        var mime     = ext is "jpg" or "jpeg" ? "image/jpeg" : ext == "png" ? "image/png" : ext == "gif" ? "image/gif" : "video/mp4";
+        var ext = Path.GetExtension(storedName);
+        // Unknown/unsupported stored extensions are never served — no "default to video/mp4".
+        if (!WorkflowMediaValidator.TryGetMimeForExtension(ext, out var mime)) return NotFound();
         return File(_files.OpenRead(relativePath), mime);
     }
 
@@ -391,6 +420,8 @@ public class WorkflowConfigsController : ControllerBase
     [Authorize(Roles = "Admin,Project Manager")]
     public async Task<IActionResult> DeleteMedia(string id, string mediaId)
     {
+        if (!IsPathSafeConfigId(id) || !IsValidMediaId(mediaId)) return NotFound();
+
         var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
         if (entity is null) return NotFound();
 
