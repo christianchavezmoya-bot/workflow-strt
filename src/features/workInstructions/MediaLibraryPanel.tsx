@@ -20,6 +20,7 @@ import {
 import type { MediaItem, Workflow, WorkflowStep } from "../../types/workflow";
 import { workflowConfigService } from "../../services/workflowConfigService";
 import QRUploadButton from "../../components/QRUploadButton";
+import { resolveMediaUrl } from "../../utils/mediaUrl";
 
 const IMAGE_MAX_DIM = 1920;
 const IMAGE_JPEG_QUALITY = 0.85;
@@ -230,7 +231,7 @@ export function MediaLibraryPanel({ workflow, step, templateId, ensureConfigId, 
                   {/* Thumbnail */}
                   <Box sx={{ width: 48, height: 48, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "action.hover", borderRadius: 1, overflow: "hidden" }}>
                     {item.type === "image" ? (
-                      <img src={item.url} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      <img src={resolveMediaUrl(item.url)} alt={item.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                     ) : (
                       <VideocamOutlined fontSize="small" color="action" />
                     )}
