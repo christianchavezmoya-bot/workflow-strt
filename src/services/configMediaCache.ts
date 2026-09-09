@@ -4,7 +4,7 @@ import type { MediaItem, Workflow } from "../types/workflow";
 import { configMediaGet, configMediaGetByConfig, configMediaPut } from "./localDB";
 import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
-import { getApiBaseUrl } from "./apiBase";
+import { resolveMediaUrl } from "../utils/mediaUrl";
 
 /**
  * configMediaCache — downloads a workflow config's (or legacy workflow
@@ -47,22 +47,6 @@ function stripDataUrlPrefix(dataUrl: string): string {
 /** A media URL worth caching: anything that isn't already embedded as data. */
 function isCacheableUrl(url: string | undefined): url is string {
   return !!url && !url.startsWith("data:") && !url.startsWith("blob:");
-}
-
-/**
- * Resolve a possibly server-relative media URL (e.g.
- * "/api/workflow-configs/{id}/media/{mediaId}/file") to an absolute URL that
- * fetch() can reach. Absolute http(s) URLs pass through unchanged. Returns null
- * when the URL can't be resolved.
- */
-function toAbsoluteUrl(url: string): string | null {
-  if (/^https?:\/\//i.test(url)) return url;
-  try {
-    const origin = new URL(getApiBaseUrl()).origin;
-    return url.startsWith("/") ? `${origin}${url}` : `${origin}/${url}`;
-  } catch {
-    return null;
-  }
 }
 
 function parseMedia(source: MediaSource): MediaItem[] {
@@ -124,7 +108,7 @@ export const configMediaCache = {
       const existing = await configMediaGet(recordId);
       if (existing) continue; // already downloaded
 
-      const absoluteUrl = toAbsoluteUrl(item.url);
+      const absoluteUrl = resolveMediaUrl(item.url);
       if (!absoluteUrl) continue;
 
       try {

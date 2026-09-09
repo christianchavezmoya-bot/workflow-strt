@@ -9,6 +9,14 @@ vi.mock("../../components/QRUploadButton", () => ({
   default: () => null,
 }));
 
+// jsdom's default test origin differs from this mocked API origin — a test
+// relying on this proves the thumbnail resolves against the real API host,
+// not window.location.origin.
+const getApiBaseUrl = vi.fn(() => "https://api.staging.strata-ngo.com/api");
+vi.mock("../../services/apiBase", () => ({
+  getApiBaseUrl: () => getApiBaseUrl(),
+}));
+
 const uploadMedia = vi.fn();
 vi.mock("../../services/workflowConfigService", () => ({
   workflowConfigService: {
@@ -85,6 +93,28 @@ describe("MediaLibraryPanel — reference Content scoped to the selected step (T
 
     expect(screen.queryByText("photoA.jpg")).not.toBeInTheDocument();
     expect(screen.getByText(/No content attached to this step yet/i)).toBeInTheDocument();
+  });
+});
+
+describe("MediaLibraryPanel — thumbnail resolves against the API origin (TEST 7)", () => {
+  it("resolves a relative media URL against getApiBaseUrl(), not window.location.origin", () => {
+    const workflow = baseWorkflow([photoA()]);
+    const step = baseStep("A", ["photoA"]);
+
+    const { container } = render(
+      <MediaLibraryPanel
+        workflow={workflow}
+        step={step}
+        templateId="cfg-1"
+        ensureConfigId={async () => "cfg-1"}
+        onStepChange={vi.fn()}
+        onWorkflowUpdate={vi.fn()}
+      />,
+    );
+
+    const img = container.querySelector("img");
+    expect(img).not.toBeNull();
+    expect(img?.getAttribute("src")).toBe("https://api.staging.strata-ngo.com/media/photoA");
   });
 });
 

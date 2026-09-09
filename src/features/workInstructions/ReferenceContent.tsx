@@ -1,6 +1,9 @@
-import { Box, Stack, Tooltip, Typography } from "@mui/material";
+import { useState } from "react";
+import { ButtonBase, Dialog, DialogContent, IconButton, Stack, Tooltip, Typography } from "@mui/material";
+import { CloseOutlined } from "@mui/icons-material";
 import type { MediaItem } from "../../types/workflow";
 import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
+import { resolveMediaUrl } from "../../utils/mediaUrl";
 
 /**
  * Renders a step's reference Content — instructional media a workflow author
@@ -11,8 +14,17 @@ import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
  * passed in, never touches step inputs/capture state, and has no upload
  * affordance of its own. Shared between WorkerPreviewPanel (Builder) and
  * WorkOrderRunner (real run + other previews) so both present it identically.
+ *
+ * Media URLs are resolved via resolveMediaUrl() (src/utils/mediaUrl.ts) before
+ * use — the backend returns server-relative paths, and the frontend/API are
+ * commonly different origins, so a raw <img src>/<a href>/<video src> would
+ * resolve against the wrong host. Images open in an in-app lightbox dialog
+ * (never a same-window/new-tab navigation) so a technician never loses
+ * workflow progress by viewing reference Content.
  */
 export function ReferenceContentSection({ media }: { media: MediaItem[] }) {
+  const [lightboxImage, setLightboxImage] = useState<MediaItem | null>(null);
+
   if (media.length === 0) return null;
 
   const images = media.filter((m) => m.type === "image");
@@ -24,11 +36,9 @@ export function ReferenceContentSection({ media }: { media: MediaItem[] }) {
         <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
           {images.map((m) => (
             <Tooltip key={m.id} title={m.name} {...nativeTooltipTouchProps()}>
-              <Box
-                component="a"
-                href={m.url}
-                target="_blank"
-                rel="noopener noreferrer"
+              <ButtonBase
+                onClick={() => setLightboxImage(m)}
+                aria-label={`View ${m.name}`}
                 sx={{
                   width: 72,
                   height: 72,
@@ -36,46 +46,82 @@ export function ReferenceContentSection({ media }: { media: MediaItem[] }) {
                   overflow: "hidden",
                   border: "1px solid",
                   borderColor: "divider",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
                   bgcolor: "action.hover",
-                  cursor: "pointer",
                   "&:hover": { borderColor: "primary.main" },
                 }}
               >
                 <img
-                  src={m.url}
+                  src={resolveMediaUrl(m.url)}
                   alt={m.name}
                   style={{ width: "100%", height: "100%", objectFit: "cover" }}
                 />
-              </Box>
+              </ButtonBase>
             </Tooltip>
           ))}
         </Stack>
       )}
 
       {videos.map((m) => (
-        <Box key={m.id} sx={{ maxWidth: 360 }}>
-          <Box
-            component="video"
-            src={m.url}
+        <Stack key={m.id} spacing={0.5} sx={{ maxWidth: 360 }}>
+          <video
+            src={resolveMediaUrl(m.url)}
             controls
             playsInline
             preload="metadata"
-            sx={{
+            style={{
               width: "100%",
               height: "auto",
               display: "block",
-              borderRadius: 1,
-              bgcolor: "common.black",
+              borderRadius: 4,
+              backgroundColor: "black",
             }}
           />
-          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block", mt: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" noWrap sx={{ display: "block" }}>
             {m.name}
           </Typography>
-        </Box>
+        </Stack>
       ))}
+
+      <Dialog
+        open={Boolean(lightboxImage)}
+        onClose={() => setLightboxImage(null)}
+        maxWidth="lg"
+        fullWidth
+      >
+        <DialogContent
+          sx={{
+            p: 0,
+            position: "relative",
+            bgcolor: "common.black",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            minHeight: 240,
+          }}
+        >
+          <IconButton
+            onClick={() => setLightboxImage(null)}
+            aria-label="Close"
+            sx={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              color: "common.white",
+              bgcolor: "rgba(0,0,0,0.45)",
+              "&:hover": { bgcolor: "rgba(0,0,0,0.65)" },
+            }}
+          >
+            <CloseOutlined />
+          </IconButton>
+          {lightboxImage && (
+            <img
+              src={resolveMediaUrl(lightboxImage.url)}
+              alt={lightboxImage.name}
+              style={{ maxWidth: "100%", maxHeight: "85vh", objectFit: "contain", display: "block" }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </Stack>
   );
 }
