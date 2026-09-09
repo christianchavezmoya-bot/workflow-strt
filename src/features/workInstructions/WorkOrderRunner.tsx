@@ -86,6 +86,7 @@ import { isMobileNativePlatform } from "../../utils/platform";
 import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx, nativeNestedDialogSx, nativeSelectMenuProps } from "../../utils/nativeDialogInsets";
 import RunnerLiveDuration from "./RunnerLiveDuration";
 import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
+import { ReferenceContentSection, resolveAttachedMedia } from "./ReferenceContent";
 import { randomId } from "../../utils/randomId";
 import { markOfflinePerf } from "../../utils/offlinePerf";
 import {
@@ -1814,9 +1815,7 @@ function WorkOrderRunner({
       ? `${currentStep.id}__iter__${repeatIdx}`
       : currentStep.id;
 
-    const attachedMedia = (currentStep.mediaIds ?? [])
-      .map((id) => (workflow.media ?? []).find((m) => m.id === id))
-      .filter(Boolean) as NonNullable<typeof workflow.media>;
+    const attachedMedia = resolveAttachedMedia(currentStep.mediaIds, workflow.media);
 
     return (
       <>
@@ -2186,34 +2185,8 @@ function WorkOrderRunner({
                   )}
                 </Box>
 
-                {/* Media thumbnails */}
-                {attachedMedia.length > 0 && (
-                  <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-                    {attachedMedia.map((m) => (
-                      <Tooltip key={m.id} title={m.name} {...nativeTooltipTouchProps()}>
-                        <Box
-                          component="a"
-                          href={m.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          sx={{
-                            width: 72, height: 72, borderRadius: 1, overflow: "hidden",
-                            border: "1px solid", borderColor: "divider",
-                            display: "flex", alignItems: "center", justifyContent: "center",
-                            bgcolor: "action.hover", cursor: "pointer",
-                            "&:hover": { borderColor: "primary.main" },
-                          }}
-                        >
-                          {m.type === "image" ? (
-                            <img src={m.url} alt={m.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
-                          ) : (
-                            <Typography variant="caption" color="text.secondary">ðŸŽ¥</Typography>
-                          )}
-                        </Box>
-                      </Tooltip>
-                    ))}
-                  </Stack>
-                )}
+                {/* Reference Content — author-supplied instructions, distinct from technician Capture below */}
+                <ReferenceContentSection media={attachedMedia} />
 
                 {/* Inputs */}
                 {hasInputs && (

@@ -47,7 +47,8 @@ vi.mock("../../services/workflowTypeService", () => ({
   },
 }));
 
-import WorkInstructions from "./WorkInstructions";
+import WorkInstructions, { parseSteps } from "./WorkInstructions";
+import type { WorkflowConfig } from "../../types/workflowConfig";
 
 function makeProduct(id: string, name: string): Product {
   return { id, name, description: "", features: [] } as Product;
@@ -126,5 +127,45 @@ describe("WorkInstructions — activeProduct effect regression", () => {
 
     await waitFor(() => expect(getByProductMock).toHaveBeenCalledTimes(1));
     expect(getByProductMock).toHaveBeenCalledWith("prod-2");
+  });
+});
+
+describe("parseSteps — reference Content reaches the Preview runner (TEST E)", () => {
+  function configWithMedia(): WorkflowConfig {
+    return {
+      id: "cfg-1",
+      name: "Test",
+      productId: "p1",
+      version: 1,
+      status: "Published",
+      stepsJson: JSON.stringify([
+        { id: "s1", order: 1, title: "Step 1", description: "", overrideInReport: false, overrideReportText: "", includeDescriptionInReport: true, mediaIds: ["photoA"], decisionsEnabled: false, decisions: [], inputs: [], nextStepId: null },
+      ]),
+      mediaJson: JSON.stringify([
+        { id: "photoA", type: "image", name: "photoA.jpg", size: 100, mime: "image/jpeg", url: "/media/photoA", createdAt: 1 },
+      ]),
+      featureSelectionsJson: "[]",
+      configType: "Install",
+      displayName: "Test",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  it("populates workflow.media from a config with non-empty mediaJson (previously always []) ", () => {
+    const workflow = parseSteps(configWithMedia());
+
+    expect(workflow?.media).toHaveLength(1);
+    expect(workflow?.media[0]?.id).toBe("photoA");
+    expect(workflow?.steps[0]?.mediaIds).toEqual(["photoA"]);
+  });
+
+  it("returns an empty media array (not a crash) for a config with no mediaJson media", () => {
+    const cfg = configWithMedia();
+    cfg.mediaJson = "[]";
+
+    const workflow = parseSteps(cfg);
+
+    expect(workflow?.media).toEqual([]);
   });
 });

@@ -44,7 +44,9 @@ export type LoadWorkflowOpenOptions = {
   workflowConfigIdForRun?: string;
   /** Builder preview — skip asset run lookup and asset refresh. */
   previewOnly?: boolean;
-  /** Merge config mediaJson into workflow shell (Assets page). */
+  /** Merge config mediaJson into workflow shell. Defaults to true — reference
+   *  Content is expected on every open path; pass `false` explicitly for the
+   *  rare case a caller genuinely wants the media-less shell only. */
   mergeMedia?: boolean;
 };
 
@@ -92,7 +94,7 @@ export async function loadWorkflowOpenPayload(
 
     if (!workflow || workflow.steps.length === 0) return null;
 
-    if (options?.mergeMedia) {
+    if (options?.mergeMedia !== false) {
       workflow = mergeWorkflowConfigMedia(workflow, cfg);
     }
 
