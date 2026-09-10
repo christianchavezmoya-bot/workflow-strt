@@ -412,7 +412,10 @@ public class WorkflowConfigsController : ControllerBase
         var ext = Path.GetExtension(storedName);
         // Unknown/unsupported stored extensions are never served — no "default to video/mp4".
         if (!WorkflowMediaValidator.TryGetMimeForExtension(ext, out var mime)) return NotFound();
-        return File(_files.OpenRead(relativePath), mime);
+        // enableRangeProcessing: true — required for <video> playback in WKWebView (iOS), which
+        // refuses to play a source that doesn't answer Range requests with 206 Partial Content.
+        // Same pattern already used by DocumentsController.ServeDocument for the same reason.
+        return File(_files.OpenRead(relativePath), mime, enableRangeProcessing: true);
     }
 
     // DELETE api/workflow-configs/{id}/media/{mediaId}
