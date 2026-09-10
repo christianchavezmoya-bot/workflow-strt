@@ -434,6 +434,40 @@ public class WorkflowConfigMediaTests : IClassFixture<ApiTestFactory>
     }
 
     [Fact]
+    public async Task Served_mp4_supports_range_requests_for_native_video_playback()
+    {
+        // iOS WKWebView (Capacitor native app) refuses to play a <video> source that
+        // doesn't answer Range requests with 206 Partial Content — this is the exact
+        // regression this test guards. See WorkflowConfigsController.ServeMedia's
+        // enableRangeProcessing: true (same pattern as DocumentsController.ServeDocument).
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+        var (mediaUrl, _) = await UploadAndGetUrlAsync(client, configId, ValidMp4Bytes(), "clip.mp4", "video/mp4");
+
+        var request = new HttpRequestMessage(HttpMethod.Get, mediaUrl);
+        request.Headers.Range = new RangeHeaderValue(0, 3);
+
+        var served = await _factory.CreateClient().SendAsync(request);
+
+        Assert.Equal(HttpStatusCode.PartialContent, served.StatusCode);
+        Assert.NotNull(served.Content.Headers.ContentRange);
+        Assert.Equal("video/mp4", served.Content.Headers.ContentType?.MediaType);
+    }
+
+    [Fact]
+    public async Task Served_mp4_advertises_range_support_even_on_a_full_unranged_request()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var configId = await SeedDraftConfigAsync();
+        var (mediaUrl, _) = await UploadAndGetUrlAsync(client, configId, ValidMp4Bytes(), "clip.mp4", "video/mp4");
+
+        var served = await _factory.CreateClient().GetAsync(mediaUrl);
+
+        Assert.Equal(HttpStatusCode.OK, served.StatusCode);
+        Assert.Contains("bytes", served.Headers.AcceptRanges);
+    }
+
+    [Fact]
     public async Task Unknown_stored_extension_is_never_served_as_video_mp4()
     {
         var client = await CreateAuthenticatedClientAsync();
