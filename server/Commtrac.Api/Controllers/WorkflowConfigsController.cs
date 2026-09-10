@@ -398,9 +398,20 @@ public class WorkflowConfigsController : ControllerBase
     // AllowAnonymous is unchanged in this phase (Phase 1 is upload/serve validation only).
     // Auth tightening is a later phase, deferred until Runner rendering no longer depends
     // on a bare <img src>/<video src> pointed directly at this URL.
+    //
+    // Serves real HTTP byte ranges via IFileStorageService.OpenReadRangeAsync rather than
+    // ASP.NET's File(..., enableRangeProcessing: true). That flag requires Stream.CanSeek to
+    // do anything — true for LocalFileStorageService's FileStream, but S3's GetObject
+    // ResponseStream is not seekable, so enableRangeProcessing silently no-ops on S3-backed
+    // storage: no 206, no Accept-Ranges, no Content-Range, ever (proven live against staging).
+    // OpenReadRangeAsync fixes this uniformly: S3 uses a real ranged GetObjectRequest.ByteRange
+    // (S3 truncates its own response stream to the requested bytes — never buffers the full
+    // object), while local disk seeks + bounds the FileStream itself. WKWebView's <video>
+    // playback pipeline requires genuine 206/Accept-Ranges/Content-Range to trust a source as
+    // seekable/streamable — without it, playback is refused ("unavailable" state).
     [HttpGet("{id}/media/{mediaId}/file")]
     [AllowAnonymous]
-    public IActionResult ServeMedia(string id, string mediaId)
+    public async Task<IActionResult> ServeMedia(string id, string mediaId, CancellationToken cancellationToken)
     {
         if (!IsPathSafeConfigId(id) || !IsValidMediaId(mediaId)) return NotFound();
 
@@ -412,10 +423,38 @@ public class WorkflowConfigsController : ControllerBase
         var ext = Path.GetExtension(storedName);
         // Unknown/unsupported stored extensions are never served — no "default to video/mp4".
         if (!WorkflowMediaValidator.TryGetMimeForExtension(ext, out var mime)) return NotFound();
-        // enableRangeProcessing: true — required for <video> playback in WKWebView (iOS), which
-        // refuses to play a source that doesn't answer Range requests with 206 Partial Content.
-        // Same pattern already used by DocumentsController.ServeDocument for the same reason.
-        return File(_files.OpenRead(relativePath), mime, enableRangeProcessing: true);
+
+        var rangeHeaderValue = Request.Headers.TryGetValue("Range", out var rangeValues) ? rangeValues.ToString() : null;
+
+        FileRangeResult? result;
+        try
+        {
+            result = await _files.OpenReadRangeAsync(relativePath, rangeHeaderValue, cancellationToken);
+        }
+        catch (RangeNotSatisfiableException ex)
+        {
+            Response.Headers["Content-Range"] = $"bytes */{ex.TotalLength}";
+            return StatusCode(StatusCodes.Status416RangeNotSatisfiable);
+        }
+
+        if (result is null) return NotFound();
+
+        await using var stream = result.Stream;
+        Response.ContentType = mime;
+        Response.Headers["Accept-Ranges"] = "bytes";
+        Response.ContentLength = result.ContentLength;
+        if (result.IsPartial)
+        {
+            Response.StatusCode = StatusCodes.Status206PartialContent;
+            Response.Headers["Content-Range"] = $"bytes {result.RangeStart}-{result.RangeEnd}/{result.TotalLength}";
+        }
+        else
+        {
+            Response.StatusCode = StatusCodes.Status200OK;
+        }
+
+        await stream.CopyToAsync(Response.Body, cancellationToken);
+        return new EmptyResult();
     }
 
     // DELETE api/workflow-configs/{id}/media/{mediaId}

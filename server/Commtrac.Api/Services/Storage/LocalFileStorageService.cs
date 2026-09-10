@@ -28,6 +28,36 @@ public sealed class LocalFileStorageService : IFileStorageService
 
     public Stream OpenRead(string relativePath) => File.OpenRead(GetAbsolutePath(relativePath));
 
+    public Task<FileRangeResult?> OpenReadRangeAsync(string relativePath, string? rangeHeaderValue, CancellationToken cancellationToken = default)
+    {
+        var absolutePath = GetAbsolutePath(relativePath);
+        if (!File.Exists(absolutePath))
+        {
+            return Task.FromResult<FileRangeResult?>(null);
+        }
+
+        var totalLength = new FileInfo(absolutePath).Length;
+
+        if (HttpRangeHeader.TryParse(rangeHeaderValue, totalLength, out var range, out var unsatisfiable))
+        {
+            var contentLength = range.End - range.Start + 1;
+            var fileStream = File.OpenRead(absolutePath);
+            fileStream.Seek(range.Start, SeekOrigin.Begin);
+            Stream bounded = new BoundedReadStream(fileStream, contentLength);
+            return Task.FromResult<FileRangeResult?>(
+                new FileRangeResult(bounded, totalLength, contentLength, range.Start, range.End, IsPartial: true));
+        }
+
+        if (unsatisfiable)
+        {
+            throw new RangeNotSatisfiableException(totalLength);
+        }
+
+        var full = File.OpenRead(absolutePath);
+        return Task.FromResult<FileRangeResult?>(
+            new FileRangeResult(full, totalLength, totalLength, 0, Math.Max(0, totalLength - 1), IsPartial: false));
+    }
+
     public Task<byte[]> ReadBytesAsync(string relativePath, CancellationToken cancellationToken = default)
         => File.ReadAllBytesAsync(GetAbsolutePath(relativePath), cancellationToken);
 
