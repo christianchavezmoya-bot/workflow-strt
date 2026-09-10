@@ -48,6 +48,53 @@ public sealed class S3FileStorageService : IFileStorageService
         return response.ResponseStream;
     }
 
+    /// <summary>
+    /// Unlike <see cref="OpenRead"/>, this issues a real ranged S3 GetObject
+    /// (GetObjectRequest.ByteRange) when a range is requested — S3 truncates the
+    /// returned ResponseStream to exactly the requested bytes itself, so no full-object
+    /// buffering ever happens here regardless of how small the requested range is.
+    /// A cheap GetObjectMetadata (HEAD-equivalent, no body transfer) resolves the total
+    /// length first so open-ended ("bytes=N-") and suffix ("bytes=-N") ranges, and
+    /// satisfiability, can be validated before issuing the real ranged read.
+    /// </summary>
+    public async Task<FileRangeResult?> OpenReadRangeAsync(string relativePath, string? rangeHeaderValue, CancellationToken cancellationToken = default)
+    {
+        var key = ToKey(relativePath);
+        long totalLength;
+        try
+        {
+            var meta = await _s3.GetObjectMetadataAsync(
+                new GetObjectMetadataRequest { BucketName = _bucket, Key = key }, cancellationToken).ConfigureAwait(false);
+            totalLength = meta.ContentLength;
+        }
+        catch (AmazonS3Exception ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+
+        if (HttpRangeHeader.TryParse(rangeHeaderValue, totalLength, out var range, out var unsatisfiable))
+        {
+            var rangedRequest = new GetObjectRequest
+            {
+                BucketName = _bucket,
+                Key = key,
+                ByteRange = new ByteRange(range.Start, range.End),
+            };
+            var rangedResponse = await _s3.GetObjectAsync(rangedRequest, cancellationToken).ConfigureAwait(false);
+            var contentLength = range.End - range.Start + 1;
+            return new FileRangeResult(rangedResponse.ResponseStream, totalLength, contentLength, range.Start, range.End, IsPartial: true);
+        }
+
+        if (unsatisfiable)
+        {
+            throw new RangeNotSatisfiableException(totalLength);
+        }
+
+        var fullResponse = await _s3.GetObjectAsync(
+            new GetObjectRequest { BucketName = _bucket, Key = key }, cancellationToken).ConfigureAwait(false);
+        return new FileRangeResult(fullResponse.ResponseStream, totalLength, totalLength, 0, Math.Max(0, totalLength - 1), IsPartial: false);
+    }
+
     public async Task<byte[]> ReadBytesAsync(string relativePath, CancellationToken cancellationToken = default)
     {
         await using var stream = OpenRead(relativePath);

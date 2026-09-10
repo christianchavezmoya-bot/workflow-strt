@@ -11,6 +11,22 @@ public interface IFileStorageService
     string GetAbsolutePath(string relativePath);
     bool Exists(string relativePath);
     Stream OpenRead(string relativePath);
+
+    /// <summary>
+    /// Range-aware read supporting real HTTP byte-range semantics (RFC 7233) uniformly
+    /// across storage backends. This matters specifically for S3: its GetObject response
+    /// stream is not seekable, so ASP.NET's built-in FileStreamResult.EnableRangeProcessing
+    /// (which requires Stream.CanSeek to compute/serve a range) silently falls back to
+    /// serving the whole object with no Accept-Ranges/Content-Range — which is exactly the
+    /// defect this method exists to fix. <paramref name="rangeHeaderValue"/> is the raw
+    /// incoming "Range" request header value (e.g. "bytes=0-1023"), or null/empty for a
+    /// normal full-content request. Returns null when the file does not exist. Throws
+    /// <see cref="RangeNotSatisfiableException"/> when a single, well-formed range is out
+    /// of bounds for the resource; a malformed or multi-range header is treated as no
+    /// Range header (full content) per RFC 7233 §3.1.
+    /// </summary>
+    Task<FileRangeResult?> OpenReadRangeAsync(string relativePath, string? rangeHeaderValue, CancellationToken cancellationToken = default);
+
     Task<byte[]> ReadBytesAsync(string relativePath, CancellationToken cancellationToken = default);
     Task<string> ReadTextAsync(string relativePath, CancellationToken cancellationToken = default);
     Task SaveAsync(string relativePath, Stream content, CancellationToken cancellationToken = default);
