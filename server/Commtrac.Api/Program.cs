@@ -29,7 +29,7 @@ string resolvedConnectionString;
 
 if (string.Equals(dbProvider, "Postgres", StringComparison.OrdinalIgnoreCase))
 {
-    resolvedConnectionString = rawConnectionString;
+    resolvedConnectionString = DatabaseConnectionStringResolver.Resolve(builder.Configuration, builder.Environment);
     Console.WriteLine("[DB] Provider: Postgres");
     builder.Services.AddDbContext<AppDbContext>(options =>
         options.UseNpgsql(resolvedConnectionString));
