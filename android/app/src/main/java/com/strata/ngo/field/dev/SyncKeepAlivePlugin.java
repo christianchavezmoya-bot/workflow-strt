@@ -1,4 +1,4 @@
-package com.christianchavez.kinet;
+package com.strata.ngo.field.dev;
 
 import android.content.Intent;
 import android.os.Build;
