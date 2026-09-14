@@ -8,6 +8,7 @@ const filesystemMocks = vi.hoisted(() => ({
 
 const capacitorMocks = vi.hoisted(() => ({
   convertFileSrc: vi.fn((uri: string) => `capacitor://localhost/_capacitor_file_${uri}`),
+  getPlatform: vi.fn(() => "android"),
 }));
 
 const platformMocks = vi.hoisted(() => ({
@@ -18,6 +19,10 @@ const localDBMocks = vi.hoisted(() => ({
   configMediaGet: vi.fn(),
   configMediaGetByConfig: vi.fn(),
   configMediaPut: vi.fn(),
+}));
+
+const localMediaServerMocks = vi.hoisted(() => ({
+  getUrl: vi.fn(),
 }));
 
 vi.mock("@capacitor/filesystem", () => ({
@@ -32,6 +37,10 @@ vi.mock("@capacitor/core", () => ({
 vi.mock("../utils/platform", () => platformMocks);
 
 vi.mock("./localDB", () => localDBMocks);
+
+vi.mock("./nativePlugins/localMediaServer", () => ({
+  LocalMediaServer: localMediaServerMocks,
+}));
 
 vi.mock("../utils/ensureNativeDataDir", () => ({
   ensureNativeDataDir: vi.fn(),
@@ -75,10 +84,15 @@ beforeEach(() => {
   vi.clearAllMocks();
   platformMocks.isMobileNativePlatform.mockReturnValue(true);
   capacitorMocks.convertFileSrc.mockImplementation((uri: string) => `capacitor://localhost/_capacitor_file_${uri}`);
+  capacitorMocks.getPlatform.mockReturnValue("android");
   localDBMocks.configMediaGetByConfig.mockResolvedValue([]);
 });
 
-describe("configMediaCache offline video hydration", () => {
+// These tests run with Capacitor.getPlatform() === "android" (the beforeEach default),
+// exercising the Filesystem.getUri()+Capacitor.convertFileSrc() path that is preserved
+// unchanged for Android. The iOS-specific LocalMediaServer path is covered in the
+// "iOS local media server video path" describe block below.
+describe("configMediaCache offline video hydration (Android/default native path)", () => {
   it("A. resolves a native cached video via getUri + convertFileSrc, without reading file bytes", async () => {
     localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
     localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
@@ -279,5 +293,99 @@ describe("configMediaCache offline video hydration", () => {
     expect(consoleErrorSpy).toHaveBeenCalled();
 
     consoleErrorSpy.mockRestore();
+  });
+});
+
+describe("configMediaCache offline video hydration (iOS local media server path)", () => {
+  const videoItem: MediaItem = {
+    id: "video-1",
+    type: "video",
+    name: "Panel install",
+    size: 1024,
+    mime: "video/mp4",
+    url: "/api/workflow-configs/wf-1/media/video-1/file",
+    createdAt: Date.now(),
+  };
+
+  beforeEach(() => {
+    capacitorMocks.getPlatform.mockReturnValue("ios");
+  });
+
+  it("G. resolves a cached video via LocalMediaServer.getUrl, not Filesystem.getUri/convertFileSrc", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
+    localMediaServerMocks.getUrl.mockResolvedValue({ url: "http://127.0.0.1:54321/media/abc-token" });
+
+    const result = await configMediaCache.hydrateWorkflowMedia(makeWorkflow([videoItem]));
+
+    expect(localMediaServerMocks.getUrl).toHaveBeenCalledWith({ path: videoRecord.localPath });
+    expect(result.media[0].url).toBe("http://127.0.0.1:54321/media/abc-token");
+    expect(filesystemMocks.getUri).not.toHaveBeenCalled();
+    expect(filesystemMocks.readFile).not.toHaveBeenCalled();
+    expect(capacitorMocks.convertFileSrc).not.toHaveBeenCalled();
+  });
+
+  it("H. does NOT fall back to base64 hydration when LocalMediaServer.getUrl rejects — leaves the item unresolved and logs", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
+    localMediaServerMocks.getUrl.mockRejectedValue(new Error("Path is outside the allowed cache root"));
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await configMediaCache.hydrateWorkflowMedia(makeWorkflow([videoItem]));
+
+    expect(result.media[0].url).toBe(videoItem.url);
+    expect(filesystemMocks.readFile).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to obtain a local-media-server URL"),
+      expect.any(Error),
+    );
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("I. does NOT fall back to base64 hydration when LocalMediaServer.getUrl resolves with an empty url", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
+    localMediaServerMocks.getUrl.mockResolvedValue({ url: "" });
+    const consoleErrorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    const result = await configMediaCache.hydrateWorkflowMedia(makeWorkflow([videoItem]));
+
+    expect(result.media[0].url).toBe(videoItem.url);
+    expect(consoleErrorSpy).toHaveBeenCalled();
+
+    consoleErrorSpy.mockRestore();
+  });
+
+  it("J. cached photo hydration on iOS is unaffected — still the base64 data: URL path", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([photoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(photoRecord);
+    filesystemMocks.readFile.mockResolvedValue({ data: "QUJD" });
+
+    const photoItem: MediaItem = {
+      id: "photo-1",
+      type: "image",
+      name: "Panel photo",
+      size: 512,
+      mime: "image/jpeg",
+      url: "/api/workflow-configs/wf-1/media/photo-1/file",
+      createdAt: Date.now(),
+    };
+
+    const result = await configMediaCache.hydrateWorkflowMedia(makeWorkflow([photoItem]));
+
+    expect(result.media[0].url).toBe("data:image/jpeg;base64,QUJD");
+    expect(localMediaServerMocks.getUrl).not.toHaveBeenCalled();
+  });
+
+  it("K. an existing (pre-fix) ConfigMediaRecord hydrates successfully through the iOS local-server path with no re-download", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
+    localMediaServerMocks.getUrl.mockResolvedValue({ url: "http://127.0.0.1:54321/media/abc-token" });
+
+    const result = await configMediaCache.hydrateWorkflowMedia(makeWorkflow([videoItem]));
+
+    expect(result.media[0].url).toBe("http://127.0.0.1:54321/media/abc-token");
+    expect(localDBMocks.configMediaPut).not.toHaveBeenCalled();
   });
 });

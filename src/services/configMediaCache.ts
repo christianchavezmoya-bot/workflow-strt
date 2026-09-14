@@ -6,6 +6,7 @@ import { configMediaGet, configMediaGetByConfig, configMediaPut, type ConfigMedi
 import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { resolveMediaUrl } from "../utils/mediaUrl";
+import { LocalMediaServer } from "./nativePlugins/localMediaServer";
 
 /**
  * configMediaCache — downloads a workflow config's (or legacy workflow
@@ -22,14 +23,30 @@ import { resolveMediaUrl } from "../utils/mediaUrl";
  * modern config path and the legacy template path share one cache.
  *
  * Photos and videos hydrate to different URL shapes. Photos become an
- * embedded base64 data: URL (cheap, no seek requirement). Videos resolve to
- * a native, device-local, seekable file URL via Filesystem.getUri() +
- * Capacitor.convertFileSrc() — a data: URL is not reliably seekable in
- * native WebViews and can hit media-element size limits, which is exactly
- * why offline reference video playback was broken. Video hydration never
- * reads the file into JS memory and never base64-encodes it, and if native
- * URI resolution fails it must NOT fall back to the data: URL path — that
- * would silently resurrect the bug this module exists to fix.
+ * embedded base64 data: URL (cheap, no seek requirement) on every platform.
+ * Videos never read the file into JS memory and never base64-encode it — a
+ * data: URL is not reliably seekable in native WebViews and can hit
+ * media-element size limits, which is why offline reference video playback
+ * was broken in the first place — but the two native platforms need
+ * different video resolution strategies:
+ *
+ * - iOS: real-device testing proved that BOTH `capacitor://` and
+ *   `http://localhost` convertFileSrc URLs are unreachable by <video>'s
+ *   AVFoundation-backed resource loading on iOS (it does not consult
+ *   WKWebView's registered scheme handlers at all for media elements — a
+ *   platform limitation, not a bug in this app). iOS instead resolves
+ *   cached videos through a local, loopback-only (127.0.0.1) HTTP server
+ *   (LocalMediaServerPlugin, ios/App/App/LocalMediaServerPlugin.swift),
+ *   which AVFoundation *can* genuinely connect to, with real Range/206
+ *   support.
+ * - Android: Chromium's WebView video pipeline is architecturally
+ *   different and does consult the registered asset-loader for <video>, so
+ *   the existing Filesystem.getUri()+Capacitor.convertFileSrc() path is
+ *   preserved unchanged (not proven broken, so not touched).
+ *
+ * Either way, if native URL resolution fails it must NOT fall back to the
+ * data: URL path — that would silently resurrect the bug this module
+ * exists to fix.
  */
 
 /** Minimal shape prefetchConfig needs — satisfied by WorkflowConfig and WorkflowTemplateDto. */
@@ -95,7 +112,9 @@ async function readCachedDataUrl(record: ConfigMediaRecord): Promise<string | nu
 }
 
 /**
- * Resolves a cached video to a native, seekable, device-local file URL.
+ * Android video path (unchanged from the original PR #355 approach —
+ * Android's Chromium WebView video pipeline does consult the registered
+ * asset loader for <video>, so this has not been proven broken there).
  * Never reads the file's bytes and never base64-encodes it. On failure,
  * logs loudly and returns null — callers must leave the item's URL
  * unresolved rather than falling back to readCachedDataUrl, so a broken
@@ -121,6 +140,38 @@ async function readCachedVideoFileUrl(record: ConfigMediaRecord): Promise<string
   }
 }
 
+/**
+ * iOS video path: asks the local loopback-only HTTP server plugin for a
+ * `http://127.0.0.1:<port>/media/<token>` URL — see the module doc comment
+ * above for why iOS specifically cannot use convertFileSrc for video. Never
+ * reads the file's bytes on the JS side (the native plugin streams them
+ * directly to the socket) and never base64-encodes it. On failure, logs
+ * loudly and returns null — same no-silent-fallback contract as the
+ * Android path above.
+ */
+async function readCachedVideoLocalServerUrl(record: ConfigMediaRecord): Promise<string | null> {
+  try {
+    const { url } = await LocalMediaServer.getUrl({ path: record.localPath });
+    if (!url) {
+      throw new Error("LocalMediaServer.getUrl returned an empty URL");
+    }
+    return url;
+  } catch (error) {
+    console.error(
+      `[configMediaCache] Failed to obtain a local-media-server URL for cached video "${record.mediaId}" ` +
+        `(localPath: ${record.localPath}). Not falling back to base64 hydration — this video will not ` +
+        `play offline until this is resolved.`,
+      error,
+    );
+    return null;
+  }
+}
+
+/** Picks the per-platform video resolution strategy — see the module doc comment above. */
+function readCachedVideoUrl(record: ConfigMediaRecord): Promise<string | null> {
+  return Capacitor.getPlatform() === "ios" ? readCachedVideoLocalServerUrl(record) : readCachedVideoFileUrl(record);
+}
+
 /** Shared by hydrateConfig (mediaJson string) and hydrateWorkflowMedia (media array). */
 async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<{ items: MediaItem[]; changed: boolean }> {
   let changed = false;
@@ -131,7 +182,7 @@ async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<
       if (!record) return item;
 
       const localUrl = isVideoRecord(item, record)
-        ? await readCachedVideoFileUrl(record)
+        ? await readCachedVideoUrl(record)
         : await readCachedDataUrl(record);
 
       if (!localUrl) return item;
