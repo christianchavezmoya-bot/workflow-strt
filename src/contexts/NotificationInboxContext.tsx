@@ -213,7 +213,6 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
     };
 
     let timer: number | undefined;
-    let healTimer: number | undefined;
 
     const startPolling = () => {
       if (timer !== undefined) return;
@@ -280,7 +279,7 @@ export function NotificationInboxProvider({ children }: { children: ReactNode })
       handleConnectivityResume({ forceNetwork: true });
     };
 
-    healTimer = window.setInterval(reconcilePolling, POLL_HEAL_MS);
+    const healTimer = window.setInterval(reconcilePolling, POLL_HEAL_MS);
 
     const handleApiServerReachable = () => {
       // Gate on an actual prior failure — see serverWasOfflineRef's declaration above
