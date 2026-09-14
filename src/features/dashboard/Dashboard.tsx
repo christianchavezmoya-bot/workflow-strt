@@ -86,9 +86,7 @@ import DashboardRegionalSnapshotSection from "./DashboardRegionalSnapshotSection
 import DashboardEvidenceHealthGrid from "./DashboardEvidenceHealthGrid";
 import DashboardWorkloadPanel, { type ScopedWorkloadItem, type WorkloadProjectBreakdown } from "./DashboardWorkloadPanel";
 import DashboardProjectStatusGrid from "./DashboardProjectStatusGrid";
-import DashboardManagerMobileHome from "./DashboardManagerMobileHome";
-import DashboardAdminInspectionWorkspace from "./DashboardAdminInspectionWorkspace";
-import DashboardAdminInstallWorkspace, { type AdminInstallFilter } from "./DashboardAdminInstallWorkspace";
+import type { AdminInstallFilter } from "./DashboardAdminInstallWorkspace";
 import DashboardInspectionInboxSection from "./DashboardInspectionInboxSection";
 import { INSPECTION_INBOX_UI_ENABLED } from "../../config/productFeatureFlags";
 import DashboardMyInspectionJobsToday from "./DashboardMyInspectionJobsToday";
@@ -98,11 +96,9 @@ import DashboardPendingApprovalsSection from "./DashboardPendingApprovalsSection
 import DashboardAutoAssignFlagsSection from "./DashboardAutoAssignFlagsSection";
 import DashboardPhotoUpdateNotificationsSection from "./DashboardPhotoUpdateNotificationsSection";
 import DashboardMissingMediaFlagsSection from "./DashboardMissingMediaFlagsSection";
-import DashboardManagerMobileProjectsList from "./DashboardManagerMobileProjectsList";
 import DashboardWorkspaceHeader from "./DashboardWorkspaceHeader";
 import DashboardTabBar from "./DashboardTabBar";
 import DashboardManagerDesktopView from "./DashboardManagerDesktopView";
-import DashboardFieldTechnicianInstallView from "./DashboardFieldTechnicianInstallView";
 import DashboardSupervisorInstallView from "./DashboardSupervisorInstallView";
 import DashboardEngineerInstallView from "./DashboardEngineerInstallView";
 import DashboardViewerView from "./DashboardViewerView";
@@ -176,6 +172,11 @@ const DashboardWorkloadReportDialogs = lazy(() => import("./DashboardWorkloadRep
 const DashboardQuickActionDialog = lazy(() => import("./DashboardQuickActionDialog"));
 const DashboardAutoAssignConfirmDialog = lazy(() => import("./DashboardAutoAssignConfirmDialog"));
 const DashboardAssignWorkflowDialog = lazy(() => import("./DashboardAssignWorkflowDialog"));
+const DashboardAdminInstallWorkspace = lazy(() => import("./DashboardAdminInstallWorkspace"));
+const DashboardManagerMobileHome = lazy(() => import("./DashboardManagerMobileHome"));
+const DashboardManagerMobileProjectsList = lazy(() => import("./DashboardManagerMobileProjectsList"));
+const DashboardFieldTechnicianInstallView = lazy(() => import("./DashboardFieldTechnicianInstallView"));
+const DashboardAdminInspectionWorkspace = lazy(() => import("./DashboardAdminInspectionWorkspace"));
 
 type NativeMyJobsCardContext = {
   asset: ProjectAsset;
@@ -3057,32 +3058,36 @@ const Dashboard = () => {
   );
 
   const AdminInspectionWorkspace = (
-    <DashboardAdminInspectionWorkspace
-      inspectionScopeProjects={inspectionScopeProjects}
-      inspectionScopeAssets={inspectionScopeAssets}
-      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
-    />
+    <Suspense fallback={null}>
+      <DashboardAdminInspectionWorkspace
+        inspectionScopeProjects={inspectionScopeProjects}
+        inspectionScopeAssets={inspectionScopeAssets}
+        onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+      />
+    </Suspense>
   );
 
   const AdminInstallWorkspace = (
-    <DashboardAdminInstallWorkspace
-      installProjectsWithOpenAssets={installProjectsWithOpenAssets}
-      totalInstallAssetCount={totalInstallAssetCount}
-      installScopeAssets={installScopeAssets}
-      adminInstallFilter={adminInstallFilter}
-      onAdminInstallFilterChange={setAdminInstallFilter}
-      filteredAdminInstallAssets={filteredAdminInstallAssets}
-      filteredAdminInstallProjects={filteredAdminInstallProjects}
-      adminInstallProjectsOpen={adminInstallProjectsOpen}
-      onAdminInstallProjectsOpenChange={setAdminInstallProjectsOpen}
-      adminInstallPmFilter={adminInstallPmFilter}
-      onAdminInstallPmFilterChange={setAdminInstallPmFilter}
-      adminInstallProjectFilter={adminInstallProjectFilter}
-      onAdminInstallProjectFilterChange={setAdminInstallProjectFilter}
-      projectPmLabel={projectPmLabel}
-      onNavigateToInstallations={() => navigate("/installations/assets")}
-      onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
-    />
+    <Suspense fallback={null}>
+      <DashboardAdminInstallWorkspace
+        installProjectsWithOpenAssets={installProjectsWithOpenAssets}
+        totalInstallAssetCount={totalInstallAssetCount}
+        installScopeAssets={installScopeAssets}
+        adminInstallFilter={adminInstallFilter}
+        onAdminInstallFilterChange={setAdminInstallFilter}
+        filteredAdminInstallAssets={filteredAdminInstallAssets}
+        filteredAdminInstallProjects={filteredAdminInstallProjects}
+        adminInstallProjectsOpen={adminInstallProjectsOpen}
+        onAdminInstallProjectsOpenChange={setAdminInstallProjectsOpen}
+        adminInstallPmFilter={adminInstallPmFilter}
+        onAdminInstallPmFilterChange={setAdminInstallPmFilter}
+        adminInstallProjectFilter={adminInstallProjectFilter}
+        onAdminInstallProjectFilterChange={setAdminInstallProjectFilter}
+        projectPmLabel={projectPmLabel}
+        onNavigateToInstallations={() => navigate("/installations/assets")}
+        onNavigateToProject={(projectId) => navigate(`/projects/${projectId}`)}
+      />
+    </Suspense>
   );
 
   const EvidenceHealthGrid = (
@@ -3128,15 +3133,17 @@ const Dashboard = () => {
 
   const managerMobileProjectsTab = (
     <>
-      <DashboardManagerMobileProjectsList
-        projects={dashboardProjects}
-        canViewAllProjects={canViewAllProjects}
-        dashboardProjectScope={dashboardProjectScope}
-        onDashboardProjectScopeChange={setDashboardProjectScope}
-        onNavigateToProjects={() => navigate("/projects")}
-        onNavigateToProjectAssets={(project) => navigate(projectAssetsPath(project))}
-        getProjectCompletionMetrics={getProjectCompletionMetrics}
-      />
+      <Suspense fallback={null}>
+        <DashboardManagerMobileProjectsList
+          projects={dashboardProjects}
+          canViewAllProjects={canViewAllProjects}
+          dashboardProjectScope={dashboardProjectScope}
+          onDashboardProjectScopeChange={setDashboardProjectScope}
+          onNavigateToProjects={() => navigate("/projects")}
+          onNavigateToProjectAssets={(project) => navigate(projectAssetsPath(project))}
+          getProjectCompletionMetrics={getProjectCompletionMetrics}
+        />
+      </Suspense>
 
       {pendingApprovals.length > 0 && (
         <DashboardPendingApprovalsSection
@@ -3202,32 +3209,34 @@ const Dashboard = () => {
   );
 
   const ManagerMobileHome = (
-    <DashboardManagerMobileHome
-      userFullName={user.fullName}
-      userRole={user.role}
-      userId={user.id}
-      activeOffice={activeOffice}
-      overviewActiveCount={overviewActiveCount}
-      overviewPausedCount={overviewPausedCount}
-      overviewQueuedCount={overviewQueuedCount}
-      overviewPendingCount={overviewPendingCount}
-      isAdmin={isAdmin}
-      dashboardUsers={dashboardUsers}
-      viewingOwnDashboard={viewingOwnDashboard}
-      viewedDashboardUser={viewedDashboardUser ?? null}
-      selectedDashboardId={selectedDashboardId}
-      allDashboardsValue={ALL_DASHBOARDS_VALUE}
-      onSelectedDashboardIdChange={setSelectedDashboardId}
-      mobileManagerTab={mobileManagerTab}
-      onMobileManagerTabChange={setMobileManagerTab}
-      projectTabSignal={projectTabSignal}
-      inspectionTabSignal={inspectionTabSignal}
-      installTabSignal={installTabSignal}
-      renderTabLabel={renderDashboardTabLabel}
-      projectsTab={managerMobileProjectsTab}
-      inspectionsTab={managerMobileInspectionsTab}
-      installsTab={managerMobileInstallsTab}
-    />
+    <Suspense fallback={null}>
+      <DashboardManagerMobileHome
+        userFullName={user.fullName}
+        userRole={user.role}
+        userId={user.id}
+        activeOffice={activeOffice}
+        overviewActiveCount={overviewActiveCount}
+        overviewPausedCount={overviewPausedCount}
+        overviewQueuedCount={overviewQueuedCount}
+        overviewPendingCount={overviewPendingCount}
+        isAdmin={isAdmin}
+        dashboardUsers={dashboardUsers}
+        viewingOwnDashboard={viewingOwnDashboard}
+        viewedDashboardUser={viewedDashboardUser ?? null}
+        selectedDashboardId={selectedDashboardId}
+        allDashboardsValue={ALL_DASHBOARDS_VALUE}
+        onSelectedDashboardIdChange={setSelectedDashboardId}
+        mobileManagerTab={mobileManagerTab}
+        onMobileManagerTabChange={setMobileManagerTab}
+        projectTabSignal={projectTabSignal}
+        inspectionTabSignal={inspectionTabSignal}
+        installTabSignal={installTabSignal}
+        renderTabLabel={renderDashboardTabLabel}
+        projectsTab={managerMobileProjectsTab}
+        inspectionsTab={managerMobileInspectionsTab}
+        installsTab={managerMobileInstallsTab}
+      />
+    </Suspense>
   );
 
   return (
@@ -3279,37 +3288,39 @@ const Dashboard = () => {
 
 
       {canActAsFieldTechnician && pmDashboardTab === "my-installs" && (
-        <DashboardFieldTechnicianInstallView
-          inspectionRunsDue={inspectionRunsDue}
-          myInstallAssets={myInstallAssets}
-          isNativePlatform={isNativePlatform}
-          runnerLoadingAssetId={runnerLoading}
-          photoReminders={photoReminders}
-          missingMediaFlags={missingMediaFlags}
-          technicianUserId={user.id}
-          attentionLoading={attentionLoading}
-          myInstallAttentionCount={myInstallAttentionCount}
-          myInstallBlocking={myInstallBlocking}
-          myInstallPendingSigs={myInstallPendingSigs}
-          myInstallHighObservations={myInstallHighObservations}
-          resolvingDashboardIssueId={resolvingDashboardIssueId}
-          myInstallHistory={myInstallHistory}
-          historyDialogLoading={historyDialogLoading}
-          getMyJobsCardAction={getMyJobsCardAction}
-          assetAttentionLabel={assetAttentionLabel}
-          onOpenInspections={() => navigate("/installations/assets?workflowType=Inspection")}
-          onAssetTap={(asset, cardAction) => { void handleMyJobsAssetTap(asset, cardAction); }}
-          onViewAllAssets={() => navigate("/installations/assets")}
-          onPhotoRemindersChange={setPhotoReminders}
-          onMissingMediaFlagsChange={setMissingMediaFlags}
-          onUploadPhotos={(flag) => {
-            setPhotoUploadMode("installer");
-            setPhotoUploadTarget(flag);
-          }}
-          onOpenIssueRepair={openIssueRepair}
-          onOpenSignatureRepair={openSignatureRepair}
-          onOpenHistory={(asset) => { void openHistoryReport(asset); }}
-        />
+        <Suspense fallback={null}>
+          <DashboardFieldTechnicianInstallView
+            inspectionRunsDue={inspectionRunsDue}
+            myInstallAssets={myInstallAssets}
+            isNativePlatform={isNativePlatform}
+            runnerLoadingAssetId={runnerLoading}
+            photoReminders={photoReminders}
+            missingMediaFlags={missingMediaFlags}
+            technicianUserId={user.id}
+            attentionLoading={attentionLoading}
+            myInstallAttentionCount={myInstallAttentionCount}
+            myInstallBlocking={myInstallBlocking}
+            myInstallPendingSigs={myInstallPendingSigs}
+            myInstallHighObservations={myInstallHighObservations}
+            resolvingDashboardIssueId={resolvingDashboardIssueId}
+            myInstallHistory={myInstallHistory}
+            historyDialogLoading={historyDialogLoading}
+            getMyJobsCardAction={getMyJobsCardAction}
+            assetAttentionLabel={assetAttentionLabel}
+            onOpenInspections={() => navigate("/installations/assets?workflowType=Inspection")}
+            onAssetTap={(asset, cardAction) => { void handleMyJobsAssetTap(asset, cardAction); }}
+            onViewAllAssets={() => navigate("/installations/assets")}
+            onPhotoRemindersChange={setPhotoReminders}
+            onMissingMediaFlagsChange={setMissingMediaFlags}
+            onUploadPhotos={(flag) => {
+              setPhotoUploadMode("installer");
+              setPhotoUploadTarget(flag);
+            }}
+            onOpenIssueRepair={openIssueRepair}
+            onOpenSignatureRepair={openSignatureRepair}
+            onOpenHistory={(asset) => { void openHistoryReport(asset); }}
+          />
+        </Suspense>
       )}
 
       {isSupervisor && pmDashboardTab === "my-installs" && (
