@@ -1,4 +1,4 @@
-package com.christianchavez.kinet;
+package com.strata.ngo.field.dev;
 
 import android.os.Bundle;
 import com.getcapacitor.BridgeActivity;
