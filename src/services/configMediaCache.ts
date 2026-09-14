@@ -1,10 +1,12 @@
+import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import type { MediaItem, Workflow } from "../types/workflow";
-import { configMediaGet, configMediaGetByConfig, configMediaPut } from "./localDB";
+import { configMediaGet, configMediaGetByConfig, configMediaPut, type ConfigMediaRecord } from "./localDB";
 import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { resolveMediaUrl } from "../utils/mediaUrl";
+import { getLocalVideoPlaybackUrl } from "./localMediaServer";
 
 /**
  * configMediaCache — downloads a workflow config's (or legacy workflow
@@ -19,6 +21,10 @@ import { resolveMediaUrl } from "../utils/mediaUrl";
  * { id, mediaJson } — this covers both WorkflowConfig and the raw
  * WorkflowTemplateDto returned by workflowTemplateService, so both the
  * modern config path and the legacy template path share one cache.
+ *
+ * Photos hydrate to base64 data: URLs. Videos hydrate to device-local playback
+ * URLs: Android uses convertFileSrc(); iOS uses a loopback HTTP server because
+ * AVFoundation does not route <video> through WKURLSchemeHandler.
  */
 
 /** Minimal shape prefetchConfig needs — satisfied by WorkflowConfig and WorkflowTemplateDto. */
@@ -58,19 +64,63 @@ function parseMedia(source: MediaSource): MediaItem[] {
   }
 }
 
+function isVideoRecord(item: MediaItem, record: ConfigMediaRecord): boolean {
+  if (item.type === "video") return true;
+  if (item.mime?.toLowerCase().startsWith("video/")) return true;
+  if (record.mimeType?.toLowerCase().startsWith("video/")) return true;
+  return false;
+}
+
+async function readCachedDataUrl(record: ConfigMediaRecord): Promise<string | null> {
+  try {
+    const result = await Filesystem.readFile({ path: record.localPath, directory: Directory.Data });
+    const base64 = typeof result.data === "string" ? result.data : "";
+    return `data:${record.mimeType ?? "application/octet-stream"};base64,${base64}`;
+  } catch {
+    return null;
+  }
+}
+
+async function readCachedVideoPlayUrl(record: ConfigMediaRecord): Promise<string | null> {
+  try {
+    const uriResult = await Filesystem.getUri({ path: record.localPath, directory: Directory.Data });
+
+    if (Capacitor.getPlatform() === "ios") {
+      const loopbackUrl = await getLocalVideoPlaybackUrl(uriResult.uri, record.mimeType ?? undefined);
+      if (loopbackUrl) return loopbackUrl;
+      throw new Error("LocalMediaServer returned no URL");
+    }
+
+    const convertedUrl = Capacitor.convertFileSrc(uriResult.uri);
+    if (!convertedUrl) throw new Error("Capacitor.convertFileSrc returned an empty URL");
+    return convertedUrl;
+  } catch (error) {
+    console.error(
+      `[configMediaCache] Failed to resolve offline video URL for "${record.mediaId}" ` +
+        `(localPath: ${record.localPath}). Not falling back to base64 hydration.`,
+      error,
+    );
+    return null;
+  }
+}
+
 /** Shared by hydrateConfig (mediaJson string) and hydrateWorkflowMedia (media array). */
 async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<{ items: MediaItem[]; changed: boolean }> {
   let changed = false;
   const items = await Promise.all(
     media.map(async (item) => {
       if (!item?.id || !isCacheableUrl(item.url)) return item;
-      const dataUrl = await configMediaCache.getLocalDataUrl(sourceId, item.id);
-      if (dataUrl) {
-        changed = true;
-        return { ...item, url: dataUrl };
-      }
-      return item;
-    })
+      const record = await configMediaGet(`${sourceId}:${item.id}`);
+      if (!record) return item;
+
+      const localUrl = isVideoRecord(item, record)
+        ? await readCachedVideoPlayUrl(record)
+        : await readCachedDataUrl(record);
+
+      if (!localUrl) return item;
+      changed = true;
+      return { ...item, url: localUrl };
+    }),
   );
   return { items, changed };
 }
@@ -133,18 +183,12 @@ export const configMediaCache = {
     }
   },
 
-  /** Read a cached media item back as a data URL, or null when not cached. */
+  /** Read a cached photo back as a data URL, or null when not cached. */
   async getLocalDataUrl(configId: string, mediaId: string): Promise<string | null> {
     if (!isMobileNativePlatform()) return null;
     const record = await configMediaGet(`${configId}:${mediaId}`);
     if (!record) return null;
-    try {
-      const result = await Filesystem.readFile({ path: record.localPath, directory: Directory.Data });
-      const base64 = typeof result.data === "string" ? result.data : "";
-      return `data:${record.mimeType ?? "application/octet-stream"};base64,${base64}`;
-    } catch {
-      return null;
-    }
+    return readCachedDataUrl(record);
   },
 
   /**

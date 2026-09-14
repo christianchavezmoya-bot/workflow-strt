@@ -53,7 +53,7 @@ public class DocumentsController : ControllerBase
     [HttpPost]
     public async Task<ActionResult<DocumentDto>> Create([FromBody] DocumentDto request)
     {
-        if (!await CanUploadDocumentsAsync())
+        if (!await CanCreateOrUploadDocumentAsync(request.Type))
         {
             return Forbid();
         }
@@ -83,7 +83,7 @@ public class DocumentsController : ControllerBase
     [RequestSizeLimit(50_000_000)]
     public async Task<ActionResult<DocumentDto>> Upload([FromForm] UploadDocumentRequest request)
     {
-        if (!await CanUploadDocumentsAsync())
+        if (!await CanCreateOrUploadDocumentAsync(request.Type))
         {
             return Forbid();
         }
@@ -148,13 +148,13 @@ public class DocumentsController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> Delete(string id)
     {
-        if (!await CanDeleteDocumentsAsync())
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        if (!await CanDeleteDocumentAsync(doc))
         {
             return Forbid();
         }
-
-        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
-        if (doc is null) return NotFound();
         if (doc.IsDeleted) return NoContent();
 
         doc.IsDeleted = true;
@@ -184,13 +184,13 @@ public class DocumentsController : ControllerBase
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> Purge(string id)
     {
-        if (!await CanDeleteDocumentsAsync())
+        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
+        if (doc is null) return NotFound();
+
+        if (!await CanDeleteDocumentAsync(doc))
         {
             return Forbid();
         }
-
-        var doc = await _db.Documents.IgnoreQueryFilters().FirstOrDefaultAsync(d => d.Id == id);
-        if (doc is null) return NotFound();
 
         if (!string.IsNullOrWhiteSpace(doc.FilePath))
         {
@@ -206,15 +206,15 @@ public class DocumentsController : ControllerBase
     [HttpPut("{id}")]
     public async Task<ActionResult<DocumentDto>> Update(string id, [FromBody] DocumentDto request)
     {
-        if (!await CanUploadDocumentsAsync())
-        {
-            return Forbid();
-        }
-
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null)
         {
             return NotFound();
+        }
+
+        if (!await CanModifyDocumentAsync(doc))
+        {
+            return Forbid();
         }
 
         doc.Name = request.Name;
@@ -244,11 +244,6 @@ public class DocumentsController : ControllerBase
     [RequestSizeLimit(50_000_000)]
     public async Task<ActionResult<DocumentDto>> ReplaceFile(string id, [FromForm] ReplaceDocumentFileRequest request)
     {
-        if (!await CanUploadDocumentsAsync())
-        {
-            return Forbid();
-        }
-
         if (request.File is null || request.File.Length == 0)
         {
             return BadRequest(new { message = "File is required." });
@@ -256,6 +251,11 @@ public class DocumentsController : ControllerBase
 
         var doc = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id);
         if (doc is null) return NotFound();
+
+        if (!await CanModifyDocumentAsync(doc))
+        {
+            return Forbid();
+        }
 
         var previousPath = doc.FilePath;
         var extension = Path.GetExtension(request.File.FileName);
@@ -429,6 +429,30 @@ public class DocumentsController : ControllerBase
         return Ok(new DocumentConfigDto(config.TabsJson, config.FieldsJson));
     }
 
+    private static bool IsTipsDocument(string? type) =>
+        string.Equals(type, "tips", StringComparison.OrdinalIgnoreCase);
+
+    private async Task<bool> CanCreateOrUploadDocumentAsync(string? type)
+    {
+        if (IsTipsDocument(type))
+        {
+            return await HasTipsPermissionAsync((tips) => tips.Create)
+                || await CanUploadDocumentsAsync();
+        }
+
+        return await CanUploadDocumentsAsync();
+    }
+
+    private async Task<bool> CanModifyDocumentAsync(DocumentEntity doc) =>
+        IsTipsDocument(doc.Type)
+            ? await HasTipsPermissionAsync((tips) => tips.Edit) || await CanUploadDocumentsAsync()
+            : await CanUploadDocumentsAsync();
+
+    private async Task<bool> CanDeleteDocumentAsync(DocumentEntity doc) =>
+        IsTipsDocument(doc.Type)
+            ? await HasTipsPermissionAsync((tips) => tips.Delete) || await CanDeleteDocumentsAsync()
+            : await CanDeleteDocumentsAsync();
+
     private async Task<bool> CanUploadDocumentsAsync()
     {
         return await HasDocumentPermissionAsync((documents) => documents.Upload);
@@ -437,6 +461,38 @@ public class DocumentsController : ControllerBase
     private async Task<bool> CanDeleteDocumentsAsync()
     {
         return await HasDocumentPermissionAsync((documents) => documents.Delete);
+    }
+
+    private async Task<bool> HasTipsPermissionAsync(Func<TipsDomainPermissions, bool> selector)
+    {
+        var role = User.FindFirstValue(ClaimTypes.Role)?.Trim();
+        if (string.IsNullOrWhiteSpace(role))
+        {
+            return false;
+        }
+
+        var config = await _db.RoleConfigs.AsNoTracking().FirstOrDefaultAsync();
+        if (!string.IsNullOrWhiteSpace(config?.ConfigJson))
+        {
+            try
+            {
+                var roles = JsonSerializer.Deserialize<Dictionary<string, RolePermissions>>(config.ConfigJson, JsonOptions);
+                if (roles != null)
+                {
+                    var matchedRole = roles.FirstOrDefault(entry => string.Equals(entry.Key, role, StringComparison.OrdinalIgnoreCase));
+                    if (!string.IsNullOrWhiteSpace(matchedRole.Key))
+                    {
+                        return selector(ResolveTipsPermissions(matchedRole.Value));
+                    }
+                }
+            }
+            catch
+            {
+                // Fall through to defaults if role config JSON cannot be parsed.
+            }
+        }
+
+        return selector(GetDefaultTipsPermissions(role));
     }
 
     private async Task<bool> HasDocumentPermissionAsync(Func<DocumentsDomainPermissions, bool> selector)
@@ -491,6 +547,39 @@ public class DocumentsController : ControllerBase
         return DocumentManagers.Contains(role)
             ? new DocumentsDomainPermissions(true, "all", true, true)
             : new DocumentsDomainPermissions(true, "all", false, false);
+    }
+
+    /// <summary>
+    /// Mirrors frontend defaultDomains(): tips authoring follows EditFields when no
+    /// explicit tips domain is saved in role config.
+    /// </summary>
+    private static TipsDomainPermissions ResolveTipsPermissions(RolePermissions permissions)
+    {
+        if (permissions.Domains?.Tips != null)
+        {
+            return permissions.Domains.Tips;
+        }
+
+        return new TipsDomainPermissions(
+            View: true,
+            Create: permissions.EditFields,
+            Edit: permissions.EditFields,
+            Delete: permissions.CreateDeleteTables);
+    }
+
+    private static TipsDomainPermissions GetDefaultTipsPermissions(string role)
+    {
+        if (DocumentManagers.Contains(role))
+        {
+            return new TipsDomainPermissions(true, true, true, true);
+        }
+
+        // Match frontend FALLBACK_ROLE_PERMISSIONS: Supervisor/Installer get tips.create via editFields.
+        return role switch
+        {
+            "Supervisor" or "Installer" => new TipsDomainPermissions(true, Create: true, Edit: true, Delete: false),
+            _ => new TipsDomainPermissions(true, false, false, false),
+        };
     }
 
     private static DocumentDto ToDto(DocumentEntity doc, HttpRequest request, int? myRating = null)
