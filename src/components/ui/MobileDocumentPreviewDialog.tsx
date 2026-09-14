@@ -721,6 +721,8 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
       PaperProps={{
         sx: {
           height: "88vh",
+          display: "flex",
+          flexDirection: "column",
           borderRadius: 4,
           overflow: "hidden",
           background: "linear-gradient(180deg, rgba(8,18,24,0.98), rgba(8,14,19,0.99))",
@@ -829,6 +831,8 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         ref={zoomSurfaceRef}
         sx={{
           p: 0,
+          flex: 1,
+          minHeight: 0,
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
@@ -958,14 +962,29 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "video" && blobUrl && (
-          <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", p: { xs: 1.25, sm: 2.5 } }}>
+          <Box
+            sx={{
+              flex: 1,
+              minHeight: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              bgcolor: "#000",
+              p: { xs: 1.25, sm: 2.5 },
+              overflow: "hidden",
+            }}
+          >
             <Box
               component="video"
               src={blobUrl}
               controls
+              playsInline
               sx={{
-                width: "100%",
+                maxWidth: "100%",
                 maxHeight: "100%",
+                width: "auto",
+                height: "auto",
+                objectFit: "contain",
                 borderRadius: 3,
                 bgcolor: "#000",
               }}

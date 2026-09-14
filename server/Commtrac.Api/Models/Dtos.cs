@@ -748,13 +748,15 @@ public record InstallationAssetsDomainPermissions(
 public record WorkInstructionsBuilderDomainPermissions(bool View, string ViewScope = "own", bool Build = false, bool Publish = false, bool Archive = false);
 public record DocumentsDomainPermissions(bool View, string ViewScope = "own", bool Upload = false, bool Delete = false);
 public record SettingsDomainPermissions(bool View, bool Edit);
+public record TipsDomainPermissions(bool View, bool Create = false, bool Edit = false, bool Delete = false);
 
 public record DomainPermissions(
     ProjectDomainPermissions Projects,
     InstallationAssetsDomainPermissions InstallationAssets,
     WorkInstructionsBuilderDomainPermissions WorkInstructionsBuilder,
     DocumentsDomainPermissions Documents,
-    SettingsDomainPermissions Settings
+    SettingsDomainPermissions Settings,
+    TipsDomainPermissions? Tips = null
 );
 
 public record RolePermissions(

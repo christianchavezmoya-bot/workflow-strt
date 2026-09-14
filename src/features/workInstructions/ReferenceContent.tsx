@@ -204,7 +204,15 @@ export function ReferenceContentSection({ media }: { media: MediaItem[] }) {
               playsInline
               autoPlay
               preload="metadata"
-              style={{ width: "100%", maxHeight: "80vh", display: "block", backgroundColor: "black" }}
+              style={{
+                width: "100%",
+                maxWidth: "100%",
+                maxHeight: "70vh",
+                height: "auto",
+                objectFit: "contain",
+                display: "block",
+                backgroundColor: "black",
+              }}
             />
           )}
           <Button
