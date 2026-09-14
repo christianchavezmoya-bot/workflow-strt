@@ -1,7 +1,8 @@
+import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import type { MediaItem, Workflow } from "../types/workflow";
-import { configMediaGet, configMediaGetByConfig, configMediaPut } from "./localDB";
+import { configMediaGet, configMediaGetByConfig, configMediaPut, type ConfigMediaRecord } from "./localDB";
 import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { resolveMediaUrl } from "../utils/mediaUrl";
@@ -19,6 +20,16 @@ import { resolveMediaUrl } from "../utils/mediaUrl";
  * { id, mediaJson } — this covers both WorkflowConfig and the raw
  * WorkflowTemplateDto returned by workflowTemplateService, so both the
  * modern config path and the legacy template path share one cache.
+ *
+ * Photos and videos hydrate to different URL shapes. Photos become an
+ * embedded base64 data: URL (cheap, no seek requirement). Videos resolve to
+ * a native, device-local, seekable file URL via Filesystem.getUri() +
+ * Capacitor.convertFileSrc() — a data: URL is not reliably seekable in
+ * native WebViews and can hit media-element size limits, which is exactly
+ * why offline reference video playback was broken. Video hydration never
+ * reads the file into JS memory and never base64-encodes it, and if native
+ * URI resolution fails it must NOT fall back to the data: URL path — that
+ * would silently resurrect the bug this module exists to fix.
  */
 
 /** Minimal shape prefetchConfig needs — satisfied by WorkflowConfig and WorkflowTemplateDto. */
@@ -58,18 +69,74 @@ function parseMedia(source: MediaSource): MediaItem[] {
   }
 }
 
+/**
+ * Robust video detection: primary signal is the media item's own `type`,
+ * but legacy/incomplete records (cached before `type` was reliably set, or
+ * whose MediaItem metadata is stale) are still recognized via MIME —
+ * either the item's declared `mime` or the MIME captured on download in
+ * the ConfigMediaRecord.
+ */
+function isVideoRecord(item: MediaItem, record: ConfigMediaRecord): boolean {
+  if (item.type === "video") return true;
+  if (item.mime?.toLowerCase().startsWith("video/")) return true;
+  if (record.mimeType?.toLowerCase().startsWith("video/")) return true;
+  return false;
+}
+
+/** Reads a cached file fully into memory and returns it as a base64 data: URL. Photos only. */
+async function readCachedDataUrl(record: ConfigMediaRecord): Promise<string | null> {
+  try {
+    const result = await Filesystem.readFile({ path: record.localPath, directory: Directory.Data });
+    const base64 = typeof result.data === "string" ? result.data : "";
+    return `data:${record.mimeType ?? "application/octet-stream"};base64,${base64}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a cached video to a native, seekable, device-local file URL.
+ * Never reads the file's bytes and never base64-encodes it. On failure,
+ * logs loudly and returns null — callers must leave the item's URL
+ * unresolved rather than falling back to readCachedDataUrl, so a broken
+ * native URI resolution is visibly broken offline instead of silently
+ * degrading back to the non-seekable data: URL.
+ */
+async function readCachedVideoFileUrl(record: ConfigMediaRecord): Promise<string | null> {
+  try {
+    const uriResult = await Filesystem.getUri({ path: record.localPath, directory: Directory.Data });
+    const convertedUrl = Capacitor.convertFileSrc(uriResult.uri);
+    if (!convertedUrl) {
+      throw new Error("Capacitor.convertFileSrc returned an empty URL");
+    }
+    return convertedUrl;
+  } catch (error) {
+    console.error(
+      `[configMediaCache] Failed to resolve a native seekable URL for cached video "${record.mediaId}" ` +
+        `(localPath: ${record.localPath}). Not falling back to base64 hydration — this video will not ` +
+        `play offline until this is resolved.`,
+      error,
+    );
+    return null;
+  }
+}
+
 /** Shared by hydrateConfig (mediaJson string) and hydrateWorkflowMedia (media array). */
 async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<{ items: MediaItem[]; changed: boolean }> {
   let changed = false;
   const items = await Promise.all(
     media.map(async (item) => {
       if (!item?.id || !isCacheableUrl(item.url)) return item;
-      const dataUrl = await configMediaCache.getLocalDataUrl(sourceId, item.id);
-      if (dataUrl) {
-        changed = true;
-        return { ...item, url: dataUrl };
-      }
-      return item;
+      const record = await configMediaGet(`${sourceId}:${item.id}`);
+      if (!record) return item;
+
+      const localUrl = isVideoRecord(item, record)
+        ? await readCachedVideoFileUrl(record)
+        : await readCachedDataUrl(record);
+
+      if (!localUrl) return item;
+      changed = true;
+      return { ...item, url: localUrl };
     })
   );
   return { items, changed };
@@ -133,24 +200,24 @@ export const configMediaCache = {
     }
   },
 
-  /** Read a cached media item back as a data URL, or null when not cached. */
+  /**
+   * Read a cached photo back as a data URL, or null when not cached. Kept
+   * for photos only — cached videos must go through hydrateConfig /
+   * hydrateWorkflowMedia so they resolve to a native seekable file URL
+   * instead (see readCachedVideoFileUrl above).
+   */
   async getLocalDataUrl(configId: string, mediaId: string): Promise<string | null> {
     if (!isMobileNativePlatform()) return null;
     const record = await configMediaGet(`${configId}:${mediaId}`);
     if (!record) return null;
-    try {
-      const result = await Filesystem.readFile({ path: record.localPath, directory: Directory.Data });
-      const base64 = typeof result.data === "string" ? result.data : "";
-      return `data:${record.mimeType ?? "application/octet-stream"};base64,${base64}`;
-    } catch {
-      return null;
-    }
+    return readCachedDataUrl(record);
   },
 
   /**
-   * Return a copy of the config whose media URLs are rewritten to embedded
-   * data URLs from the filesystem cache (for offline rendering). Configs with
-   * no cached media are returned unchanged.
+   * Return a copy of the config whose media URLs are rewritten to local
+   * filesystem-cache URLs for offline rendering (embedded data: URLs for
+   * photos, native seekable file URLs for videos). Configs with no cached
+   * media are returned unchanged.
    */
   async hydrateConfig(config: WorkflowConfig): Promise<WorkflowConfig> {
     if (!isMobileNativePlatform()) return config;
