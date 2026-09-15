@@ -59,3 +59,78 @@ export function parseFeatureImportRow(row: Record<string, unknown>): FeatureImpo
     isInventory: parseFeatureFlagFromImportRow(row),
   };
 }
+
+/**
+ * WF-6 Feature Library extension: FeatureDependency rows, exported to (and parsed from) a second
+ * "Dependencies" sheet alongside the existing "Features" sheet. A dependency row references its
+ * parent feature by NAME (not id — XLSX is a human-editable format and ids aren't stable/known
+ * to a spreadsheet author), matching how the "Features" sheet itself has no id column either;
+ * resolving that name back to a real featureId is the importing caller's job (it has the
+ * feature-name -> id map from the Features sheet's own import pass), not this module's.
+ */
+export interface FeatureDependencyImportRow {
+  featureName: string;
+  name: string;
+  isInventory: boolean;
+  captureFields: string[];
+  defaultQty: string;
+  unit: string;
+  unitPrice: string;
+}
+
+/** Canonical export row (as an array, matching the aoa_to_sheet convention already used for the
+ *  Features sheet) for one FeatureDependency, given its parent feature's name. */
+export function featureDependencyToExportRow(
+  dep: { name: string; isInventory: boolean; captureFields: string[]; defaultQty: number; unit?: string; unitPrice: number },
+  featureName: string,
+): (string | number)[] {
+  return [
+    featureName,
+    dep.name,
+    featureFlagToExportValue(dep.isInventory),
+    dep.captureFields.join(";"),
+    String(dep.defaultQty),
+    dep.unit ?? "",
+    String(dep.unitPrice),
+  ];
+}
+
+export function parseFeatureDependencyImportRow(row: Record<string, unknown>): FeatureDependencyImportRow {
+  const captureFieldsRaw = String(row["captureFields"] || row["capture_fields"] || row["CaptureFields"] || "").trim();
+  return {
+    featureName: String(row["featureName"] || row["feature"] || row["Feature"] || row["FeatureName"] || "").trim(),
+    name: String(row["name"] || row["Name"] || "").trim(),
+    isInventory: parseFeatureFlagFromImportRow(row),
+    captureFields: captureFieldsRaw ? captureFieldsRaw.split(";").map((s) => s.trim()).filter(Boolean) : [],
+    defaultQty: String(row["defaultQty"] || row["default_qty"] || row["DefaultQty"] || "1").trim() || "1",
+    unit: String(row["unit"] || row["Unit"] || "").trim(),
+    unitPrice: String(row["unitPrice"] || row["unit_price"] || row["UnitPrice"] || row["price"] || "0").trim() || "0",
+  };
+}
+
+export type FeatureDependencyResolution =
+  | { status: "resolved"; featureName: string }
+  | { status: "unknown" }
+  | { status: "ambiguous"; matchCount: number };
+
+function normalizeFeatureName(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+/**
+ * Resolves a dependency row's `featureName` against a set of candidate feature names (typically
+ * existing library features UNION the names of feature rows in the same import batch). Never
+ * invents or remaps an id: zero matches is "unknown" and more than one match is "ambiguous" —
+ * both are reported, never guessed, so the caller can skip/report that row rather than attach it
+ * to the wrong (or a nonexistent) feature.
+ */
+export function resolveFeatureDependencyRow(
+  row: FeatureDependencyImportRow,
+  candidateFeatureNames: string[],
+): FeatureDependencyResolution {
+  const target = normalizeFeatureName(row.featureName);
+  const matches = candidateFeatureNames.filter((name) => normalizeFeatureName(name) === target);
+  if (matches.length === 0) return { status: "unknown" };
+  if (matches.length > 1) return { status: "ambiguous", matchCount: matches.length };
+  return { status: "resolved", featureName: matches[0] };
+}

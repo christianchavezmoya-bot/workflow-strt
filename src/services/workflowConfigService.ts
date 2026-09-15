@@ -1,6 +1,8 @@
 ﻿import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
 import type { SyncFeatureStepsResult } from "../types/syncFeatureSteps";
+import type { WorkflowExportDocument } from "../types/workflowExportSchema";
+import type { WorkflowImportValidation } from "../types/workflowImportValidation";
 import offlineStore from "./offlineStore";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -275,6 +277,28 @@ export const workflowConfigService = {
    *  client-side reconciliation engine; this is the only source of preview data. */
   async previewSyncFeatureSteps(id: string): Promise<SyncFeatureStepsResult> {
     const res = await api.post<SyncFeatureStepsResult>(`/workflow-configs/${id}/sync-feature-steps/preview`);
+    return res.data;
+  },
+
+  /** WF-6B: exports this config as the WF-1 reusable workflow JSON schema — featureSelections
+   *  are references + selection state only, never a copy of Product/Feature master data. */
+  async exportWorkflow(id: string): Promise<WorkflowExportDocument> {
+    const res = await api.get<WorkflowExportDocument>(`/workflow-configs/${id}/export`);
+    return res.data;
+  },
+
+  /** WF-6C: read-only validation of an import payload — no persistence. The real import call
+   *  re-validates independently; never trust a cached validation result when committing. */
+  async validateImportWorkflow(id: string, doc: WorkflowExportDocument): Promise<WorkflowImportValidation> {
+    const res = await api.post<WorkflowImportValidation>(`/workflow-configs/${id}/import/validate`, doc);
+    return res.data;
+  },
+
+  /** WF-6C: commits a reusable workflow JSON import. The server re-validates and refuses to
+   *  write anything if invalid — it never trusts the frontend's own validate-call result. */
+  async importWorkflow(id: string, doc: WorkflowExportDocument): Promise<WorkflowConfig> {
+    const res = await api.post<WorkflowConfig>(`/workflow-configs/${id}/import`, doc);
+    invalidateWebCacheByPrefix("/workflow-configs");
     return res.data;
   },
 

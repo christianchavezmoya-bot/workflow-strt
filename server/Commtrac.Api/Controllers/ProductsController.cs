@@ -89,6 +89,69 @@ public class ProductsController : ControllerBase
         return Ok(ToDto(product, null, null));
     }
 
+    /// <summary>
+    /// WF-6: Product Workflow Context export — Product master data only (schemaVersion, product
+    /// id/name, every linked Feature and its Dependencies with full metadata). Intended for an
+    /// external agent to construct a valid WorkflowExportDto.FeatureSelections for this product.
+    /// Deliberately contains no WorkflowConfig-specific selection state (no quantities/
+    /// inclusions — that's per-config, not Product master data), no secrets/credentials, no
+    /// customer/project data, no workflow-run values, no signatures.
+    /// </summary>
+    [HttpGet("{id}/workflow-context")]
+    public async Task<IActionResult> GetWorkflowContext(string id)
+    {
+        var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == id);
+        if (product is null) return NotFound();
+
+        var links = await _db.ProductFeatures
+            .Where(pf => pf.ProductId == id)
+            .OrderBy(pf => pf.SortOrder)
+            .ToListAsync();
+        var featureIds = links.Select(l => l.FeatureId).ToList();
+
+        var features = await _db.Features.Where(f => featureIds.Contains(f.Id)).ToListAsync();
+        var featureById = features.ToDictionary(f => f.Id);
+
+        var allDeps = await _db.FeatureDependencies
+            .Where(d => featureIds.Contains(d.FeatureId))
+            .OrderBy(d => d.SortOrder)
+            .ToListAsync();
+        var depsByFeature = allDeps.GroupBy(d => d.FeatureId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var featureContexts = new List<FeatureContextDto>();
+        foreach (var link in links)
+        {
+            if (!featureById.TryGetValue(link.FeatureId, out var f)) continue; // stale link, skip
+
+            var options = string.IsNullOrWhiteSpace(f.OptionsJson) || f.OptionsJson == "[]"
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(f.OptionsJson, JsonOptions) ?? new();
+            var subProps = string.IsNullOrWhiteSpace(f.SubPropertiesJson) || f.SubPropertiesJson == "[]"
+                ? new List<FeatureSubPropertyDto>()
+                : JsonSerializer.Deserialize<List<FeatureSubPropertyDto>>(f.SubPropertiesJson, JsonOptions) ?? new();
+
+            var deps = depsByFeature.TryGetValue(f.Id, out var featureDeps) ? featureDeps : new List<FeatureDependencyEntity>();
+            var depContexts = deps.Select(d =>
+            {
+                var captureFields = string.IsNullOrWhiteSpace(d.CaptureFieldsJson) || d.CaptureFieldsJson == "[]"
+                    ? new List<string>()
+                    : JsonSerializer.Deserialize<List<string>>(d.CaptureFieldsJson, JsonOptions) ?? new();
+                return new FeatureDependencyContextDto(
+                    d.Id, d.Name, d.FeatureId, d.IsInventory, captureFields, d.DefaultQty, d.Unit, d.UnitPrice, d.SortOrder);
+            }).ToList();
+
+            featureContexts.Add(new FeatureContextDto(
+                f.Id, f.Name, f.Description, f.ValueType, options, subProps, f.IsInventory,
+                // Mirrors isFeatureAvailableForNewSelection's master-data rule — Feature: Yes is
+                // always selectable; Feature: No has no config-specific selection context here.
+                Selectable: f.IsInventory,
+                link.SortOrder, f.Brand, f.Supplier, f.AlternativePartNumber, f.ManufacturerPartNumber,
+                f.UnitPrice, f.ProductLink, depContexts));
+        }
+
+        return Ok(new ProductWorkflowContextDto(1, new ProductContextDto(product.Id, product.Name), featureContexts));
+    }
+
     [HttpGet("{id}/impact")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> GetImpact(string id)

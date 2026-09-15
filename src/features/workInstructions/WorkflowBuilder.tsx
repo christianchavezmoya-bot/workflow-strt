@@ -59,6 +59,10 @@ import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
 import { SyncFeatureStepsDialog } from "./SyncFeatureStepsDialog";
 import { SyncFeatureStepsButton } from "./SyncFeatureStepsButton";
+import { ImportWorkflowJsonDialog } from "./ImportWorkflowJsonDialog";
+import { downloadJsonFile } from "./downloadJsonFile";
+import { productService } from "../../services/productService";
+import type { WorkflowExportDocument } from "../../types/workflowExportSchema";
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
@@ -2851,6 +2855,46 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
 }) {
   const [tab, setTab] = React.useState(0);
   const [syncDialogOpen, setSyncDialogOpen] = React.useState(false);
+  const [importDoc, setImportDoc] = React.useState<WorkflowExportDocument | null>(null);
+  const importFileInputRef = React.useRef<HTMLInputElement>(null);
+  const toast = useAppToast();
+
+  // WF-6A: Product Workflow Context — Product master data only, no config-specific selection
+  // state. Distinct from the WF-6B reusable-workflow export below.
+  async function handleExportWorkflowContext() {
+    try {
+      const context = await productService.getWorkflowContext(workflow.productId);
+      downloadJsonFile(`workflow-context-${workflow.productId}.json`, context);
+    } catch {
+      toast.error("Could not export the workflow context. Please try again.");
+    }
+  }
+
+  // WF-6B: the reusable workflow JSON (WF-1 schema) for the current config.
+  async function handleExportWorkflowJson() {
+    if (!configId) return;
+    try {
+      const doc = await workflowConfigService.exportWorkflow(configId);
+      downloadJsonFile(`workflow-${configId}.json`, doc);
+    } catch {
+      toast.error("Could not export this workflow. Please try again.");
+    }
+  }
+
+  // WF-6C: reads the picked file and opens ImportWorkflowJsonDialog with it — the dialog itself
+  // owns validation (server-authoritative) and the confirm/cancel flow.
+  async function handleImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as WorkflowExportDocument;
+      setImportDoc(parsed);
+    } catch {
+      toast.error("That file isn't valid JSON.");
+    }
+  }
   const sels = featureSelections ?? [];
   // This is the "Features" tab's own new-selection picker (quantities + dependency
   // inclusions) — same availability rule as the left-panel "Installed Features" list.
@@ -3077,6 +3121,34 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
                 preparation, test & acceptance, inspection, return-to-service, or any other
                 manually-authored step. */}
             <SyncFeatureStepsButton visible={!!configId && !isReadOnly} onClick={() => setSyncDialogOpen(true)} />
+
+            {/* WF-6: Product Workflow Context (Product master data) and reusable workflow JSON
+                (WF-1 schema) export/import — distinct from both Sync Feature Steps above and
+                Regenerate Workflow below, and from each other (context vs. this config's own
+                feature selections + steps). */}
+            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+              <Button size="small" variant="text" startIcon={<DownloadOutlined />} onClick={handleExportWorkflowContext}>
+                Export Workflow Context
+              </Button>
+              {configId && (
+                <Button size="small" variant="text" startIcon={<DownloadOutlined />} onClick={handleExportWorkflowJson}>
+                  Export Workflow JSON
+                </Button>
+              )}
+              {configId && !isReadOnly && (
+                <Button size="small" variant="text" startIcon={<UploadOutlined />} onClick={() => importFileInputRef.current?.click()}>
+                  Import Workflow JSON
+                </Button>
+              )}
+              <input
+                ref={importFileInputRef}
+                type="file"
+                accept="application/json"
+                hidden
+                onChange={handleImportFileSelected}
+              />
+            </Stack>
+
             <Stack spacing={1}>
               {features.map((feat) => {
                 const sel = sels.find((s) => s.featureId === feat.id) ?? { featureId: feat.id, included: false, activeCount: 0 };
@@ -3219,6 +3291,15 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
           configId={configId}
           steps={workflow.steps}
           onSynced={(cfg) => onConfigRefreshed?.(cfg)}
+        />
+      )}
+
+      {configId && (
+        <ImportWorkflowJsonDialog
+          doc={importDoc}
+          onClose={() => setImportDoc(null)}
+          configId={configId}
+          onImported={(cfg) => onConfigRefreshed?.(cfg)}
         />
       )}
     </Stack>

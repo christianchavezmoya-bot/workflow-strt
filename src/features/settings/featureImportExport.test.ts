@@ -3,6 +3,9 @@ import {
   featureFlagToExportValue,
   parseFeatureFlagFromImportRow,
   parseFeatureImportRow,
+  featureDependencyToExportRow,
+  parseFeatureDependencyImportRow,
+  resolveFeatureDependencyRow,
 } from "./featureImportExport";
 
 describe("featureFlagToExportValue", () => {
@@ -124,5 +127,73 @@ describe("parseFeatureImportRow — full row round trip", () => {
 
     const legacyTrueRow = { ...legacyRow, Inventory: "true" };
     expect(parseFeatureImportRow(legacyTrueRow).isInventory).toBe(true);
+  });
+});
+
+// WF-6: Feature Library XLSX extension — FeatureDependency rows on a second "Dependencies" sheet.
+describe("featureDependencyToExportRow / parseFeatureDependencyImportRow — round trip", () => {
+  const HEADERS = ["featureName", "name", "isInventory", "captureFields", "defaultQty", "unit", "unitPrice"];
+
+  function rowToRecord(row: (string | number)[]): Record<string, string> {
+    return Object.fromEntries(HEADERS.map((h, i) => [h, String(row[i])]));
+  }
+
+  it("round-trips an inventory dependency (multiple capture fields) through export→import", () => {
+    const dep = { name: "Camera Unit", isInventory: true, captureFields: ["serialNo", "firmware"], defaultQty: 1, unit: undefined, unitPrice: 0 };
+    const exported = featureDependencyToExportRow(dep, "Junction Box");
+    const reimported = parseFeatureDependencyImportRow(rowToRecord(exported));
+
+    expect(reimported).toEqual({
+      featureName: "Junction Box",
+      name: "Camera Unit",
+      isInventory: true,
+      captureFields: ["serialNo", "firmware"],
+      defaultQty: "1",
+      unit: "",
+      unitPrice: "0",
+    });
+  });
+
+  it("round-trips a non-inventory dependency (qty/unit/price, no capture fields)", () => {
+    const dep = { name: "Mounting Bracket", isInventory: false, captureFields: [], defaultQty: 4, unit: "ea", unitPrice: 12.5 };
+    const exported = featureDependencyToExportRow(dep, "Junction Box");
+    const reimported = parseFeatureDependencyImportRow(rowToRecord(exported));
+
+    expect(reimported).toEqual({
+      featureName: "Junction Box",
+      name: "Mounting Bracket",
+      isInventory: false,
+      captureFields: [],
+      defaultQty: "4",
+      unit: "ea",
+      unitPrice: "12.5",
+    });
+  });
+
+  it("defaults defaultQty/unitPrice to sensible values and captureFields to [] when columns are blank", () => {
+    const parsed = parseFeatureDependencyImportRow({ featureName: "Junction Box", name: "Widget" });
+    expect(parsed.defaultQty).toBe("1");
+    expect(parsed.unitPrice).toBe("0");
+    expect(parsed.captureFields).toEqual([]);
+  });
+});
+
+describe("resolveFeatureDependencyRow — never invents or remaps an id", () => {
+  const row = (featureName: string): ReturnType<typeof parseFeatureDependencyImportRow> =>
+    ({ featureName, name: "Camera Unit", isInventory: true, captureFields: [], defaultQty: "1", unit: "", unitPrice: "0" });
+
+  it("resolves a single case/punctuation-insensitive match", () => {
+    const result = resolveFeatureDependencyRow(row("junction box"), ["Junction Box", "Generator"]);
+    expect(result).toEqual({ status: "resolved", featureName: "Junction Box" });
+  });
+
+  it("reports unknown when no candidate feature name matches", () => {
+    const result = resolveFeatureDependencyRow(row("Nonexistent Feature"), ["Junction Box", "Generator"]);
+    expect(result).toEqual({ status: "unknown" });
+  });
+
+  it("reports ambiguous (never guesses) when more than one candidate matches", () => {
+    const result = resolveFeatureDependencyRow(row("Junction Box"), ["Junction Box", "Junction Box"]);
+    expect(result).toEqual({ status: "ambiguous", matchCount: 2 });
   });
 });

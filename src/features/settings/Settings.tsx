@@ -47,7 +47,11 @@ import { divisionService } from "../../services/divisionService";
 import type { Division } from "../../types/division";
 import { featureService } from "../../services/featureService";
 import type { Feature } from "../../types/feature";
-import { featureFlagToExportValue, parseFeatureImportRow, type FeatureImportRow } from "./featureImportExport";
+import {
+  featureFlagToExportValue, parseFeatureImportRow, type FeatureImportRow,
+  featureDependencyToExportRow, parseFeatureDependencyImportRow, type FeatureDependencyImportRow,
+  resolveFeatureDependencyRow,
+} from "./featureImportExport";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
 import { productService } from "../../services/productService";
@@ -749,8 +753,10 @@ const Settings = () => {
   const [featureImportProduct, setFeatureImportProduct] = useState<string>("");
   const [featureImportError, setFeatureImportError] = useState<string | null>(null);
   const [featureImporting, setFeatureImporting] = useState(false);
-  const [featureImportDone, setFeatureImportDone] = useState<{ created: number; skipped: number } | null>(null);
+  const [featureImportDone, setFeatureImportDone] = useState<{ created: number; skipped: number; depsCreated: number; depsSkipped: number } | null>(null);
   const featureImportFileRef = useRef<HTMLInputElement>(null);
+  // WF-6: FeatureDependency rows from the same workbook's "Feature Dependencies" sheet, if present.
+  const [featureImportDepRows, setFeatureImportDepRows] = useState<FeatureDependencyImportRow[]>([]);
   const [exportMenuAnchor, setExportMenuAnchor] = useState<HTMLElement | null>(null);
 
   function exportFeaturesCSV() {
@@ -770,6 +776,15 @@ const Settings = () => {
       const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Features");
+
+      // WF-6: a second "Feature Dependencies" sheet, one row per FeatureDependency, referencing
+      // its parent feature by name (features have no id column in this sheet either).
+      const depRows = (await Promise.all(features.map((f) => featureDependencyService.getByFeature(f.id))))
+        .flatMap((deps, i) => deps.map((dep) => featureDependencyToExportRow(dep, features[i].name)));
+      const depHeaders = ["featureName", "name", "isInventory", "captureFields", "defaultQty", "unit", "unitPrice"];
+      const depWs = XLSX.utils.aoa_to_sheet([depHeaders, ...depRows]);
+      XLSX.utils.book_append_sheet(wb, depWs, "Feature Dependencies");
+
       XLSX.writeFile(wb, "features.xlsx");
     } catch {
       toast.error("Failed to export Excel file. Check console for details.");
@@ -814,6 +829,16 @@ const Settings = () => {
       ]);
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Features");
+
+      // WF-6: matching "Feature Dependencies" sheet — featureName must match a name on the
+      // Features sheet above (or an existing library feature) exactly, case/punctuation-insensitive.
+      const depWs = XLSX.utils.aoa_to_sheet([
+        ["featureName", "name", "isInventory", "captureFields", "defaultQty", "unit", "unitPrice"],
+        ["IP Camera 4MP", "PoE Injector", "Yes", "serialNo;firmware", "1", "", "0"],
+        ["* must match a Features-sheet name", "* required", "optional (Yes/No, default: No)", "optional, ; separated", "optional (default: 1)", "optional", "optional (default: 0)"],
+      ]);
+      XLSX.utils.book_append_sheet(wb, depWs, "Feature Dependencies");
+
       XLSX.writeFile(wb, "features-template.xlsx");
     } catch {
       toast.error("Failed to download template. Check console for details.");
@@ -838,6 +863,20 @@ const Settings = () => {
           .filter((r) => r.name && !r.name.trim().startsWith("*"));
         if (!parsed.length) { setFeatureImportError("No valid rows found. Make sure the file has a 'name' column and at least one data row (skip the grey hint row in the template)."); return; }
         setFeatureImportRows(parsed);
+
+        // WF-6: optional second "Feature Dependencies" sheet — absent from older exports/files,
+        // which is a legitimate, common case, not an error.
+        const depSheetName = wb.SheetNames.find((n: string) => /^feature ?dependencies$/i.test(n));
+        if (depSheetName) {
+          const depWs = wb.Sheets[depSheetName];
+          const depRows = XLSX.utils.sheet_to_json<Record<string, string>>(depWs, { defval: "" });
+          const parsedDeps = depRows
+            .map((r) => parseFeatureDependencyImportRow(r))
+            .filter((r) => r.name && r.featureName && !r.name.trim().startsWith("*"));
+          setFeatureImportDepRows(parsedDeps);
+        } else {
+          setFeatureImportDepRows([]);
+        }
       } catch {
         setFeatureImportError("Could not parse file. Use the template for correct format.");
       }
@@ -861,6 +900,14 @@ const Settings = () => {
     const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
     const existing = await featureService.getAll();
     const existingKeys = new Set(existing.map((f) => normalize(f.name)));
+    // Candidate (name, id) records for resolving Feature Dependency rows below — seeded from the
+    // full existing library (not just rows in this import) so a dependency can reference an
+    // already-existing feature that isn't itself being re-imported, then grown as new features
+    // are created. Kept as a list (not a Map) so resolveFeatureDependencyRow can still correctly
+    // detect true ambiguity (two distinct features whose names normalize the same) rather than
+    // having a later entry silently overwrite an earlier one under the same key.
+    const nameRecords: { name: string; id: string }[] = existing.map((f) => ({ name: f.name, id: f.id }));
+
     for (const row of featureImportRows) {
       if (existingKeys.has(normalize(row.name))) { skipped++; continue; }
       try {
@@ -879,12 +926,40 @@ const Settings = () => {
           await featureService.linkToProduct(featureImportProduct, created_.id);
         }
         existingKeys.add(normalize(row.name));
+        nameRecords.push({ name: row.name, id: created_.id });
         created++;
       } catch { skipped++; }
     }
+
+    // WF-6: Feature Dependency rows — resolved against the SAME candidate set (existing library
+    // UNION features just created above) via the same resolution rule used in the review table.
+    // A row whose featureName has zero or more-than-one match is never guessed at; it's skipped
+    // and counted, matching this dialog's existing per-row-skip convention for Feature rows.
+    let depsCreated = 0; let depsSkipped = 0;
+    const candidateNames = nameRecords.map((r) => r.name);
+    for (const row of featureImportDepRows) {
+      const resolution = resolveFeatureDependencyRow(row, candidateNames);
+      if (resolution.status !== "resolved") { depsSkipped++; continue; }
+      const featureId = nameRecords.find((r) => normalize(r.name) === normalize(resolution.featureName))?.id;
+      if (!featureId) { depsSkipped++; continue; }
+      try {
+        await featureDependencyService.create({
+          featureId,
+          name: row.name,
+          isInventory: row.isInventory,
+          captureFields: row.captureFields,
+          defaultQty: Number(row.defaultQty) || 1,
+          unit: row.unit || undefined,
+          unitPrice: Number(row.unitPrice) || 0,
+          sortOrder: 0,
+        });
+        depsCreated++;
+      } catch { depsSkipped++; }
+    }
+
     await loadFeatures();
     setFeatureImporting(false);
-    setFeatureImportDone({ created, skipped });
+    setFeatureImportDone({ created, skipped, depsCreated, depsSkipped });
   }
 
   async function loadFeatures() {
@@ -2454,6 +2529,7 @@ const Settings = () => {
                   startIcon={<UploadFileOutlined />}
                   onClick={() => {
                     setFeatureImportRows([]);
+                    setFeatureImportDepRows([]);
                     setFeatureImportProduct("");
                     setFeatureImportError(null);
                     setFeatureImportDone(null);
@@ -3946,11 +4022,54 @@ const Settings = () => {
               </>
             )}
 
+            {featureImportDepRows.length > 0 && (
+              <>
+                <Typography variant="caption" fontWeight={700} color="text.secondary">
+                  Feature Dependencies ({featureImportDepRows.length} rows)
+                </Typography>
+                <TableContainer sx={{ overflowX: "auto", maxHeight: 260 }}>
+                  <Table size="small" stickyHeader sx={{ minWidth: 600 }}>
+                    <TableHead>
+                      <TableRow>
+                        <TableCell>Dependency</TableCell>
+                        <TableCell>Feature</TableCell>
+                        <TableCell>Type</TableCell>
+                        <TableCell>Qty / Unit</TableCell>
+                        <TableCell>Status</TableCell>
+                      </TableRow>
+                    </TableHead>
+                    <TableBody>
+                      {featureImportDepRows.map((r, i) => {
+                        const candidateNames = [...features.map((f) => f.name), ...featureImportRows.map((fr) => fr.name)];
+                        const resolution = resolveFeatureDependencyRow(r, candidateNames);
+                        return (
+                          <TableRow key={i}>
+                            <TableCell><Typography variant="body2" fontWeight={600}>{r.name}</Typography></TableCell>
+                            <TableCell>{r.featureName}</TableCell>
+                            <TableCell><Chip size="small" label={r.isInventory ? "Inventory" : "Non-inv."} variant="outlined" /></TableCell>
+                            <TableCell>{r.defaultQty}{r.unit ? ` ${r.unit}` : ""}</TableCell>
+                            <TableCell>
+                              {resolution.status === "resolved" && <Chip size="small" color="success" label="Ready" />}
+                              {resolution.status === "unknown" && <Chip size="small" color="error" label="Unknown feature" />}
+                              {resolution.status === "ambiguous" && <Chip size="small" color="warning" label={`Ambiguous (${resolution.matchCount})`} />}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </TableContainer>
+              </>
+            )}
+
             {featureImportDone && (
               <Alert severity="success">
                 Done — {featureImportDone.created} feature{featureImportDone.created !== 1 ? "s" : ""} created
                 {featureImportDone.skipped > 0 ? `, ${featureImportDone.skipped} skipped (already exist)` : ""}.
                 {featureImportProduct && " All linked to selected product."}
+                {featureImportDepRows.length > 0 &&
+                  ` ${featureImportDone.depsCreated} dependenc${featureImportDone.depsCreated !== 1 ? "ies" : "y"} created` +
+                  (featureImportDone.depsSkipped > 0 ? `, ${featureImportDone.depsSkipped} skipped (unknown/ambiguous feature).` : ".")}
               </Alert>
             )}
           </Stack>

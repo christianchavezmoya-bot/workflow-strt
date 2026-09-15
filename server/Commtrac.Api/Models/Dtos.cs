@@ -1,3 +1,5 @@
+using System.Text.Json;
+
 namespace Commtrac.Api.Models;
 
 public record LoginRequest(string Email, string Password, string? TrustedDeviceToken = null);
@@ -1032,6 +1034,115 @@ public record SyncFeatureStepsResultDto(
     List<SyncFeatureStepItemDto> Removed,
     List<SyncFeatureStepItemDto> Unchanged,
     List<SyncFeatureStepItemDto> Blocked
+);
+
+// ─── WF-6: Product Workflow Context export (Product master data only) ─────────
+
+public record ProductContextDto(string Id, string Name);
+
+public record FeatureDependencyContextDto(
+    string DependencyId,
+    string Name,
+    string FeatureId,
+    bool IsInventory,
+    List<string> CaptureFields,
+    decimal DefaultQty,
+    string? Unit,
+    decimal UnitPrice,
+    int SortOrder
+);
+
+/// <summary>One Product-linked Feature's master-data context. Selectable mirrors
+/// isFeatureAvailableForNewSelection's master-data rule (no config-specific selection state
+/// exists at this level, so Feature: Yes items are always selectable and Feature: No items are
+/// not offered as a brand-new choice).</summary>
+public record FeatureContextDto(
+    string FeatureId,
+    string Name,
+    string? Description,
+    string ValueType,
+    List<string> Options,
+    List<FeatureSubPropertyDto> SubProperties,
+    bool IsInventory,
+    bool Selectable,
+    int SortOrder,
+    string? Brand,
+    string? Supplier,
+    string? AlternativePartNumber,
+    string? ManufacturerPartNumber,
+    decimal? UnitPrice,
+    string? ProductLink,
+    List<FeatureDependencyContextDto> Dependencies
+);
+
+/// <summary>Product master data only — every Feature linked to this Product plus its
+/// Dependencies, with enough metadata for an external agent to construct a valid
+/// WorkflowExportDto.FeatureSelections for this product. Deliberately contains NO
+/// WorkflowConfig-specific selection state (quantities/inclusions), no secrets/credentials, no
+/// customer/project data, no workflow-run values, no signatures.</summary>
+public record ProductWorkflowContextDto(
+    int SchemaVersion,
+    ProductContextDto Product,
+    List<FeatureContextDto> Features
+);
+
+// ─── WF-6: Reusable workflow JSON export/import (WF-1 schema) ─────────────────
+
+/// <summary>References + selection state only — featureId/dependencyId point at Product-linked
+/// master data, never duplicated here.</summary>
+public record WorkflowExportFeatureSelectionDto(string FeatureId, int Quantity, Dictionary<string, bool> Inclusions);
+
+/// <summary>The WF-1 reusable workflow JSON schema. `Steps` includes both custom steps (exported
+/// verbatim, authoritative) and feature-generated steps (exported for inspection/round-trip
+/// traceability only — never trusted as authoritative on import; see ImportWorkflow).</summary>
+public record WorkflowExportDto(
+    int SchemaVersion,
+    string ProductId,
+    string Name,
+    List<WorkflowExportFeatureSelectionDto> FeatureSelections,
+    List<JsonElement> Steps
+);
+
+/// <summary>Request body for both {id}/import/validate and {id}/import — identical shape to
+/// WorkflowExportDto, since an import payload is simply a previously-exported document (or one
+/// authored to match this schema).</summary>
+public record WorkflowImportRequestDto(
+    int SchemaVersion,
+    string ProductId,
+    string? Name,
+    List<WorkflowExportFeatureSelectionDto>? FeatureSelections,
+    List<JsonElement>? Steps
+);
+
+/// <summary>Validation summary shown to the admin before an import commits anything. Valid is
+/// false if the schema version is unsupported, the product doesn't match the target config, or
+/// any feature/dependency reference is unknown — reject rather than invent/remap.</summary>
+public record WorkflowImportValidationDto(
+    bool Valid,
+    string ProductId,
+    string ProductName,
+    int FeatureReferencesMatched,
+    int FeatureReferencesTotal,
+    int DependencyReferencesMatched,
+    int DependencyReferencesTotal,
+    int CustomStepCount,
+    int GeneratedStepsToReconstruct,
+    List<string> UnknownFeatureIds,
+    List<string> UnknownDependencyIds,
+    bool SchemaVersionSupported,
+    bool ProductMatches,
+    /// <summary>featureIds appearing more than once in featureSelections[] — never silently
+    /// merged or last-one-wins; any duplicate makes the whole import invalid.</summary>
+    List<string> DuplicateFeatureIds
+);
+
+/// <summary>Returned (409) when a reusable-workflow import is valid on its own terms but cannot
+/// be applied because it would require removing/changing a generated step an unlocked
+/// AssetWorkflowRun still references. Import is all-or-nothing — unlike an ordinary Sync Feature
+/// Steps call, nothing is committed when this happens.</summary>
+public record WorkflowImportBlockedDto(
+    string Message,
+    List<SyncFeatureStepItemDto> BlockedSteps
 );
 
 public record WorkflowTypeDto(

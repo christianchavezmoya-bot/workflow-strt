@@ -32,3 +32,11 @@ export interface SyncFeatureStepsResult {
   unchanged: SyncFeatureStepItem[];
   blocked: SyncFeatureStepItem[];
 }
+
+/** WF-6: 409 response body from POST /workflow-configs/{id}/import when the import would require
+ *  removing/changing a generated step an unlocked run still references. Import is all-or-nothing
+ *  on this — nothing was persisted when this comes back. */
+export interface WorkflowImportBlocked {
+  message: string;
+  blockedSteps: SyncFeatureStepItem[];
+}

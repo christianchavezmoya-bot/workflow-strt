@@ -1,5 +1,6 @@
 import api from "./api";
 import { Product } from "../types/product";
+import type { ProductWorkflowContext } from "../types/productWorkflowContext";
 import { referenceDataGet, referenceDataSet, syncMetaSet } from "./localDB";
 import { isMobileNativePlatform } from "../utils/platform";
 import { shouldSkipBlockingFetch } from "./connectivityMonitor";
@@ -52,5 +53,11 @@ export const productService = {
   async deleteProduct(id: string) {
     await api.delete(`/products/${id}`);
     return id;
-  }
+  },
+  /** WF-6A: Product master data only, for an AI agent to construct a valid reusable workflow
+   *  JSON's featureSelections[] for this product. */
+  async getWorkflowContext(productId: string): Promise<ProductWorkflowContext> {
+    const response = await api.get<ProductWorkflowContext>(`/products/${productId}/workflow-context`);
+    return response.data;
+  },
 };

@@ -20,6 +20,11 @@ public class WorkflowConfigsController : ControllerBase
     private readonly IFileStorageService _files;
     private static readonly JsonSerializerOptions JsonOpts = new(JsonSerializerDefaults.Web);
 
+    /// <summary>WF-6: the only schemaVersion this server currently accepts for the reusable
+    /// workflow JSON export/import format (WorkflowExportDto). Bump alongside a real breaking
+    /// shape change, never silently.</summary>
+    private const int SupportedWorkflowExportSchemaVersion = 1;
+
     public WorkflowConfigsController(AppDbContext db, IFileStorageService files)
     {
         _db = db;
@@ -773,6 +778,241 @@ public class WorkflowConfigsController : ControllerBase
         }
 
         return (new SyncFeatureStepsResultDto(added, updated, removed, unchanged, blocked), finalSteps);
+    }
+
+    // ── WF-6: reusable workflow JSON export/import (WF-1 schema) ───────────────
+
+    /// <summary>
+    /// Exports this WorkflowConfig as a WF-1-schema document: featureSelections are references +
+    /// selection state only (from WorkflowConfigFeature rows — never a duplicated copy of
+    /// Product/Feature/FeatureDependency master data), steps are the config's current StepsJson
+    /// verbatim (custom steps exported as the authoritative content; feature-generated steps
+    /// included only for inspection/round-trip traceability — ImportWorkflow never trusts them).
+    /// </summary>
+    [HttpGet("{id}/export")]
+    public async Task<IActionResult> ExportWorkflow(string id)
+    {
+        var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
+        if (entity is null) return NotFound();
+
+        var configFeatures = await _db.WorkflowConfigFeatures
+            .Where(f => f.WorkflowConfigId == id)
+            .OrderBy(f => f.SortOrder)
+            .ToListAsync();
+        var featureSelections = configFeatures
+            .Select(cf => new WorkflowExportFeatureSelectionDto(cf.FeatureId, cf.Quantity, ParseInclusions(cf.InclusionsJson)))
+            .ToList();
+
+        var steps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
+
+        return Ok(new WorkflowExportDto(SupportedWorkflowExportSchemaVersion, entity.ProductId, entity.Name, featureSelections, steps));
+    }
+
+    /// <summary>
+    /// Validation-only preview for POST {id}/import — never persists anything. Reject rather than
+    /// invent/remap: an unknown featureId or dependencyId, an unsupported schemaVersion, or a
+    /// productId that doesn't match this config's own Product all make Valid false, and the
+    /// import action itself independently re-validates and refuses to commit unless Valid.
+    /// </summary>
+    [HttpPost("{id}/import/validate")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> ValidateImportWorkflow(string id, [FromBody] WorkflowImportRequestDto request)
+    {
+        var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
+        if (entity is null) return NotFound();
+
+        var validation = await ValidateImportAsync(entity, request);
+        return Ok(validation);
+    }
+
+    /// <summary>
+    /// Commits a WF-1-schema import, atomically. Fully validates BEFORE any mutation, then wraps
+    /// the entire operation — WorkflowConfigFeature replacement, the legacy FeatureSelectionsJson
+    /// mirror, custom-step import, and generated-step reconciliation — in a single DB transaction
+    /// (see FieldDefinitionsController for the same BeginTransactionAsync/commit/rollback pattern
+    /// already used elsewhere in this codebase). Any exception rolls back to the exact pre-import
+    /// state; nothing is left partially applied.
+    ///
+    /// Import is deliberately all-or-nothing on run-safety, unlike an ordinary Sync Feature Steps
+    /// call (WF-4's partial-application behavior is untouched and still applies there): if
+    /// reconciling the imported feature selections against Product master data would require
+    /// removing or identity-changing a generated step that an unlocked AssetWorkflowRun still
+    /// references, the WHOLE import is rejected (409) with which step(s)/run(s) blocked it, and
+    /// the transaction is rolled back — never a partial commit.
+    ///
+    /// Generated steps are always reconciled via the SAME shared ReconcileFeatureStepsAsync used
+    /// by Publish/SyncFeatureSteps — the imported file's own generated-step content is discarded
+    /// entirely and never trusted as Product master truth, while any compatible custom
+    /// augmentation already on this config's EXISTING generated steps is preserved exactly as an
+    /// ordinary sync would.
+    /// </summary>
+    [HttpPost("{id}/import")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> ImportWorkflow(string id, [FromBody] WorkflowImportRequestDto request)
+    {
+        var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
+        if (entity is null) return NotFound();
+        if (entity.Status == "Archived")
+            return BadRequest(new { message = "Archived configurations cannot be imported into." });
+
+        // Full validation BEFORE any mutation — nothing below this point runs unless the import
+        // is structurally valid on its own terms (schema/product/feature/dependency references,
+        // no duplicate feature selections).
+        var validation = await ValidateImportAsync(entity, request);
+        if (!validation.Valid)
+            return BadRequest(new { message = "Import validation failed.", validation });
+
+        var featureSelections = request.FeatureSelections ?? new();
+
+        using var transaction = await _db.Database.BeginTransactionAsync();
+        try
+        {
+            // Replace this config's canonical WorkflowConfigFeature rows.
+            var existingCf = await _db.WorkflowConfigFeatures.Where(f => f.WorkflowConfigId == id).ToListAsync();
+            _db.WorkflowConfigFeatures.RemoveRange(existingCf);
+            var sortOrder = 0;
+            foreach (var fs in featureSelections)
+            {
+                _db.WorkflowConfigFeatures.Add(new WorkflowConfigFeatureEntity
+                {
+                    Id = Guid.NewGuid().ToString(),
+                    WorkflowConfigId = id,
+                    FeatureId = fs.FeatureId,
+                    Quantity = fs.Quantity,
+                    InclusionsJson = JsonSerializer.Serialize(fs.Inclusions ?? new Dictionary<string, bool>(), JsonOpts),
+                    SortOrder = sortOrder++,
+                });
+            }
+            // Flushed within the transaction so ReconcileFeatureStepsAsync below reads the
+            // just-imported rows, not the old ones — a later failure or rejection still rolls
+            // this back too, since nothing commits until the very end.
+            await _db.SaveChangesAsync();
+
+            // Legacy compatibility mirror only — generation/sync/import logic never reads this back.
+            entity.FeatureSelectionsJson = JsonSerializer.Serialize(
+                featureSelections.Select(fs => new { featureId = fs.FeatureId, included = fs.Quantity > 0, activeCount = fs.Quantity }),
+                JsonOpts);
+
+            // Custom steps import verbatim and become this config's authoritative custom-step set.
+            // Any EXISTING generated steps on this config are carried forward only as a
+            // reconciliation base (so compatible custom augmentation on them survives via
+            // ReconcileFeatureStepsAsync's field-preserving diff) — never as authoritative content
+            // on their own, and never from the imported file's own generated-step JSON.
+            var importedCustomSteps = (request.Steps ?? new())
+                .Where(s => !(s.TryGetProperty("stepOrigin", out var o) && o.GetString() == "feature-generated"))
+                .ToList();
+            var existingGeneratedSteps = (JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new())
+                .Where(s => s.TryGetProperty("stepOrigin", out var o) && o.GetString() == "feature-generated")
+                .ToList();
+            var stagedStepsJson = JsonSerializer.Serialize(importedCustomSteps.Concat(existingGeneratedSteps), JsonOpts);
+
+            var (reconcileResult, finalSteps) = await ReconcileFeatureStepsAsync(id, stagedStepsJson);
+
+            if (reconcileResult.Blocked.Count > 0)
+            {
+                // All-or-nothing: reject the whole import and commit nothing, rather than WF-4's
+                // ordinary partial-application behavior (which stays unchanged for SyncFeatureSteps
+                // itself). Feature selections, custom steps, and generated steps must all remain
+                // exactly as they were before this call.
+                await transaction.RollbackAsync();
+                _db.ChangeTracker.Clear();
+                return Conflict(new WorkflowImportBlockedDto(
+                    "Import cannot proceed: applying it would require changing a generated step that an active run still references.",
+                    reconcileResult.Blocked));
+            }
+
+            entity.StepsJson = JsonSerializer.Serialize(finalSteps, JsonOpts);
+            if (!string.IsNullOrWhiteSpace(request.Name)) entity.Name = request.Name;
+            entity.UpdatedAt = DateTime.UtcNow;
+            await _db.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return Ok(ToDto(entity));
+    }
+
+    private async Task<WorkflowImportValidationDto> ValidateImportAsync(WorkflowConfigEntity targetConfig, WorkflowImportRequestDto request)
+    {
+        var schemaVersionSupported = request.SchemaVersion == SupportedWorkflowExportSchemaVersion;
+        var productMatches = request.ProductId == targetConfig.ProductId;
+        var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == request.ProductId);
+
+        var featureSelections = request.FeatureSelections ?? new();
+
+        // Reject rather than silently merge or let last-one-win decide the configuration.
+        var duplicateFeatureIds = featureSelections
+            .GroupBy(fs => fs.FeatureId)
+            .Where(g => g.Count() > 1)
+            .Select(g => g.Key)
+            .ToList();
+
+        var featureIds = featureSelections.Select(fs => fs.FeatureId).Distinct().ToList();
+        var linkedFeatureIds = featureIds.Count == 0
+            ? new List<string>()
+            : await _db.ProductFeatures
+                .Where(pf => pf.ProductId == request.ProductId && featureIds.Contains(pf.FeatureId))
+                .Select(pf => pf.FeatureId)
+                .ToListAsync();
+        var unknownFeatureIds = featureIds.Except(linkedFeatureIds).ToList();
+
+        var allDeps = featureIds.Count == 0
+            ? new List<FeatureDependencyEntity>()
+            : await _db.FeatureDependencies.Where(d => featureIds.Contains(d.FeatureId)).ToListAsync();
+        var depIdsByFeature = allDeps.GroupBy(d => d.FeatureId).ToDictionary(g => g.Key, g => g.Select(d => d.Id).ToHashSet());
+
+        var unknownDependencyIds = new List<string>();
+        var dependencyReferencesTotal = 0;
+        foreach (var fs in featureSelections)
+        {
+            foreach (var depId in (fs.Inclusions ?? new()).Keys)
+            {
+                dependencyReferencesTotal++;
+                var known = depIdsByFeature.TryGetValue(fs.FeatureId, out var set) && set.Contains(depId);
+                if (!known) unknownDependencyIds.Add(depId);
+            }
+        }
+
+        var steps = request.Steps ?? new();
+        var customStepCount = steps.Count(s => !(s.TryGetProperty("stepOrigin", out var o) && o.GetString() == "feature-generated"));
+
+        // Same unit x stepType grouping rule as WF-3's generator — one installation group and one
+        // data-collection group per unit, never split per dependency.
+        var generatedStepsToReconstruct = 0;
+        foreach (var fs in featureSelections)
+        {
+            if (!depIdsByFeature.TryGetValue(fs.FeatureId, out _)) continue;
+            var deps = allDeps.Where(d => d.FeatureId == fs.FeatureId).ToList();
+            var includedIds = (fs.Inclusions ?? new()).Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet();
+            var hasInventory = deps.Any(d => d.IsInventory && includedIds.Contains(d.Id));
+            var hasNonInventory = deps.Any(d => !d.IsInventory && includedIds.Contains(d.Id));
+            var groupsPerUnit = (hasInventory ? 1 : 0) + (hasNonInventory ? 1 : 0);
+            generatedStepsToReconstruct += groupsPerUnit * Math.Max(0, fs.Quantity);
+        }
+
+        var valid = schemaVersionSupported && productMatches && product is not null
+            && unknownFeatureIds.Count == 0 && unknownDependencyIds.Count == 0
+            && duplicateFeatureIds.Count == 0;
+
+        return new WorkflowImportValidationDto(
+            valid,
+            request.ProductId,
+            product?.Name ?? "",
+            featureIds.Count - unknownFeatureIds.Count,
+            featureIds.Count,
+            dependencyReferencesTotal - unknownDependencyIds.Count,
+            dependencyReferencesTotal,
+            customStepCount,
+            generatedStepsToReconstruct,
+            unknownFeatureIds,
+            unknownDependencyIds,
+            schemaVersionSupported,
+            productMatches,
+            duplicateFeatureIds);
     }
 
     // POST api/workflow-configs/{id}/clone  — creates a new Draft version
