@@ -197,3 +197,52 @@ describe("resolveFeatureDependencyRow — never invents or remaps an id", () => 
     expect(result).toEqual({ status: "ambiguous", matchCount: 2 });
   });
 });
+
+// WF-7 Acceptance Scenario 10: export Features + Feature Dependencies sheets, re-import, and
+// verify the whole round trip — correct resolution, visible unknown/ambiguous flags, no guessed
+// ids, valid rows round-trip correctly — as one end-to-end scenario over the real sheet shapes.
+describe("WF-7 Scenario 10 — Feature Library XLSX Features + Feature Dependencies round trip", () => {
+  const HEADERS = ["featureName", "name", "isInventory", "captureFields", "defaultQty", "unit", "unitPrice"];
+  const rowToRecord = (row: (string | number)[]): Record<string, string> =>
+    Object.fromEntries(HEADERS.map((h, i) => [h, String(row[i])]));
+
+  it("resolves valid rows to the correct feature, flags unknown and ambiguous rows, and never guesses an id", () => {
+    // Simulates the two sheets of a real exported workbook: 2 features on "Features", 3
+    // dependency rows on "Feature Dependencies" (one per feature, one unknown, one ambiguous).
+    const libraryFeatureNames = ["Junction Box", "Generator"];
+
+    const validRow = rowToRecord(featureDependencyToExportRow(
+      { name: "Certification", isInventory: true, captureFields: ["certification"], defaultQty: 1, unit: undefined, unitPrice: 0 },
+      "Junction Box",
+    ));
+    const unknownRow = rowToRecord(featureDependencyToExportRow(
+      { name: "Fuel Sensor", isInventory: true, captureFields: [], defaultQty: 1, unit: undefined, unitPrice: 0 },
+      "Nonexistent Enclosure",
+    ));
+    // Ambiguous: two features that both normalize to "generator" (e.g. a data-entry duplicate).
+    const ambiguousCandidates = [...libraryFeatureNames, "GENERATOR"];
+    const ambiguousRow = rowToRecord(featureDependencyToExportRow(
+      { name: "Fuel Level", isInventory: false, captureFields: [], defaultQty: 1, unit: "L", unitPrice: 0 },
+      "Generator",
+    ));
+
+    const parsedValid = parseFeatureDependencyImportRow(validRow);
+    const parsedUnknown = parseFeatureDependencyImportRow(unknownRow);
+    const parsedAmbiguous = parseFeatureDependencyImportRow(ambiguousRow);
+
+    const validResolution = resolveFeatureDependencyRow(parsedValid, libraryFeatureNames);
+    expect(validResolution).toEqual({ status: "resolved", featureName: "Junction Box" }); // resolves to the correct Feature
+
+    const unknownResolution = resolveFeatureDependencyRow(parsedUnknown, libraryFeatureNames);
+    expect(unknownResolution.status).toBe("unknown"); // visibly flagged, not silently dropped or guessed
+
+    const ambiguousResolution = resolveFeatureDependencyRow(parsedAmbiguous, ambiguousCandidates);
+    expect(ambiguousResolution).toEqual({ status: "ambiguous", matchCount: 2 }); // flagged, not guessed
+
+    // The valid row's full field set survives the round trip correctly.
+    expect(parsedValid).toEqual({
+      featureName: "Junction Box", name: "Certification", isInventory: true,
+      captureFields: ["certification"], defaultQty: "1", unit: "", unitPrice: "0",
+    });
+  });
+});

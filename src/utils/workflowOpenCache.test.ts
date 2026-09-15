@@ -32,6 +32,44 @@ describe("workflowOpenCache", () => {
     expect(wf?.steps).toHaveLength(1);
   });
 
+  // WF-7 Scenario 11 (legacy compatibility): stepsJson can still be a bare steps array with no
+  // {steps: [...]} wrapper — the shape written before the wrapper existed. No old workflow may
+  // lose its steps just because it predates that shape.
+  it("parses a legacy raw steps array (no {steps} wrapper) — WF-7 Scenario 11", () => {
+    const cfg: WorkflowConfig = {
+      id: "cfg-legacy", name: "Legacy Wf", productId: "p1", version: 1, status: "Published",
+      stepsJson: JSON.stringify([{ id: "s1", title: "Step One", inputs: [] }, { id: "s2", title: "Step Two", inputs: [] }]),
+      mediaJson: "[]", featureSelectionsJson: "[]", configType: "Install", displayName: "Legacy Wf",
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const wf = parseWorkflowFromConfig(cfg);
+    expect(wf?.steps).toHaveLength(2);
+    expect(wf?.steps[0].id).toBe("s1");
+    expect(wf?.productId).toBe("p1");
+    expect(wf?.media).toEqual([]);
+  });
+
+  // WF-7 Scenario 11: a step with no stepOrigin (every workflow authored before WF-3) must lose
+  // none of its own fields when parsed/opened — stepOrigin/generatorKey are purely additive.
+  it("preserves every field of a pre-WF-3 step that has no stepOrigin/generatorKey", () => {
+    const legacyStep = {
+      id: "s1", order: 1, title: "Install", description: "desc", overrideInReport: false,
+      overrideReportText: "", includeDescriptionInReport: true, mediaIds: ["m1"], decisionsEnabled: true,
+      decisions: [{ id: "d1", label: "Pass", targetStepId: null }],
+      inputs: [{ id: "i1", type: "text", label: "Note", required: false }],
+      nextStepId: null, repeatable: true, repeatLabel: "Unit",
+    };
+    const cfg: WorkflowConfig = {
+      id: "cfg-legacy-2", name: "Legacy Wf 2", productId: "p1", version: 1, status: "Published",
+      stepsJson: JSON.stringify({ steps: [legacyStep] }),
+      mediaJson: "[]", featureSelectionsJson: "[]", configType: "Install", displayName: "Legacy Wf 2",
+      createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
+    };
+    const wf = parseWorkflowFromConfig(cfg);
+    expect(wf?.steps[0]).toEqual(legacyStep); // byte-identical — nothing added, nothing stripped
+    expect(wf?.steps[0].stepOrigin).toBeUndefined();
+  });
+
   it("stores and retrieves parsed workflow shells", () => {
     const wf = {
       id: "cfg-1",
