@@ -39,6 +39,86 @@ public class WorkflowConfigPublishTests : IClassFixture<ApiTestFactory>
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
 
+    // WF-1: WorkflowConfigFeature.quantity is the canonical quantity authority for generated
+    // steps; FeatureSelection.activeCount (persisted on WorkflowConfig.FeatureSelectionsJson) is a
+    // legacy compatibility mirror only and must never be read by Publish()'s step generation. This
+    // seeds a deliberately mismatched activeCount to prove generation ignores it.
+    [Fact]
+    public async Task Publish_generated_step_quantity_uses_WorkflowConfigFeature_not_FeatureSelection_activeCount()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        const int canonicalQuantity = 5;
+        const string mismatchedActiveCount = "999";
+        var (configId, featureId, depId) = await SeedDraftConfigWithFeatureAsync(
+            isInventory: true, quantity: canonicalQuantity, mismatchedActiveCount: mismatchedActiveCount);
+
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/publish", null);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+
+        var body = await resp.Content.ReadAsStringAsync();
+        // The response DTO legitimately echoes the raw (mismatched) FeatureSelectionsJson back
+        // verbatim, so assert on the *generated step description* specifically, not the whole body.
+        Assert.Contains($"Quantity: {canonicalQuantity}.", body);
+        Assert.DoesNotContain($"Quantity: {mismatchedActiveCount}.", body);
+    }
+
+    private async Task<(string configId, string featureId, string depId)> SeedDraftConfigWithFeatureAsync(
+        bool isInventory, int quantity, string mismatchedActiveCount)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        var now = DateTime.UtcNow;
+
+        var featureId = Guid.NewGuid().ToString("N");
+        db.Features.Add(new FeatureEntity
+        {
+            Id = featureId,
+            Name = "Test Camera",
+            ValueType = "component",
+            IsInventory = isInventory,
+        });
+
+        var depId = Guid.NewGuid().ToString("N");
+        db.FeatureDependencies.Add(new FeatureDependencyEntity
+        {
+            Id = depId,
+            FeatureId = featureId,
+            Name = "Camera Unit",
+            IsInventory = isInventory,
+            CaptureFieldsJson = "[\"serialNo\"]",
+        });
+
+        var configId = Guid.NewGuid().ToString("N");
+        db.WorkflowConfigs.Add(new WorkflowConfigEntity
+        {
+            Id = configId,
+            ProductId = "prod-test",
+            Name = "Feature Quantity Draft",
+            Status = "Draft",
+            WorkflowTypeId = "wftype-installation",
+            Version = 1,
+            StepsJson = "[]",
+            MediaJson = "[]",
+            // Deliberately mismatched vs. WorkflowConfigFeature.Quantity below — proves Publish()
+            // does not read this legacy field as an authority.
+            FeatureSelectionsJson = $"[{{\"featureId\":\"{featureId}\",\"included\":true,\"activeCount\":{mismatchedActiveCount}}}]",
+            CreatedAt = now,
+            UpdatedAt = now,
+        });
+
+        db.WorkflowConfigFeatures.Add(new WorkflowConfigFeatureEntity
+        {
+            Id = Guid.NewGuid().ToString("N"),
+            WorkflowConfigId = configId,
+            FeatureId = featureId,
+            Quantity = quantity,
+            InclusionsJson = $"{{\"{depId}\":true}}",
+        });
+
+        await db.SaveChangesAsync();
+        return (configId, featureId, depId);
+    }
+
     private static async Task<HttpClient> CreateAuthenticatedClientAsync(ApiTestFactory factory)
     {
         var client = factory.CreateClient();

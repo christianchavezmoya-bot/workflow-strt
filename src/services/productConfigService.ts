@@ -7,6 +7,10 @@ import { shouldSkipBlockingFetch } from "./connectivityMonitor";
 export interface FeatureSelection {
   featureId: string;
   included: boolean;
+  /** Legacy compatibility mirror of WorkflowConfigFeature.quantity, kept in sync by
+   *  WorkflowBuilder's updateSel() and read by existing legacy runtime consumers
+   *  (e.g. repeatFeatureId step-repetition UI). WorkflowConfigFeature.quantity is the
+   *  canonical authority — generation/sync/import logic (WF-3/4/6) must read that, never this. */
   activeCount: number;
 }
 

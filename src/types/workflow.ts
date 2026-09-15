@@ -108,6 +108,19 @@ export interface WorkflowStep {
   repeatable?: boolean;
   /** Legacy: label for each repeated unit. Kept for backward compat. */
   repeatLabel?: string;
+  /** Ownership: "feature-generated" for steps produced from WorkflowConfigFeature/FeatureDependency
+   *  (WF-3+), "custom" for hand-authored or imported steps. Absent on steps predating this field —
+   *  treat as "custom" (a step is only feature-generated if explicitly marked so). Supersedes the
+   *  legacy `bomSource` marker as the durable ownership signal; `bomSource` is kept for back-compat. */
+  stepOrigin?: "feature-generated" | "custom";
+  /** Feature-generated steps only: the deterministic key this step was derived from
+   *  (see WF-3 generator-identity design). Stable across re-publish/sync when the underlying
+   *  feature/dependency/unit selection is unchanged. Absent on custom steps. */
+  generatorKey?: string;
+  /** Legacy marker for a feature-generated step, set by WorkflowConfigsController.Publish().
+   *  Kept for back-compat with code that predates stepOrigin/generatorKey; not the source of truth
+   *  going forward. */
+  bomSource?: { dependencyId: string; featureId: string; isInventory: boolean };
 }
 
 export interface MediaItem {

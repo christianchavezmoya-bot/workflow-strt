@@ -2904,9 +2904,13 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
   }
   // ──────────────────────────────────────────────────────────────────────────
 
+  // WorkflowConfigFeature.quantity is the canonical quantity authority (read by publish/sync/import
+  // logic); FeatureSelection.activeCount below is a legacy compatibility mirror only, kept in sync
+  // here for existing legacy runtime consumers (e.g. repeatFeatureId step-repetition UI) until those
+  // are separately retired. Never treat activeCount as a second source of truth for generation.
   function updateSel(featureId: string, patch: Partial<FeatureSelection>) {
     onFeatureSelectionsChange?.(sels.map((s) => s.featureId === featureId ? { ...s, ...patch } : s));
-    // Also sync qty to WorkflowConfigFeature table
+    // Also sync qty to WorkflowConfigFeature table (the canonical quantity)
     if (patch.activeCount !== undefined && configId && !isReadOnly) {
       void syncConfigFeature(featureId, patch.activeCount);
       if (patch.activeCount > 0) void ensureFeatureDeps(featureId);
