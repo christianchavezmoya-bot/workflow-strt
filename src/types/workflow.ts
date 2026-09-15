@@ -120,7 +120,7 @@ export interface WorkflowStep {
   /** Legacy marker for a feature-generated step, set by WorkflowConfigsController.Publish().
    *  Kept for back-compat with code that predates stepOrigin/generatorKey; not the source of truth
    *  going forward. */
-  bomSource?: { dependencyId: string; featureId: string; isInventory: boolean };
+  bomSource?: { dependencyId: string; dependencyIds?: string[]; featureId: string; isInventory: boolean };
 }
 
 export interface MediaItem {

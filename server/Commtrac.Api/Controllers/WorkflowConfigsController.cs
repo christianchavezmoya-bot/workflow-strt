@@ -580,12 +580,56 @@ public class WorkflowConfigsController : ControllerBase
         if (entity.Status == "Archived")
             return BadRequest(new { message = "Archived configurations cannot be synced." });
 
+        // Recomputed from scratch here, every time — this action never accepts or trusts a
+        // client-cached preview result, since run/config state can change between a preview call
+        // and this confirmation.
+        var (result, finalSteps) = await ReconcileFeatureStepsAsync(id, entity.StepsJson);
+
+        entity.StepsJson = JsonSerializer.Serialize(finalSteps, JsonOpts);
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// WF-5: preview-only. Runs the exact same ReconcileFeatureStepsAsync used by
+    /// POST {id}/sync-feature-steps below — same diff algorithm, same run-safety checks
+    /// (FindBlockingRunsAsync) — but never assigns entity.StepsJson and never calls
+    /// SaveChangesAsync, so nothing this action computes is persisted. There are deliberately not
+    /// two diff engines: this and the apply action share one implementation, so they can never
+    /// drift, and a client can never evaluate run-safety itself (it has no visibility into
+    /// AssetWorkflowRun data) — only the server can produce an authoritative preview.
+    /// </summary>
+    [HttpPost("{id}/sync-feature-steps/preview")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> PreviewSyncFeatureSteps(string id)
+    {
+        var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
+        if (entity is null) return NotFound();
+        if (entity.Status == "Archived")
+            return BadRequest(new { message = "Archived configurations cannot be synced." });
+
+        var (result, _) = await ReconcileFeatureStepsAsync(id, entity.StepsJson);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Shared reconciliation core for both SyncFeatureSteps (apply) and PreviewSyncFeatureSteps
+    /// (dry run) — the single diff implementation described in the WF-4 doc comment on
+    /// SyncFeatureSteps. Pure computation over its inputs: reads WorkflowConfigFeature/
+    /// FeatureDependency/AssetWorkflowRun from the database, but never writes anything —
+    /// persistence is entirely the caller's responsibility.
+    /// </summary>
+    private async Task<(SyncFeatureStepsResultDto Result, List<JsonElement> FinalSteps)> ReconcileFeatureStepsAsync(
+        string workflowConfigId, string currentStepsJson)
+    {
         var configFeatures = await _db.WorkflowConfigFeatures
-            .Where(f => f.WorkflowConfigId == id)
+            .Where(f => f.WorkflowConfigId == workflowConfigId)
             .OrderBy(f => f.SortOrder)
             .ToListAsync();
 
-        var existingSteps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
+        var existingSteps = JsonSerializer.Deserialize<List<JsonElement>>(currentStepsJson, JsonOpts) ?? new();
 
         var customSteps = new List<JsonElement>();
         var existingGeneratedByKey = new Dictionary<string, JsonElement>();
@@ -659,7 +703,7 @@ public class WorkflowConfigsController : ControllerBase
             {
                 // No longer desired at all (quantity decrease, a dependency group fully excluded,
                 // or the whole feature removed from the config) — whole-step removal candidate.
-                var blockingRuns = await FindBlockingRunsAsync(id, stepId);
+                var blockingRuns = await FindBlockingRunsAsync(workflowConfigId, stepId);
                 if (blockingRuns.Count > 0)
                 {
                     finalSteps.Add(existingStep); // keep untouched
@@ -693,7 +737,7 @@ public class WorkflowConfigsController : ControllerBase
                 continue;
             }
 
-            var blockingRunsForStep = await FindBlockingRunsAsync(id, stepId);
+            var blockingRunsForStep = await FindBlockingRunsAsync(workflowConfigId, stepId);
             if (blockingRunsForStep.Count > 0)
             {
                 // Partial application: apply the safe additions now, leave the unsafe removal for
@@ -728,11 +772,7 @@ public class WorkflowConfigsController : ControllerBase
             added.Add(ToResultItem(newStep, null));
         }
 
-        entity.StepsJson = JsonSerializer.Serialize(finalSteps, JsonOpts);
-        entity.UpdatedAt = DateTime.UtcNow;
-        await _db.SaveChangesAsync();
-
-        return Ok(new SyncFeatureStepsResultDto(added, updated, removed, unchanged, blocked));
+        return (new SyncFeatureStepsResultDto(added, updated, removed, unchanged, blocked), finalSteps);
     }
 
     // POST api/workflow-configs/{id}/clone  — creates a new Draft version

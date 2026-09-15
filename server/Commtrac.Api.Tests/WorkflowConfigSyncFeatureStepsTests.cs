@@ -306,6 +306,124 @@ public class WorkflowConfigSyncFeatureStepsTests : IClassFixture<ApiTestFactory>
         Assert.Contains(bodyFieldId, fieldIds); // blocked removal — still present
     }
 
+    // WF-5: POST .../sync-feature-steps/preview must never persist — it runs the exact same
+    // ReconcileFeatureStepsAsync as apply, computing what WOULD add/update/remove, but StepsJson
+    // on disk must be completely unchanged afterward.
+    [Fact]
+    public async Task Preview_does_not_persist_StepsJson()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var (configId, _, _) = await SeedFeatureConfigAsync(
+            quantity: 2, deps: new[] { new DepSpec("Camera Unit", true, new[] { "serialNo" }) });
+
+        var stepsBefore = await GetStepsJsonAsync(configId);
+        Assert.Empty(stepsBefore); // nothing generated yet
+
+        var preview = await PreviewAsync(client, configId);
+        Assert.Equal(2, preview.Added.Count); // preview reports what WOULD be added...
+
+        var stepsAfter = await GetStepsJsonAsync(configId);
+        Assert.Empty(stepsAfter); // ...but nothing was actually written.
+    }
+
+    // WF-5: the preview must run the same run-safety check as apply, so an admin sees a blocked
+    // removal BEFORE ever calling apply — not discover it only after confirming.
+    [Fact]
+    public async Task Preview_reports_run_blocked_removals_before_any_apply_call()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var (configId, featureId, _) = await SeedFeatureConfigAsync(
+            quantity: 2, deps: new[] { new DepSpec("Camera Unit", true, new[] { "serialNo" }) });
+
+        var first = await SyncAsync(client, configId); // establish real generated steps
+        var unit2StepId = first.Added.Single(i => i.UnitIndex == 2).StepId;
+        var runId = await SeedBlockingRunAsync(configId, unit2StepId);
+
+        await UpdateQuantityAsync(configId, featureId, 1); // wants to remove unit 2 — will be blocked
+
+        var preview = await PreviewAsync(client, configId);
+
+        var blockedItem = Assert.Single(preview.Blocked);
+        Assert.Equal(unit2StepId, blockedItem.StepId);
+        Assert.Contains(blockedItem.BlockingRuns!, r => r.RunId == runId);
+        Assert.Empty(preview.Removed);
+
+        // Still nothing persisted by the preview call.
+        var stepsAfter = await GetStepsJsonAsync(configId);
+        Assert.Contains(stepsAfter, s => s.GetProperty("id").GetString() == unit2StepId);
+    }
+
+    // WF-5: custom/manual steps must never appear in the authoritative preview, matching apply's
+    // own scope exactly (same shared implementation).
+    [Fact]
+    public async Task Custom_steps_are_absent_from_the_preview()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var (configId, _, _) = await SeedFeatureConfigAsync(
+            quantity: 1, deps: new[] { new DepSpec("Camera Unit", true, new[] { "serialNo" }) });
+
+        var customStep = new
+        {
+            id = "custom-prep-step",
+            order = 0,
+            title = "Preparation & Permits",
+            description = "Manually authored.",
+            overrideInReport = false,
+            overrideReportText = "",
+            includeDescriptionInReport = true,
+            mediaIds = Array.Empty<string>(),
+            decisionsEnabled = false,
+            decisions = Array.Empty<object>(),
+            inputs = Array.Empty<object>(),
+            nextStepId = (string?)null,
+            captureFields = Array.Empty<object>(),
+            stepType = "preparation",
+        };
+        await SetStepsJsonAsync(configId, JsonSerializer.Serialize(new[] { customStep }, JsonOpts));
+
+        var preview = await PreviewAsync(client, configId);
+
+        Assert.DoesNotContain(preview.Added, i => i.StepId == "custom-prep-step");
+        Assert.DoesNotContain(preview.Updated, i => i.StepId == "custom-prep-step");
+        Assert.DoesNotContain(preview.Removed, i => i.StepId == "custom-prep-step");
+        Assert.DoesNotContain(preview.Unchanged, i => i.StepId == "custom-prep-step");
+        Assert.DoesNotContain(preview.Blocked, i => i.StepId == "custom-prep-step");
+    }
+
+    // WF-5: apply must recompute independently of any earlier preview — if state changes between
+    // preview and confirm (here: a blocking run appears after the preview was taken), apply must
+    // reflect the NEW state, not a stale cached preview result.
+    [Fact]
+    public async Task Apply_recalculates_independently_of_an_earlier_preview()
+    {
+        var client = await CreateAuthenticatedClientAsync();
+        var (configId, featureId, _) = await SeedFeatureConfigAsync(
+            quantity: 2, deps: new[] { new DepSpec("Camera Unit", true, new[] { "serialNo" }) });
+
+        var first = await SyncAsync(client, configId);
+        var unit2StepId = first.Added.Single(i => i.UnitIndex == 2).StepId;
+
+        await UpdateQuantityAsync(configId, featureId, 1); // wants to remove unit 2
+
+        // Preview BEFORE any run exists — reports a clean removal, nothing blocked.
+        var preview = await PreviewAsync(client, configId);
+        Assert.Contains(preview.Removed, i => i.StepId == unit2StepId);
+        Assert.Empty(preview.Blocked);
+
+        // State changes after the preview was taken.
+        var runId = await SeedBlockingRunAsync(configId, unit2StepId);
+
+        // Apply must recompute fresh, not trust the earlier (now-stale) preview.
+        var applied = await SyncAsync(client, configId);
+        Assert.Empty(applied.Removed);
+        var blockedItem = Assert.Single(applied.Blocked);
+        Assert.Equal(unit2StepId, blockedItem.StepId);
+        Assert.Contains(blockedItem.BlockingRuns!, r => r.RunId == runId);
+
+        var stepsAfter = await GetStepsJsonAsync(configId);
+        Assert.Contains(stepsAfter, s => s.GetProperty("id").GetString() == unit2StepId);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     private record DepSpec(string Name, bool IsInventory, string[] CaptureFields);
@@ -330,6 +448,15 @@ public class WorkflowConfigSyncFeatureStepsTests : IClassFixture<ApiTestFactory>
     private async Task<SyncResult> SyncAsync(HttpClient client, string configId)
     {
         var resp = await client.PostAsync($"/api/workflow-configs/{configId}/sync-feature-steps", null);
+        resp.EnsureSuccessStatusCode();
+        var body = await resp.Content.ReadAsStringAsync();
+        var dto = JsonSerializer.Deserialize<SyncFeatureStepsResultDto>(body, JsonOpts)!;
+        return new SyncResult(dto.Added, dto.Updated, dto.Removed, dto.Unchanged, dto.Blocked);
+    }
+
+    private async Task<SyncResult> PreviewAsync(HttpClient client, string configId)
+    {
+        var resp = await client.PostAsync($"/api/workflow-configs/{configId}/sync-feature-steps/preview", null);
         resp.EnsureSuccessStatusCode();
         var body = await resp.Content.ReadAsStringAsync();
         var dto = JsonSerializer.Deserialize<SyncFeatureStepsResultDto>(body, JsonOpts)!;

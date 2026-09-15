@@ -57,6 +57,8 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { workflowTypeService } from "../../services/workflowTypeService";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
+import { SyncFeatureStepsDialog } from "./SyncFeatureStepsDialog";
+import { SyncFeatureStepsButton } from "./SyncFeatureStepsButton";
 import type { WorkflowConfigFeature } from "../../types/workflowConfigFeature";
 import { featureDependencyService } from "../../services/featureDependencyService";
 import type { FeatureDependency } from "../../types/featureDependency";
@@ -1362,6 +1364,19 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             featureSelections={featureSelections}
             onFeatureSelectionsChange={setFeatureSelections}
             configId={currentConfig?.id ?? null}
+            onConfigRefreshed={(cfg) => {
+              // WF-5: Sync Feature Steps refresh — server is authoritative, so pull the fresh
+              // steps from its response rather than rebuilding anything client-side.
+              setCurrentConfig(cfg);
+              try {
+                const parsed = JSON.parse(cfg.stepsJson);
+                const nextSteps = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.steps) ? parsed.steps : null;
+                if (nextSteps) {
+                  justLoadedRef.current = true;
+                  setWorkflow((prev) => ({ ...prev, steps: nextSteps }));
+                }
+              } catch { /* keep current workflow state if stepsJson is unexpectedly malformed */ }
+            }}
           />
         </Grid>
       </Grid>
@@ -2819,7 +2834,7 @@ function ReportPreviewInline({ step }: { step: WorkflowStep }) {
 
 const uid2 = () => randomId();
 
-function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId }: {
+function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId, onConfigRefreshed }: {
   workflow: Workflow;
   stepsSorted: WorkflowStep[];
   selectedStepId: string | null;
@@ -2831,8 +2846,11 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
   onFeatureSelectionsChange?: (sels: FeatureSelection[]) => void;
   /** Active WorkflowConfig id — enables BOM step inclusion management. */
   configId?: string | null;
+  /** WF-5: called with the freshly re-fetched config after a successful Sync Feature Steps. */
+  onConfigRefreshed?: (cfg: import("../../types/workflowConfig").WorkflowConfig) => void;
 }) {
   const [tab, setTab] = React.useState(0);
+  const [syncDialogOpen, setSyncDialogOpen] = React.useState(false);
   const sels = featureSelections ?? [];
   // This is the "Features" tab's own new-selection picker (quantities + dependency
   // inclusions) — same availability rule as the left-panel "Installed Features" list.
@@ -3053,6 +3071,12 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
               </Typography>
               {cfLoading && <CircularProgress size={14} />}
             </Stack>
+            {/* Sync Feature Steps — a separate, non-destructive server action from "Regenerate
+                Workflow" above. It only ever reconciles feature-generated steps (matched by
+                generatorKey) against the current quantities/inclusions here; it never touches
+                preparation, test & acceptance, inspection, return-to-service, or any other
+                manually-authored step. */}
+            <SyncFeatureStepsButton visible={!!configId && !isReadOnly} onClick={() => setSyncDialogOpen(true)} />
             <Stack spacing={1}>
               {features.map((feat) => {
                 const sel = sels.find((s) => s.featureId === feat.id) ?? { featureId: feat.id, included: false, activeCount: 0 };
@@ -3186,6 +3210,16 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
             </Stack>
           </Stack>
         </Paper>
+      )}
+
+      {configId && (
+        <SyncFeatureStepsDialog
+          open={syncDialogOpen}
+          onClose={() => setSyncDialogOpen(false)}
+          configId={configId}
+          steps={workflow.steps}
+          onSynced={(cfg) => onConfigRefreshed?.(cfg)}
+        />
       )}
     </Stack>
   );

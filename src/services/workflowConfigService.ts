@@ -1,5 +1,6 @@
 ﻿import api from "./api";
 import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } from "../types/workflowConfig";
+import type { SyncFeatureStepsResult } from "../types/syncFeatureSteps";
 import offlineStore from "./offlineStore";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -256,6 +257,24 @@ export const workflowConfigService = {
   async publish(id: string): Promise<WorkflowConfig> {
     const res = await api.post<WorkflowConfig>(`/workflow-configs/${id}/publish`);
     invalidateWebCacheByPrefix("/workflow-configs");
+    return res.data;
+  },
+
+  /** WF-4/WF-5: non-destructive reconciliation of feature-generated steps only — distinct from
+   *  publish()'s full strip-and-regenerate. Always safe to call; the server itself gates any
+   *  destructive change behind run-safety and reports the outcome in the returned result.
+   *  Recomputes the diff from scratch server-side on every call — never trust a cached preview. */
+  async syncFeatureSteps(id: string): Promise<SyncFeatureStepsResult> {
+    const res = await api.post<SyncFeatureStepsResult>(`/workflow-configs/${id}/sync-feature-steps`);
+    invalidateWebCacheByPrefix("/workflow-configs");
+    return res.data;
+  },
+
+  /** WF-5: server-authoritative, read-only preview of what syncFeatureSteps() would do — same
+   *  reconciliation implementation, same run-safety checks, zero persistence. There is no
+   *  client-side reconciliation engine; this is the only source of preview data. */
+  async previewSyncFeatureSteps(id: string): Promise<SyncFeatureStepsResult> {
+    const res = await api.post<SyncFeatureStepsResult>(`/workflow-configs/${id}/sync-feature-steps/preview`);
     return res.data;
   },
 
