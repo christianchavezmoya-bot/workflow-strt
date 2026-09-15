@@ -67,6 +67,7 @@ import { useAuth } from "../../hooks/useAuth";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
+import { getFeatureLinkContext as getFeatureLinkContextUtil } from "../../utils/featureStepRepeat";
 import {
   getMissingWorkflowItems,
   getRunMissingMediaSteps,
@@ -393,21 +394,7 @@ function WorkOrderRunner({
   const isPreviewWalkthrough = previewWalkthrough && !isRealRun;
 
   function getFeatureLinkContext(step: WorkflowStep) {
-    for (const inp of step.inputs ?? []) {
-      if (inp.featureId) {
-        const sel = (featureSelections ?? []).find((s) => s.featureId === inp.featureId && s.activeCount > 0);
-        const feat = (productFeatures ?? []).find((f) => f.id === inp.featureId);
-        if (sel && feat) return { feature: feat, sel };
-      }
-    }
-    for (const cf of step.captureFields ?? []) {
-      if (cf.featureId) {
-        const sel = (featureSelections ?? []).find((s) => s.featureId === cf.featureId && s.activeCount > 0);
-        const feat = (productFeatures ?? []).find((f) => f.id === cf.featureId);
-        if (sel && feat) return { feature: feat, sel };
-      }
-    }
-    return null;
+    return getFeatureLinkContextUtil(step, featureSelections, productFeatures);
   }
 
   function getEffectiveStepId(step: WorkflowStep): string {
@@ -1795,7 +1782,7 @@ function WorkOrderRunner({
     const blockingCount = issues.filter((i) => i.isBlocking && !i.resolved).length;
 
     // Feature-linked repeatable step â€" derived from inputs or capture fields with featureId
-    const derivedFeatureLink = getFeatureLinkContext(currentStep);
+    const derivedFeatureLink = getFeatureLinkContextUtil(currentStep, featureSelections, productFeatures);
     const linkedFeature = derivedFeatureLink?.feature ?? null;
     const linkedFeatureSel = derivedFeatureLink?.sel ?? null;
     const expectedQty = linkedFeatureSel?.activeCount ?? 1;

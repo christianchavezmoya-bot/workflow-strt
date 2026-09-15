@@ -5,6 +5,8 @@ using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace Commtrac.Api.Controllers;
@@ -26,6 +28,27 @@ public class WorkflowConfigsController : ControllerBase
 
     private string WorkflowMediaDirectory(string workflowId)
         => _files.BuildRelativePath("Storage", "WorkflowMedia", workflowId);
+
+    /// <summary>WF-3: deterministic, GUID-shaped id derived from a stable seed string — the same
+    /// seed always produces the same id (so republishing with no feature/unit changes is
+    /// byte-identical), distinct seeds practically never collide (SHA-256 truncated to the first
+    /// 128 bits), and the shape matches the Guid.NewGuid() ids it replaces so nothing downstream
+    /// that expects a GUID-looking id breaks.</summary>
+    private static string DeterministicId(string seed)
+    {
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        return new Guid(hash[..16]).ToString();
+    }
+
+    /// <summary>Generator key format: feature:&lt;featureId&gt;:unit:&lt;unitIndex&gt;:&lt;stepType&gt;
+    /// — one grouped step per physical unit, never split per dependency.</summary>
+    private static string GeneratedStepId(string generatorKey) => DeterministicId($"step:{generatorKey}");
+
+    /// <summary>Deterministic capture-field / input identity: featureId + unitIndex + dependencyId
+    /// + fieldKey — distinguishes physical units so multiple units of the same feature/dependency
+    /// never collide.</summary>
+    private static string GeneratedFieldId(string featureId, int unitIndex, string dependencyId, string fieldKey)
+        => DeterministicId($"field:{featureId}:unit:{unitIndex}:dep:{dependencyId}:key:{fieldKey}");
 
     /// <summary>Defense-in-depth for the media routes only. mediaId is always a
     /// server-generated GUID (Guid.TryParse accepts both hyphenated and "N" formats
@@ -167,15 +190,18 @@ public class WorkflowConfigsController : ControllerBase
             // Load the current steps array
             var steps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
 
-            // Determine highest existing order value
+            // Remove any previously-injected BOM steps (safe re-publish guard) BEFORE computing
+            // maxOrder — otherwise every republish (even with zero feature/quantity changes) would
+            // keep pushing nextOrder past the previous generation's own order values, breaking
+            // WF-3's "unchanged publish is byte-identical" guarantee.
+            steps = steps.Where(s =>
+                !(s.TryGetProperty("bomSource", out _))).ToList();
+
+            // Determine highest surviving (custom) step's order value
             int maxOrder = 0;
             foreach (var s in steps)
                 if (s.TryGetProperty("order", out var ordProp) && ordProp.TryGetInt32(out var ord))
                     if (ord > maxOrder) maxOrder = ord;
-
-            // Remove any previously-injected BOM steps (safe re-publish guard)
-            steps = steps.Where(s =>
-                !(s.TryGetProperty("bomSource", out _))).ToList();
 
             int nextOrder = maxOrder + 1;
 
@@ -197,39 +223,54 @@ public class WorkflowConfigsController : ControllerBase
                     .OrderBy(d => d.SortOrder)
                     .ToListAsync();
 
-                foreach (var dep in deps)
+                var inventoryDeps = deps.Where(d => d.IsInventory).ToList();
+                var nonInventoryDeps = deps.Where(d => !d.IsInventory).ToList();
+
+                // WF-3: unroll one step per physical unit (1-based stepUnitIndex, matching the
+                // app-wide convention already used by WorkflowBuilder's manual step templates —
+                // see buildStepTemplate in WorkflowBuilder.tsx). Dependencies of the same stepType
+                // never split a unit's step — they group into that unit's single generated step
+                // (see the WF-3 plan: "Do not split a grouped feature/unit step into separate
+                // steps merely because it has multiple dependencies").
+                for (var unitIndex = 1; unitIndex <= cf.Quantity; unitIndex++)
                 {
-                    var captureFields = string.IsNullOrWhiteSpace(dep.CaptureFieldsJson) || dep.CaptureFieldsJson == "[]"
-                        ? new List<string>()
-                        : JsonSerializer.Deserialize<List<string>>(dep.CaptureFieldsJson, JsonOpts) ?? new();
-
-                    object stepObj;
-                    if (dep.IsInventory)
+                    if (inventoryDeps.Count > 0)
                     {
-                        var cfList = captureFields.Select(key => new
+                        var generatorKey = $"feature:{cf.FeatureId}:unit:{unitIndex}:installation";
+                        var cfList = new List<object>();
+                        foreach (var dep in inventoryDeps)
                         {
-                            id = Guid.NewGuid().ToString(),
-                            key,
-                            label = key switch {
-                                "serialNo"   => "Serial Number",
-                                "firmware"   => "Firmware Version",
-                                "ipAddress"  => "IP Address",
-                                "macAddress" => "MAC Address",
-                                "model"      => "Model",
-                                "location"   => "Location",
-                                _            => key
-                            },
-                            type = "text",
-                            required = true,
-                            featureId = cf.FeatureId
-                        }).ToList();
+                            var captureFields = string.IsNullOrWhiteSpace(dep.CaptureFieldsJson) || dep.CaptureFieldsJson == "[]"
+                                ? new List<string>()
+                                : JsonSerializer.Deserialize<List<string>>(dep.CaptureFieldsJson, JsonOpts) ?? new();
 
-                        stepObj = new
+                            cfList.AddRange(captureFields.Select(key => (object)new
+                            {
+                                id = GeneratedFieldId(cf.FeatureId, unitIndex, dep.Id, key),
+                                key,
+                                label = key switch
+                                {
+                                    "serialNo"   => "Serial Number",
+                                    "firmware"   => "Firmware Version",
+                                    "ipAddress"  => "IP Address",
+                                    "macAddress" => "MAC Address",
+                                    "model"      => "Model",
+                                    "location"   => "Location",
+                                    _            => key
+                                },
+                                type = "text",
+                                required = true,
+                                featureId = cf.FeatureId
+                            }));
+                        }
+
+                        var depNames = string.Join(", ", inventoryDeps.Select(d => d.Name));
+                        object stepObj = new
                         {
-                            id = Guid.NewGuid().ToString(),
+                            id = GeneratedStepId(generatorKey),
                             order = nextOrder++,
-                            title = $"Install {dep.Name} ({feature.Name})",
-                            description = $"Capture details for each {dep.Name}. Quantity: {cf.Quantity}.",
+                            title = $"{feature.Name} {unitIndex} — Installation",
+                            description = $"Capture details for {depNames} ({feature.Name} {unitIndex}).",
                             overrideInReport = false,
                             overrideReportText = "",
                             includeDescriptionInReport = true,
@@ -240,43 +281,69 @@ public class WorkflowConfigsController : ControllerBase
                             nextStepId = (string?)null,
                             captureFields = cfList,
                             stepType = "installation",
-                            repeatFeatureId = cf.FeatureId,
-                            bomSource = new { dependencyId = dep.Id, featureId = cf.FeatureId, isInventory = true }
+                            stepFeatureId = cf.FeatureId,
+                            stepUnitIndex = unitIndex,
+                            stepOrigin = "feature-generated",
+                            generatorKey,
+                            // Legacy shape (dependencyId, singular) kept for back-compat with any
+                            // reader written against the pre-WF-3 one-step-per-dependency shape
+                            // (e.g. captureSpreadsheet.ts's findDependencyCaptureValue); dependencyIds
+                            // is the accurate superset now that a unit's step can group several deps.
+                            bomSource = new
+                            {
+                                dependencyId = inventoryDeps[0].Id,
+                                dependencyIds = inventoryDeps.Select(d => d.Id).ToList(),
+                                featureId = cf.FeatureId,
+                                isInventory = true,
+                            },
                         };
+                        steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
                     }
-                    else
+
+                    if (nonInventoryDeps.Count > 0)
                     {
-                        stepObj = new
+                        var generatorKey = $"feature:{cf.FeatureId}:unit:{unitIndex}:data-collection";
+                        var inputs = nonInventoryDeps.Select(dep => (object)new
                         {
-                            id = Guid.NewGuid().ToString(),
+                            id = GeneratedFieldId(cf.FeatureId, unitIndex, dep.Id, "qty"),
+                            type = "number",
+                            label = $"Actual qty — {dep.Name} ({(dep.Unit ?? "units")})",
+                            required = true,
+                            featureId = cf.FeatureId
+                        }).ToList();
+
+                        var depSummary = string.Join(", ", nonInventoryDeps.Select(d =>
+                            $"{d.Name} (Expected: {d.DefaultQty}{(d.Unit != null ? " " + d.Unit : "")})"));
+                        object stepObj = new
+                        {
+                            id = GeneratedStepId(generatorKey),
                             order = nextOrder++,
-                            title = $"Confirm {dep.Name} ({feature.Name})",
-                            description = $"Confirm quantity of {dep.Name} used. Expected: {dep.DefaultQty}{(dep.Unit != null ? " " + dep.Unit : "")}.",
+                            title = $"{feature.Name} {unitIndex} — Data Collection",
+                            description = $"Confirm quantities used for {feature.Name} {unitIndex}: {depSummary}.",
                             overrideInReport = false,
                             overrideReportText = "",
                             includeDescriptionInReport = true,
                             mediaIds = Array.Empty<string>(),
                             decisionsEnabled = false,
                             decisions = Array.Empty<object>(),
-                            inputs = new[]
-                            {
-                                new
-                                {
-                                    id = Guid.NewGuid().ToString(),
-                                    type = "number",
-                                    label = $"Actual qty ({(dep.Unit ?? "units")})",
-                                    required = true,
-                                    featureId = cf.FeatureId
-                                }
-                            },
+                            inputs,
                             nextStepId = (string?)null,
                             captureFields = Array.Empty<object>(),
                             stepType = "data-collection",
-                            bomSource = new { dependencyId = dep.Id, featureId = cf.FeatureId, isInventory = false }
+                            stepFeatureId = cf.FeatureId,
+                            stepUnitIndex = unitIndex,
+                            stepOrigin = "feature-generated",
+                            generatorKey,
+                            bomSource = new
+                            {
+                                dependencyId = nonInventoryDeps[0].Id,
+                                dependencyIds = nonInventoryDeps.Select(d => d.Id).ToList(),
+                                featureId = cf.FeatureId,
+                                isInventory = false,
+                            },
                         };
+                        steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
                     }
-
-                    steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
                 }
             }
 
