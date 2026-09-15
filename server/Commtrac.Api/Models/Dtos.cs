@@ -993,6 +993,47 @@ public record UpsertWorkflowConfigRequest(
     string? FeatureSelectionsJson
 );
 
+// ─── WF-4: Sync Feature Steps result contract ─────────────────────────────────
+
+/// <summary>One unlocked run whose immutable WorkflowSnapshotJson still contains the step —
+/// blocks its removal regardless of whether a result has been recorded for it yet.</summary>
+public record SyncFeatureStepBlockingRunDto(string RunId, string AssetId);
+
+/// <summary>One generated step's outcome in a sync-feature-steps call.
+///
+/// A Blocked item can represent EITHER a whole step that couldn't be removed at all (no fields
+/// were touched — AppliedFieldIds is null) OR a step that was partially reconciled: some newly-
+/// included dependencies' fields were safely added (AppliedFieldIds lists them) while a since-
+/// excluded dependency's field couldn't be removed (BlockedFieldIds lists them) because a run
+/// still references this step (BlockingRuns). A Blocked item's own StepId/Title/etc. always
+/// reflect the step's CURRENT state — i.e. with AppliedFieldIds already applied — so this never
+/// represents a partially-applied change as if the item were untouched.
+///
+/// AppliedFieldIds/BlockedFieldIds are also populated on Updated items (AppliedFieldIds only,
+/// since nothing was blocked there) so WF-5 can render the same "what changed" detail uniformly
+/// across both buckets.</summary>
+public record SyncFeatureStepItemDto(
+    string StepId,
+    string GeneratorKey,
+    string FeatureId,
+    int UnitIndex,
+    string StepType,
+    string Title,
+    List<SyncFeatureStepBlockingRunDto>? BlockingRuns,
+    List<string>? AppliedFieldIds = null,
+    List<string>? BlockedFieldIds = null
+);
+
+/// <summary>Result of POST /workflow-configs/{id}/sync-feature-steps — a machine-readable diff of
+/// every stepOrigin: "feature-generated" step touched or considered by the reconciliation.</summary>
+public record SyncFeatureStepsResultDto(
+    List<SyncFeatureStepItemDto> Added,
+    List<SyncFeatureStepItemDto> Updated,
+    List<SyncFeatureStepItemDto> Removed,
+    List<SyncFeatureStepItemDto> Unchanged,
+    List<SyncFeatureStepItemDto> Blocked
+);
+
 public record WorkflowTypeDto(
     string Id,
     string Name,

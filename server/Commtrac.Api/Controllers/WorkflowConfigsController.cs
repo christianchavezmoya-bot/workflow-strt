@@ -50,6 +50,138 @@ public class WorkflowConfigsController : ControllerBase
     private static string GeneratedFieldId(string featureId, int unitIndex, string dependencyId, string fieldKey)
         => DeterministicId($"field:{featureId}:unit:{unitIndex}:dep:{dependencyId}:key:{fieldKey}");
 
+    // ── Shared feature-generated step/field construction (Publish + WF-4 SyncFeatureSteps) ────
+
+    private static Dictionary<string, bool> ParseInclusions(string? inclusionsJson) =>
+        string.IsNullOrWhiteSpace(inclusionsJson) || inclusionsJson == "{}"
+            ? new Dictionary<string, bool>()
+            : JsonSerializer.Deserialize<Dictionary<string, bool>>(inclusionsJson, JsonOpts) ?? new();
+
+    private static List<string> CaptureFieldKeysFor(FeatureDependencyEntity dep) =>
+        string.IsNullOrWhiteSpace(dep.CaptureFieldsJson) || dep.CaptureFieldsJson == "[]"
+            ? new List<string>()
+            : JsonSerializer.Deserialize<List<string>>(dep.CaptureFieldsJson, JsonOpts) ?? new();
+
+    /// <summary>The field key(s) a dependency contributes for a given generated stepType —
+    /// one entry per capture-field key for "installation" (inventory), a single fixed "qty" entry
+    /// for "data-collection" (non-inventory). Shared by generation and WF-4 diffing so both always
+    /// agree on which deterministic field ids a dependency can ever produce.</summary>
+    private static List<string> FieldKeysFor(FeatureDependencyEntity dep, string stepType) =>
+        stepType == "installation" ? CaptureFieldKeysFor(dep) : new List<string> { "qty" };
+
+    private static string CaptureFieldLabel(string key) => key switch
+    {
+        "serialNo"   => "Serial Number",
+        "firmware"   => "Firmware Version",
+        "ipAddress"  => "IP Address",
+        "macAddress" => "MAC Address",
+        "model"      => "Model",
+        "location"   => "Location",
+        _            => key,
+    };
+
+    private static object BuildFieldObjectFor(string featureId, int unitIndex, FeatureDependencyEntity dep, string fieldKey, string stepType) =>
+        stepType == "installation"
+            ? new
+            {
+                id = GeneratedFieldId(featureId, unitIndex, dep.Id, fieldKey),
+                key = fieldKey,
+                label = CaptureFieldLabel(fieldKey),
+                type = "text",
+                required = true,
+                featureId,
+            }
+            : new
+            {
+                id = GeneratedFieldId(featureId, unitIndex, dep.Id, fieldKey),
+                type = "number",
+                label = $"Actual qty — {dep.Name} ({(dep.Unit ?? "units")})",
+                required = true,
+                featureId,
+            };
+
+    private static object BuildInstallationStepObject(
+        string featureId, string featureName, int unitIndex, int order, List<FeatureDependencyEntity> inventoryDeps)
+    {
+        var generatorKey = $"feature:{featureId}:unit:{unitIndex}:installation";
+        var cfList = new List<object>();
+        foreach (var dep in inventoryDeps)
+            foreach (var key in CaptureFieldKeysFor(dep))
+                cfList.Add(BuildFieldObjectFor(featureId, unitIndex, dep, key, "installation"));
+
+        var depNames = string.Join(", ", inventoryDeps.Select(d => d.Name));
+        return new
+        {
+            id = GeneratedStepId(generatorKey),
+            order,
+            title = $"{featureName} {unitIndex} — Installation",
+            description = $"Capture details for {depNames} ({featureName} {unitIndex}).",
+            overrideInReport = false,
+            overrideReportText = "",
+            includeDescriptionInReport = true,
+            mediaIds = Array.Empty<string>(),
+            decisionsEnabled = false,
+            decisions = Array.Empty<object>(),
+            inputs = Array.Empty<object>(),
+            nextStepId = (string?)null,
+            captureFields = cfList,
+            stepType = "installation",
+            stepFeatureId = featureId,
+            stepUnitIndex = unitIndex,
+            stepOrigin = "feature-generated",
+            generatorKey,
+            // Legacy shape (dependencyId, singular) kept for back-compat with any reader written
+            // against the pre-WF-3 one-step-per-dependency shape (e.g. captureSpreadsheet.ts's
+            // findDependencyCaptureValue); dependencyIds is the accurate superset now that a
+            // unit's step can group several deps.
+            bomSource = new
+            {
+                dependencyId = inventoryDeps[0].Id,
+                dependencyIds = inventoryDeps.Select(d => d.Id).ToList(),
+                featureId,
+                isInventory = true,
+            },
+        };
+    }
+
+    private static object BuildDataCollectionStepObject(
+        string featureId, string featureName, int unitIndex, int order, List<FeatureDependencyEntity> nonInventoryDeps)
+    {
+        var generatorKey = $"feature:{featureId}:unit:{unitIndex}:data-collection";
+        var inputs = nonInventoryDeps.Select(dep => BuildFieldObjectFor(featureId, unitIndex, dep, "qty", "data-collection")).ToList();
+
+        var depSummary = string.Join(", ", nonInventoryDeps.Select(d =>
+            $"{d.Name} (Expected: {d.DefaultQty}{(d.Unit != null ? " " + d.Unit : "")})"));
+        return new
+        {
+            id = GeneratedStepId(generatorKey),
+            order,
+            title = $"{featureName} {unitIndex} — Data Collection",
+            description = $"Confirm quantities used for {featureName} {unitIndex}: {depSummary}.",
+            overrideInReport = false,
+            overrideReportText = "",
+            includeDescriptionInReport = true,
+            mediaIds = Array.Empty<string>(),
+            decisionsEnabled = false,
+            decisions = Array.Empty<object>(),
+            inputs,
+            nextStepId = (string?)null,
+            captureFields = Array.Empty<object>(),
+            stepType = "data-collection",
+            stepFeatureId = featureId,
+            stepUnitIndex = unitIndex,
+            stepOrigin = "feature-generated",
+            generatorKey,
+            bomSource = new
+            {
+                dependencyId = nonInventoryDeps[0].Id,
+                dependencyIds = nonInventoryDeps.Select(d => d.Id).ToList(),
+                featureId,
+                isInventory = false,
+            },
+        };
+    }
+
     /// <summary>Defense-in-depth for the media routes only. mediaId is always a
     /// server-generated GUID (Guid.TryParse accepts both hyphenated and "N" formats
     /// used across this codebase), so it's validated strictly.</summary>
@@ -207,9 +339,7 @@ public class WorkflowConfigsController : ControllerBase
 
             foreach (var cf in configFeatures)
             {
-                var inclusions = string.IsNullOrWhiteSpace(cf.InclusionsJson) || cf.InclusionsJson == "{}"
-                    ? new Dictionary<string, bool>()
-                    : JsonSerializer.Deserialize<Dictionary<string, bool>>(cf.InclusionsJson, JsonOpts) ?? new();
+                var inclusions = ParseInclusions(cf.InclusionsJson);
 
                 if (!inclusions.Any(kv => kv.Value)) continue; // nothing included
 
@@ -236,112 +366,13 @@ public class WorkflowConfigsController : ControllerBase
                 {
                     if (inventoryDeps.Count > 0)
                     {
-                        var generatorKey = $"feature:{cf.FeatureId}:unit:{unitIndex}:installation";
-                        var cfList = new List<object>();
-                        foreach (var dep in inventoryDeps)
-                        {
-                            var captureFields = string.IsNullOrWhiteSpace(dep.CaptureFieldsJson) || dep.CaptureFieldsJson == "[]"
-                                ? new List<string>()
-                                : JsonSerializer.Deserialize<List<string>>(dep.CaptureFieldsJson, JsonOpts) ?? new();
-
-                            cfList.AddRange(captureFields.Select(key => (object)new
-                            {
-                                id = GeneratedFieldId(cf.FeatureId, unitIndex, dep.Id, key),
-                                key,
-                                label = key switch
-                                {
-                                    "serialNo"   => "Serial Number",
-                                    "firmware"   => "Firmware Version",
-                                    "ipAddress"  => "IP Address",
-                                    "macAddress" => "MAC Address",
-                                    "model"      => "Model",
-                                    "location"   => "Location",
-                                    _            => key
-                                },
-                                type = "text",
-                                required = true,
-                                featureId = cf.FeatureId
-                            }));
-                        }
-
-                        var depNames = string.Join(", ", inventoryDeps.Select(d => d.Name));
-                        object stepObj = new
-                        {
-                            id = GeneratedStepId(generatorKey),
-                            order = nextOrder++,
-                            title = $"{feature.Name} {unitIndex} — Installation",
-                            description = $"Capture details for {depNames} ({feature.Name} {unitIndex}).",
-                            overrideInReport = false,
-                            overrideReportText = "",
-                            includeDescriptionInReport = true,
-                            mediaIds = Array.Empty<string>(),
-                            decisionsEnabled = false,
-                            decisions = Array.Empty<object>(),
-                            inputs = Array.Empty<object>(),
-                            nextStepId = (string?)null,
-                            captureFields = cfList,
-                            stepType = "installation",
-                            stepFeatureId = cf.FeatureId,
-                            stepUnitIndex = unitIndex,
-                            stepOrigin = "feature-generated",
-                            generatorKey,
-                            // Legacy shape (dependencyId, singular) kept for back-compat with any
-                            // reader written against the pre-WF-3 one-step-per-dependency shape
-                            // (e.g. captureSpreadsheet.ts's findDependencyCaptureValue); dependencyIds
-                            // is the accurate superset now that a unit's step can group several deps.
-                            bomSource = new
-                            {
-                                dependencyId = inventoryDeps[0].Id,
-                                dependencyIds = inventoryDeps.Select(d => d.Id).ToList(),
-                                featureId = cf.FeatureId,
-                                isInventory = true,
-                            },
-                        };
+                        var stepObj = BuildInstallationStepObject(cf.FeatureId, feature.Name, unitIndex, nextOrder++, inventoryDeps);
                         steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
                     }
 
                     if (nonInventoryDeps.Count > 0)
                     {
-                        var generatorKey = $"feature:{cf.FeatureId}:unit:{unitIndex}:data-collection";
-                        var inputs = nonInventoryDeps.Select(dep => (object)new
-                        {
-                            id = GeneratedFieldId(cf.FeatureId, unitIndex, dep.Id, "qty"),
-                            type = "number",
-                            label = $"Actual qty — {dep.Name} ({(dep.Unit ?? "units")})",
-                            required = true,
-                            featureId = cf.FeatureId
-                        }).ToList();
-
-                        var depSummary = string.Join(", ", nonInventoryDeps.Select(d =>
-                            $"{d.Name} (Expected: {d.DefaultQty}{(d.Unit != null ? " " + d.Unit : "")})"));
-                        object stepObj = new
-                        {
-                            id = GeneratedStepId(generatorKey),
-                            order = nextOrder++,
-                            title = $"{feature.Name} {unitIndex} — Data Collection",
-                            description = $"Confirm quantities used for {feature.Name} {unitIndex}: {depSummary}.",
-                            overrideInReport = false,
-                            overrideReportText = "",
-                            includeDescriptionInReport = true,
-                            mediaIds = Array.Empty<string>(),
-                            decisionsEnabled = false,
-                            decisions = Array.Empty<object>(),
-                            inputs,
-                            nextStepId = (string?)null,
-                            captureFields = Array.Empty<object>(),
-                            stepType = "data-collection",
-                            stepFeatureId = cf.FeatureId,
-                            stepUnitIndex = unitIndex,
-                            stepOrigin = "feature-generated",
-                            generatorKey,
-                            bomSource = new
-                            {
-                                dependencyId = nonInventoryDeps[0].Id,
-                                dependencyIds = nonInventoryDeps.Select(d => d.Id).ToList(),
-                                featureId = cf.FeatureId,
-                                isInventory = false,
-                            },
-                        };
+                        var stepObj = BuildDataCollectionStepObject(cf.FeatureId, feature.Name, unitIndex, nextOrder++, nonInventoryDeps);
                         steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
                     }
                 }
@@ -354,6 +385,354 @@ public class WorkflowConfigsController : ControllerBase
         entity.UpdatedAt = DateTime.UtcNow;
         await _db.SaveChangesAsync();
         return Ok(ToDto(entity));
+    }
+
+    // ── WF-4: Sync Feature Steps ────────────────────────────────────────────────
+
+    /// <summary>Desired state for one (featureId, unitIndex, stepType) generated step — the
+    /// currently-included dependencies that should populate it, plus every dependency of that
+    /// inventory-type on the feature (used to identify stale fields safe to remove).</summary>
+    private sealed record DesiredUnitStep(
+        string GeneratorKey, string StepType, string FeatureId, string FeatureName, int UnitIndex,
+        List<FeatureDependencyEntity> IncludedDeps, List<FeatureDependencyEntity> AllDepsOfType);
+
+    private sealed record FieldDiff(string ArrayProp, List<(string Id, object Field)> ToAdd, HashSet<string> ToRemoveIds);
+
+    /// <summary>Shape of the outer run snapshot object built in AssetWorkflowRunsController's
+    /// start-run action — its StepsJson property is itself a still-serialized JSON string (the
+    /// frozen WorkflowConfig.StepsJson at run-start), not a nested array, so reading it is a
+    /// two-stage parse.</summary>
+    private sealed record RunSnapshotRef(string? StepsJson);
+
+    private sealed record SnapshotStepIdRef(string Id);
+
+    /// <summary>Computes which fields an existing generated step is missing (toAdd) and which of
+    /// its existing fields are now stale (toRemoveIds) — never touching a field whose id isn't
+    /// provably derivable from this exact (featureId, unitIndex, dependencyId, fieldKey) formula
+    /// for THIS feature, so a manually-added/unknown field is never a candidate for removal.</summary>
+    private static FieldDiff ComputeFieldDiff(JsonElement existingStep, DesiredUnitStep plan)
+    {
+        var arrayProp = plan.StepType == "installation" ? "captureFields" : "inputs";
+        var existingArray = existingStep.TryGetProperty(arrayProp, out var arr)
+            ? arr.EnumerateArray().ToList() : new List<JsonElement>();
+        var existingIds = existingArray.Select(e => e.GetProperty("id").GetString() ?? "").ToHashSet();
+
+        var toAdd = new List<(string Id, object Field)>();
+        foreach (var dep in plan.IncludedDeps)
+            foreach (var fieldKey in FieldKeysFor(dep, plan.StepType))
+            {
+                var fid = GeneratedFieldId(plan.FeatureId, plan.UnitIndex, dep.Id, fieldKey);
+                if (!existingIds.Contains(fid))
+                    toAdd.Add((fid, BuildFieldObjectFor(plan.FeatureId, plan.UnitIndex, dep, fieldKey, plan.StepType)));
+            }
+
+        // Removal universe: only ids derivable from a dependency of this feature/type that is no
+        // longer included. Anything else present in the array (a manual field, or a field this
+        // formula could never have produced) is never a removal candidate.
+        var removableIds = new HashSet<string>();
+        foreach (var dep in plan.AllDepsOfType)
+        {
+            if (plan.IncludedDeps.Any(d => d.Id == dep.Id)) continue;
+            foreach (var fieldKey in FieldKeysFor(dep, plan.StepType))
+                removableIds.Add(GeneratedFieldId(plan.FeatureId, plan.UnitIndex, dep.Id, fieldKey));
+        }
+        var toRemoveIds = existingIds.Intersect(removableIds).ToHashSet();
+
+        return new FieldDiff(arrayProp, toAdd, toRemoveIds);
+    }
+
+    /// <summary>Applies a FieldDiff to an existing step, preserving every other property verbatim
+    /// (title, description, mediaIds, decisions, overrideInReport/overrideReportText — any custom
+    /// augmentation an admin attached after generation). Additions always apply; removals apply
+    /// only when applyRemovals is true (the caller has already confirmed it's run-safe).</summary>
+    private static JsonElement ApplyFieldDiff(JsonElement existingStep, FieldDiff diff, bool applyRemovals, DesiredUnitStep plan)
+    {
+        var existingArray = existingStep.TryGetProperty(diff.ArrayProp, out var arr)
+            ? arr.EnumerateArray().ToList() : new List<JsonElement>();
+
+        var kept = existingArray
+            .Where(e => !(applyRemovals && diff.ToRemoveIds.Contains(e.GetProperty("id").GetString() ?? "")))
+            .Select(e => (object)e)
+            .ToList();
+        kept.AddRange(diff.ToAdd.Select(t => t.Field));
+
+        var newBomSource = new
+        {
+            dependencyId = plan.IncludedDeps.Count > 0 ? plan.IncludedDeps[0].Id : null,
+            dependencyIds = plan.IncludedDeps.Select(d => d.Id).ToList(),
+            featureId = plan.FeatureId,
+            isInventory = plan.StepType == "installation",
+        };
+
+        return WithProperties(existingStep, new Dictionary<string, object?>
+        {
+            [diff.ArrayProp] = kept,
+            ["bomSource"] = newBomSource,
+        });
+    }
+
+    /// <summary>Returns a copy of a step JsonElement with the given properties replaced (or
+    /// added) and every other property preserved verbatim — the mechanism that lets an "updated"
+    /// step keep any custom augmentation (title/description/media/decisions/report overrides) an
+    /// admin attached after it was first generated.</summary>
+    private static JsonElement WithProperties(JsonElement original, Dictionary<string, object?> overrides)
+    {
+        var dict = new Dictionary<string, object?>();
+        foreach (var prop in original.EnumerateObject())
+            dict[prop.Name] = prop.Value;
+        foreach (var kv in overrides)
+            dict[kv.Key] = kv.Value;
+        return JsonSerializer.SerializeToElement(dict, JsonOpts);
+    }
+
+    /// <summary>Builds a result item. appliedFieldIds/blockedFieldIds make a partially-applied
+    /// item self-describing: the step's own fields above (StepId/Title/etc.) already reflect the
+    /// CURRENT state (with appliedFieldIds already applied), so this never represents a
+    /// partially-changed step as if it were untouched.</summary>
+    private static SyncFeatureStepItemDto ToResultItem(
+        JsonElement step,
+        List<SyncFeatureStepBlockingRunDto>? blockingRuns,
+        List<string>? appliedFieldIds = null,
+        List<string>? blockedFieldIds = null) => new(
+        StepId: step.TryGetProperty("id", out var id) ? id.GetString() ?? "" : "",
+        GeneratorKey: step.TryGetProperty("generatorKey", out var gk) ? gk.GetString() ?? "" : "",
+        FeatureId: step.TryGetProperty("stepFeatureId", out var fid) ? fid.GetString() ?? "" : "",
+        UnitIndex: step.TryGetProperty("stepUnitIndex", out var ui) && ui.TryGetInt32(out var uiv) ? uiv : 0,
+        StepType: step.TryGetProperty("stepType", out var st) ? st.GetString() ?? "" : "",
+        Title: step.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
+        BlockingRuns: blockingRuns,
+        AppliedFieldIds: appliedFieldIds is { Count: > 0 } ? appliedFieldIds : null,
+        BlockedFieldIds: blockedFieldIds is { Count: > 0 } ? blockedFieldIds : null
+    );
+
+    /// <summary>WF-4 run-safety guard — approved policy: block a generated-step removal whenever
+    /// any persisted, unlocked AssetWorkflowRun for this workflow config still carries that step in
+    /// its immutable WorkflowSnapshotJson, regardless of whether a StepResultsJson value has been
+    /// recorded for it yet. AssetWorkflowRunEntity.WorkflowSnapshotJson is a write-once copy taken
+    /// at run creation (see Entities.cs, and the snapshot's construction in
+    /// AssetWorkflowRunsController) — its own `stepsJson` property is itself a still-serialized
+    /// JSON string (the frozen WorkflowConfig.StepsJson at that moment), not a nested array, hence
+    /// the two-stage parse below. Scoped to runs of THIS workflow config only. A Complete/locked
+    /// run is read-only and excluded — it can't be affected by anything this endpoint does.
+    ///
+    /// Server-only limitation (accepted, documented here rather than silently assumed away): a run
+    /// that exists only in a device's local IndexedDB offline queue, not yet synced to this server,
+    /// is invisible to this query by construction — there is no request this endpoint could make to
+    /// observe it. It becomes protected by this same guard the moment it does sync and gets a
+    /// persisted, non-locked AssetWorkflowRun row.</summary>
+    private async Task<List<SyncFeatureStepBlockingRunDto>> FindBlockingRunsAsync(string workflowConfigId, string stepId)
+    {
+        var candidates = await _db.AssetWorkflowRuns
+            .Where(r => r.WorkflowConfigId == workflowConfigId && !r.IsLocked)
+            .Select(r => new { r.Id, r.AssetId, r.WorkflowSnapshotJson })
+            .ToListAsync();
+
+        var blocking = new List<SyncFeatureStepBlockingRunDto>();
+        foreach (var run in candidates)
+        {
+            if (SnapshotContainsStep(run.WorkflowSnapshotJson, stepId))
+                blocking.Add(new SyncFeatureStepBlockingRunDto(run.Id, run.AssetId));
+        }
+        return blocking;
+    }
+
+    private static bool SnapshotContainsStep(string? snapshotJson, string stepId)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotJson)) return false;
+        try
+        {
+            var outer = JsonSerializer.Deserialize<RunSnapshotRef>(snapshotJson, JsonOpts);
+            if (string.IsNullOrWhiteSpace(outer?.StepsJson)) return false;
+            var steps = JsonSerializer.Deserialize<List<SnapshotStepIdRef>>(outer.StepsJson, JsonOpts);
+            return steps?.Any(s => s.Id == stepId) == true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// WF-4: non-destructive reconciliation of stepOrigin: "feature-generated" steps against the
+    /// config's current WorkflowConfigFeature/FeatureDependency state. Deliberately a separate
+    /// action from Publish() (which still does a full strip-and-regenerate on every call) — this
+    /// one only ever adds a step it can prove is newly desired, or surgically updates/removes
+    /// generated content it can prove is no longer desired, matched by generatorKey. It NEVER
+    /// touches a step whose stepOrigin isn't "feature-generated" — preparation, SAT/commissioning,
+    /// inspection, return-to-service, report-configuration, manual, and imported steps are always
+    /// preserved untouched, verbatim.
+    ///
+    /// Partial application: every safe change (all additions; any step needing no removal) applies
+    /// unconditionally. A destructive change (whole-step removal, or removing a stale field from an
+    /// otherwise-updated step) is independently subject to FindBlockingRunsAsync — one blocked
+    /// removal never blocks any other item in the same sync. The whole result (added/updated/
+    /// removed/unchanged/blocked steps) is computed in memory first and written back in a single
+    /// StepsJson update + SaveChangesAsync, so this partial application is fully transactional:
+    /// either the entire computed-safe result is persisted, or (on any DB error) none of it is —
+    /// there is no intermediate half-applied state on disk.
+    /// </summary>
+    [HttpPost("{id}/sync-feature-steps")]
+    [Authorize(Roles = "Admin,Project Manager")]
+    public async Task<IActionResult> SyncFeatureSteps(string id)
+    {
+        var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
+        if (entity is null) return NotFound();
+        if (entity.Status == "Archived")
+            return BadRequest(new { message = "Archived configurations cannot be synced." });
+
+        var configFeatures = await _db.WorkflowConfigFeatures
+            .Where(f => f.WorkflowConfigId == id)
+            .OrderBy(f => f.SortOrder)
+            .ToListAsync();
+
+        var existingSteps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
+
+        var customSteps = new List<JsonElement>();
+        var existingGeneratedByKey = new Dictionary<string, JsonElement>();
+        foreach (var s in existingSteps)
+        {
+            var origin = s.TryGetProperty("stepOrigin", out var o) ? o.GetString() : null;
+            var genKey = s.TryGetProperty("generatorKey", out var g) ? g.GetString() : null;
+            if (origin == "feature-generated" && genKey is not null)
+                existingGeneratedByKey[genKey] = s;
+            else
+                customSteps.Add(s); // never touched by this action
+        }
+
+        // Desired generator-key -> unit-step plan, built from CURRENT WorkflowConfigFeature /
+        // inclusion state. A key absent here but present in existingGeneratedByKey is a removal
+        // candidate; one present here but absent there is a pure addition.
+        var desired = new Dictionary<string, DesiredUnitStep>();
+        foreach (var cf in configFeatures)
+        {
+            var inclusions = ParseInclusions(cf.InclusionsJson);
+            if (!inclusions.Any(kv => kv.Value)) continue;
+
+            var feature = await _db.Features.FirstOrDefaultAsync(f => f.Id == cf.FeatureId);
+            if (feature is null) continue;
+
+            // ALL dependencies of this feature (not just included) — needed so a toggled-off
+            // dependency's previously-generated fields can be identified for removal.
+            var allDeps = await _db.FeatureDependencies
+                .Where(d => d.FeatureId == cf.FeatureId)
+                .OrderBy(d => d.SortOrder)
+                .ToListAsync();
+
+            var includedIds = inclusions.Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet();
+            var allInventory = allDeps.Where(d => d.IsInventory).ToList();
+            var allNonInventory = allDeps.Where(d => !d.IsInventory).ToList();
+            var includedInventory = allInventory.Where(d => includedIds.Contains(d.Id)).ToList();
+            var includedNonInventory = allNonInventory.Where(d => includedIds.Contains(d.Id)).ToList();
+
+            for (var unitIndex = 1; unitIndex <= cf.Quantity; unitIndex++)
+            {
+                if (includedInventory.Count > 0)
+                {
+                    var key = $"feature:{cf.FeatureId}:unit:{unitIndex}:installation";
+                    desired[key] = new DesiredUnitStep(key, "installation", cf.FeatureId, feature.Name, unitIndex, includedInventory, allInventory);
+                }
+                if (includedNonInventory.Count > 0)
+                {
+                    var key = $"feature:{cf.FeatureId}:unit:{unitIndex}:data-collection";
+                    desired[key] = new DesiredUnitStep(key, "data-collection", cf.FeatureId, feature.Name, unitIndex, includedNonInventory, allNonInventory);
+                }
+            }
+        }
+
+        var added = new List<SyncFeatureStepItemDto>();
+        var updated = new List<SyncFeatureStepItemDto>();
+        var removed = new List<SyncFeatureStepItemDto>();
+        var unchanged = new List<SyncFeatureStepItemDto>();
+        var blocked = new List<SyncFeatureStepItemDto>();
+        var finalSteps = new List<JsonElement>(customSteps);
+
+        int maxOrder = 0;
+        foreach (var s in existingSteps)
+            if (s.TryGetProperty("order", out var op) && op.TryGetInt32(out var ov) && ov > maxOrder) maxOrder = ov;
+        int nextOrder = maxOrder + 1;
+
+        foreach (var (key, existingStep) in existingGeneratedByKey)
+        {
+            var stepId = existingStep.TryGetProperty("id", out var idProp) ? idProp.GetString() ?? "" : "";
+
+            if (!desired.TryGetValue(key, out var plan))
+            {
+                // No longer desired at all (quantity decrease, a dependency group fully excluded,
+                // or the whole feature removed from the config) — whole-step removal candidate.
+                var blockingRuns = await FindBlockingRunsAsync(id, stepId);
+                if (blockingRuns.Count > 0)
+                {
+                    finalSteps.Add(existingStep); // keep untouched
+                    blocked.Add(ToResultItem(existingStep, blockingRuns));
+                }
+                else
+                {
+                    removed.Add(ToResultItem(existingStep, null)); // not re-added to finalSteps
+                }
+                continue;
+            }
+
+            desired.Remove(key); // consumed — anything left afterward is a pure addition
+
+            var diff = ComputeFieldDiff(existingStep, plan);
+            if (diff.ToAdd.Count == 0 && diff.ToRemoveIds.Count == 0)
+            {
+                finalSteps.Add(existingStep); // byte-identical, verbatim
+                unchanged.Add(ToResultItem(existingStep, null));
+                continue;
+            }
+
+            var addedFieldIds = diff.ToAdd.Select(t => t.Id).ToList();
+
+            if (diff.ToRemoveIds.Count == 0)
+            {
+                // Pure addition (inclusion toggled on for a new dependency) — always safe.
+                var newStep = ApplyFieldDiff(existingStep, diff, applyRemovals: true, plan);
+                finalSteps.Add(newStep);
+                updated.Add(ToResultItem(newStep, null, appliedFieldIds: addedFieldIds));
+                continue;
+            }
+
+            var blockingRunsForStep = await FindBlockingRunsAsync(id, stepId);
+            if (blockingRunsForStep.Count > 0)
+            {
+                // Partial application: apply the safe additions now, leave the unsafe removal for
+                // later, and report this step as blocked (not updated) — everything else in this
+                // sync still applies normally. The item explicitly carries what WAS applied
+                // (appliedFieldIds), what's still stuck (blockedFieldIds), and why
+                // (blockingRunsForStep) — never a bare "blocked" that could read as untouched.
+                var partialStep = ApplyFieldDiff(existingStep, diff, applyRemovals: false, plan);
+                finalSteps.Add(partialStep);
+                blocked.Add(ToResultItem(
+                    partialStep, blockingRunsForStep,
+                    appliedFieldIds: addedFieldIds,
+                    blockedFieldIds: diff.ToRemoveIds.ToList()));
+            }
+            else
+            {
+                var newStep = ApplyFieldDiff(existingStep, diff, applyRemovals: true, plan);
+                finalSteps.Add(newStep);
+                updated.Add(ToResultItem(newStep, null, appliedFieldIds: addedFieldIds));
+            }
+        }
+
+        // Whatever remains in `desired` has no existing match — brand new steps. Never run-safety
+        // gated: nothing could reference a step id that didn't exist before this call.
+        foreach (var plan in desired.Values.OrderBy(p => p.FeatureId).ThenBy(p => p.UnitIndex).ThenBy(p => p.StepType))
+        {
+            var stepObj = plan.StepType == "installation"
+                ? BuildInstallationStepObject(plan.FeatureId, plan.FeatureName, plan.UnitIndex, nextOrder++, plan.IncludedDeps)
+                : BuildDataCollectionStepObject(plan.FeatureId, plan.FeatureName, plan.UnitIndex, nextOrder++, plan.IncludedDeps);
+            var newStep = JsonSerializer.SerializeToElement(stepObj, JsonOpts);
+            finalSteps.Add(newStep);
+            added.Add(ToResultItem(newStep, null));
+        }
+
+        entity.StepsJson = JsonSerializer.Serialize(finalSteps, JsonOpts);
+        entity.UpdatedAt = DateTime.UtcNow;
+        await _db.SaveChangesAsync();
+
+        return Ok(new SyncFeatureStepsResultDto(added, updated, removed, unchanged, blocked));
     }
 
     // POST api/workflow-configs/{id}/clone  — creates a new Draft version
