@@ -60,6 +60,7 @@ import { SyncFeatureStepsDialog } from "./SyncFeatureStepsDialog";
 import { ImportWorkflowJsonDialog } from "./ImportWorkflowJsonDialog";
 import { rehydrateFeatureSelections } from "./featureSelectionsHydration";
 import { assembleAuthoringContextFromBuilderState } from "./workflowContextExportAssembly";
+import { resolveImportConfigId } from "./resolveImportConfigId";
 import { WorkflowActionsMenu } from "./WorkflowActionsMenu";
 import { AdvancedWorkflowActionsMenu } from "./AdvancedWorkflowActionsMenu";
 import { downloadJsonFile } from "./downloadJsonFile";
@@ -911,6 +912,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   // Builder toolbar, not the Features tab.
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [importDoc, setImportDoc] = useState<WorkflowExportDocument | null>(null);
+  // Resolved explicitly in handleImportWorkflowJsonFileSelected rather than read from
+  // currentConfig?.id at render time — on a brand-new Builder, ensureConfigId() creates the
+  // draft and this is set to the freshly-created id in the same async flow, so the dialog opens
+  // with the right id immediately rather than racing a currentConfig setState/rerender.
+  const [importConfigId, setImportConfigId] = useState<string | null>(null);
   const importWorkflowJsonInputRef = useRef<HTMLInputElement>(null);
 
   // WF-6A: Workflow Authoring Context — always built from what the Builder currently has on
@@ -955,17 +961,41 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
 
   // WF-6C: reads the picked file and opens ImportWorkflowJsonDialog with it — the dialog itself
   // owns validation (server-authoritative) and the confirm/cancel flow.
+  //
+  // A brand-new, never-saved Builder has no configId yet, but Import Workflow JSON is part of
+  // the intended "New Workflow → select Features → Export Context → generate JSON externally →
+  // Import → review → Test Run → Publish" authoring loop — the user should never have to
+  // publish or perform an unrelated save first just to unlock this. So: parse the file first
+  // (bad JSON never touches the server or creates anything); only once it parses do we resolve
+  // a config id, creating the draft via the existing ensureConfigId() mechanism if one doesn't
+  // exist yet. ensureConfigId() persists only name/productId/stepsJson (no featureSelectionsJson
+  // — confirmed unnecessary: ValidateImportAsync/ImportWorkflow on the backend read the request
+  // body's own ProductId/FeatureSelections/Steps, never the target config's existing feature
+  // selections, so an empty-selections draft validates and imports identically to any other).
+  // Builder step/feature-selection state is untouched by draft creation — import only replaces
+  // it once the user confirms inside the dialog.
   async function handleImportWorkflowJsonFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     e.target.value = ""; // allow re-selecting the same file later
     if (!file) return;
+
+    let parsed: WorkflowExportDocument;
     try {
       const text = await file.text();
-      const parsed = JSON.parse(text) as WorkflowExportDocument;
-      setImportDoc(parsed);
+      parsed = JSON.parse(text) as WorkflowExportDocument;
     } catch {
       toast.error("That file isn't valid JSON.");
+      return;
     }
+
+    const cfgId = await resolveImportConfigId(currentConfig?.id, ensureConfigId);
+    if (!cfgId) {
+      toast.error("Could not create the workflow draft required for import. Please try again.");
+      return;
+    }
+
+    setImportConfigId(cfgId);
+    setImportDoc(parsed);
   }
 
   // Export / Import
@@ -1210,7 +1240,12 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             onExportContext={() => { void handleExportWorkflowContext(); }}
             canExportJson={!!currentConfig?.id}
             onExportJson={() => { void handleExportWorkflowJson(); }}
-            canImportJson={!!currentConfig?.id && !isReadOnly}
+            // Unlike Sync/Export JSON (which act on an existing saved config and so stay
+            // config-id-gated), Import Workflow JSON is available on a brand-new unsaved
+            // Builder too — handleImportWorkflowJsonFileSelected creates the draft on demand
+            // via ensureConfigId() the moment a valid file is chosen, so this only needs to
+            // exclude read-only (Published/Archived) workflows.
+            canImportJson={!isReadOnly}
             onImportJson={() => importWorkflowJsonInputRef.current?.click()}
           />
           <input
@@ -1477,11 +1512,11 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
         />
       )}
 
-      {currentConfig?.id && (
+      {importConfigId && (
         <ImportWorkflowJsonDialog
           doc={importDoc}
-          onClose={() => setImportDoc(null)}
-          configId={currentConfig.id}
+          onClose={() => { setImportDoc(null); setImportConfigId(null); }}
+          configId={importConfigId}
           productFeatures={productFeatures}
           currentFeatureSelections={featureSelections}
           onImported={refreshConfigState}
