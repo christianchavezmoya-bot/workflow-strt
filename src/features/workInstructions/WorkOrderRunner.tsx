@@ -1730,6 +1730,14 @@ function WorkOrderRunner({
     const onChange = (v: string) => setInputValue(sid, field.id, v);
     const isReq = field.required && !val.trim();
 
+    // Reference-only field (e.g. Product/Feature master P/N) — shown so the worker can see it,
+    // never editable and never counted as an unanswered required field.
+    if (field.readOnly) {
+      return (
+        <TextField size="small" fullWidth disabled value={field.value ?? ""} />
+      );
+    }
+
     if (field.type === "scan") {
       return (
         <Stack direction="row" spacing={1} alignItems="center">

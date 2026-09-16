@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ImportWorkflowJsonDialog } from "./ImportWorkflowJsonDialog";
 import type { WorkflowExportDocument } from "../../types/workflowExportSchema";
 import type { WorkflowImportValidation } from "../../types/workflowImportValidation";
+import type { ProductFeatureDefinition } from "../../types/product";
 
 const validateImportWorkflow = vi.fn();
 const importWorkflow = vi.fn();
@@ -158,5 +159,69 @@ describe("ImportWorkflowJsonDialog", () => {
     expect(screen.getByText(/Reason: active run run-abc/)).toBeInTheDocument();
     expect(screen.getByText(/rejected in full, not partially applied/i)).toBeInTheDocument();
     expect(onImported).not.toHaveBeenCalled();
+  });
+
+  // IMPORT UX CLARITY: show Current vs Imported quantities and the plain-language consequence
+  // BEFORE the user confirms — never silently change quantities.
+  describe("Current vs Imported quantity comparison", () => {
+    const productFeatures: ProductFeatureDefinition[] = [
+      { id: "feat-enclosure", name: "FP Enclosure", valueType: "text" },
+      { id: "feat-display", name: "Tracking Display", valueType: "text" },
+      { id: "feat-generator", name: "Proximity Generator", valueType: "text" },
+      { id: "feat-junction", name: "Junction Box", valueType: "text" },
+    ];
+    const currentFeatureSelections = [
+      { featureId: "feat-enclosure", included: true, activeCount: 1 },
+      { featureId: "feat-display", included: true, activeCount: 1 },
+      { featureId: "feat-junction", included: true, activeCount: 3 },
+    ];
+    function importedDoc(): WorkflowExportDocument {
+      return {
+        schemaVersion: 1, productId: "prod-1", name: "Wf",
+        featureSelections: [
+          { featureId: "feat-enclosure", quantity: 1, inclusions: {} },
+          { featureId: "feat-generator", quantity: 3, inclusions: {} },
+          { featureId: "feat-junction", quantity: 3, inclusions: {} },
+        ],
+        steps: [],
+      };
+    }
+
+    it("shows Current vs Imported quantities for every Feature on either side, and the plain-language consequence message", async () => {
+      validateImportWorkflow.mockResolvedValue(validValidation());
+      render(
+        <ImportWorkflowJsonDialog
+          doc={importedDoc()}
+          onClose={vi.fn()}
+          configId="config-1"
+          productFeatures={productFeatures}
+          currentFeatureSelections={currentFeatureSelections}
+          onImported={vi.fn()}
+        />,
+      );
+
+      await screen.findByText("HA-Coal");
+
+      // Present on the "current" side, absent from imported (Tracking Display) — must still show.
+      expect(screen.getByText("Tracking Display")).toBeInTheDocument();
+      // Present only on the imported side (Proximity Generator) — must show too, not just diffs.
+      expect(screen.getByText("Proximity Generator")).toBeInTheDocument();
+      expect(screen.getByText("FP Enclosure")).toBeInTheDocument();
+      expect(screen.getByText("Junction Box")).toBeInTheDocument();
+
+      expect(screen.getByText(
+        "Importing this reusable workflow will replace this Draft's Feature quantities with the quantities contained in the imported workflow.",
+      )).toBeInTheDocument();
+    });
+
+    it("does not render the comparison table or crash when productFeatures/currentFeatureSelections are omitted (back-compat)", async () => {
+      validateImportWorkflow.mockResolvedValue(validValidation());
+      render(<ImportWorkflowJsonDialog doc={importedDoc()} onClose={vi.fn()} configId="config-1" onImported={vi.fn()} />);
+
+      await screen.findByText("HA-Coal");
+      expect(screen.queryByText("Tracking Display")).not.toBeInTheDocument();
+      // The rest of the validation summary still renders normally.
+      expect(screen.getByRole("button", { name: "Import" })).toBeInTheDocument();
+    });
   });
 });

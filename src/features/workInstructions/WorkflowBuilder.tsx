@@ -8,7 +8,6 @@ import {
   DeleteOutline,
   DescriptionOutlined,
   DragIndicatorOutlined,
-  DownloadOutlined,
   PlayArrowOutlined,
   PublishOutlined,
   RemoveOutlined,
@@ -58,8 +57,10 @@ import { workflowTypeService } from "../../services/workflowTypeService";
 import type { WorkflowConfig } from "../../types/workflowConfig";
 import { workflowConfigFeatureService } from "../../services/workflowConfigFeatureService";
 import { SyncFeatureStepsDialog } from "./SyncFeatureStepsDialog";
-import { SyncFeatureStepsButton } from "./SyncFeatureStepsButton";
 import { ImportWorkflowJsonDialog } from "./ImportWorkflowJsonDialog";
+import { rehydrateFeatureSelections } from "./featureSelectionsHydration";
+import { WorkflowActionsMenu } from "./WorkflowActionsMenu";
+import { AdvancedWorkflowActionsMenu } from "./AdvancedWorkflowActionsMenu";
 import { downloadJsonFile } from "./downloadJsonFile";
 import { productService } from "../../services/productService";
 import type { WorkflowExportDocument } from "../../types/workflowExportSchema";
@@ -434,15 +435,8 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             if (Array.isArray(media)) wf.media = media;
           } catch {}
           // Restore feature selections
-          let parsedSels: FeatureSelection[] = [];
-          try {
-            const sels = JSON.parse(cfg.featureSelectionsJson) as FeatureSelection[];
-            parsedSels = sels;
-            const selMap = new Map(sels.map((s) => [s.featureId, s]));
-            setFeatureSelections(productFeatures.map((f) =>
-              selMap.get(f.id) ?? { featureId: f.id, included: false, activeCount: 0 }
-            ));
-          } catch {}
+          const parsedSels = rehydrateFeatureSelections(cfg.featureSelectionsJson, productFeatures);
+          setFeatureSelections(parsedSels);
           // Auto-populate steps when config is brand new (empty)
           if (wf.steps.length === 0 && parsedSels.some((s) => s.activeCount > 0)) {
             const autoSteps = buildAutoSteps(parsedSels, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
@@ -876,6 +870,96 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
     });
   }
 
+  /** GOAL 1/5: "Create a default installation workflow using the Features and quantities I
+   *  selected." Confirms before replacing existing steps; skips the confirmation on a brand-new
+   *  (empty) workflow. The single trigger for this action lives in the Workflow Actions menu. */
+  function regenerateWorkflow() {
+    const hasSteps = workflow.steps.length > 0;
+    const run = () => {
+      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
+      importedRef.current = true;
+      updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
+      importedRef.current = false;
+    };
+    if (!hasSteps) { run(); return; }
+    setConfirmDialog({
+      message: "This will replace all current steps with a new auto-generated workflow. Continue?",
+      onConfirm: run,
+    });
+  }
+
+  /** Called with the freshly re-fetched config after a successful Sync Feature Steps or Import
+   *  Workflow JSON — server is authoritative for both steps and feature quantities, so pull both
+   *  fresh from its response rather than trusting any client-side state. Feeds the GOAL 4 fix:
+   *  previously only stepsJson was re-applied here, leaving the Builder's quantity UI showing
+   *  stale values after an Import. */
+  function refreshConfigState(cfg: WorkflowConfig) {
+    setCurrentConfig(cfg);
+    try {
+      const parsed = JSON.parse(cfg.stepsJson);
+      const nextSteps = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.steps) ? parsed.steps : null;
+      if (nextSteps) {
+        justLoadedRef.current = true;
+        setWorkflow((prev) => ({ ...prev, steps: nextSteps }));
+      }
+    } catch { /* keep current workflow state if stepsJson is unexpectedly malformed */ }
+    setFeatureSelections(rehydrateFeatureSelections(cfg.featureSelectionsJson, productFeaturesRef.current));
+  }
+
+  // GOAL 5 (revised): Workflow Actions menu state — a workflow-level control living in the main
+  // Builder toolbar, not the Features tab.
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [importDoc, setImportDoc] = useState<WorkflowExportDocument | null>(null);
+  const importWorkflowJsonInputRef = useRef<HTMLInputElement>(null);
+
+  // WF-6A: Product Workflow Context — Product master data only, no config-specific selection
+  // state. Distinct from the WF-6B reusable-workflow export below.
+  // Workflow-scoped whenever a saved WorkflowConfig exists (the normal Builder case) — only the
+  // Features actually selected here, at their real quantities, not the Product's whole catalog.
+  // Falls back to the Product-level context (every linked Feature, no quantities) only when
+  // there's no configId yet to scope to (e.g. a brand-new, not-yet-saved draft).
+  async function handleExportWorkflowContext() {
+    const configId = currentConfig?.id ?? null;
+    try {
+      if (configId) {
+        const context = await workflowConfigService.getAuthoringContext(configId);
+        downloadJsonFile(`workflow-context-${configId}.json`, context);
+        return;
+      }
+      const context = await productService.getWorkflowContext(workflow.productId);
+      downloadJsonFile(`workflow-context-${workflow.productId}.json`, context);
+    } catch {
+      toast.error("Could not export the workflow context. Please try again.");
+    }
+  }
+
+  // WF-6B: the reusable workflow JSON (WF-1 schema) for the current config.
+  async function handleExportWorkflowJson() {
+    const configId = currentConfig?.id ?? null;
+    if (!configId) return;
+    try {
+      const doc = await workflowConfigService.exportWorkflow(configId);
+      downloadJsonFile(`workflow-${configId}.json`, doc);
+    } catch {
+      toast.error("Could not export this workflow. Please try again.");
+    }
+  }
+
+  // WF-6C: reads the picked file and opens ImportWorkflowJsonDialog with it — the dialog itself
+  // owns validation (server-authoritative) and the confirm/cancel flow.
+  async function handleImportWorkflowJsonFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-selecting the same file later
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text) as WorkflowExportDocument;
+      setImportDoc(parsed);
+    } catch {
+      toast.error("That file isn't valid JSON.");
+    }
+  }
+
   // Export / Import
   const importRef = useRef<HTMLInputElement>(null);
 
@@ -1100,12 +1184,34 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             </Typography>
           </Stack>
         </Stack>
-        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
+        <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap alignItems="center">
           {onNewConfig && (
             <Button size="small" variant="outlined" startIcon={<AddOutlined />} onClick={onNewConfig}>
               New Workflow
             </Button>
           )}
+          {/* GOAL 5 (revised): Workflow Actions is a workflow-level control (Regenerate/Sync/
+              Export Context/Export JSON/Import JSON) — it lives in the main toolbar, discoverable
+              without opening the Features tab, right where Regenerate used to be most prominent. */}
+          <WorkflowActionsMenu
+            hasSteps={workflow.steps.length > 0}
+            canRegenerate={!isReadOnly && featureSelections.some((s) => s.activeCount > 0)}
+            onRegenerate={regenerateWorkflow}
+            canSync={!!currentConfig?.id && !isReadOnly}
+            onSync={() => setSyncDialogOpen(true)}
+            onExportContext={() => { void handleExportWorkflowContext(); }}
+            canExportJson={!!currentConfig?.id}
+            onExportJson={() => { void handleExportWorkflowJson(); }}
+            canImportJson={!!currentConfig?.id && !isReadOnly}
+            onImportJson={() => importWorkflowJsonInputRef.current?.click()}
+          />
+          <input
+            ref={importWorkflowJsonInputRef}
+            type="file"
+            accept="application/json"
+            hidden
+            onChange={handleImportWorkflowJsonFileSelected}
+          />
           <Button
             size="small"
             variant="contained"
@@ -1128,9 +1234,13 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               {publishSaving ? "Publishing…" : "Publish"}
             </Button>
           )}
-          <Button size="small" variant="outlined" startIcon={<DownloadOutlined />} onClick={exportJSON}>
-            Export JSON
-          </Button>
+          {/* GOAL 2 (revised): the older raw JSON mechanism stays available for backward
+              compatibility, but must not compete with Export/Import Workflow JSON above — tucked
+              behind a clearly labeled Advanced menu instead of its own toolbar buttons. */}
+          <AdvancedWorkflowActionsMenu
+            onExportRawJson={exportJSON}
+            onImportRawJson={() => importRef.current?.click()}
+          />
           <input
             ref={importRef}
             type="file"
@@ -1142,9 +1252,6 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
               try { await importJSON(f); } catch (err) { toast.error(String((err as Error)?.message || err)); } finally { e.target.value = ""; }
             }}
           />
-          <Button size="small" variant="outlined" startIcon={<UploadOutlined />} onClick={() => importRef.current?.click()}>
-            Import JSON
-          </Button>
           <Tooltip title="Clear all steps and reset to blank">
             <Button
               size="small"
@@ -1239,36 +1346,9 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
                   );
                 })}
               </Stack>
-              {!isReadOnly && (
-                <Button
-                  size="small"
-                  variant="contained"
-                  fullWidth
-                  sx={{ mt: 1.5 }}
-                  disabled={!featureSelections.some((s) => s.activeCount > 0)}
-                  onClick={() => {
-                    const hasSteps = workflow.steps.length > 0;
-                    if (!hasSteps) {
-                      const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
-                      importedRef.current = true;
-                      updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
-                      importedRef.current = false;
-                      return;
-                    }
-                    setConfirmDialog({
-                      message: "This will replace all current steps with a new auto-generated workflow. Continue?",
-                      onConfirm: () => {
-                        const autoSteps = buildAutoSteps(featureSelections, productFeaturesRef.current, libFeaturesRef.current, libFeatureDepsRef.current);
-                        importedRef.current = true;
-                        updateWorkflow((wf) => { wf.steps = autoSteps; return wf; });
-                        importedRef.current = false;
-                      },
-                    });
-                  }}
-                >
-                  {workflow.steps.length > 0 ? "Regenerate Workflow" : "Create Workflow"}
-                </Button>
-              )}
+              {/* The Regenerate/Create Workflow action lives in the single "Workflow Actions"
+                  menu (Features tab) now — GOAL 5: one normal user-facing location, not one copy
+                  here and another there. */}
             </Paper>
           )}
           <StepListPanel
@@ -1367,23 +1447,33 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             productFeatures={productFeatures}
             featureSelections={featureSelections}
             onFeatureSelectionsChange={setFeatureSelections}
+            libFeatures={libFeatures}
+            libFeatureDeps={libFeatureDeps}
             configId={currentConfig?.id ?? null}
-            onConfigRefreshed={(cfg) => {
-              // WF-5: Sync Feature Steps refresh — server is authoritative, so pull the fresh
-              // steps from its response rather than rebuilding anything client-side.
-              setCurrentConfig(cfg);
-              try {
-                const parsed = JSON.parse(cfg.stepsJson);
-                const nextSteps = Array.isArray(parsed) ? parsed : Array.isArray(parsed?.steps) ? parsed.steps : null;
-                if (nextSteps) {
-                  justLoadedRef.current = true;
-                  setWorkflow((prev) => ({ ...prev, steps: nextSteps }));
-                }
-              } catch { /* keep current workflow state if stepsJson is unexpectedly malformed */ }
-            }}
           />
         </Grid>
       </Grid>
+
+      {currentConfig?.id && (
+        <SyncFeatureStepsDialog
+          open={syncDialogOpen}
+          onClose={() => setSyncDialogOpen(false)}
+          configId={currentConfig.id}
+          steps={workflow.steps}
+          onSynced={refreshConfigState}
+        />
+      )}
+
+      {currentConfig?.id && (
+        <ImportWorkflowJsonDialog
+          doc={importDoc}
+          onClose={() => setImportDoc(null)}
+          configId={currentConfig.id}
+          productFeatures={productFeatures}
+          currentFeatureSelections={featureSelections}
+          onImported={refreshConfigState}
+        />
+      )}
 
       <WorkOrderRunner
         open={runnerOpen}
@@ -2513,7 +2603,7 @@ function buildAutoSteps(
         ? libFeat.captureFields
         : (feat.subProperties ?? []).map((d) => d.name);
 
-      const captureFields = depCaptureFields.length > 0
+      const editableCaptureFields = depCaptureFields.length > 0
         ? depCaptureFields
         : fallbackNames.map((fieldName) => ({
             id: u(),
@@ -2524,9 +2614,30 @@ function buildAutoSteps(
             featureId: feat.id,
           }));
 
-      // No capture fields at all (inventory feature with no dependencies and no legacy
-      // capture config) -> a tick box to confirm, rather than an empty data step.
-      const confirmTick = captureFields.length === 0
+      // Product/Feature master P/N — reference-only, visible to the worker but never
+      // technician-editable. Precedence matches the rest of the app (Settings → Features "P/N"
+      // column, captureSpreadsheet.ts): alternativePartNumber first, manufacturerPartNumber as
+      // fallback. Shown first so it reads before the fields the worker actually fills in.
+      const partNumber = libFeat?.alternativePartNumber || libFeat?.manufacturerPartNumber || "";
+      const partNumberField = partNumber
+        ? [{
+            id: u(),
+            key: "partNumber",
+            label: "Part Number",
+            type: "text" as CaptureFieldType,
+            required: false,
+            featureId: feat.id,
+            readOnly: true,
+            value: partNumber,
+          }]
+        : [];
+
+      const captureFields = [...partNumberField, ...editableCaptureFields];
+
+      // No editable capture fields (inventory feature with no dependencies and no legacy
+      // capture config) -> a tick box to confirm, rather than an empty data step. The read-only
+      // P/N reference field alone doesn't count as "something to capture".
+      const confirmTick = editableCaptureFields.length === 0
         ? [mkCheck(`${feat.name} ${unit} — Data recorded / nothing to capture`, feat.id)]
         : [];
 
@@ -2838,7 +2949,7 @@ function ReportPreviewInline({ step }: { step: WorkflowStep }) {
 
 const uid2 = () => randomId();
 
-function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, configId, onConfigRefreshed }: {
+function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isReadOnly, onWorkflowUpdate, productFeatures, featureSelections, onFeatureSelectionsChange, libFeatures, libFeatureDeps, configId }: {
   workflow: Workflow;
   stepsSorted: WorkflowStep[];
   selectedStepId: string | null;
@@ -2848,53 +2959,16 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
   productFeatures?: ProductFeatureDefinition[];
   featureSelections?: FeatureSelection[];
   onFeatureSelectionsChange?: (sels: FeatureSelection[]) => void;
-  /** Active WorkflowConfig id — enables BOM step inclusion management. */
+  /** Feature library (with captureFields) and dependencies for the active product — used for the
+   *  Features panel's compact read-only "Data captured" summary. */
+  libFeatures?: Feature[];
+  libFeatureDeps?: Record<string, FeatureDependency[]>;
+  /** Active WorkflowConfig id — enables BOM step inclusion management. The Workflow Actions menu
+   *  (Regenerate/Sync/Export Context/Export JSON/Import JSON) lives in the main Builder toolbar
+   *  now, not here — a workflow-level control, not a Features-tab control. */
   configId?: string | null;
-  /** WF-5: called with the freshly re-fetched config after a successful Sync Feature Steps. */
-  onConfigRefreshed?: (cfg: import("../../types/workflowConfig").WorkflowConfig) => void;
 }) {
   const [tab, setTab] = React.useState(0);
-  const [syncDialogOpen, setSyncDialogOpen] = React.useState(false);
-  const [importDoc, setImportDoc] = React.useState<WorkflowExportDocument | null>(null);
-  const importFileInputRef = React.useRef<HTMLInputElement>(null);
-  const toast = useAppToast();
-
-  // WF-6A: Product Workflow Context — Product master data only, no config-specific selection
-  // state. Distinct from the WF-6B reusable-workflow export below.
-  async function handleExportWorkflowContext() {
-    try {
-      const context = await productService.getWorkflowContext(workflow.productId);
-      downloadJsonFile(`workflow-context-${workflow.productId}.json`, context);
-    } catch {
-      toast.error("Could not export the workflow context. Please try again.");
-    }
-  }
-
-  // WF-6B: the reusable workflow JSON (WF-1 schema) for the current config.
-  async function handleExportWorkflowJson() {
-    if (!configId) return;
-    try {
-      const doc = await workflowConfigService.exportWorkflow(configId);
-      downloadJsonFile(`workflow-${configId}.json`, doc);
-    } catch {
-      toast.error("Could not export this workflow. Please try again.");
-    }
-  }
-
-  // WF-6C: reads the picked file and opens ImportWorkflowJsonDialog with it — the dialog itself
-  // owns validation (server-authoritative) and the confirm/cancel flow.
-  async function handleImportFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    e.target.value = ""; // allow re-selecting the same file later
-    if (!file) return;
-    try {
-      const text = await file.text();
-      const parsed = JSON.parse(text) as WorkflowExportDocument;
-      setImportDoc(parsed);
-    } catch {
-      toast.error("That file isn't valid JSON.");
-    }
-  }
   const sels = featureSelections ?? [];
   // This is the "Features" tab's own new-selection picker (quantities + dependency
   // inclusions) — same availability rule as the left-panel "Installed Features" list.
@@ -2928,6 +3002,28 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
     } catch { /* ignore */ } finally {
       setDepsLoadingMap((prev) => ({ ...prev, [featureId]: false }));
     }
+  }
+
+  // SIMPLIFY FEATURES PANEL: auto-load each included Feature's dependencies (if any) so the
+  // panel can show its compact "Data captured" summary immediately — no "Load dependencies…"
+  // click required from the Builder user.
+  React.useEffect(() => {
+    if (tab !== 2) return;
+    sels.filter((s) => s.activeCount > 0).forEach((s) => { void ensureFeatureDeps(s.featureId); });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, sels.map((s) => `${s.featureId}:${s.activeCount > 0}`).join(",")]);
+
+  const libFeatureById = React.useMemo(
+    () => new Map((libFeatures ?? []).map((f) => [f.id, f])),
+    [libFeatures],
+  );
+
+  /** Same fallback rule used by generation (buildAutoSteps / ReconcileFeatureStepsAsync): real
+   *  Dependencies win when present, otherwise the Feature's own master captureFields. */
+  function captureFieldLabelsFor(featureId: string): string[] {
+    const deps = featureDeps[featureId] ?? libFeatureDeps?.[featureId];
+    if (deps && deps.length > 0) return deps.map((d) => d.name);
+    return libFeatureById.get(featureId)?.captureFields ?? [];
   }
 
   async function syncConfigFeature(featureId: string, qty: number, inclusionsJson?: string) {
@@ -3111,42 +3207,9 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
           <Stack spacing={2}>
             <Stack direction="row" alignItems="center" justifyContent="space-between">
               <Typography variant="body2" color="text.secondary">
-                Set quantities and choose which dependencies generate steps on publish.
+                Features
               </Typography>
               {cfLoading && <CircularProgress size={14} />}
-            </Stack>
-            {/* Sync Feature Steps — a separate, non-destructive server action from "Regenerate
-                Workflow" above. It only ever reconciles feature-generated steps (matched by
-                generatorKey) against the current quantities/inclusions here; it never touches
-                preparation, test & acceptance, inspection, return-to-service, or any other
-                manually-authored step. */}
-            <SyncFeatureStepsButton visible={!!configId && !isReadOnly} onClick={() => setSyncDialogOpen(true)} />
-
-            {/* WF-6: Product Workflow Context (Product master data) and reusable workflow JSON
-                (WF-1 schema) export/import — distinct from both Sync Feature Steps above and
-                Regenerate Workflow below, and from each other (context vs. this config's own
-                feature selections + steps). */}
-            <Stack direction="row" spacing={1} flexWrap="wrap" useFlexGap>
-              <Button size="small" variant="text" startIcon={<DownloadOutlined />} onClick={handleExportWorkflowContext}>
-                Export Workflow Context
-              </Button>
-              {configId && (
-                <Button size="small" variant="text" startIcon={<DownloadOutlined />} onClick={handleExportWorkflowJson}>
-                  Export Workflow JSON
-                </Button>
-              )}
-              {configId && !isReadOnly && (
-                <Button size="small" variant="text" startIcon={<UploadOutlined />} onClick={() => importFileInputRef.current?.click()}>
-                  Import Workflow JSON
-                </Button>
-              )}
-              <input
-                ref={importFileInputRef}
-                type="file"
-                accept="application/json"
-                hidden
-                onChange={handleImportFileSelected}
-              />
             </Stack>
 
             <Stack spacing={1}>
@@ -3219,33 +3282,25 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
                       </Stack>
                     )}
 
-                    {/* BOM step inclusion panel — only when qty > 0 and configId present */}
+                    {/* SIMPLIFY FEATURES PANEL: a normal Builder user just needs to know what
+                        gets recorded for this Feature — not FeatureDependency internals. Show a
+                        compact read-only "Data captured" summary sourced from Settings → Features
+                        master data. Only when this Feature has genuine optional equipment choices
+                        configured (real Dependencies) does the more technical per-item toggle
+                        list appear, since that's a real choice the user must make — not just
+                        implementation detail. */}
                     {sel.activeCount > 0 && configId && (
                       <Stack spacing={0.75} sx={{ mt: 1.5, pl: 0.5 }}>
-                        <Stack direction="row" alignItems="center" justifyContent="space-between">
-                          <Typography variant="caption" fontWeight={700} color="text.secondary">
-                            BOM STEPS ON PUBLISH
-                          </Typography>
-                          {cfSaving[feat.id] && <CircularProgress size={12} />}
-                        </Stack>
-
-                        {depsLoadingMap[feat.id] ? (
+                        {depsLoadingMap[feat.id] && !deps ? (
                           <CircularProgress size={14} />
-                        ) : !deps ? (
-                          <Typography
-                            variant="caption"
-                            color="text.secondary"
-                            sx={{ cursor: "pointer", textDecoration: "underline" }}
-                            onClick={() => ensureFeatureDeps(feat.id)}
-                          >
-                            Load dependencies…
-                          </Typography>
-                        ) : deps.length === 0 ? (
-                          <Typography variant="caption" color="text.secondary">
-                            No dependencies defined. Go to Settings → Features to add them.
-                          </Typography>
-                        ) : (
+                        ) : deps && deps.length > 0 ? (
                           <>
+                            <Stack direction="row" alignItems="center" justifyContent="space-between">
+                              <Typography variant="caption" fontWeight={700} color="text.secondary">
+                                Optional components
+                              </Typography>
+                              {cfSaving[feat.id] && <CircularProgress size={12} />}
+                            </Stack>
                             <Stack spacing={0.5}>
                               {deps.map((dep) => (
                                 <Stack key={dep.id} direction="row" alignItems="center" spacing={1}>
@@ -3257,23 +3312,27 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
                                     sx={{ p: 0.25 }}
                                   />
                                   <Typography variant="caption" sx={{ flexGrow: 1 }}>{dep.name}</Typography>
-                                  <Chip
-                                    size="small"
-                                    label={dep.isInventory ? "Inventory" : "Non-inv."}
-                                    color={dep.isInventory ? "primary" : "default"}
-                                    variant="outlined"
-                                    sx={{ fontSize: 9, height: 18 }}
-                                  />
                                 </Stack>
                               ))}
                             </Stack>
                             {includedDepCount > 0 && (
                               <Alert severity="success" sx={{ fontSize: 11, py: 0.25, mt: 0.5 }}>
-                                Will generate {includedDepCount} BOM step{includedDepCount > 1 ? "s" : ""} on publish.
+                                {includedDepCount} optional component{includedDepCount > 1 ? "s" : ""} selected for this workflow.
                               </Alert>
                             )}
                           </>
-                        )}
+                        ) : (() => {
+                          const captureLabels = captureFieldLabelsFor(feat.id);
+                          return captureLabels.length > 0 ? (
+                            <Typography variant="caption" color="text.secondary">
+                              Data captured: {captureLabels.join(" · ")}
+                            </Typography>
+                          ) : (
+                            <Typography variant="caption" color="text.secondary">
+                              No data fields configured for this Feature yet — add them in Settings → Features.
+                            </Typography>
+                          );
+                        })()}
                       </Stack>
                     )}
                   </Paper>
@@ -3284,24 +3343,6 @@ function RightPanel({ workflow, stepsSorted, selectedStepId, onSelectStep, isRea
         </Paper>
       )}
 
-      {configId && (
-        <SyncFeatureStepsDialog
-          open={syncDialogOpen}
-          onClose={() => setSyncDialogOpen(false)}
-          configId={configId}
-          steps={workflow.steps}
-          onSynced={(cfg) => onConfigRefreshed?.(cfg)}
-        />
-      )}
-
-      {configId && (
-        <ImportWorkflowJsonDialog
-          doc={importDoc}
-          onClose={() => setImportDoc(null)}
-          configId={configId}
-          onImported={(cfg) => onConfigRefreshed?.(cfg)}
-        />
-      )}
     </Stack>
   );
 }

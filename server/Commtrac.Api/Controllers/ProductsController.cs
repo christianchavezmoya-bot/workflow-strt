@@ -129,6 +129,9 @@ public class ProductsController : ControllerBase
             var subProps = string.IsNullOrWhiteSpace(f.SubPropertiesJson) || f.SubPropertiesJson == "[]"
                 ? new List<FeatureSubPropertyDto>()
                 : JsonSerializer.Deserialize<List<FeatureSubPropertyDto>>(f.SubPropertiesJson, JsonOptions) ?? new();
+            var featureCaptureFields = string.IsNullOrWhiteSpace(f.CaptureFieldsJson) || f.CaptureFieldsJson == "[]"
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOptions) ?? new();
 
             var deps = depsByFeature.TryGetValue(f.Id, out var featureDeps) ? featureDeps : new List<FeatureDependencyEntity>();
             var depContexts = deps.Select(d =>
@@ -146,7 +149,7 @@ public class ProductsController : ControllerBase
                 // always selectable; Feature: No has no config-specific selection context here.
                 Selectable: f.IsInventory,
                 link.SortOrder, f.Brand, f.Supplier, f.AlternativePartNumber, f.ManufacturerPartNumber,
-                f.UnitPrice, f.ProductLink, depContexts));
+                f.UnitPrice, f.ProductLink, depContexts, featureCaptureFields));
         }
 
         return Ok(new ProductWorkflowContextDto(1, new ProductContextDto(product.Id, product.Name), featureContexts));

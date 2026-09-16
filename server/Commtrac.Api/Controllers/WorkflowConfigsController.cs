@@ -85,6 +85,30 @@ public class WorkflowConfigsController : ControllerBase
         _            => key,
     };
 
+    /// <summary>Product/Feature master P/N — reference-only, visible to the worker on every
+    /// generated installation step but never technician-editable. Precedence matches the rest of
+    /// the app (Settings → Features "P/N" column, captureSpreadsheet.ts): alternativePartNumber
+    /// first, manufacturerPartNumber as fallback.</summary>
+    private static string? ResolvePartNumber(FeatureEntity feature) =>
+        !string.IsNullOrWhiteSpace(feature.AlternativePartNumber) ? feature.AlternativePartNumber
+        : !string.IsNullOrWhiteSpace(feature.ManufacturerPartNumber) ? feature.ManufacturerPartNumber
+        : null;
+
+    private static string PartNumberFieldId(string featureId, int unitIndex) =>
+        DeterministicId($"field:{featureId}:unit:{unitIndex}:partNumber");
+
+    private static object BuildPartNumberFieldObject(string featureId, int unitIndex, string partNumber) => new
+    {
+        id = PartNumberFieldId(featureId, unitIndex),
+        key = "partNumber",
+        label = "Part Number",
+        type = "text",
+        required = false,
+        featureId,
+        readOnly = true,
+        value = partNumber,
+    };
+
     private static object BuildFieldObjectFor(string featureId, int unitIndex, FeatureDependencyEntity dep, string fieldKey, string stepType) =>
         stepType == "installation"
             ? new
@@ -106,10 +130,12 @@ public class WorkflowConfigsController : ControllerBase
             };
 
     private static object BuildInstallationStepObject(
-        string featureId, string featureName, int unitIndex, int order, List<FeatureDependencyEntity> inventoryDeps)
+        string featureId, string featureName, int unitIndex, int order, List<FeatureDependencyEntity> inventoryDeps, string? partNumber = null)
     {
         var generatorKey = $"feature:{featureId}:unit:{unitIndex}:installation";
         var cfList = new List<object>();
+        if (!string.IsNullOrWhiteSpace(partNumber))
+            cfList.Add(BuildPartNumberFieldObject(featureId, unitIndex, partNumber));
         foreach (var dep in inventoryDeps)
             foreach (var key in CaptureFieldKeysFor(dep))
                 cfList.Add(BuildFieldObjectFor(featureId, unitIndex, dep, key, "installation"));
@@ -344,22 +370,51 @@ public class WorkflowConfigsController : ControllerBase
 
             foreach (var cf in configFeatures)
             {
-                var inclusions = ParseInclusions(cf.InclusionsJson);
-
-                if (!inclusions.Any(kv => kv.Value)) continue; // nothing included
-
-                // Load the feature and its included dependencies
+                // Load the feature first — needed both for the dependency-having path (name) and
+                // the dependency-less fallback below (IsInventory/CaptureFieldsJson/P-N).
                 var feature = await _db.Features.FirstOrDefaultAsync(f => f.Id == cf.FeatureId);
                 if (feature is null) continue;
 
-                var depIds = inclusions.Where(kv => kv.Value).Select(kv => kv.Key).ToList();
-                var deps = await _db.FeatureDependencies
-                    .Where(d => d.FeatureId == cf.FeatureId && depIds.Contains(d.Id))
+                var allDeps = await _db.FeatureDependencies
+                    .Where(d => d.FeatureId == cf.FeatureId)
                     .OrderBy(d => d.SortOrder)
                     .ToListAsync();
 
-                var inventoryDeps = deps.Where(d => d.IsInventory).ToList();
-                var nonInventoryDeps = deps.Where(d => !d.IsInventory).ToList();
+                List<FeatureDependencyEntity> inventoryDeps, nonInventoryDeps;
+
+                if (allDeps.Count > 0)
+                {
+                    // Real Dependencies exist — per-dependency inclusion toggles decide what
+                    // generates. Unchanged pre-existing behavior.
+                    var inclusions = ParseInclusions(cf.InclusionsJson);
+                    if (!inclusions.Any(kv => kv.Value)) continue; // nothing included
+
+                    var includedIds = inclusions.Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet();
+                    inventoryDeps = allDeps.Where(d => d.IsInventory && includedIds.Contains(d.Id)).ToList();
+                    nonInventoryDeps = allDeps.Where(d => !d.IsInventory && includedIds.Contains(d.Id)).ToList();
+                }
+                else if (feature.IsInventory && !string.IsNullOrWhiteSpace(feature.CaptureFieldsJson) && feature.CaptureFieldsJson != "[]")
+                {
+                    // No Dependencies configured — fall back to the Feature's own captureFields,
+                    // the same synthetic-dependency fallback ReconcileFeatureStepsAsync uses (see
+                    // its own doc comment for the full rationale). Driven purely by cf.Quantity,
+                    // no inclusion toggle to check.
+                    inventoryDeps = new List<FeatureDependencyEntity>
+                    {
+                        new FeatureDependencyEntity
+                        {
+                            Id = feature.Id, FeatureId = feature.Id, Name = feature.Name,
+                            IsInventory = true, CaptureFieldsJson = feature.CaptureFieldsJson, SortOrder = 0,
+                        },
+                    };
+                    nonInventoryDeps = new List<FeatureDependencyEntity>();
+                }
+                else
+                {
+                    continue; // nothing configured to generate for this feature
+                }
+
+                var partNumber = ResolvePartNumber(feature);
 
                 // WF-3: unroll one step per physical unit (1-based stepUnitIndex, matching the
                 // app-wide convention already used by WorkflowBuilder's manual step templates —
@@ -371,7 +426,7 @@ public class WorkflowConfigsController : ControllerBase
                 {
                     if (inventoryDeps.Count > 0)
                     {
-                        var stepObj = BuildInstallationStepObject(cf.FeatureId, feature.Name, unitIndex, nextOrder++, inventoryDeps);
+                        var stepObj = BuildInstallationStepObject(cf.FeatureId, feature.Name, unitIndex, nextOrder++, inventoryDeps, partNumber);
                         steps.Add(JsonSerializer.SerializeToElement(stepObj, JsonOpts));
                     }
 
@@ -399,9 +454,18 @@ public class WorkflowConfigsController : ControllerBase
     /// inventory-type on the feature (used to identify stale fields safe to remove).</summary>
     private sealed record DesiredUnitStep(
         string GeneratorKey, string StepType, string FeatureId, string FeatureName, int UnitIndex,
-        List<FeatureDependencyEntity> IncludedDeps, List<FeatureDependencyEntity> AllDepsOfType);
+        List<FeatureDependencyEntity> IncludedDeps, List<FeatureDependencyEntity> AllDepsOfType,
+        /// <summary>Product/Feature master P/N, "installation" stepType only — always desired
+        /// once configured (see ComputeFieldDiff), never a removal candidate.</summary>
+        string? PartNumber = null);
 
-    private sealed record FieldDiff(string ArrayProp, List<(string Id, object Field)> ToAdd, HashSet<string> ToRemoveIds);
+    private sealed record FieldDiff(
+        string ArrayProp, List<(string Id, object Field)> ToAdd, HashSet<string> ToRemoveIds,
+        /// <summary>Fields whose id is unchanged but whose content must be refreshed in place —
+        /// currently only the P/N reference field's value. Applied unconditionally by
+        /// ApplyFieldDiff, never gated by applyRemovals: overwriting a read-only reference value
+        /// can never discard technician-entered data, unlike removing a field outright.</summary>
+        List<(string Id, object Field)> ToUpdateInPlace);
 
     /// <summary>Shape of the outer run snapshot object built in AssetWorkflowRunsController's
     /// start-run action — its StepsJson property is itself a still-serialized JSON string (the
@@ -423,6 +487,46 @@ public class WorkflowConfigsController : ControllerBase
         var existingIds = existingArray.Select(e => e.GetProperty("id").GetString() ?? "").ToHashSet();
 
         var toAdd = new List<(string Id, object Field)>();
+        var toUpdateInPlace = new List<(string Id, object Field)>();
+        var pnRemovableIds = new HashSet<string>();
+
+        // Product/Feature master P/N — kept synchronized with Product master on every Sync, the
+        // same as any other master-data-derived field:
+        //   - configured, not yet present  -> add (also how a cleared-then-restored P/N comes
+        //     back, deterministically, since PartNumberFieldId depends only on
+        //     featureId/unitIndex, never on the value itself)
+        //   - configured, present, value unchanged -> untouched
+        //   - configured, present, value changed    -> update in place (same id, fresh value;
+        //     never run-safety gated — refreshing a read-only reference value can't discard a
+        //     technician's already-recorded answer, unlike removing a field outright)
+        //   - cleared, still present -> removal candidate, run-safety gated like any other field
+        //     removal (see pnRemovableIds below) — a stale P/N must never linger in the workflow
+        if (plan.StepType == "installation")
+        {
+            var pnFieldId = PartNumberFieldId(plan.FeatureId, plan.UnitIndex);
+            var existingPnField = existingArray.FirstOrDefault(e =>
+                e.TryGetProperty("id", out var idProp) && idProp.GetString() == pnFieldId);
+            var hasExistingPn = existingIds.Contains(pnFieldId);
+
+            if (!string.IsNullOrWhiteSpace(plan.PartNumber))
+            {
+                if (!hasExistingPn)
+                {
+                    toAdd.Add((pnFieldId, BuildPartNumberFieldObject(plan.FeatureId, plan.UnitIndex, plan.PartNumber)));
+                }
+                else
+                {
+                    var existingValue = existingPnField.TryGetProperty("value", out var valueProp) ? valueProp.GetString() : null;
+                    if (existingValue != plan.PartNumber)
+                        toUpdateInPlace.Add((pnFieldId, BuildPartNumberFieldObject(plan.FeatureId, plan.UnitIndex, plan.PartNumber)));
+                }
+            }
+            else if (hasExistingPn)
+            {
+                pnRemovableIds.Add(pnFieldId);
+            }
+        }
+
         foreach (var dep in plan.IncludedDeps)
             foreach (var fieldKey in FieldKeysFor(dep, plan.StepType))
             {
@@ -431,33 +535,70 @@ public class WorkflowConfigsController : ControllerBase
                     toAdd.Add((fid, BuildFieldObjectFor(plan.FeatureId, plan.UnitIndex, dep, fieldKey, plan.StepType)));
             }
 
-        // Removal universe: only ids derivable from a dependency of this feature/type that is no
-        // longer included. Anything else present in the array (a manual field, or a field this
-        // formula could never have produced) is never a removal candidate.
-        var removableIds = new HashSet<string>();
+        // Removal universe, case A: only ids derivable from a dependency of this feature/type that
+        // is no longer included at all, plus the P/N reference field id when Product master has
+        // been cleared (pnRemovableIds, computed above). Anything else present in the array (a
+        // manual field, or a field this formula could never have produced) is never a removal
+        // candidate.
+        var removableIds = new HashSet<string>(pnRemovableIds);
         foreach (var dep in plan.AllDepsOfType)
         {
             if (plan.IncludedDeps.Any(d => d.Id == dep.Id)) continue;
             foreach (var fieldKey in FieldKeysFor(dep, plan.StepType))
                 removableIds.Add(GeneratedFieldId(plan.FeatureId, plan.UnitIndex, dep.Id, fieldKey));
         }
+
+        // Removal universe, case B ("installation" only): a dependency that is STILL included can
+        // itself have its own capture-field key list shrink (e.g. the synthetic Feature.captureFields
+        // fallback dependency, or an ordinary dependency whose CaptureFieldsJson was edited in
+        // Settings) — case A alone misses this, since the dependency was never excluded. Verify
+        // each existing field's own "key" against a recomputed id for one of its included
+        // dependencies: only an EXACT id match proves this exact field was produced by this exact
+        // (featureId, unitIndex, dependencyId, key) formula, so a manually-added field (random
+        // uid(), never matching the deterministic hash) can never qualify. The P/N reference field
+        // is excluded here — its own removal/update is computed separately above.
+        if (plan.StepType == "installation")
+        {
+            foreach (var existing in existingArray)
+            {
+                if (!existing.TryGetProperty("key", out var keyProp)) continue;
+                var key = keyProp.GetString();
+                if (key is null || key == "partNumber") continue;
+                var eid = existing.GetProperty("id").GetString() ?? "";
+                foreach (var dep in plan.IncludedDeps)
+                {
+                    if (GeneratedFieldId(plan.FeatureId, plan.UnitIndex, dep.Id, key) != eid) continue;
+                    if (!FieldKeysFor(dep, plan.StepType).Contains(key))
+                        removableIds.Add(eid);
+                }
+            }
+        }
+
         var toRemoveIds = existingIds.Intersect(removableIds).ToHashSet();
 
-        return new FieldDiff(arrayProp, toAdd, toRemoveIds);
+        return new FieldDiff(arrayProp, toAdd, toRemoveIds, toUpdateInPlace);
     }
 
     /// <summary>Applies a FieldDiff to an existing step, preserving every other property verbatim
     /// (title, description, mediaIds, decisions, overrideInReport/overrideReportText — any custom
-    /// augmentation an admin attached after generation). Additions always apply; removals apply
-    /// only when applyRemovals is true (the caller has already confirmed it's run-safe).</summary>
+    /// augmentation an admin attached after generation). Additions always apply; in-place updates
+    /// (currently only a changed P/N value) always apply too — never run-safety gated, since
+    /// refreshing a read-only reference value can't discard a technician's already-recorded
+    /// answer; removals apply only when applyRemovals is true (the caller has already confirmed
+    /// it's run-safe).</summary>
     private static JsonElement ApplyFieldDiff(JsonElement existingStep, FieldDiff diff, bool applyRemovals, DesiredUnitStep plan)
     {
         var existingArray = existingStep.TryGetProperty(diff.ArrayProp, out var arr)
             ? arr.EnumerateArray().ToList() : new List<JsonElement>();
+        var updates = diff.ToUpdateInPlace.ToDictionary(u => u.Id, u => u.Field);
 
         var kept = existingArray
             .Where(e => !(applyRemovals && diff.ToRemoveIds.Contains(e.GetProperty("id").GetString() ?? "")))
-            .Select(e => (object)e)
+            .Select(e =>
+            {
+                var id = e.GetProperty("id").GetString() ?? "";
+                return updates.TryGetValue(id, out var replacement) ? replacement : (object)e;
+            })
             .ToList();
         kept.AddRange(diff.ToAdd.Select(t => t.Field));
 
@@ -654,9 +795,6 @@ public class WorkflowConfigsController : ControllerBase
         var desired = new Dictionary<string, DesiredUnitStep>();
         foreach (var cf in configFeatures)
         {
-            var inclusions = ParseInclusions(cf.InclusionsJson);
-            if (!inclusions.Any(kv => kv.Value)) continue;
-
             var feature = await _db.Features.FirstOrDefaultAsync(f => f.Id == cf.FeatureId);
             if (feature is null) continue;
 
@@ -667,18 +805,63 @@ public class WorkflowConfigsController : ControllerBase
                 .OrderBy(d => d.SortOrder)
                 .ToListAsync();
 
-            var includedIds = inclusions.Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet();
-            var allInventory = allDeps.Where(d => d.IsInventory).ToList();
-            var allNonInventory = allDeps.Where(d => !d.IsInventory).ToList();
-            var includedInventory = allInventory.Where(d => includedIds.Contains(d.Id)).ToList();
-            var includedNonInventory = allNonInventory.Where(d => includedIds.Contains(d.Id)).ToList();
+            List<FeatureDependencyEntity> allInventory, allNonInventory, includedInventory, includedNonInventory;
+
+            if (allDeps.Count > 0)
+            {
+                // Real Dependencies exist for this Feature — per-dependency inclusion toggles
+                // (WorkflowConfigFeature.InclusionsJson) decide what generates. Unchanged
+                // pre-existing behavior.
+                var inclusions = ParseInclusions(cf.InclusionsJson);
+                if (!inclusions.Any(kv => kv.Value)) continue;
+
+                var includedIds = inclusions.Where(kv => kv.Value).Select(kv => kv.Key).ToHashSet();
+                allInventory = allDeps.Where(d => d.IsInventory).ToList();
+                allNonInventory = allDeps.Where(d => !d.IsInventory).ToList();
+                includedInventory = allInventory.Where(d => includedIds.Contains(d.Id)).ToList();
+                includedNonInventory = allNonInventory.Where(d => includedIds.Contains(d.Id)).ToList();
+            }
+            else if (feature.IsInventory && !string.IsNullOrWhiteSpace(feature.CaptureFieldsJson) && feature.CaptureFieldsJson != "[]")
+            {
+                // No Dependencies configured for this Feature — fall back to the Feature's OWN
+                // captureFields (Settings → Features "Feature: Yes" capture definitions), the
+                // same fallback the client's buildAutoSteps() already uses for Regenerate. There
+                // is nothing to toggle here (no per-dependency inclusion makes sense when there
+                // are no dependencies) — generation is driven purely by cf.Quantity > 0, matching
+                // the simplified Builder mental model ("Builder defines HOW MANY are used").
+                //
+                // Modeled as a synthetic single-item dependency list so it flows through the SAME
+                // diff/generation engine (ComputeFieldDiff/ApplyFieldDiff/
+                // BuildInstallationStepObject) unchanged. Id = feature.Id, stable across every
+                // recompute, so generated field ids (keyed off dependencyId) stay deterministic —
+                // a previously-answered field never changes identity because of this fallback.
+                var syntheticDep = new FeatureDependencyEntity
+                {
+                    Id = feature.Id,
+                    FeatureId = feature.Id,
+                    Name = feature.Name,
+                    IsInventory = true,
+                    CaptureFieldsJson = feature.CaptureFieldsJson,
+                    SortOrder = 0,
+                };
+                allInventory = new List<FeatureDependencyEntity> { syntheticDep };
+                allNonInventory = new List<FeatureDependencyEntity>();
+                includedInventory = allInventory;
+                includedNonInventory = new List<FeatureDependencyEntity>();
+            }
+            else
+            {
+                continue; // nothing configured to generate for this feature
+            }
+
+            var partNumber = ResolvePartNumber(feature);
 
             for (var unitIndex = 1; unitIndex <= cf.Quantity; unitIndex++)
             {
                 if (includedInventory.Count > 0)
                 {
                     var key = $"feature:{cf.FeatureId}:unit:{unitIndex}:installation";
-                    desired[key] = new DesiredUnitStep(key, "installation", cf.FeatureId, feature.Name, unitIndex, includedInventory, allInventory);
+                    desired[key] = new DesiredUnitStep(key, "installation", cf.FeatureId, feature.Name, unitIndex, includedInventory, allInventory, partNumber);
                 }
                 if (includedNonInventory.Count > 0)
                 {
@@ -724,14 +907,14 @@ public class WorkflowConfigsController : ControllerBase
             desired.Remove(key); // consumed — anything left afterward is a pure addition
 
             var diff = ComputeFieldDiff(existingStep, plan);
-            if (diff.ToAdd.Count == 0 && diff.ToRemoveIds.Count == 0)
+            if (diff.ToAdd.Count == 0 && diff.ToRemoveIds.Count == 0 && diff.ToUpdateInPlace.Count == 0)
             {
                 finalSteps.Add(existingStep); // byte-identical, verbatim
                 unchanged.Add(ToResultItem(existingStep, null));
                 continue;
             }
 
-            var addedFieldIds = diff.ToAdd.Select(t => t.Id).ToList();
+            var addedFieldIds = diff.ToAdd.Select(t => t.Id).Concat(diff.ToUpdateInPlace.Select(t => t.Id)).ToList();
 
             if (diff.ToRemoveIds.Count == 0)
             {
@@ -770,7 +953,7 @@ public class WorkflowConfigsController : ControllerBase
         foreach (var plan in desired.Values.OrderBy(p => p.FeatureId).ThenBy(p => p.UnitIndex).ThenBy(p => p.StepType))
         {
             var stepObj = plan.StepType == "installation"
-                ? BuildInstallationStepObject(plan.FeatureId, plan.FeatureName, plan.UnitIndex, nextOrder++, plan.IncludedDeps)
+                ? BuildInstallationStepObject(plan.FeatureId, plan.FeatureName, plan.UnitIndex, nextOrder++, plan.IncludedDeps, plan.PartNumber)
                 : BuildDataCollectionStepObject(plan.FeatureId, plan.FeatureName, plan.UnitIndex, nextOrder++, plan.IncludedDeps);
             var newStep = JsonSerializer.SerializeToElement(stepObj, JsonOpts);
             finalSteps.Add(newStep);
@@ -806,6 +989,75 @@ public class WorkflowConfigsController : ControllerBase
         var steps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
 
         return Ok(new WorkflowExportDto(SupportedWorkflowExportSchemaVersion, entity.ProductId, entity.Name, featureSelections, steps));
+    }
+
+    /// <summary>
+    /// WF-8: Builder "Export Workflow Context" — workflow-scoped equivalent of
+    /// GET /api/products/{id}/workflow-context. Unlike the Product-level endpoint (every linked
+    /// Feature, no quantities), this returns ONLY the Features actually selected in THIS
+    /// WorkflowConfig (WorkflowConfigFeature.Quantity > 0), each with its real quantity — "this is
+    /// the actual equipment configuration for this workflow," so an authoring agent never has to
+    /// guess which zero-quantity catalog entries to ignore. Capture fields use the same
+    /// "Dependencies win when present, else Feature.captureFields" rule as generation itself, so
+    /// the fields reported here are exactly what Regenerate/Sync will actually produce. Contains
+    /// no customer/project/run data, no answers, no secrets.
+    /// </summary>
+    [HttpGet("{id}/authoring-context")]
+    public async Task<IActionResult> GetAuthoringContext(string id)
+    {
+        var entity = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
+        if (entity is null) return NotFound();
+
+        var product = await _db.Products.FirstOrDefaultAsync(p => p.Id == entity.ProductId);
+        if (product is null) return NotFound();
+
+        var configFeatures = await _db.WorkflowConfigFeatures
+            .Where(f => f.WorkflowConfigId == id && f.Quantity > 0)
+            .OrderBy(f => f.SortOrder)
+            .ToListAsync();
+
+        var featureIds = configFeatures.Select(cf => cf.FeatureId).ToList();
+        var features = await _db.Features.Where(f => featureIds.Contains(f.Id)).ToListAsync();
+        var featureById = features.ToDictionary(f => f.Id);
+
+        var allDeps = await _db.FeatureDependencies
+            .Where(d => featureIds.Contains(d.FeatureId))
+            .OrderBy(d => d.SortOrder)
+            .ToListAsync();
+        var depsByFeature = allDeps.GroupBy(d => d.FeatureId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var authoringFeatures = new List<WorkflowAuthoringFeatureDto>();
+        foreach (var cf in configFeatures)
+        {
+            if (!featureById.TryGetValue(cf.FeatureId, out var f)) continue; // stale reference, skip
+
+            var deps = depsByFeature.TryGetValue(f.Id, out var featureDeps) ? featureDeps : new List<FeatureDependencyEntity>();
+
+            // Same fallback rule as ReconcileFeatureStepsAsync/buildAutoSteps: real Dependencies
+            // win when present, otherwise fall back to the Feature's own captureFields.
+            List<string> captureFields;
+            List<string> dependencyIds;
+            if (deps.Count > 0)
+            {
+                captureFields = deps.SelectMany(d => CaptureFieldKeysFor(d)).Distinct().ToList();
+                dependencyIds = deps.Select(d => d.Id).ToList();
+            }
+            else
+            {
+                captureFields = string.IsNullOrWhiteSpace(f.CaptureFieldsJson) || f.CaptureFieldsJson == "[]"
+                    ? new List<string>()
+                    : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOpts) ?? new();
+                dependencyIds = new List<string>();
+            }
+
+            authoringFeatures.Add(new WorkflowAuthoringFeatureDto(
+                f.Id, f.Name, cf.Quantity, captureFields,
+                f.Brand, f.Supplier, f.AlternativePartNumber, f.ManufacturerPartNumber, f.UnitPrice,
+                dependencyIds));
+        }
+
+        return Ok(new WorkflowAuthoringContextDto(
+            1, new ProductContextDto(product.Id, product.Name), entity.Id, entity.Name, authoringFeatures));
     }
 
     /// <summary>

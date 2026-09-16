@@ -3,6 +3,7 @@ import type { WorkflowConfig, UpsertWorkflowConfigInput, WorkflowConfigStatus } 
 import type { SyncFeatureStepsResult } from "../types/syncFeatureSteps";
 import type { WorkflowExportDocument } from "../types/workflowExportSchema";
 import type { WorkflowImportValidation } from "../types/workflowImportValidation";
+import type { WorkflowAuthoringContext } from "../types/workflowAuthoringContext";
 import offlineStore from "./offlineStore";
 import { shouldSkipBlockingFetch, shouldSkipBlockingNetworkRead } from "./connectivityMonitor";
 import { isMobileNativePlatform } from "../utils/platform";
@@ -284,6 +285,14 @@ export const workflowConfigService = {
    *  are references + selection state only, never a copy of Product/Feature master data. */
   async exportWorkflow(id: string): Promise<WorkflowExportDocument> {
     const res = await api.get<WorkflowExportDocument>(`/workflow-configs/${id}/export`);
+    return res.data;
+  },
+
+  /** Builder "Export Workflow Context" — workflow-scoped: only Features selected (quantity > 0)
+   *  in THIS config, with their real quantities. Prefer this over productService.getWorkflowContext
+   *  whenever a saved WorkflowConfig exists (Builder always has one once created). */
+  async getAuthoringContext(id: string): Promise<WorkflowAuthoringContext> {
+    const res = await api.get<WorkflowAuthoringContext>(`/workflow-configs/${id}/authoring-context`);
     return res.data;
   },
 

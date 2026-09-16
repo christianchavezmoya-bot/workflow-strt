@@ -33,6 +33,12 @@ export interface CaptureField {
   hint?: string;
   /** Product feature this field was generated from — drives repeat qty */
   featureId?: string;
+  /** Reference-only field (e.g. Product/Feature master P/N) — rendered disabled, pre-filled from
+   *  `value`, and never counted as an unanswered required field. Master data the worker reads,
+   *  not something they record. */
+  readOnly?: boolean;
+  /** Static value for a readOnly field — meaningless (ignored) when readOnly is not set. */
+  value?: string;
 }
 
 export interface Decision {

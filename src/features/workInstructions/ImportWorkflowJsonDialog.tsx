@@ -17,6 +17,8 @@ import type { WorkflowConfig } from "../../types/workflowConfig";
 import type { WorkflowExportDocument } from "../../types/workflowExportSchema";
 import type { WorkflowImportValidation } from "../../types/workflowImportValidation";
 import type { WorkflowImportBlocked } from "../../types/syncFeatureSteps";
+import type { ProductFeatureDefinition } from "../../types/product";
+import type { FeatureSelection } from "../../services/productConfigService";
 import { workflowConfigService } from "../../services/workflowConfigService";
 
 export interface ImportWorkflowJsonDialogProps {
@@ -24,6 +26,11 @@ export interface ImportWorkflowJsonDialogProps {
   doc: WorkflowExportDocument | null;
   onClose: () => void;
   configId: string;
+  /** For rendering feature names (the import file only carries featureId) in the Current vs
+   *  Imported quantity comparison. Optional — omitting it just skips that table. */
+  productFeatures?: ProductFeatureDefinition[];
+  /** This Draft's quantities BEFORE the import, for the same comparison. */
+  currentFeatureSelections?: FeatureSelection[];
   /** Called once, after a successful import, with the freshly re-fetched config. */
   onImported: (config: WorkflowConfig) => void;
 }
@@ -53,7 +60,7 @@ function extractBlocked(err: unknown): WorkflowImportBlocked | null {
  * Does not silently accept a cross-product file — a product mismatch renders as invalid and the
  * Import button stays disabled.
  */
-export function ImportWorkflowJsonDialog({ doc, onClose, configId, onImported }: ImportWorkflowJsonDialogProps) {
+export function ImportWorkflowJsonDialog({ doc, onClose, configId, productFeatures = [], currentFeatureSelections = [], onImported }: ImportWorkflowJsonDialogProps) {
   const [phase, setPhase] = useState<Phase>("validating");
   const [validation, setValidation] = useState<WorkflowImportValidation | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -148,8 +155,16 @@ export function ImportWorkflowJsonDialog({ doc, onClose, configId, onImported }:
           </Stack>
         )}
 
-        {phase === "summary" && validation && (
-          <Stack spacing={1}>
+        {phase === "summary" && validation && doc && (
+          <Stack spacing={1.5}>
+            <QuantityComparisonTable
+              productFeatures={productFeatures}
+              current={currentFeatureSelections}
+              imported={doc.featureSelections}
+            />
+            <Alert severity="info" sx={{ fontSize: 12 }}>
+              Importing this reusable workflow will replace this Draft's Feature quantities with the quantities contained in the imported workflow.
+            </Alert>
             {!validation.valid && (
               <Alert severity="warning">
                 {!validation.schemaVersionSupported
@@ -185,6 +200,55 @@ export function ImportWorkflowJsonDialog({ doc, onClose, configId, onImported }:
         {(phase === "validating" || phase === "importing") && <Button disabled>Please wait…</Button>}
       </DialogActions>
     </Dialog>
+  );
+}
+
+/** IMPORT UX CLARITY: a plain Current-vs-Imported Feature quantity table, shown before the user
+ *  confirms — so a quantity change is always seen, never silently applied. Features present in
+ *  either side (current or imported) are listed; a Feature untouched by the import (same quantity
+ *  on both sides) still shows, so "nothing changes for X" is visible too, not just the diffs. */
+function QuantityComparisonTable({
+  productFeatures,
+  current,
+  imported,
+}: {
+  productFeatures: ProductFeatureDefinition[];
+  current: FeatureSelection[];
+  imported: { featureId: string; quantity: number }[];
+}) {
+  const nameFor = (featureId: string) => productFeatures.find((f) => f.id === featureId)?.name ?? featureId;
+  const currentQty = new Map(current.map((s) => [s.featureId, s.activeCount]));
+  const importedQty = new Map(imported.map((s) => [s.featureId, s.quantity]));
+  const featureIds = Array.from(new Set([...currentQty.keys(), ...importedQty.keys()]))
+    .sort((a, b) => nameFor(a).localeCompare(nameFor(b)));
+
+  if (featureIds.length === 0) return null;
+
+  return (
+    <Stack spacing={0.5}>
+      <Typography variant="caption" fontWeight={700} color="text.secondary" sx={{ textTransform: "uppercase", letterSpacing: 0.5 }}>
+        Import Workflow
+      </Typography>
+      <Stack spacing={0.25}>
+        <Stack direction="row" sx={{ px: 0.5 }}>
+          <Typography variant="caption" color="text.secondary" sx={{ flexGrow: 1 }}>Feature</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ width: 64, textAlign: "right" }}>Current</Typography>
+          <Typography variant="caption" color="text.secondary" sx={{ width: 64, textAlign: "right" }}>Imported</Typography>
+        </Stack>
+        {featureIds.map((featureId) => {
+          const cur = currentQty.get(featureId) ?? 0;
+          const imp = importedQty.get(featureId) ?? 0;
+          const changed = cur !== imp;
+          return (
+            <Stack key={featureId} direction="row" sx={{ px: 0.5, py: 0.25, bgcolor: changed ? "action.hover" : undefined, borderRadius: 0.5 }}>
+              <Typography variant="body2" sx={{ flexGrow: 1, fontSize: 13 }}>{nameFor(featureId)}</Typography>
+              <Typography variant="body2" sx={{ width: 64, textAlign: "right", fontSize: 13, color: "text.secondary" }}>{cur}</Typography>
+              <Typography variant="body2" sx={{ width: 64, textAlign: "right", fontSize: 13, fontWeight: changed ? 700 : 400 }}>{imp}</Typography>
+            </Stack>
+          );
+        })}
+      </Stack>
+    </Stack>
   );
 }
 

@@ -36,4 +36,7 @@ export interface FeatureWorkflowContext {
   unitPrice?: number | null;
   productLink?: string | null;
   dependencies: FeatureDependencyWorkflowContext[];
+  /** Feature-level capture definitions (Settings → Features "Feature: Yes" list) — the fallback
+   *  "what do we record" source when this Feature has no Dependencies configured. */
+  captureFields: string[];
 }

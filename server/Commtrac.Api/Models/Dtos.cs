@@ -1072,7 +1072,13 @@ public record FeatureContextDto(
     string? ManufacturerPartNumber,
     decimal? UnitPrice,
     string? ProductLink,
-    List<FeatureDependencyContextDto> Dependencies
+    List<FeatureDependencyContextDto> Dependencies,
+    /// <summary>Feature-level capture definitions (FeatureEntity.CaptureFieldsJson) — the master
+    /// "what do we record about this feature" list when the Feature itself has no Dependencies
+    /// configured (e.g. serialNo/firmware/location/Certificate). Populated independently of
+    /// Dependencies; a consumer building a Data Collection step should use this as the fallback
+    /// when Dependencies is empty, mirroring the client's own buildAutoSteps() fallback.</summary>
+    List<string> CaptureFields
 );
 
 /// <summary>Product master data only — every Feature linked to this Product plus its
@@ -1084,6 +1090,38 @@ public record ProductWorkflowContextDto(
     int SchemaVersion,
     ProductContextDto Product,
     List<FeatureContextDto> Features
+);
+
+// ─── Workflow-scoped authoring context (Builder "Export Workflow Context") ────────────────
+
+/// <summary>One selected (quantity > 0) Feature's authoring context for a specific
+/// WorkflowConfig — master metadata plus this config's own quantity. Capture fields follow the
+/// same "Dependencies win when present, else Feature.captureFields" rule used by generation
+/// (buildAutoSteps client-side, ReconcileFeatureStepsAsync server-side), so an external agent
+/// producing reusable workflow JSON sees exactly the fields that will actually be generated.</summary>
+public record WorkflowAuthoringFeatureDto(
+    string FeatureId,
+    string Name,
+    int Quantity,
+    List<string> CaptureFields,
+    string? Brand,
+    string? Supplier,
+    string? AlternativePartNumber,
+    string? ManufacturerPartNumber,
+    decimal? UnitPrice,
+    List<string> DependencyIds
+);
+
+/// <summary>Workflow-scoped equivalent of ProductWorkflowContextDto: only the Features actually
+/// selected (Quantity > 0) in THIS WorkflowConfig, with their real quantities — "this is the
+/// actual equipment configuration for this workflow," not the Product's full catalog. Contains
+/// no customer/project/run data, no answers, no secrets.</summary>
+public record WorkflowAuthoringContextDto(
+    int SchemaVersion,
+    ProductContextDto Product,
+    string WorkflowConfigId,
+    string WorkflowConfigName,
+    List<WorkflowAuthoringFeatureDto> Features
 );
 
 // ─── WF-6: Reusable workflow JSON export/import (WF-1 schema) ─────────────────
