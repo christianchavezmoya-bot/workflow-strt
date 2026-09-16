@@ -958,14 +958,23 @@ export default function MobileDocumentPreviewDialog({ doc, open, onClose }: Prop
         )}
 
         {!loading && !error && previewMode === "video" && blobUrl && (
-          <Box sx={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", p: { xs: 1.25, sm: 2.5 } }}>
+          // minHeight: 0 is load-bearing: this Box is a flex item in DialogContent's column
+          // flex layout, and a flex item's default min-height is "auto" (its content's intrinsic
+          // size), not 0 — without this override the Box grows to fit the <video>'s full
+          // intrinsic height (which can be enormous for a portrait clip rendered at width:100%
+          // of a wide desktop dialog) instead of shrinking to the space actually available,
+          // and DialogContent's overflow:hidden then silently clips it to only the top slice.
+          <Box sx={{ flex: 1, minHeight: 0, display: "flex", alignItems: "center", justifyContent: "center", p: { xs: 1.25, sm: 2.5 } }}>
             <Box
               component="video"
               src={blobUrl}
               controls
               sx={{
                 width: "100%",
+                height: "auto",
+                maxWidth: "100%",
                 maxHeight: "100%",
+                objectFit: "contain",
                 borderRadius: 3,
                 bgcolor: "#000",
               }}
