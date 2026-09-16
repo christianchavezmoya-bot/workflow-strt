@@ -1220,16 +1220,21 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
             hidden
             onChange={handleImportWorkflowJsonFileSelected}
           />
-          <Button
-            size="small"
-            variant="contained"
-            color="success"
-            startIcon={<PlayArrowOutlined />}
-            onClick={() => { void handlePreviewRun(); }}
-            disabled={stepsSorted.length === 0}
-          >
-            Run
-          </Button>
+          <Tooltip title="Test this workflow before publishing. Test answers and photos are not saved to any project or asset.">
+            <span>
+              <Button
+                size="small"
+                variant="contained"
+                color="success"
+                startIcon={<PlayArrowOutlined />}
+                onClick={() => { void handlePreviewRun(); }}
+                disabled={stepsSorted.length === 0}
+                aria-label="Test Run"
+              >
+                Test Run
+              </Button>
+            </span>
+          </Tooltip>
           {canPublishWorkflow && currentConfig?.status !== "Published" && currentConfig?.status !== "Archived" && (
             <Button
               size="small"
