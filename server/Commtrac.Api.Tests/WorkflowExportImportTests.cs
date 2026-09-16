@@ -251,6 +251,10 @@ public class WorkflowExportImportTests : IClassFixture<ApiTestFactory>
     // WF-6 correction #1: import must be atomic — a failure partway through must roll back to the
     // exact pre-import state, not leave the WorkflowConfigFeature replacement persisted while the
     // rest of the operation never completed.
+    //
+    // StepsJson compatibility fix: genuinely malformed StepsJson (this test's failure point) is
+    // now a controlled 400 BadRequest from ParseWorkflowSteps, not an unhandled 500 — the
+    // atomicity guarantee under test is unchanged, only the response category improved.
     [Fact]
     public async Task Import_failure_after_feature_selection_replacement_rolls_back_completely()
     {
@@ -258,9 +262,9 @@ public class WorkflowExportImportTests : IClassFixture<ApiTestFactory>
         var (productId, featureId, depId) = await SeedProductFeatureDepAsync();
         var targetConfigId = await SeedEmptyConfigAsync(productId);
 
-        // Corrupt the target's StepsJson so the deserialize that runs AFTER the
-        // WorkflowConfigFeature replacement (but still inside the same transaction, before
-        // reconciliation/commit) throws — a realistic failure point to prove atomicity against.
+        // Corrupt the target's StepsJson so the parse that runs AFTER the WorkflowConfigFeature
+        // replacement (but still inside the same transaction, before reconciliation/commit) fails
+        // — a realistic failure point to prove atomicity against.
         const string corruptStepsJson = "{not valid json";
         using (var scope = _factory.Services.CreateScope())
         {
@@ -278,7 +282,7 @@ public class WorkflowExportImportTests : IClassFixture<ApiTestFactory>
         };
 
         var importResp = await client.PostAsJsonAsync($"/api/workflow-configs/{targetConfigId}/import", request);
-        Assert.True(((int)importResp.StatusCode) >= 500, $"expected a server error, got {importResp.StatusCode}");
+        Assert.Equal(HttpStatusCode.BadRequest, importResp.StatusCode);
 
         // Nothing persisted: no WorkflowConfigFeature rows, config fields exactly as they were.
         Assert.Equal(0, await CountConfigFeaturesAsync(targetConfigId));

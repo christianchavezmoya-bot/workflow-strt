@@ -55,6 +55,62 @@ public class WorkflowConfigsController : ControllerBase
     private static string GeneratedFieldId(string featureId, int unitIndex, string dependencyId, string fieldKey)
         => DeterministicId($"field:{featureId}:unit:{unitIndex}:dep:{dependencyId}:key:{fieldKey}");
 
+    // ── StepsJson shape compatibility ───────────────────────────────────────────────────────
+    //
+    // WorkflowConfig.StepsJson (and the identical value a run's WorkflowSnapshotJson.StepsJson
+    // inherits verbatim at run-start) is valid in two shapes in real data:
+    //   1. A bare steps array:              [ {...}, {...} ]
+    //   2. A wrapped whole-workflow object: { "id", "name", "productId", "createdAt",
+    //                                         "steps": [ {...}, {...} ], "media": [...] }
+    // The frontend's own loader already tolerates both (WorkflowBuilder.tsx: Array.isArray(parsed)
+    // ? parsed : Array.isArray(parsed?.steps) ? parsed.steps : ...); the backend previously assumed
+    // shape 1 everywhere, throwing an unhandled JsonException (surfacing to clients as a generic
+    // network failure) for any config actually stored in shape 2 — which real staging/production
+    // data commonly is. ParseWorkflowSteps is the single tolerant reader for both shapes; every
+    // call site that used to do `Deserialize<List<JsonElement>>(...StepsJson, JsonOpts)` directly
+    // must go through this instead so there is exactly one place that understands the ambiguity.
+    //
+    // Read-only fix: this does not change what any operation WRITES back. Every write site in
+    // this controller already serializes a bare `List<JsonElement>`/IEnumerable directly (Publish,
+    // SyncFeatureSteps, ImportWorkflow), which always produces shape 1 — so a config's stored
+    // shape naturally normalizes to the bare array over time as it's touched, without this fix
+    // needing to rewrite anything itself.
+    private sealed record StepsParseResult(bool Ok, List<JsonElement> Steps, string? Error)
+    {
+        public static StepsParseResult Success(List<JsonElement> steps) => new(true, steps, null);
+        public static StepsParseResult Failure(string error) => new(false, new List<JsonElement>(), error);
+    }
+
+    private static StepsParseResult ParseWorkflowSteps(string? stepsJson)
+    {
+        if (string.IsNullOrWhiteSpace(stepsJson))
+            return StepsParseResult.Success(new List<JsonElement>());
+
+        JsonElement root;
+        try
+        {
+            root = JsonSerializer.Deserialize<JsonElement>(stepsJson, JsonOpts);
+        }
+        catch (JsonException ex)
+        {
+            return StepsParseResult.Failure($"StepsJson is not valid JSON: {ex.Message}");
+        }
+
+        if (root.ValueKind == JsonValueKind.Array)
+            return StepsParseResult.Success(root.EnumerateArray().ToList());
+
+        if (root.ValueKind == JsonValueKind.Object)
+        {
+            if (!root.TryGetProperty("steps", out var stepsProp))
+                return StepsParseResult.Failure("StepsJson object is missing a \"steps\" property.");
+            if (stepsProp.ValueKind != JsonValueKind.Array)
+                return StepsParseResult.Failure($"StepsJson object's \"steps\" property must be an array, got {stepsProp.ValueKind}.");
+            return StepsParseResult.Success(stepsProp.EnumerateArray().ToList());
+        }
+
+        return StepsParseResult.Failure($"StepsJson root must be a JSON array or a wrapped object, got {root.ValueKind}.");
+    }
+
     // ── Shared feature-generated step/field construction (Publish + WF-4 SyncFeatureSteps) ────
 
     private static Dictionary<string, bool> ParseInclusions(string? inclusionsJson) =>
@@ -350,8 +406,11 @@ public class WorkflowConfigsController : ControllerBase
 
         if (configFeatures.Count > 0)
         {
-            // Load the current steps array
-            var steps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
+            // Load the current steps array — tolerant of both real StepsJson shapes.
+            var parsedSteps = ParseWorkflowSteps(entity.StepsJson);
+            if (!parsedSteps.Ok)
+                return BadRequest(new { message = $"Could not read this workflow's steps: {parsedSteps.Error}" });
+            var steps = parsedSteps.Steps;
 
             // Remove any previously-injected BOM steps (safe re-publish guard) BEFORE computing
             // maxOrder — otherwise every republish (even with zero feature/quantity changes) would
@@ -472,8 +531,6 @@ public class WorkflowConfigsController : ControllerBase
     /// frozen WorkflowConfig.StepsJson at run-start), not a nested array, so reading it is a
     /// two-stage parse.</summary>
     private sealed record RunSnapshotRef(string? StepsJson);
-
-    private sealed record SnapshotStepIdRef(string Id);
 
     /// <summary>Computes which fields an existing generated step is missing (toAdd) and which of
     /// its existing fields are now stale (toRemoveIds) — never touching a field whose id isn't
@@ -689,8 +746,15 @@ public class WorkflowConfigsController : ControllerBase
         {
             var outer = JsonSerializer.Deserialize<RunSnapshotRef>(snapshotJson, JsonOpts);
             if (string.IsNullOrWhiteSpace(outer?.StepsJson)) return false;
-            var steps = JsonSerializer.Deserialize<List<SnapshotStepIdRef>>(outer.StepsJson, JsonOpts);
-            return steps?.Any(s => s.Id == stepId) == true;
+            // A run's snapshot inherits WorkflowConfig.StepsJson verbatim at run-start
+            // (AssetWorkflowRunsController), so outer.StepsJson carries the identical shape
+            // ambiguity — tolerate both via ParseWorkflowSteps. Previously a wrapped-shape
+            // snapshot threw here and was swallowed by the catch below, silently returning false
+            // (not blocking) — a run-safety false negative, not merely a crash — instead of
+            // correctly detecting that the step is genuinely still referenced.
+            var parsed = ParseWorkflowSteps(outer.StepsJson);
+            if (!parsed.Ok) return false;
+            return parsed.Steps.Any(s => s.TryGetProperty("id", out var idProp) && idProp.GetString() == stepId);
         }
         catch
         {
@@ -729,7 +793,9 @@ public class WorkflowConfigsController : ControllerBase
         // Recomputed from scratch here, every time — this action never accepts or trusts a
         // client-cached preview result, since run/config state can change between a preview call
         // and this confirmation.
-        var (result, finalSteps) = await ReconcileFeatureStepsAsync(id, entity.StepsJson);
+        var (ok, error, result, finalSteps) = await ReconcileFeatureStepsAsync(id, entity.StepsJson);
+        if (!ok)
+            return BadRequest(new { message = $"Could not read this workflow's steps: {error}" });
 
         entity.StepsJson = JsonSerializer.Serialize(finalSteps, JsonOpts);
         entity.UpdatedAt = DateTime.UtcNow;
@@ -756,7 +822,9 @@ public class WorkflowConfigsController : ControllerBase
         if (entity.Status == "Archived")
             return BadRequest(new { message = "Archived configurations cannot be synced." });
 
-        var (result, _) = await ReconcileFeatureStepsAsync(id, entity.StepsJson);
+        var (ok, error, result, _) = await ReconcileFeatureStepsAsync(id, entity.StepsJson);
+        if (!ok)
+            return BadRequest(new { message = $"Could not read this workflow's steps: {error}" });
         return Ok(result);
     }
 
@@ -767,15 +835,19 @@ public class WorkflowConfigsController : ControllerBase
     /// FeatureDependency/AssetWorkflowRun from the database, but never writes anything —
     /// persistence is entirely the caller's responsibility.
     /// </summary>
-    private async Task<(SyncFeatureStepsResultDto Result, List<JsonElement> FinalSteps)> ReconcileFeatureStepsAsync(
+    private async Task<(bool Ok, string? Error, SyncFeatureStepsResultDto? Result, List<JsonElement>? FinalSteps)> ReconcileFeatureStepsAsync(
         string workflowConfigId, string currentStepsJson)
     {
+        var parsedSteps = ParseWorkflowSteps(currentStepsJson);
+        if (!parsedSteps.Ok)
+            return (false, parsedSteps.Error, null, null);
+
         var configFeatures = await _db.WorkflowConfigFeatures
             .Where(f => f.WorkflowConfigId == workflowConfigId)
             .OrderBy(f => f.SortOrder)
             .ToListAsync();
 
-        var existingSteps = JsonSerializer.Deserialize<List<JsonElement>>(currentStepsJson, JsonOpts) ?? new();
+        var existingSteps = parsedSteps.Steps;
 
         var customSteps = new List<JsonElement>();
         var existingGeneratedByKey = new Dictionary<string, JsonElement>();
@@ -960,7 +1032,7 @@ public class WorkflowConfigsController : ControllerBase
             added.Add(ToResultItem(newStep, null));
         }
 
-        return (new SyncFeatureStepsResultDto(added, updated, removed, unchanged, blocked), finalSteps);
+        return (true, null, new SyncFeatureStepsResultDto(added, updated, removed, unchanged, blocked), finalSteps);
     }
 
     // ── WF-6: reusable workflow JSON export/import (WF-1 schema) ───────────────
@@ -986,9 +1058,11 @@ public class WorkflowConfigsController : ControllerBase
             .Select(cf => new WorkflowExportFeatureSelectionDto(cf.FeatureId, cf.Quantity, ParseInclusions(cf.InclusionsJson)))
             .ToList();
 
-        var steps = JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new();
+        var parsedSteps = ParseWorkflowSteps(entity.StepsJson);
+        if (!parsedSteps.Ok)
+            return BadRequest(new { message = $"Could not read this workflow's steps: {parsedSteps.Error}" });
 
-        return Ok(new WorkflowExportDto(SupportedWorkflowExportSchemaVersion, entity.ProductId, entity.Name, featureSelections, steps));
+        return Ok(new WorkflowExportDto(SupportedWorkflowExportSchemaVersion, entity.ProductId, entity.Name, featureSelections, parsedSteps.Steps));
     }
 
     /// <summary>
@@ -1153,14 +1227,30 @@ public class WorkflowConfigsController : ControllerBase
             var importedCustomSteps = (request.Steps ?? new())
                 .Where(s => !(s.TryGetProperty("stepOrigin", out var o) && o.GetString() == "feature-generated"))
                 .ToList();
-            var existingGeneratedSteps = (JsonSerializer.Deserialize<List<JsonElement>>(entity.StepsJson, JsonOpts) ?? new())
+            var parsedExistingSteps = ParseWorkflowSteps(entity.StepsJson);
+            if (!parsedExistingSteps.Ok)
+            {
+                await transaction.RollbackAsync();
+                _db.ChangeTracker.Clear();
+                return BadRequest(new { message = $"Could not read this workflow's existing steps: {parsedExistingSteps.Error}" });
+            }
+            var existingGeneratedSteps = parsedExistingSteps.Steps
                 .Where(s => s.TryGetProperty("stepOrigin", out var o) && o.GetString() == "feature-generated")
                 .ToList();
             var stagedStepsJson = JsonSerializer.Serialize(importedCustomSteps.Concat(existingGeneratedSteps), JsonOpts);
 
-            var (reconcileResult, finalSteps) = await ReconcileFeatureStepsAsync(id, stagedStepsJson);
+            var (reconcileOk, reconcileError, reconcileResult, finalSteps) = await ReconcileFeatureStepsAsync(id, stagedStepsJson);
+            if (!reconcileOk)
+            {
+                // stagedStepsJson is always a freshly-serialized bare array (built above), so this
+                // can only fail on a genuinely malformed request.Steps payload, not on the shape
+                // ambiguity itself — still handled the same controlled way.
+                await transaction.RollbackAsync();
+                _db.ChangeTracker.Clear();
+                return BadRequest(new { message = $"Could not reconcile generated steps: {reconcileError}" });
+            }
 
-            if (reconcileResult.Blocked.Count > 0)
+            if (reconcileResult!.Blocked.Count > 0)
             {
                 // All-or-nothing: reject the whole import and commit nothing, rather than WF-4's
                 // ordinary partial-application behavior (which stays unchanged for SyncFeatureSteps
