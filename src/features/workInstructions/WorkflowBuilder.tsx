@@ -59,6 +59,7 @@ import { workflowConfigFeatureService } from "../../services/workflowConfigFeatu
 import { SyncFeatureStepsDialog } from "./SyncFeatureStepsDialog";
 import { ImportWorkflowJsonDialog } from "./ImportWorkflowJsonDialog";
 import { rehydrateFeatureSelections } from "./featureSelectionsHydration";
+import { assembleAuthoringContextFromBuilderState } from "./workflowContextExportAssembly";
 import { WorkflowActionsMenu } from "./WorkflowActionsMenu";
 import { AdvancedWorkflowActionsMenu } from "./AdvancedWorkflowActionsMenu";
 import { downloadJsonFile } from "./downloadJsonFile";
@@ -912,22 +913,29 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
   const [importDoc, setImportDoc] = useState<WorkflowExportDocument | null>(null);
   const importWorkflowJsonInputRef = useRef<HTMLInputElement>(null);
 
-  // WF-6A: Product Workflow Context — Product master data only, no config-specific selection
-  // state. Distinct from the WF-6B reusable-workflow export below.
-  // Workflow-scoped whenever a saved WorkflowConfig exists (the normal Builder case) — only the
-  // Features actually selected here, at their real quantities, not the Product's whole catalog.
-  // Falls back to the Product-level context (every linked Feature, no quantities) only when
-  // there's no configId yet to scope to (e.g. a brand-new, not-yet-saved draft).
+  // WF-6A: Workflow Authoring Context — always built from what the Builder currently has on
+  // screen (live featureSelections), never from the persisted WorkflowConfigFeature rows and
+  // never falling back to the Product's whole catalog. This is an authoring aid for generating a
+  // new workflow file, so current UI state wins even when the workflow has never been saved, or
+  // when Builder quantities have since diverged from the last save — the user should never have
+  // to Save/Publish/Sync first just to get an accurate export. See
+  // workflowContextExportAssembly.ts. Distinct from the WF-6B reusable-workflow export below, and
+  // from GET /products/{id}/workflow-context (the Product master blueprint, unchanged, still used
+  // as the metadata source here) and GET /workflow-configs/{id}/authoring-context (the
+  // DB-authoritative equivalent, still correct and unchanged — just no longer what this button
+  // calls, since it can't see unsaved/dirty Builder state).
   async function handleExportWorkflowContext() {
-    const configId = currentConfig?.id ?? null;
     try {
-      if (configId) {
-        const context = await workflowConfigService.getAuthoringContext(configId);
-        downloadJsonFile(`workflow-context-${configId}.json`, context);
-        return;
-      }
-      const context = await productService.getWorkflowContext(workflow.productId);
-      downloadJsonFile(`workflow-context-${workflow.productId}.json`, context);
+      const productContext = await productService.getWorkflowContext(workflow.productId);
+      const configId = currentConfig?.id ?? workflow.id;
+      const configName = currentConfig?.name ?? workflow.name;
+      const context = assembleAuthoringContextFromBuilderState(
+        productContext,
+        featureSelections,
+        configId,
+        configName,
+      );
+      downloadJsonFile(`workflow-context-${configId}.json`, context);
     } catch {
       toast.error("Could not export the workflow context. Please try again.");
     }
