@@ -372,7 +372,9 @@ export default function TimeEntriesEditorDialog({
           background: "var(--panel)",
           border: "1px solid rgba(255,255,255,0.08)",
           borderRadius: isPhoneApp ? 0 : 3,
-          ...nativeDialogPaperSx(isPhoneApp ? { mb: 0, maxHeight: "100vh" } : undefined),
+          // 100dvh, not 100vh — see nativeDialogInsets.ts. Without this the Save Changes /
+          // Cancel footer can render below the real visible viewport once the keyboard opens.
+          ...nativeDialogPaperSx(isPhoneApp ? { mb: 0, maxHeight: "100dvh" } : undefined),
         },
       }}
     >

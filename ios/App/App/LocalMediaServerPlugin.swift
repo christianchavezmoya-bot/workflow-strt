@@ -64,7 +64,15 @@ final class LocalMediaHTTPServer {
     private static let allowedRootName = "offline-config-media"
     private static let chunkSize = 64 * 1024
 
-    private let queue = DispatchQueue(label: "com.strata.ngo.localmediaserver")
+    // Only for the listener itself (accepting new connections) — each accepted connection gets
+    // its own dedicated serial queue (see accept(connection:)), not this one. AVFoundation
+    // genuinely opens more than one connection per playback session (an initial HEAD probe,
+    // then a separate GET/Range connection, and further Range connections while seeking/
+    // buffering) — sharing one serial queue across accept + every connection's receive/send
+    // meant one connection's in-flight request/response could delay another's, which is a
+    // plausible source of the intermittent (sometimes works, sometimes doesn't) failures seen
+    // on-device even after the HEAD-request fix.
+    private let listenerQueue = DispatchQueue(label: "com.strata.ngo.localmediaserver.listener")
     private let startLock = NSLock()
     private var listener: NWListener?
     private var port: UInt16?
@@ -141,7 +149,7 @@ final class LocalMediaHTTPServer {
         newListener.newConnectionHandler = { [weak self] connection in
             self?.accept(connection: connection)
         }
-        newListener.start(queue: queue)
+        newListener.start(queue: listenerQueue)
 
         _ = semaphore.wait(timeout: .now() + 5)
         if let startError = startError {
@@ -159,7 +167,9 @@ final class LocalMediaHTTPServer {
     // MARK: - Connection handling
 
     private func accept(connection: NWConnection) {
-        connection.start(queue: queue)
+        // Dedicated queue per connection — see the comment on listenerQueue above.
+        let connectionQueue = DispatchQueue(label: "com.strata.ngo.localmediaserver.conn.\(UUID().uuidString)")
+        connection.start(queue: connectionQueue)
         receiveRequest(on: connection, buffer: Data())
     }
 
@@ -202,10 +212,20 @@ final class LocalMediaHTTPServer {
             respondSimple(connection: connection, status: 400, statusText: "Bad Request")
             return
         }
-        guard requestParts[0] == "GET" else {
-            respondSimple(connection: connection, status: 405, statusText: "Method Not Allowed", extraHeaders: ["Allow": "GET"])
+        // AVFoundation's HTTP resource loader (the actual network client for a WKWebView
+        // <video> element — it does not go through WKWebView's own network stack at all) is
+        // documented to issue a HEAD request first to learn Content-Length/Accept-Ranges
+        // before ever issuing a GET, when resolving a plain http(s) AVURLAsset. Rejecting HEAD
+        // with 405 (as this server did originally) makes AVFoundation treat the whole source as
+        // unusable — surfacing as readyState=0, networkState=NETWORK_NO_SOURCE,
+        // error=MEDIA_ERR_SRC_NOT_SUPPORTED with no GET ever reaching this server at all, which
+        // is exactly the signature proven on-device for the offline (127.0.0.1) case.
+        let method = requestParts[0]
+        guard method == "GET" || method == "HEAD" else {
+            respondSimple(connection: connection, status: 405, statusText: "Method Not Allowed", extraHeaders: ["Allow": "GET, HEAD"])
             return
         }
+        let isHeadRequest = method == "HEAD"
         let path = String(requestParts[1])
 
         var rangeHeader: String?
@@ -228,10 +248,10 @@ final class LocalMediaHTTPServer {
             return
         }
 
-        serveFile(fileURL, rangeHeader: rangeHeader, connection: connection)
+        serveFile(fileURL, rangeHeader: rangeHeader, isHeadRequest: isHeadRequest, connection: connection)
     }
 
-    private func serveFile(_ fileURL: URL, rangeHeader: String?, connection: NWConnection) {
+    private func serveFile(_ fileURL: URL, rangeHeader: String?, isHeadRequest: Bool, connection: NWConnection) {
         guard let attributes = try? FileManager.default.attributesOfItem(atPath: fileURL.path),
               let totalSize = (attributes[.size] as? NSNumber)?.intValue, totalSize > 0 else {
             respondSimple(connection: connection, status: 404, statusText: "Not Found")
@@ -257,11 +277,6 @@ final class LocalMediaHTTPServer {
             return // handled above
         }
 
-        guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
-            respondSimple(connection: connection, status: 500, statusText: "Internal Server Error")
-            return
-        }
-
         let mimeType = MimeTypeResolver.mimeType(forExtension: fileURL.pathExtension)
         let contentLength = end - start + 1
         var headers: [String: String] = [
@@ -281,6 +296,18 @@ final class LocalMediaHTTPServer {
         } else {
             status = 200
             statusText = "OK"
+        }
+
+        if isHeadRequest {
+            sendStatusAndHeaders(connection: connection, status: status, statusText: statusText, headers: headers) {
+                connection.cancel()
+            }
+            return
+        }
+
+        guard let fileHandle = try? FileHandle(forReadingFrom: fileURL) else {
+            respondSimple(connection: connection, status: 500, statusText: "Internal Server Error")
+            return
         }
 
         sendStatusAndHeaders(connection: connection, status: status, statusText: statusText, headers: headers) { [weak self] in

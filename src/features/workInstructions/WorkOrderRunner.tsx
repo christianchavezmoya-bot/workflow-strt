@@ -8,6 +8,8 @@ import {
   DrawOutlined,
   EditOutlined,
   EmailOutlined,
+  ExpandMoreOutlined,
+  MoreHorizOutlined,
   PauseOutlined,
   PhotoCameraOutlined,
   PlayArrowOutlined,
@@ -64,6 +66,7 @@ import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog
 import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { useAuth } from "../../hooks/useAuth";
+import { useIsKeyboardOpen } from "../../hooks/useIsKeyboardOpen";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
 import { canEditRun } from "../../utils/runEditPermissions";
@@ -84,7 +87,7 @@ import {
 } from "../../utils/mediaProcessing";
 import { API_LARGE_PAYLOAD_WARNING_BYTES } from "../../utils/syncPolicy";
 import { isMobileNativePlatform } from "../../utils/platform";
-import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx, nativeNestedDialogSx, nativeSelectMenuProps } from "../../utils/nativeDialogInsets";
+import { NATIVE_BOTTOM_NAV_INSET, nativeDialogActionsSx, nativeDialogSx, nativeNestedDialogSx, nativePopoverSx, nativeSelectMenuProps } from "../../utils/nativeDialogInsets";
 import RunnerLiveDuration from "./RunnerLiveDuration";
 import { nativeTooltipTouchProps } from "../../utils/nativeTooltipTouchProps";
 import { ReferenceContentSection, resolveAttachedMedia } from "./ReferenceContent";
@@ -366,7 +369,18 @@ function WorkOrderRunner({
 
   const [downtimeReason, setDowntimeReason] = useState("");
   const [trackingBusy, setTrackingBusy] = useState(false);
+  // Mobile-only: the runner header's less-frequently-used detail (exact site timestamp, Edit
+  // Times) starts collapsed so actual workflow content — not persistent chrome — dominates the
+  // screen. Desktop/tablet ignore this entirely and always render the full header.
+  const [headerExpanded, setHeaderExpanded] = useState(false);
+  // Mobile-only: while the on-screen keyboard covers a large share of the viewport, the
+  // productive/downtime card, offline/sync row, and controls row are hidden entirely (not just
+  // collapsed to the already-compact headerExpanded state) so a technician typing into a capture
+  // field gets the vertical space back — none of that chrome is reachable/useful while the
+  // keyboard is up anyway. The footer collapses to a single Back/Next row for the same reason.
+  const keyboardOpen = useIsKeyboardOpen();
   const [reasonPopoverAnchor, setReasonPopoverAnchor] = useState<HTMLButtonElement | null>(null);
+  const [footerOverflowAnchor, setFooterOverflowAnchor] = useState<HTMLElement | null>(null);
   const [productiveSecondsBase, setProductiveSecondsBase] = useState(0);
   const [downtimeSecondsBase, setDowntimeSecondsBase] = useState(0);
   const [trackingCategory, setTrackingCategory] = useState<"productive" | "downtime" | null>(null);
@@ -1724,6 +1738,15 @@ function WorkOrderRunner({
     );
   }
 
+  // Mobile acceptance B5: scroll a field into view when it gains focus, so the keyboard opening
+  // doesn't leave it hidden behind the keyboard or a sticky header. Fires on focus only (not on
+  // every keystroke) — `scrollIntoView` is idempotent for an already-visible element, so this is
+  // safe to attach unconditionally rather than tracking focus/keyboard-transition state.
+  function handleCaptureFieldFocus(e: React.FocusEvent<HTMLInputElement>) {
+    if (!isMobileNativePlatform()) return;
+    e.target.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+
   function renderCaptureField(step: WorkflowStep, field: CaptureField, stepIdOverride?: string) {
     const sid = stepIdOverride ?? step.id;
     const val = getInputValue(sid, field.id);
@@ -1738,6 +1761,30 @@ function WorkOrderRunner({
       );
     }
 
+    // setInputValue() silently no-ops when the run is edit-locked (finalized, or awaiting
+    // customer signature for a non-PM/Admin role) — a keystroke typed in that state simply
+    // never lands in `values`, so a controlled TextField bound to it appears to reject input
+    // with no explanation. Surface that state visibly here instead: a technician who is
+    // legitimately edit-locked out sees WHY, rather than an unexplained "won't type" field that
+    // looks broken and only "sometimes" accepts input as the run's lock state changes underneath
+    // them (e.g. right after the run loads/syncs and activeRun/runEditPerms settle).
+    const editLocked = !!activeRun && !runEditPerms.data;
+    if (editLocked) {
+      return (
+        <TextField
+          size="small"
+          fullWidth
+          disabled
+          value={val}
+          helperText={
+            runEditPerms.finalized
+              ? "This run is finalized and can no longer be edited."
+              : "This run is awaiting customer sign-off and can no longer be edited from this device."
+          }
+        />
+      );
+    }
+
     if (field.type === "scan") {
       return (
         <Stack direction="row" spacing={1} alignItems="center">
@@ -1746,7 +1793,7 @@ function WorkOrderRunner({
           </Tooltip>
           <TextField size="small" fullWidth error={isReq}
             placeholder={field.hint || "Scan or enter value"}
-            value={val} onChange={(e) => onChange(e.target.value)} />
+            value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
         </Stack>
       );
     }
@@ -1767,13 +1814,13 @@ function WorkOrderRunner({
       return (
         <TextField size="small" fullWidth type="number" error={isReq}
           placeholder={field.hint || field.unit || ""}
-          value={val} onChange={(e) => onChange(e.target.value)} />
+          value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
       );
     }
     return (
       <TextField size="small" fullWidth error={isReq}
         placeholder={field.hint || "Enter value"}
-        value={val} onChange={(e) => onChange(e.target.value)} />
+        value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
     );
   }
 
@@ -1844,12 +1891,28 @@ function WorkOrderRunner({
                   />
                 </Tooltip>
               )}
-              <DiagnosticClockBar
-                variant="compact"
-                siteOnly
-                projectTimeZoneId={resolvedTimeZone}
-                projectLabel="Site"
-              />
+              {(!isMobileNativePlatform() || headerExpanded) && (
+                <DiagnosticClockBar
+                  variant="compact"
+                  siteOnly
+                  projectTimeZoneId={resolvedTimeZone}
+                  projectLabel="Site"
+                />
+              )}
+              {isMobileNativePlatform() && (
+                <Tooltip title={headerExpanded ? "Hide details" : "Show timestamp & time editing"} {...nativeTooltipTouchProps()}>
+                  <IconButton
+                    size="small"
+                    onClick={() => setHeaderExpanded((v) => !v)}
+                    sx={{
+                      transition: "transform 0.15s ease",
+                      transform: headerExpanded ? "rotate(180deg)" : "none",
+                    }}
+                  >
+                    <ExpandMoreOutlined fontSize="small" />
+                  </IconButton>
+                </Tooltip>
+              )}
               <Menu
                 anchorEl={issueMenuAnchor}
                 open={Boolean(issueMenuAnchor)}
@@ -1887,6 +1950,12 @@ function WorkOrderRunner({
           <LinearProgress variant="determinate" value={progress} sx={{ mt: 1, borderRadius: 1 }} />
 {isRealRun && activeRunId && (
             <Stack spacing={1} sx={{ mt: 1.25 }}>
+              {/* Productive/downtime card, offline/sync row, and controls row all hide while the
+                  keyboard is open — none of them are reachable/useful mid-type, and reclaiming
+                  the space is the point (mobile acceptance B2). The timer keeps running
+                  underneath; only its on-screen presentation pauses. */}
+              {!keyboardOpen && (
+              <>
               {/* Time tracking bar â€" colour-coded, always visible */}
               <Box sx={{
                 display: "flex", alignItems: "center", gap: 1.5,
@@ -1961,7 +2030,7 @@ function WorkOrderRunner({
               </Stack>
               {/* Controls row â€" single toggle button */}
               <Stack direction="row" spacing={0.75} alignItems="center" useFlexGap>
-                {runEditPerms.time && (
+                {runEditPerms.time && (!isMobileNativePlatform() || headerExpanded) && (
                 <Button
                   size="small"
                   variant="text"
@@ -1997,6 +2066,8 @@ function WorkOrderRunner({
                   </Button>
                 )}
               </Stack>
+              </>
+              )}
               {/* Downtime reason popover */}
               <Popover
                 open={Boolean(reasonPopoverAnchor)}
@@ -2004,6 +2075,7 @@ function WorkOrderRunner({
                 onClose={() => { setReasonPopoverAnchor(null); setDowntimeReason(""); }}
                 anchorOrigin={{ vertical: "bottom", horizontal: "left" }}
                 transformOrigin={{ vertical: "top", horizontal: "left" }}
+                sx={isMobileNativePlatform() ? nativePopoverSx() : undefined}
                 slotProps={{ paper: { sx: { p: 2, width: 300 } } }}
               >
                 <Stack spacing={1.5}>
@@ -2521,6 +2593,112 @@ function WorkOrderRunner({
                 ))}
               </Stack>
             </>
+          ) : isMobileNativePlatform() ? (
+            // Mobile: primary nav (Back / Next) always gets its own full-width row so it's
+            // never squeezed out by Pause/Flag/Cancel — those move to a secondary row below,
+            // still fully visible (not menu-hidden) so every control stays reachable and at a
+            // real tap-target size, just de-emphasized relative to Back/Next.
+            <Stack spacing={0.75} sx={{ width: "100%" }}>
+              <Stack direction="row" alignItems="center" justifyContent="space-between" spacing={0.75}>
+                <Button onClick={goBack} disabled={history.length === 0} variant="outlined" size="small">
+                  {"<- Back"}
+                </Button>
+                {!needsConfirmation && !needsCountPicker && (hasDecisions ? (
+                  <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap justifyContent="flex-end">
+                    {(currentStep.decisions ?? []).map((d) => (
+                      <Button
+                        key={d.id}
+                        variant="contained"
+                        size="small"
+                        onClick={() => handleDecision(d.targetStepId)}
+                      >
+                        {d.label || "Decision"}
+                      </Button>
+                    ))}
+                  </Stack>
+                ) : (
+                  <Button
+                    variant="contained"
+                    color={isLast ? "success" : "primary"}
+                    size="small"
+                    onClick={handleNext}
+                  >
+                    {(isFeatureRepeatable || isLegacyRepeatable) && repeatCount > 0 && repeatIdx + 1 < repeatCount
+                      ? `Next ${unitLabel} ->`
+                      : isLast ? "Complete" : "Next step ->"}
+                  </Button>
+                ))}
+              </Stack>
+              {keyboardOpen ? (
+                // Keyboard-open compact footer (mobile acceptance B4): Pause/Flag/Cancel move
+                // behind a single overflow button so the footer stays one row while the keyboard
+                // is up — Back/Next are what a technician actually needs reachable mid-type.
+                <Stack direction="row" justifyContent="flex-end">
+                  <IconButton
+                    size="small"
+                    aria-label="More actions"
+                    onClick={(e) => setFooterOverflowAnchor(e.currentTarget)}
+                  >
+                    <MoreHorizOutlined fontSize="small" />
+                  </IconButton>
+                  <Menu
+                    anchorEl={footerOverflowAnchor}
+                    open={Boolean(footerOverflowAnchor)}
+                    onClose={() => setFooterOverflowAnchor(null)}
+                    sx={isMobileNativePlatform() ? nativePopoverSx() : undefined}
+                  >
+                    <MenuItem onClick={() => { setFooterOverflowAnchor(null); handlePause(); }}>
+                      <PauseOutlined fontSize="small" sx={{ mr: 1 }} /> Pause
+                    </MenuItem>
+                    <MenuItem onClick={() => { setFooterOverflowAnchor(null); openFlagDialog(); }}>
+                      <ReportProblemOutlined fontSize="small" sx={{ mr: 1 }} />
+                      {(() => {
+                        const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
+                        return stepIssueCount > 0 ? `Issues (${stepIssueCount}) +` : "Flag issue";
+                      })()}
+                    </MenuItem>
+                    <MenuItem onClick={() => { setFooterOverflowAnchor(null); requestDiscardRun(); }}>
+                      <DeleteOutlineOutlined fontSize="small" sx={{ mr: 1 }} /> Cancel
+                    </MenuItem>
+                  </Menu>
+                </Stack>
+              ) : (
+              <Stack direction="row" spacing={0.75} flexWrap="wrap" useFlexGap alignItems="center">
+                <Tooltip title="Save progress and close - resume later from where you left off" {...nativeTooltipTouchProps()}>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    color="warning"
+                    startIcon={<PauseOutlined fontSize="small" />}
+                    onClick={handlePause}
+                  >
+                    Pause
+                  </Button>
+                </Tooltip>
+                {(() => {
+                  const stepIssueCount = issues.filter((i) => i.stepId === currentStep?.id).length;
+                  return (
+                    <Tooltip title="Flag an issue on this step" {...nativeTooltipTouchProps()}>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        color="error"
+                        startIcon={<ReportProblemOutlined fontSize="small" />}
+                        onClick={() => openFlagDialog()}
+                      >
+                        {stepIssueCount > 0 ? `Issues (${stepIssueCount}) +` : "Flag issue"}
+                      </Button>
+                    </Tooltip>
+                  );
+                })()}
+                <Tooltip title="Discard all captured data, photos, and reset the time tracker" {...nativeTooltipTouchProps()}>
+                  <Button size="small" color="inherit" onClick={requestDiscardRun}>
+                    Cancel
+                  </Button>
+                </Tooltip>
+              </Stack>
+              )}
+            </Stack>
           ) : (
             <>
               <Stack direction="row" spacing={0.75} alignItems="center">
@@ -2633,8 +2811,17 @@ function WorkOrderRunner({
           sx: {
             ...(isMobileNativePlatform()
               ? {
-                  maxHeight: `calc(100vh - ${nativeBottomInset})`,
-                  mb: nativeBottomInset,
+                  // 100dvh, not 100vh — see nativeDialogInsets.ts. This is the runner's own
+                  // dialog Paper, so sizing it against the wrong viewport basis is what let the
+                  // sticky footer (Back/Pause/Cancel/Next) render below the actually-visible,
+                  // tappable screen once the keyboard opened.
+                  //
+                  // The bottom-nav inset (mb) is only reserved while the keyboard is closed —
+                  // the global bottom tab bar isn't practically reachable while typing anyway
+                  // (tapping it would just fight the keyboard), so once it opens the runner
+                  // reclaims that space instead of leaving it empty underneath the keyboard.
+                  maxHeight: keyboardOpen ? "100dvh" : `calc(100dvh - ${nativeBottomInset})`,
+                  mb: keyboardOpen ? 0 : nativeBottomInset,
                   borderBottomLeftRadius: 0,
                   borderBottomRightRadius: 0,
                 }
@@ -2926,8 +3113,20 @@ function WorkOrderRunner({
         />
       )}
 
-      {/* Discard run confirmation */}
-      <Dialog open={discardConfirmOpen} onClose={() => !discarding && setDiscardConfirmOpen(false)} maxWidth="xs" fullWidth>
+      {/* Discard run confirmation. Without the native nested z-index, this rendered at MUI's
+          default Dialog z-index (1300) — BELOW the runner's own pinned Dialog (1500, see
+          nativeDialogSx() in nativeDialogInsets.ts) — so on native the confirmation genuinely
+          mounted and opened, but sat invisibly behind the still-visible runner: tapping Cancel
+          looked like it did nothing. Desktop/web never showed this because nativeNestedDialogSx()
+          is a no-op there and both dialogs share MUI's default z-index, so DOM/portal mount order
+          alone put the confirmation on top. */}
+      <Dialog
+        open={discardConfirmOpen}
+        onClose={() => !discarding && setDiscardConfirmOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        sx={isMobileNativePlatform() ? nativeNestedDialogSx() : undefined}
+      >
         <DialogTitle>Discard workflow run?</DialogTitle>
         <DialogContent>
           <Stack spacing={1.5} sx={{ mt: 0.5 }}>
@@ -2949,7 +3148,14 @@ function WorkOrderRunner({
       </Dialog>
 
       {/* Modify qty dialog â€" for feature-linked repeatable steps */}
-      <Dialog open={modifyQtyOpen} onClose={() => setModifyQtyOpen(false)} maxWidth="xs" fullWidth>
+      {/* Same missing-native-z-index bug as the discard confirmation above — fixed alongside it. */}
+      <Dialog
+        open={modifyQtyOpen}
+        onClose={() => setModifyQtyOpen(false)}
+        maxWidth="xs"
+        fullWidth
+        sx={isMobileNativePlatform() ? nativeNestedDialogSx() : undefined}
+      >
         <DialogTitle>Modify installed quantity</DialogTitle>
         <DialogContent>
           <Stack spacing={2} sx={{ mt: 1 }}>

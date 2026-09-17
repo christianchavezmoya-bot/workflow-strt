@@ -20,6 +20,18 @@ export function nativeNestedDialogSx() {
   return isMobileNativePlatform() ? { zIndex: NATIVE_NESTED_DIALOG_Z_INDEX } : undefined;
 }
 
+/**
+ * Same fix as nativeNestedDialogSx(), for MUI Popover/Menu instead of Dialog. Popover is built on
+ * the same Modal primitive as Dialog and gets the same MUI-default zIndex (1300) with no override
+ * — below the runner's pinned 1500 on native, so a Popover opened from inside WorkOrderRunner
+ * (e.g. the Start Downtime reason popover) mounts and opens correctly but renders invisibly
+ * behind the still-visible runner. Apply via the `sx` prop, which Popover forwards to its root
+ * Modal exactly like Dialog does.
+ */
+export function nativePopoverSx() {
+  return isMobileNativePlatform() ? { zIndex: NATIVE_NESTED_DIALOG_Z_INDEX } : undefined;
+}
+
 /** Popper slotProps so calendar opens above native workflow/time dialogs. */
 export function nativeDatePickerDialogSlotProps() {
   if (!isMobileNativePlatform()) return undefined;
@@ -46,7 +58,12 @@ export function nativeSelectMenuProps() {
 export function nativeDialogPaperSx(extra?: Record<string, unknown>) {
   if (!isMobileNativePlatform()) return extra;
   return {
-    maxHeight: `calc(100vh - ${NATIVE_BOTTOM_NAV_INSET})`,
+    // 100dvh (dynamic viewport height), not 100vh: WKWebView computes 100vh against the
+    // LARGEST possible viewport (as if the keyboard/toolbar were hidden), so a dialog sized
+    // against it can be taller than what's actually visible once the keyboard opens — pushing
+    // its own sticky footer (Cancel/Next/Save actions) below the real, tappable screen area.
+    // 100dvh tracks the actual visible viewport and shrinks with it.
+    maxHeight: `calc(100dvh - ${NATIVE_BOTTOM_NAV_INSET})`,
     mb: NATIVE_BOTTOM_NAV_INSET,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,

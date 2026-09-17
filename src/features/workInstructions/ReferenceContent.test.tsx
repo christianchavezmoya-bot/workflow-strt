@@ -168,6 +168,20 @@ describe("ReferenceContentSection — video opens an in-app modal viewer with a 
     expect(dialog.querySelector("a")).toBeNull();
   });
 
+  // Regression coverage: a later change removed autoPlay believing it caused a "blocked/
+  // unresponsive" control on iOS, but real on-device retesting showed the opposite — without it,
+  // WKWebView's <video> never progressed past readyState HAVE_NOTHING at all (see #352 and the
+  // comment above the <video> element). autoPlay must stay set.
+  it("sets autoPlay so WKWebView begins loading the source immediately on mount (mobile acceptance P0-4)", () => {
+    render(<ReferenceContentSection media={[videoB()]} />);
+
+    fireEvent.click(screen.getByRole("button", { name: /play videoB\.mp4/i }));
+
+    const dialog = screen.getByRole("dialog");
+    const video = dialog.querySelector("video");
+    expect(video?.hasAttribute("autoplay")).toBe(true);
+  });
+
   it("closing the video modal unmounts the <video> element (stopping playback) and returns to the same step", async () => {
     render(<ReferenceContentSection media={[videoB()]} />);
 

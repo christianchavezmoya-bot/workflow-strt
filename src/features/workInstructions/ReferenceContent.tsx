@@ -196,7 +196,15 @@ export function ReferenceContentSection({ media }: { media: MediaItem[] }) {
           >
             <CloseOutlined />
           </IconButton>
-          {/* Mounted only while open, so closing the dialog unmounts the element and stops playback. */}
+          {/* Mounted only while open, so closing the dialog unmounts the element and stops playback.
+              autoPlay is required here, not just cosmetic: real iOS on-device testing (#352, and
+              this cycle's own on-device regression trace) confirmed that without it, WKWebView's
+              <video> pipeline never reliably progresses past readyState HAVE_NOTHING for a
+              cross-origin/loopback source — the native play control renders but stays inert
+              regardless of user taps. autoPlay forces WebKit to begin loading immediately on
+              mount; if iOS's unmuted-autoplay policy then blocks actual playback, the element is
+              left loaded and seekable so the visible play control genuinely works. Do not remove
+              this without new on-device proof. */}
           {videoModal && (
             <video
               src={resolveMediaUrl(videoModal.url)}

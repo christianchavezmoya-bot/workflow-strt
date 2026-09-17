@@ -39,7 +39,19 @@ function patchCapacitorConfigJson(relPath) {
 function patchAndroid() {
   const gradlePath = resolve(root, "android/app/build.gradle");
   let gradle = readFileSync(gradlePath, "utf8");
-  gradle = gradle.replace(/namespace = "[^"]+"/, `namespace = "${appId}"`);
+  // `namespace` is intentionally NOT patched per profile, unlike `applicationId` below. AGP
+  // generates the R class under whatever `namespace` says, and the project's hand-written Java
+  // sources (MainActivity.java, SyncForegroundService.java, SyncKeepAlivePlugin.java) live on
+  // disk under a fixed package directory, android/app/src/main/java/com/strata/ngo/field/dev/,
+  // with `package com.strata.ngo.field.dev;` declared in each file. Those files reference R
+  // implicitly (no import), which only resolves when their own package matches `namespace`
+  // exactly — coupling namespace to the per-profile appId broke `assembleRelease` under the prod
+  // profile ("package R does not exist") the first time anyone actually ran a production build,
+  // because namespace became "com.strata.ngo.field" while the source files stayed at
+  // "com.strata.ngo.field.dev". `applicationId` (the distributed package identity users/Play
+  // Store see) is a separate AGP concept from `namespace` (a code-organization concern) and is
+  // meant to vary independently — this fixes it at the dev value so it always matches the source
+  // tree, and lets applicationId keep varying per profile as intended.
   gradle = gradle.replace(/applicationId "[^"]+"/, `applicationId "${appId}"`);
   writeFileSync(gradlePath, gradle);
 
