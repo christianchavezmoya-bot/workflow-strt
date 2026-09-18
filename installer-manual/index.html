@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Strata N-Go — Installer Field Guide</title>
+  <link rel="stylesheet" href="shared/manual.css" />
+</head>
+<body>
+
+  <section class="cover">
+    <img class="logo" src="assets/strata-logo.png" alt="Strata N-Go" />
+    <h1>Installer Field Guide</h1>
+    <p class="subtitle">How to find your jobs, open assets, take over work when needed, and complete a workflow from start to sign-off.</p>
+    <p class="meta">Strata N-Go · Field operations · For Installer role</p>
+  </section>
+
+  <div class="page">
+
+    <h2>1. Sign in</h2>
+    <p class="lead">Open the app in your browser or on your phone. Enter the email and password your project manager gave you, then tap <strong>Sign in</strong>.</p>
+    <p>After first login you may see a welcome tour — tap <strong>Skip for now</strong> to go straight to your dashboard.</p>
+
+    <h2>2. Your home base — the Dashboard</h2>
+    <p>Installers land on the <strong>Dashboard</strong> (<code>/</code>). Your main tab is <strong>My Installs</strong> — this shows work assigned to you, not the whole company.</p>
+
+    <figure>
+      <img src="screenshots/01-dashboard-my-installs.png" alt="Dashboard showing My Installs tab" />
+      <figcaption>Dashboard → My Installs tab</figcaption>
+    </figure>
+
+    <h3>My Jobs Today</h3>
+    <p>This is your daily work list — assets assigned to you, sorted by recent activity. Each card shows:</p>
+    <ul>
+      <li><strong>Asset tag</strong> and job number</li>
+      <li><strong>Status</strong> — e.g. Not Started, In Progress, Paused, Pending sign</li>
+      <li><strong>Progress</strong> — step completion percentage</li>
+      <li>A primary action button — <strong>Start Run</strong>, <strong>Continue Run</strong>, <strong>Resume Run</strong>, <strong>Add Missing Photos</strong>, or <strong>Installer Sign-off</strong></li>
+    </ul>
+
+    <figure>
+      <img src="screenshots/02-my-jobs-today.png" alt="My Jobs Today section on dashboard" />
+      <figcaption>My Jobs Today — tap a card or its action button to open the asset or workflow</figcaption>
+    </figure>
+
+    <div class="tip"><strong>Tip:</strong> Tap <strong>+N more — view all</strong> at the bottom of My Jobs Today to open the full <strong>Project Assets</strong> page filtered to your work.</div>
+
+    <h3>Other dashboard sections</h3>
+    <table class="simple">
+      <thead><tr><th>Section</th><th>What it means</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Runs Missing Media</strong></td><td>Completed runs that still need photos — tap <strong>Add Missing Photos</strong></td></tr>
+        <tr><td><strong>My Pending Signatures</strong></td><td>Field work done — you still need to sign off</td></tr>
+        <tr><td><strong>My Blocking Issues</strong></td><td>Issues you must resolve before the run can be locked</td></tr>
+        <tr><td><strong>Job History</strong></td><td>Finished or closed jobs that were assigned to you</td></tr>
+      </tbody>
+    </table>
+
+    <h2>3. Project Assets page</h2>
+    <p>Open <strong>Assets</strong> in the sidebar (route: <code>/installations/assets</code>). Page title: <strong>Project Assets</strong>.</p>
+    <ul>
+      <li>Pick a <strong>project</strong> from the job dropdown (or <strong>All projects</strong>)</li>
+      <li>On phone: toggle <strong>My Assets</strong> to see only your assignments</li>
+      <li>Use <strong>Status</strong> filters — Not Started, In Progress, Paused, Pending, Complete, etc.</li>
+      <li>Search by asset tag, serial number, or installer name</li>
+    </ul>
+
+    <figure>
+      <img src="screenshots/03-project-assets.png" alt="Project Assets page with asset list" />
+      <figcaption>Project Assets — find your asset and use the row action (Start Run, Continue Run, …)</figcaption>
+    </figure>
+
+    <p>The <strong>Assigned Tech</strong> column shows who owns the job. Your name should appear on assets assigned to you.</p>
+
+    <h2>4. Taking over someone else's asset</h2>
+    <p>There is no separate “Take over” menu. You take over work by starting or continuing a workflow on an asset that is <strong>unassigned</strong> or <strong>assigned to another person</strong>.</p>
+
+    <ol class="step-list">
+      <li>Find the asset on the Dashboard or Project Assets page.</li>
+      <li>Tap <strong>Start Run</strong>, <strong>Continue Run</strong>, or <strong>Resume Run</strong>.</li>
+      <li>A confirmation dialog appears:
+        <ul>
+          <li><strong>Unassigned asset</strong> — the app assigns it to you and notifies the project manager.</li>
+          <li><strong>Asset assigned to someone else</strong> — you confirm reassignment to yourself.</li>
+        </ul>
+      </li>
+      <li>Tap <strong>Assign to me &amp; Start</strong> (Assets page) or <strong>Continue</strong> (Dashboard).</li>
+      <li>The workflow runner opens — you can begin field work.</li>
+    </ol>
+
+    <figure>
+      <img src="screenshots/04-takeover-dialog.png" alt="Confirmation dialog when taking over an asset assigned to another user" />
+      <figcaption>Confirm takeover — asset is reassigned to you before the run starts</figcaption>
+    </figure>
+
+    <div class="tip"><strong>Important:</strong> You can only assign an asset <em>to yourself</em>. You cannot assign work to a colleague — that is done by a Project Manager or Admin.</div>
+
+    <h2>5. Workflow journey — start to sign-off</h2>
+    <p>Every installation or inspection follows the same high-level path:</p>
+    <div class="flow">
+      <span>Setup</span><span class="arrow">→</span>
+      <span>Run steps</span><span class="arrow">→</span>
+      <span>Summary &amp; lock</span><span class="arrow">→</span>
+      <span>Installer sign</span><span class="arrow">→</span>
+      <span>Customer sign</span>
+    </div>
+
+    <h3>Step A — Setup</h3>
+    <p>After you start a run, the runner shows <strong>Run workflow</strong> with the asset ID, workflow name, and step count. Tap <strong>Start →</strong> (or <strong>Continue →</strong> if resuming).</p>
+
+    <figure>
+      <img src="screenshots/05-workflow-setup.png" alt="Workflow runner setup screen before starting steps" />
+      <figcaption>Run workflow setup — review details, then Start</figcaption>
+    </figure>
+
+    <h3>Step B — Complete each workflow step</h3>
+    <p>Work through steps one at a time. For each step you may need to:</p>
+    <ul>
+      <li>Fill in text, numbers, or choices</li>
+      <li>Take <strong>required photos</strong> (marked mandatory — you cannot finish without them)</li>
+      <li>Select your name from <strong>Installed By</strong> / team dropdowns</li>
+      <li>View reference photos or videos attached by the office (tap thumbnails in <strong>Content</strong>)</li>
+    </ul>
+    <p>Use <strong>Next step →</strong> to advance. On the last step, tap <strong>Complete</strong>. You can <strong>Pause</strong> anytime and <strong>Resume Run</strong> later from the dashboard.</p>
+
+    <figure>
+      <img src="screenshots/06-workflow-running.png" alt="Workflow runner showing an in-progress step" />
+      <figcaption>In-progress step — complete fields and photos, then Next step</figcaption>
+    </figure>
+
+    <h3>Step C — Summary and lock the run</h3>
+    <p>When all steps are done, you see <strong>Workflow complete</strong>. Review:</p>
+    <ul>
+      <li>Steps completed count</li>
+      <li>Any <strong>missing photos</strong> or <strong>blocking issues</strong></li>
+      <li>Recorded time (use <strong>Adjust time</strong> if needed)</li>
+    </ul>
+    <p>Fix blockers with <strong>Add Missing Photos</strong> or <strong>Resolve Blocking Issue(s)</strong>. When everything is clear, tap <strong>Lock run</strong>.</p>
+    <p>Locking saves the run permanently — after you sign, you cannot edit captured data (PM/Admin can until customer sign-off).</p>
+
+    <figure>
+      <img src="screenshots/07-workflow-summary-lock.png" alt="Workflow complete summary with Lock run button" />
+      <figcaption>Summary screen — resolve missing items, then Lock run</figcaption>
+    </figure>
+
+    <h3>Step D — Installer sign-off</h3>
+    <p>After locking (or from <strong>Installer Sign-off</strong> on the dashboard), complete <strong>Field sign-off</strong>:</p>
+    <ul>
+      <li><strong>Your name</strong> (required)</li>
+      <li><strong>Outcome</strong> — Completed, or Conditional</li>
+      <li><strong>Signature</strong> (optional draw)</li>
+      <li><strong>Notes</strong> (optional)</li>
+      <li>Check the confirmation box that time and captured data are correct</li>
+    </ul>
+    <p>Tap <strong>Sign &amp; continue</strong>. The run moves to customer sign-off (often collected on site or via email link from the PM).</p>
+
+    <figure>
+      <img src="screenshots/08-installer-sign-off.png" alt="Installer field sign-off form" />
+      <figcaption>Field sign-off — confirm your work is complete and accurate</figcaption>
+    </figure>
+
+    <h2>6. Quick reference — button labels</h2>
+    <table class="simple">
+      <thead><tr><th>When you see…</th><th>Do this</th></tr></thead>
+      <tbody>
+        <tr><td><strong>Start Run</strong></td><td>Begin a new workflow on this asset</td></tr>
+        <tr><td><strong>Continue Run</strong></td><td>Return to an in-progress run</td></tr>
+        <tr><td><strong>Resume Run</strong></td><td>Continue after a pause</td></tr>
+        <tr><td><strong>Add Missing Photos</strong></td><td>Upload photos required before lock/sign</td></tr>
+        <tr><td><strong>Resolve Blocking Issue</strong></td><td>Fix a blocking issue on the asset</td></tr>
+        <tr><td><strong>Installer Sign-off</strong></td><td>Sign after field work is complete</td></tr>
+        <tr><td><strong>Lock run</strong></td><td>Finalize the workflow run on the summary screen</td></tr>
+      </tbody>
+    </table>
+
+    <h2>7. Getting help</h2>
+    <ul>
+      <li><strong>Tips &amp; Tricks</strong> (sidebar) — short guides and videos for products on site</li>
+      <li><strong>Documents</strong> — project library files</li>
+      <li><strong>Issues Board</strong> — report and track site issues</li>
+      <li>Contact your <strong>Project Manager</strong> if an asset or workflow is missing</li>
+    </ul>
+
+    <p style="margin-top:32px;font-size:0.85rem;color:#888;">Strata N-Go Installer Field Guide · Screenshots captured from the live web application.</p>
+  </div>
+
+</body>
+</html>
