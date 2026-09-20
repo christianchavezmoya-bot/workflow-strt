@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  Debug-only manifest override, merged only into debug builds (never `release`,
+  never a signed .aab). Re-enables cleartext traffic so the app can reach an
+  http:// LAN IP during local/native dev testing (see CLAUDE.md's
+  VITE_API_BASE / native-build guidance). Production release builds get
+  Android's secure default (HTTPS-only) from src/main/AndroidManifest.xml.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <application
+        android:usesCleartextTraffic="true"
+        tools:replace="android:usesCleartextTraffic" />
+</manifest>

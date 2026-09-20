@@ -1,5 +1,35 @@
 apply plugin: 'com.android.application'
 
+// Strata N-Go release signing (upload key for Google Play App Signing).
+//
+// Never committed: credentials come from either environment variables
+// (STRATA_NGO_UPLOAD_KEYSTORE_PATH / _PASSWORD / STRATA_NGO_UPLOAD_KEY_ALIAS /
+// _PASSWORD) or a local, git-ignored `android/keystore.properties` file — see
+// keystore.properties.example. Deliberately does NOT fall back to any existing
+// keystore on this machine (e.g. ~/.android/genia-upload.keystore is unrelated
+// to this app and must never be used). If neither source is present,
+// `assembleRelease`/`bundleRelease` still succeeds but produces an UNSIGNED
+// artifact — fine for local inspection, not distributable to Play — and logs
+// why, rather than hard-failing the build.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+if (keystorePropertiesFile.exists()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
+def resolvedSigning = [
+    storeFile: System.getenv('STRATA_NGO_UPLOAD_KEYSTORE_PATH') ?: keystoreProperties['storeFile'],
+    storePassword: System.getenv('STRATA_NGO_UPLOAD_KEYSTORE_PASSWORD') ?: keystoreProperties['storePassword'],
+    keyAlias: System.getenv('STRATA_NGO_UPLOAD_KEY_ALIAS') ?: keystoreProperties['keyAlias'],
+    keyPassword: System.getenv('STRATA_NGO_UPLOAD_KEY_PASSWORD') ?: keystoreProperties['keyPassword'],
+]
+def hasReleaseSigning = resolvedSigning.values().every { it }
+
+if (!hasReleaseSigning) {
+    logger.warn('[signing] No Strata N-Go upload key configured (env vars or android/keystore.properties missing/incomplete). ' +
+        'assembleRelease/bundleRelease will produce an UNSIGNED artifact.')
+}
+
 android {
     namespace = "com.strata.ngo.field.dev"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +46,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        if (hasReleaseSigning) {
+            release {
+                storeFile file(resolvedSigning.storeFile)
+                storePassword resolvedSigning.storePassword
+                keyAlias resolvedSigning.keyAlias
+                keyPassword resolvedSigning.keyPassword
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasReleaseSigning) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }

@@ -69,10 +69,56 @@ function patchIos() {
   pbx = pbx.replace(/PRODUCT_BUNDLE_IDENTIFIER = [^;]+;/g, `PRODUCT_BUNDLE_IDENTIFIER = ${appId};`);
   writeFileSync(pbxPath, pbx);
 
-  const plistPath = resolve(root, "ios/App/App/Info.plist");
-  let plist = readFileSync(plistPath, "utf8");
-  plist = plist.replace(/<key>CFBundleDisplayName<\/key>\s*<string>[^<]+<\/string>/, `<key>CFBundleDisplayName</key>\n\t<string>${appName}</string>`);
-  writeFileSync(plistPath, plist);
+  // Both the Release Info.plist (production ATS posture) and the Debug-only
+  // Info-Debug.plist (relaxed ATS for LAN dev testing) carry their own
+  // CFBundleDisplayName and must be kept in sync with the active profile.
+  for (const plistName of ["Info.plist", "Info-Debug.plist"]) {
+    const plistPath = resolve(root, "ios/App/App", plistName);
+    let plist = readFileSync(plistPath, "utf8");
+    plist = plist.replace(/<key>CFBundleDisplayName<\/key>\s*<string>[^<]+<\/string>/, `<key>CFBundleDisplayName</key>\n\t<string>${appName}</string>`);
+    writeFileSync(plistPath, plist);
+  }
+}
+
+/**
+ * Read back every patched file and confirm the requested appId actually landed
+ * everywhere it needs to. A regex that silently fails to match (format drift,
+ * a manual edit, a merge conflict marker) would otherwise leave a stale
+ * identifier in place with no error — which is exactly how a "prod" build
+ * could accidentally ship `com.strata.ngo.field.dev`. Fail loud instead.
+ */
+function verify() {
+  const checks = [
+    {
+      file: "ios/App/App.xcodeproj/project.pbxproj",
+      pattern: /PRODUCT_BUNDLE_IDENTIFIER = ([^;]+);/g,
+    },
+    { file: "android/app/build.gradle", pattern: /applicationId "([^"]+)"/g },
+    { file: "capacitor.config.ts", pattern: /appId:\s*'([^']+)'/g },
+    { file: "ios/App/App/capacitor.config.json", pattern: /"appId":\s*"([^"]+)"/g },
+    { file: "android/app/src/main/assets/capacitor.config.json", pattern: /"appId":\s*"([^"]+)"/g },
+  ];
+
+  const failures = [];
+  for (const { file, pattern } of checks) {
+    const text = readFileSync(resolve(root, file), "utf8");
+    const found = [...text.matchAll(pattern)].map((m) => m[1]);
+    if (found.length === 0) {
+      failures.push(`${file}: no match found for expected identifier pattern (nothing to verify)`);
+      continue;
+    }
+    const wrong = found.filter((value) => value !== appId);
+    if (wrong.length > 0) {
+      failures.push(`${file}: expected "${appId}" everywhere, found ${JSON.stringify([...new Set(wrong)])}`);
+    }
+  }
+
+  if (failures.length > 0) {
+    console.error(`[apply-native-identity] VERIFICATION FAILED for profile "${profile.id}" (appId=${appId}):`);
+    for (const f of failures) console.error(`  - ${f}`);
+    console.error("[apply-native-identity] Refusing to report success — do not build/archive from this state.");
+    process.exit(1);
+  }
 }
 
 patchCapacitorConfigTs();
@@ -80,5 +126,6 @@ patchCapacitorConfigJson("ios/App/App/capacitor.config.json");
 patchCapacitorConfigJson("android/app/src/main/assets/capacitor.config.json");
 patchAndroid();
 patchIos();
+verify();
 
-console.log(`[apply-native-identity] profile=${profile.id} appId=${appId} appName=${appName}`);
+console.log(`[apply-native-identity] profile=${profile.id} appId=${appId} appName=${appName} (verified)`);
