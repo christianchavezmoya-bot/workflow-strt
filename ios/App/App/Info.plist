@@ -70,5 +70,12 @@
 	<array>
 		<string>remote-notification</string>
 	</array>
+	<!-- Export compliance: standard HTTPS/TLS transport plus HMAC/ECDSA JWT
+	     signing used only for authentication/integrity — no proprietary or
+	     third-party encryption anywhere in the app (see the crypto audit).
+	     Declaring this avoids the manual "Missing Compliance" step in App
+	     Store Connect on every future build. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 </dict>
 </plist>
