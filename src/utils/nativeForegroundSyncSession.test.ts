@@ -58,6 +58,23 @@ describe("nativeForegroundSyncSession", () => {
     it("fails when bootstrap is not ready for offline while online", () => {
       expect(isNativeSyncSessionComplete({ ...idle, readyForOffline: false })).toBe(false);
     });
+
+    it("completes when the bootstrap attempt failed/timed out, even though readyForOffline is still false (release user)", () => {
+      expect(isNativeSyncSessionComplete({
+        ...idle,
+        readyForOffline: false,
+        bootstrapFailed: true,
+      })).toBe(true);
+    });
+
+    it("does not complete on a failed bootstrap while still actively bootstrapping (a new attempt started)", () => {
+      expect(isNativeSyncSessionComplete({
+        ...idle,
+        readyForOffline: false,
+        bootstrapping: true,
+        bootstrapFailed: true,
+      })).toBe(false);
+    });
   });
 
   describe("shouldStartFocusedSyncSessionForBootstrap", () => {

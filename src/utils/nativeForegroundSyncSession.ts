@@ -23,6 +23,14 @@ export type NativeForegroundSyncSessionInput = {
   cannotFlush: boolean;
   /** Queue has not drained for long enough — release the blocking overlay. */
   queueStuck?: boolean;
+  /**
+   * The most recent bootstrap attempt this session ended in an error or a
+   * hard timeout (not yet superseded by a newer attempt starting). Without
+   * this, a failed/timed-out bootstrap can never set readyForOffline
+   * (lastCompletedAt only advances on success), so the session would wait
+   * forever with no other escape hatch — release the user instead.
+   */
+  bootstrapFailed?: boolean;
 };
 
 export type NativeForegroundSyncSessionMode = "focused" | "upload";
@@ -53,14 +61,16 @@ export function isNativeSyncSessionNetworkIdle(input: NativeForegroundSyncSessio
 /**
  * Session is complete when network work is idle AND either:
  * - queue/bootstrap/conflicts are clear (online success path), or
- * - the device cannot sync right now (release the user; queue waits for reconnect).
+ * - the device cannot sync right now (release the user; queue waits for reconnect), or
+ * - the bootstrap attempt itself just failed/timed out (release the user;
+ *   the next foreground/reconnect/manual retry gets a fresh attempt).
  */
 export function isNativeSyncSessionComplete(
   input: NativeForegroundSyncSessionInput,
 ): boolean {
   if (!isNativeSyncSessionNetworkIdle(input)) return false;
 
-  if (input.cannotFlush || input.queueStuck) {
+  if (input.cannotFlush || input.queueStuck || input.bootstrapFailed) {
     return true;
   }
 
