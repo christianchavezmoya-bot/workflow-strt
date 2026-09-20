@@ -28,7 +28,7 @@ const POLL_MS = 500;
 /** Release the blocking overlay when uploads make no progress while online. */
 const STUCK_QUEUE_MS = 45_000;
 
-async function readSessionInputs(queueStuck: boolean) {
+async function readSessionInputs(queueStuck: boolean, bootstrapFailed: boolean) {
   const [pending, conflicted, bootstrapStatus] = await Promise.all([
     pendingCount(),
     pendingGetConflicted(),
@@ -43,6 +43,7 @@ async function readSessionInputs(queueStuck: boolean) {
     bootstrapping: bootstrapStatus.isRunning,
     cannotFlush: shouldDeferBackgroundSync(),
     queueStuck,
+    bootstrapFailed,
   };
 }
 
@@ -57,6 +58,8 @@ export function useNativeForegroundSyncSession(): void {
   const lastPendingRef = useRef<number | null>(null);
   const lastProgressAtRef = useRef(Date.now());
   const stuckNotifiedRef = useRef(false);
+  /** True once the current session's bootstrap attempt has errored/timed out — release the overlay rather than wait forever for readyForOffline. Reset when a new attempt begins. */
+  const bootstrapFailedRef = useRef(false);
 
   useEffect(() => {
     if (!isMobileNativePlatform()) return;
@@ -132,7 +135,7 @@ export function useNativeForegroundSyncSession(): void {
         shouldDeferBackgroundSync(),
       );
 
-      const inputs = await readSessionInputs(queueStuck);
+      const inputs = await readSessionInputs(queueStuck, bootstrapFailedRef.current);
       if (cancelled) return;
 
       if (queueStuck && !stuckNotifiedRef.current) {
@@ -190,6 +193,7 @@ export function useNativeForegroundSyncSession(): void {
     };
 
     const onFocusedRequested = () => {
+      bootstrapFailedRef.current = false;
       focusedRequestedRef.current = true;
       sessionModeRef.current = "focused";
       beginSession();
@@ -205,6 +209,10 @@ export function useNativeForegroundSyncSession(): void {
     const onBootstrapStarted = (event: Event) => {
       const detail = (event as CustomEvent<{ reason?: BootstrapReason }>).detail;
       if (!shouldStartFocusedSyncSessionForBootstrap(detail?.reason)) return;
+      // A fresh attempt is beginning — give it its own unbiased chance to
+      // complete rather than immediately short-circuiting on the previous
+      // attempt's failure.
+      bootstrapFailedRef.current = false;
       focusedRequestedRef.current = true;
       sessionModeRef.current = "focused";
       beginSession();
@@ -212,6 +220,18 @@ export function useNativeForegroundSyncSession(): void {
 
     const onSessionProgress = () => {
       if (sessionActiveRef.current) void evaluate();
+    };
+
+    const onBootstrapError = (event: Event) => {
+      const detail = (event as CustomEvent<{ timedOut?: boolean }>).detail;
+      bootstrapFailedRef.current = true;
+      if (detail?.timedOut) {
+        toast.warning(
+          "Initial sync could not complete. You can continue using the app and retry sync when connected.",
+          8000,
+        );
+      }
+      onSessionProgress();
     };
 
     const onFlushComplete = (event: Event) => {
@@ -224,7 +244,7 @@ export function useNativeForegroundSyncSession(): void {
 
     const onBackground = () => {
       if (!sessionActiveRef.current) return;
-      void readSessionInputs(false).then((inputs) => {
+      void readSessionInputs(false, bootstrapFailedRef.current).then((inputs) => {
         if (!isNativeSyncSessionComplete(inputs)) {
           interruptedRef.current = true;
         }
@@ -234,7 +254,7 @@ export function useNativeForegroundSyncSession(): void {
     const onForeground = () => {
       if (!sessionActiveRef.current) return;
       if (interruptedRef.current) {
-        void readSessionInputs(false).then((inputs) => {
+        void readSessionInputs(false, bootstrapFailedRef.current).then((inputs) => {
           if (!isNativeSyncSessionComplete(inputs)) {
             toast.info(
               "Sync paused when you left the app. Pending items will upload when you're back online.",
@@ -254,7 +274,7 @@ export function useNativeForegroundSyncSession(): void {
     window.addEventListener("sync-engine:flush-complete", onFlushComplete);
     window.addEventListener("sync-engine:syncing", onSessionProgress);
     window.addEventListener("bootstrap:complete", onSessionProgress);
-    window.addEventListener("bootstrap:error", onSessionProgress);
+    window.addEventListener("bootstrap:error", onBootstrapError);
     window.addEventListener("app-backgrounded", onBackground);
     window.addEventListener("app-foregrounded", onForeground);
 
@@ -267,7 +287,7 @@ export function useNativeForegroundSyncSession(): void {
       window.removeEventListener("sync-engine:flush-complete", onFlushComplete);
       window.removeEventListener("sync-engine:syncing", onSessionProgress);
       window.removeEventListener("bootstrap:complete", onSessionProgress);
-      window.removeEventListener("bootstrap:error", onSessionProgress);
+      window.removeEventListener("bootstrap:error", onBootstrapError);
       window.removeEventListener("app-backgrounded", onBackground);
       window.removeEventListener("app-foregrounded", onForeground);
       if (sessionActiveRef.current) {

@@ -54,6 +54,8 @@ import {
   shouldFetchTechnicianWorkload,
 } from "../../utils/dashboardFetchScope";
 import { runStaggeredDashboardLiveRefresh, type DashboardLiveRefreshScope } from "../../utils/dashboardRefreshStagger";
+import { preserveLastNonEmpty } from "../../utils/preserveLastNonEmpty";
+import offlineBootstrapService from "../../services/offlineBootstrapService";
 import {
   flushHiddenDeferredRefresh,
   flushRunnerDeferredRefresh,
@@ -556,13 +558,19 @@ const Dashboard = () => {
       const workloadTimer = needsTechnicianWorkload
         ? window.setTimeout(() => {
             void projectAssetService.technicianWorkloadSummary()
-              .then((w) => { setWorkload(w); dcPut(DASHBOARD_CACHE_KEYS.workload, w); })
+              .then((w) => {
+                setWorkload((prev) => preserveLastNonEmpty(prev, w, { bootstrapping: offlineBootstrapService.isRunning() }));
+                dcPut(DASHBOARD_CACHE_KEYS.workload, w);
+              })
               .catch(() => {});
           }, 1200)
         : undefined;
       const summaryTimer = window.setTimeout(() => {
         void projectAssetService.listOpen()
-          .then((a) => { setOpenAssets(a); dcPut(DASHBOARD_CACHE_KEYS.openAssets, a); })
+          .then((a) => {
+            setOpenAssets((prev) => preserveLastNonEmpty(prev, a, { bootstrapping: offlineBootstrapService.isRunning() }));
+            dcPut(DASHBOARD_CACHE_KEYS.openAssets, a);
+          })
           .catch(() => {});
         if (needsProjectAssetSummary) {
           void projectAssetService.activeSummary()
@@ -586,13 +594,15 @@ const Dashboard = () => {
       ? window.setTimeout(() => {
           setWorkloadLoading(true);
           projectAssetService.technicianWorkloadSummary()
-            .then((w) => { setWorkload(w); })
+            .then((w) => { setWorkload((prev) => preserveLastNonEmpty(prev, w)); })
             .catch(() => {})
             .finally(() => setWorkloadLoading(false));
         }, 1200)
       : undefined;
     const summaryTimer = window.setTimeout(() => {
-      projectAssetService.listOpen().then(setOpenAssets).catch(() => {});
+      projectAssetService.listOpen()
+        .then((a) => { setOpenAssets((prev) => preserveLastNonEmpty(prev, a)); })
+        .catch(() => {});
       if (needsProjectAssetSummary) {
         projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]));
       }
@@ -671,13 +681,17 @@ const Dashboard = () => {
             }
           },
           attention: () => loadAttention({ silent: true }),
-          listOpen: () => projectAssetService.listOpen().then(setOpenAssets),
+          listOpen: () => projectAssetService.listOpen().then((a) => {
+            setOpenAssets((prev) => preserveLastNonEmpty(prev, a, { bootstrapping: offlineBootstrapService.isRunning() }));
+          }),
           activeSummary: needsProjectAssetSummary
             ? () => projectAssetService.activeSummary().then(setProjectAssetSummary).catch(() => setProjectAssetSummary([]))
             : undefined,
           workload: needsTechnicianWorkload
             ? () => projectAssetService.technicianWorkloadSummary()
-              .then(setWorkload)
+              .then((w) => {
+                setWorkload((prev) => preserveLastNonEmpty(prev, w, { bootstrapping: offlineBootstrapService.isRunning() }));
+              })
               .catch(() => {})
             : undefined,
         }, activeScope);
