@@ -61,6 +61,26 @@ if (profile.id === "dev" && process.env.BUILD_STRICT_PROFILE !== "false") {
     }
   }
 
+// PROD builds (web or native) NEVER trust env files or an ambient shell value for the API
+// base — they always use the one canonical production endpoint, no exceptions, no opt-out.
+// This is deliberately unconditional (unlike the DEV override above): `.env.production.local`
+// is Vite's own built-in env file, and CLAUDE.md documents putting a device LAN IP there for
+// the plain `npm run build` on-device-testing workflow — that file must keep working for that
+// purpose. It must never be consulted by this store-release pipeline, so we don't even look at
+// it (or any other env file/shell var) for this one value.
+if (profile.id === "prod") {
+  const current = process.env.VITE_API_BASE?.trim() ?? "";
+  if (current && current !== profile.defaultApiBase) {
+    console.warn(
+      `[build-cloud-web] Ignoring VITE_API_BASE=${current} from env files/shell — ` +
+        `production builds always use ${profile.defaultApiBase}. Local overrides such as ` +
+        `.env.production.local are for the plain \`npm run build\` LAN-testing workflow only ` +
+        `and are never read by this script.`,
+    );
+  }
+  process.env.VITE_API_BASE = profile.defaultApiBase;
+}
+
 let gitSha = "unknown";
 try {
   gitSha = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
@@ -77,6 +97,16 @@ const apiBase = validateApiBaseForProfile(
   profile,
 );
 process.env.VITE_API_BASE = apiBase;
+
+// Hard release guard: by construction this can never fail given the forced override above,
+// but a production build must refuse to proceed rather than silently ship the wrong API host
+// if this file is ever refactored and that guarantee quietly breaks.
+if (profile.id === "prod" && apiBase !== profile.defaultApiBase) {
+  fail(
+    `Production build resolved VITE_API_BASE="${apiBase}", but it must be exactly ` +
+      `"${profile.defaultApiBase}". Refusing to build.`,
+  );
+}
 
 console.log(`[build-cloud-web] profile=${profile.id}`);
 console.log(`[build-cloud-web] VITE_APP_ENV=${process.env.VITE_APP_ENV}`);
