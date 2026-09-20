@@ -59,11 +59,11 @@
 	<string>Permission is needed to save inspection photos to your photo library.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
-		<!-- Production: HTTPS-only. NSAllowsLocalNetworking permits only loopback/local-network
-		     requests (e.g. the LocalMediaServerPlugin's 127.0.0.1 video-streaming server) without
-		     weakening ATS for any real internet host — it does not allow arbitrary cleartext to
-		     the production API or any other remote domain. -->
-		<key>NSAllowsLocalNetworking</key>
+		<!-- Debug-only: local dev/LAN testing hits an http:// LAN IP (see CLAUDE.md/VITE_API_BASE
+		     native guidance) that a normal ATS exception domain list can't express because the IP
+		     varies per developer network. This key is only compiled into the Debug configuration
+		     (see App.xcodeproj INFOPLIST_FILE) and never ships in a Release/App Store build. -->
+		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
 	<key>UIBackgroundModes</key>
