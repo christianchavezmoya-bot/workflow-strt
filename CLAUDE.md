@@ -22,6 +22,7 @@ Frontend (repo root):
 - `npm run preview` — serve the production build
 - `npm run docs:update` — regenerate `docs/ARCHITECTURE.md` (also runs in the pre-commit hook)
 - `npm run hooks:install` — install the git pre-commit hook (also runs on `postinstall`)
+- `node scripts/deploy-prod-web.mjs deploy|cleanup` — production web deploy / stale-asset cleanup (dry run unless `--apply`); see `docs/PROD_WEB_DEPLOY.md`. Build first with `npm run build:prod-web`.
 
 Backend (`server/Commtrac.Api/`):
 - `dotnet run` — API on **port 4000**; Swagger UI at `/swagger` in Development
