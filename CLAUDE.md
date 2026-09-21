@@ -22,6 +22,7 @@ Frontend (repo root):
 - `npm run preview` — serve the production build
 - `npm run docs:update` — regenerate `docs/ARCHITECTURE.md` (also runs in the pre-commit hook)
 - `npm run hooks:install` — install the git pre-commit hook (also runs on `postinstall`)
+- `node scripts/deploy-prod-web.mjs deploy|cleanup` — production web deploy / stale-asset cleanup (dry run unless `--apply`); see `docs/PROD_WEB_DEPLOY.md`. Build first with `npm run build:prod-web`.
 
 Backend (`server/Commtrac.Api/`):
 - `dotnet run` — API on **port 4000**; Swagger UI at `/swagger` in Development
@@ -79,7 +80,7 @@ Sqlite is the default; **Postgres** is used for cloud parity (Docker staging, `a
 - Verify with the opt-in tests: `COMMTRAC_POSTGRES_TEST=1 dotnet test` runs the full chain against a real Postgres plus `PostgresSchemaParityTests`, which diffs every mapped property against `information_schema`. `scripts/pgtest.sh` is the local helper.
 
 ### Feature-flagged BOM module
-`src/modules/bom-project/` is a self-contained, flag-gated module. Import it **only** through `src/modules/bom-project/index.ts` (never reach into internals). Enabled by `VITE_ENABLE_BOM_MODULE=true` (frontend) and `ENABLE_BOM_PROJECT_MODULE=true` (backend, set in `launchSettings.json`). Routes/menus/APIs all disappear when off.
+`src/modules/bom-project/` is a self-contained, flag-gated module. Import it **only** through `src/modules/bom-project/index.ts` (never reach into internals). Enabled by `VITE_ENABLE_BOM_MODULE=true` (frontend) and `ENABLE_BOM_PROJECT_MODULE=true` (backend, set in `launchSettings.json`). Routes/menus/APIs all disappear when off. **Production is pinned on:** `build-cloud-web.mjs --profile prod` takes the value from `features.bomModule` in `scripts/build-profiles.mjs` (ignoring env files/shell), verifies the compiled bundle really contains the module, and records it in `build-manifest.json`; `check:artifact-isolation` re-checks it and CI builds the prod profile from a clean checkout. Only a plain `npm run build` still reads the flag from `.env`.
 
 ## Conventions & gotchas
 

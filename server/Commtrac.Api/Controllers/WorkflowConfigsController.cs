@@ -1066,6 +1066,98 @@ public class WorkflowConfigsController : ControllerBase
     }
 
     /// <summary>
+    /// Completeness structure for one exported Feature: every dependency with id/name/configuration,
+    /// every capture field with its stored key, resolved label, type, required flag, owning
+    /// dependency and the exact per-unit ids generation assigns, plus the generated steps.
+    /// Mirrors src/features/workInstructions/workflowContextExportAssembly.ts (buildStructure) —
+    /// workflow-context-parity.json fails CI if the two ever diverge. Uses this controller's own
+    /// id/label helpers so the ids reported here can never disagree with what Publish/Sync assign.
+    /// </summary>
+    private static (
+        string? PartNumber,
+        AuthoringCaptureFieldDto? PartNumberField,
+        List<AuthoringDependencyDto> Dependencies,
+        string CaptureFieldSource,
+        List<AuthoringCaptureFieldDto> Definitions,
+        List<AuthoringGeneratedStepDto> Steps)
+        BuildAuthoringStructure(FeatureEntity f, List<FeatureDependencyEntity> deps, int quantity, Dictionary<string, bool> inclusions)
+    {
+        var units = Enumerable.Range(1, Math.Max(0, quantity)).ToList();
+        var featureKeys = string.IsNullOrWhiteSpace(f.CaptureFieldsJson) || f.CaptureFieldsJson == "[]"
+            ? new List<string>()
+            : JsonSerializer.Deserialize<List<string>>(f.CaptureFieldsJson, JsonOpts) ?? new();
+
+        bool IncludedOf(FeatureDependencyEntity d) => inclusions.TryGetValue(d.Id, out var v) && v;
+
+        AuthoringCaptureFieldDto Field(
+            string key, string label, string type, bool required, bool? readOnly, string? value, int order,
+            string source, string? depId, string? depName, bool generates, Func<int, string> idOf, string identity) =>
+            new(key, label, type, required, readOnly, value, order, source, f.Id, f.Name, depId, depName, identity,
+                generates ? units.Select(u => new AuthoringGeneratedFieldIdDto(u, idOf(u))).ToList() : new List<AuthoringGeneratedFieldIdDto>());
+
+        var dependencies = deps.Select(d =>
+        {
+            var included = IncludedOf(d);
+            List<AuthoringCaptureFieldDto> fields = d.IsInventory
+                ? CaptureFieldKeysFor(d).Select((key, order) => Field(
+                    key, CaptureFieldLabel(key), "text", true, null, null, order, "dependency", d.Id, d.Name, included,
+                    u => GeneratedFieldId(f.Id, u, d.Id, key), $"feature:{f.Id}:dep:{d.Id}:key:{key}")).ToList()
+                : new List<AuthoringCaptureFieldDto>
+                {
+                    Field("qty", $"Actual qty — {d.Name} ({(d.Unit ?? "units")})", "number", true, null, null, 0, "dependency", d.Id, d.Name, included,
+                        u => GeneratedFieldId(f.Id, u, d.Id, "qty"), $"feature:{f.Id}:dep:{d.Id}:key:qty"),
+                };
+            return new AuthoringDependencyDto(
+                d.Id, d.Name, d.FeatureId, f.Name, d.IsInventory, d.IsInventory ? "installation" : "data-collection",
+                d.DefaultQty, d.Unit, d.UnitPrice, d.SortOrder, included, fields);
+        }).ToList();
+
+        string source;
+        List<AuthoringCaptureFieldDto> definitions;
+        if (deps.Count > 0)
+        {
+            source = "dependencies";
+            definitions = dependencies.SelectMany(d => d.CaptureFields).ToList();
+        }
+        else if (featureKeys.Count > 0)
+        {
+            // Feature-level fallback: a synthetic inventory dependency whose id is the Feature id.
+            source = "feature";
+            definitions = featureKeys.Select((key, order) => Field(
+                key, CaptureFieldLabel(key), "text", true, null, null, order, "feature", f.Id, f.Name, f.IsInventory,
+                u => GeneratedFieldId(f.Id, u, f.Id, key), $"feature:{f.Id}:dep:{f.Id}:key:{key}")).ToList();
+        }
+        else
+        {
+            source = "none";
+            definitions = new List<AuthoringCaptureFieldDto>();
+        }
+
+        var active = deps.Where(IncludedOf).ToList();
+        var hasInstallation = deps.Count > 0 ? active.Any(d => d.IsInventory) : f.IsInventory && featureKeys.Count > 0;
+        var hasDataCollection = deps.Count > 0 && active.Any(d => !d.IsInventory);
+
+        var steps = new List<AuthoringGeneratedStepDto>();
+        foreach (var unit in units)
+        {
+            foreach (var (stepType, on) in new[] { ("installation", hasInstallation), ("data-collection", hasDataCollection) })
+            {
+                if (!on) continue;
+                var generatorKey = $"feature:{f.Id}:unit:{unit}:{stepType}";
+                steps.Add(new AuthoringGeneratedStepDto(unit, stepType, generatorKey, GeneratedStepId(generatorKey)));
+            }
+        }
+
+        var partNumber = ResolvePartNumber(f);
+        var partNumberField = partNumber is null
+            ? null
+            : Field("partNumber", "Part Number", "text", false, true, partNumber, 0, "part-number", null, null, hasInstallation,
+                u => PartNumberFieldId(f.Id, u), $"feature:{f.Id}:partNumber");
+
+        return (partNumber, partNumberField, dependencies, source, definitions, steps);
+    }
+
+    /// <summary>
     /// WF-8: Builder "Export Workflow Context" — workflow-scoped equivalent of
     /// GET /api/products/{id}/workflow-context. Unlike the Product-level endpoint (every linked
     /// Feature, no quantities), this returns ONLY the Features actually selected in THIS
@@ -1093,6 +1185,14 @@ public class WorkflowConfigsController : ControllerBase
         var featureIds = configFeatures.Select(cf => cf.FeatureId).ToList();
         var features = await _db.Features.Where(f => featureIds.Contains(f.Id)).ToListAsync();
         var featureById = features.ToDictionary(f => f.Id);
+
+        // sortOrder in the authoring context is the Product master's link order — the same meaning
+        // it has in GET /products/{id}/workflow-context and in the client-side Builder export.
+        var productLinkSort = (await _db.ProductFeatures
+                .Where(pf => pf.ProductId == entity.ProductId && featureIds.Contains(pf.FeatureId))
+                .ToListAsync())
+            .GroupBy(pf => pf.FeatureId)
+            .ToDictionary(g => g.Key, g => g.First().SortOrder);
 
         var allDeps = await _db.FeatureDependencies
             .Where(d => featureIds.Contains(d.FeatureId))
@@ -1124,10 +1224,21 @@ public class WorkflowConfigsController : ControllerBase
                 dependencyIds = new List<string>();
             }
 
+            var structure = BuildAuthoringStructure(f, deps, cf.Quantity, ParseInclusions(cf.InclusionsJson));
+            var options = string.IsNullOrWhiteSpace(f.OptionsJson) || f.OptionsJson == "[]"
+                ? new List<string>()
+                : JsonSerializer.Deserialize<List<string>>(f.OptionsJson, JsonOpts) ?? new();
+            var subProps = string.IsNullOrWhiteSpace(f.SubPropertiesJson) || f.SubPropertiesJson == "[]"
+                ? new List<FeatureSubPropertyDto>()
+                : JsonSerializer.Deserialize<List<FeatureSubPropertyDto>>(f.SubPropertiesJson, JsonOpts) ?? new();
+
             authoringFeatures.Add(new WorkflowAuthoringFeatureDto(
                 f.Id, f.Name, cf.Quantity, captureFields,
                 f.Brand, f.Supplier, f.AlternativePartNumber, f.ManufacturerPartNumber, f.UnitPrice,
-                dependencyIds));
+                dependencyIds,
+                f.Description, f.ValueType, f.IsInventory, productLinkSort.TryGetValue(f.Id, out var linkSort) ? linkSort : cf.SortOrder, options, subProps, f.ProductLink,
+                structure.PartNumber, structure.PartNumberField, structure.Dependencies,
+                structure.CaptureFieldSource, structure.Definitions, structure.Steps));
         }
 
         return Ok(new WorkflowAuthoringContextDto(

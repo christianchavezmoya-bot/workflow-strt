@@ -5,9 +5,13 @@ import { join } from "node:path";
 // @ts-expect-error — Node build scripts are plain ESM without TS declarations.
 import { analyzeArtifact } from "../../scripts/lib/artifact-isolation.mjs";
 // @ts-expect-error — Node build scripts are plain ESM without TS declarations.
-import { validateApiBaseForProfile, resolveProfile, validateAppEnvForProfile } from "../../scripts/build-profiles.mjs";
+import { validateApiBaseForProfile, resolveProfile, validateAppEnvForProfile, BOM_ARTIFACT_MARKERS } from "../../scripts/build-profiles.mjs";
 
 const FIXTURE_ROOT = join(process.cwd(), ".tmp-artifact-fixtures");
+
+// Both profiles declare features.bomModule = true, so a VALID artifact contains the compiled BOM
+// module (see scripts/lib/artifact-isolation.mjs). Fixtures representing a valid build include the markers.
+const BOM_ON = `;${BOM_ARTIFACT_MARKERS.sidebar};${BOM_ARTIFACT_MARKERS.routes};`;
 
 interface FixtureManifest {
   profile: string;
@@ -29,7 +33,7 @@ function writeFixture(profile: string, opts: { jsContent: string; manifest: Fixt
 describe("artifact isolation", () => {
   it("passes a valid PROD fixture", () => {
     const dir = writeFixture("prod-ok", {
-      jsContent: 'const env="prod"; const api="https://api.strata-ngo.com/api"; function isDebugFeaturesEnabled(){return false}',
+      jsContent: 'const env="prod"; const api="https://api.strata-ngo.com/api"; function isDebugFeaturesEnabled(){return false}' + BOM_ON,
       manifest: {
         profile: "prod",
         appEnv: "prod",
@@ -39,6 +43,16 @@ describe("artifact isolation", () => {
     });
     const result = analyzeArtifact(dir, "prod");
     expect(result.pass).toBe(true);
+  });
+
+  it("fails an otherwise valid PROD fixture that is missing the BOM module", () => {
+    const dir = writeFixture("prod-no-bom", {
+      jsContent: 'const env="prod"; const api="https://api.strata-ngo.com/api"; function isDebugFeaturesEnabled(){return false}',
+      manifest: { profile: "prod", appEnv: "prod", apiBase: "https://api.strata-ngo.com/api", debugFeaturesEnabled: false },
+    });
+    const result = analyzeArtifact(dir, "prod");
+    expect(result.pass).toBe(false);
+    expect(result.violations.some((v: string) => v.includes("BOM module DISABLED"))).toBe(true);
   });
 
   it("fails PROD fixture with staging API baked in", () => {
@@ -58,7 +72,7 @@ describe("artifact isolation", () => {
 
   it("passes a valid DEV fixture", () => {
     const dir = writeFixture("dev-ok", {
-      jsContent: 'const env="dev"; const api="https://api.staging.strata-ngo.com/api"; function isDebugFeaturesEnabled(){return true}',
+      jsContent: 'const env="dev"; const api="https://api.staging.strata-ngo.com/api"; function isDebugFeaturesEnabled(){return true}' + BOM_ON,
       manifest: {
         profile: "dev",
         appEnv: "dev",

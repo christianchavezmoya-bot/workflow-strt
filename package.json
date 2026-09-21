@@ -32,6 +32,8 @@
     "test:e2e:web-perf": "playwright test --config playwright.web-perf.config.ts",
     "test:e2e:visual": "playwright test --config playwright.visual.config.ts",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
+    "deploy:prod-web": "node scripts/deploy-prod-web.mjs",
+    "prod-web:stale-assets": "node scripts/prod-web-stale-assets.mjs",
     "perf:baseline:record": "node scripts/perf-baseline.mjs record",
     "perf:baseline:compare": "node scripts/perf-baseline.mjs compare",
     "release-gates": "node .claude/skills/enterprise-dev-practices/scripts/check-gates.mjs typecheck backend test e2e e2eperf",

@@ -11,6 +11,7 @@ export function writeBuildManifest({
   appEnv,
   apiBase,
   debugFeaturesEnabled,
+  features,
   distDir = join(root, "dist"),
 }) {
   mkdirSync(distDir, { recursive: true });
@@ -23,6 +24,7 @@ export function writeBuildManifest({
     buildSha: process.env.VITE_BUILD_SHA ?? "unknown",
     buildTime: process.env.VITE_BUILD_TIME ?? new Date().toISOString(),
     debugFeaturesEnabled,
+    ...(features ? { features } : {}),
     builtAt: new Date().toISOString(),
   };
   writeFileSync(join(distDir, "build-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);
