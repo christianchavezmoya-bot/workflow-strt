@@ -59,7 +59,11 @@ import { workflowConfigFeatureService } from "../../services/workflowConfigFeatu
 import { SyncFeatureStepsDialog } from "./SyncFeatureStepsDialog";
 import { ImportWorkflowJsonDialog } from "./ImportWorkflowJsonDialog";
 import { rehydrateFeatureSelections } from "./featureSelectionsHydration";
-import { assembleAuthoringContextFromBuilderState } from "./workflowContextExportAssembly";
+import {
+  assembleAuthoringContextFromBuilderState,
+  inclusionsByFeatureFromRows,
+  type InclusionsByFeature,
+} from "./workflowContextExportAssembly";
 import { resolveImportConfigId } from "./resolveImportConfigId";
 import { WorkflowActionsMenu } from "./WorkflowActionsMenu";
 import { AdvancedWorkflowActionsMenu } from "./AdvancedWorkflowActionsMenu";
@@ -935,11 +939,26 @@ const WorkflowBuilder = ({ productId, productName, productFeatures = [], initial
       const productContext = await productService.getWorkflowContext(workflow.productId);
       const configId = currentConfig?.id ?? workflow.id;
       const configName = currentConfig?.name ?? workflow.name;
+      // Per-dependency inclusion toggles decide which dependencies actually generate, and they are
+      // persisted as they are switched. Best-effort: a never-saved workflow (no config row) or a
+      // failed lookup just exports each dependency with `included: null` (unknown) — it must never
+      // block the export.
+      let inclusionsByFeature: InclusionsByFeature | undefined;
+      if (currentConfig?.id) {
+        try {
+          inclusionsByFeature = inclusionsByFeatureFromRows(
+            await workflowConfigFeatureService.getByConfig(currentConfig.id),
+          );
+        } catch {
+          inclusionsByFeature = undefined;
+        }
+      }
       const context = assembleAuthoringContextFromBuilderState(
         productContext,
         featureSelections,
         configId,
         configName,
+        { inclusionsByFeature },
       );
       downloadJsonFile(`workflow-context-${configId}.json`, context);
     } catch {

@@ -1099,6 +1099,14 @@ public record ProductWorkflowContextDto(
 /// same "Dependencies win when present, else Feature.captureFields" rule used by generation
 /// (buildAutoSteps client-side, ReconcileFeatureStepsAsync server-side), so an external agent
 /// producing reusable workflow JSON sees exactly the fields that will actually be generated.</summary>
+/// <summary>
+/// One selected Feature in the authoring context. The first ten members are the ORIGINAL summary
+/// shape (capture-field KEYS as strings, dependency IDs only) and are unchanged in shape and
+/// meaning. The trailing members are ADDITIVE completeness fields (dependency + capture-field
+/// identity, names, types, generated ids) — schemaVersion stays 1. They mirror
+/// src/features/workInstructions/workflowContextExportAssembly.ts, which builds the same structure
+/// client-side for the Builder button; workflow-context-parity.json keeps the two in lockstep.
+/// </summary>
 public record WorkflowAuthoringFeatureDto(
     string FeatureId,
     string Name,
@@ -1109,8 +1117,60 @@ public record WorkflowAuthoringFeatureDto(
     string? AlternativePartNumber,
     string? ManufacturerPartNumber,
     decimal? UnitPrice,
-    List<string> DependencyIds
+    List<string> DependencyIds,
+    string? Description = null,
+    string? ValueType = null,
+    bool? IsInventory = null,
+    int? SortOrder = null,
+    List<string>? Options = null,
+    List<FeatureSubPropertyDto>? SubProperties = null,
+    string? ProductLink = null,
+    string? PartNumber = null,
+    AuthoringCaptureFieldDto? PartNumberField = null,
+    List<AuthoringDependencyDto>? Dependencies = null,
+    string? CaptureFieldSource = null,
+    List<AuthoringCaptureFieldDto>? CaptureFieldDefinitions = null,
+    List<AuthoringGeneratedStepDto>? GeneratedSteps = null
 );
+
+public record AuthoringGeneratedFieldIdDto(int UnitIndex, string FieldId);
+
+/// <summary>A capture field as the generators resolve it: stored key, label, type, required flag,
+/// owning dependency (synthetic dependency id == featureId for the Feature-level fallback), a
+/// unit-independent identity, and the exact per-unit ids Publish/Sync/Import assign.</summary>
+public record AuthoringCaptureFieldDto(
+    string Key,
+    string Label,
+    string Type,
+    bool Required,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] bool? ReadOnly,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)] string? Value,
+    int Order,
+    string Source,
+    string FeatureId,
+    string FeatureName,
+    string? DependencyId,
+    string? DependencyName,
+    string Identity,
+    List<AuthoringGeneratedFieldIdDto> GeneratedFieldIds
+);
+
+public record AuthoringDependencyDto(
+    string DependencyId,
+    string Name,
+    string FeatureId,
+    string FeatureName,
+    bool IsInventory,
+    string GeneratedStepType,
+    decimal DefaultQty,
+    string? Unit,
+    decimal UnitPrice,
+    int SortOrder,
+    bool? Included,
+    List<AuthoringCaptureFieldDto> CaptureFields
+);
+
+public record AuthoringGeneratedStepDto(int UnitIndex, string StepType, string GeneratorKey, string StepId);
 
 /// <summary>Workflow-scoped equivalent of ProductWorkflowContextDto: only the Features actually
 /// selected (Quantity > 0) in THIS WorkflowConfig, with their real quantities — "this is the
