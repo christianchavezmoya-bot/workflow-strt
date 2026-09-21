@@ -12,4 +12,7 @@ export const SUPPORT_URL = `${PUBLIC_SITE_ORIGIN}/support`;
  */
 export const SUPPORT_EMAIL = "support@strata-ngo.com";
 
+/** Legal operator of Strata N-go (owner-confirmed). */
+export const OPERATOR_NAME = "STRATA PRODUCTS AUSTRALIA PTY. LIMITED";
+
 export const PRIVACY_LAST_UPDATED = "21 September 2026";

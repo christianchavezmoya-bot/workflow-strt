@@ -1,7 +1,7 @@
 import { Link, Paper, Stack, Typography } from "@mui/material";
 import { APP_NAME } from "../../constants/branding";
 import PublicPageLayout, { PublicSection } from "./PublicPageLayout";
-import { PRIVACY_LAST_UPDATED, PUBLIC_SITE_ORIGIN, SUPPORT_EMAIL, SUPPORT_URL } from "./publicSite";
+import { OPERATOR_NAME, PRIVACY_LAST_UPDATED, PUBLIC_SITE_ORIGIN, SUPPORT_EMAIL, SUPPORT_URL } from "./publicSite";
 
 /*
  * Every statement below is traceable to code/config in this repository (see the PR
@@ -10,6 +10,10 @@ import { PRIVACY_LAST_UPDATED, PUBLIC_SITE_ORIGIN, SUPPORT_EMAIL, SUPPORT_URL } 
  * "owner confirmation required" — do not add claims here without confirming them.
  * Keep the data categories in sync with ios/App/App/PrivacyInfo.xcprivacy and the
  * App Store privacy declarations.
+ * PROVIDERS must list only services the production deployment actually uses or the
+ * production app necessarily contacts — never merely optional/unconfigured integrations
+ * (e.g. Quickbase, SMS, Android FCM). Verified against the live commtrac-api-prod task
+ * definition and the production bundle on 2026-09-21.
  */
 
 interface DataCategory {
@@ -52,8 +56,8 @@ const DATA_CATEGORIES: DataCategory[] = [
   },
   {
     name: "Device ID",
-    what: "A push notification token that identifies your device to the notification service, and device or browser details (user agent) recorded at sign-in and when a signature is captured.",
-    how: "Collected automatically. The push token is registered only if you allow notifications on the mobile app.",
+    what: "A push notification token that identifies your device to Apple's notification service, and device or browser details (user agent) recorded at sign-in and when a signature is captured.",
+    how: "Collected automatically. The push token is registered, and stored with your account on our servers, only if you allow notifications on the mobile app.",
   },
 ];
 
@@ -69,23 +73,27 @@ const PROVIDERS: Provider[] = [
   },
   {
     name: "Cloudflare and Amazon CloudFront",
-    role: "Deliver this website and the web version of the app. Cloudflare also routes email sent to our support address.",
+    role: "Deliver this website and the web version of the app. Cloudflare also handles email sent to the strata-ngo.com domain.",
   },
   {
     name: "Resend",
     role: "Sends service emails for us, such as account invitations, password reset links, one-time codes for signing links, notifications and reports. It receives the recipient email address and the email content.",
   },
   {
-    name: "Apple Push Notification service and Google Firebase Cloud Messaging",
-    role: "Deliver push notifications to your device when notifications are enabled. They receive your device push token and the notification content.",
+    name: "Apple Push Notification service",
+    role: "If you allow notifications on iPhone or iPad, your device registers with Apple's notification service, which issues the device push token that we store.",
   },
   {
     name: "OpenStreetMap",
-    role: "Supplies map images for map views. When a map is shown, your device requests map tiles from OpenStreetMap servers, which can see your IP address and the map area requested.",
+    role: "Supplies map images for map views, and looks up locations when administrators manage office locations. Your device requests map tiles from OpenStreetMap servers, which can see your IP address and the map area requested. The city, state and country text an administrator types or saves for an office is sent to OpenStreetMap's Nominatim search service.",
   },
   {
     name: "Google Fonts",
     role: "Supplies the typefaces used by the app. Your device requests font files from Google, which can see your IP address.",
+  },
+  {
+    name: "jsDelivr",
+    role: "Supplies font data used to display PDF reports on screen. Your device requests it from jsDelivr, which can see your IP address. No document content is sent.",
   },
 ];
 
@@ -111,9 +119,10 @@ export default function PrivacyPolicyPage() {
         Last updated: {PRIVACY_LAST_UPDATED}
       </Typography>
       <Typography sx={{ mt: 2 }}>
-        This policy explains how {APP_NAME} (“we”, “us”) collects, uses and shares personal information when you use the{" "}
-        {APP_NAME} mobile apps and the web app at {PUBLIC_SITE_ORIGIN.replace("https://", "")}. {APP_NAME} is a field
-        operations platform for managing projects, assets, workflows, inspections, evidence and operational issues.
+        {APP_NAME} is operated by {OPERATOR_NAME} (“we”, “us”). This policy explains how we collect, use and share
+        personal information when you use the {APP_NAME} mobile apps and the web app at{" "}
+        {PUBLIC_SITE_ORIGIN.replace("https://", "")}. {APP_NAME} is a field operations platform for managing
+        projects, assets, workflows, inspections, evidence and operational issues.
       </Typography>
 
       <PublicSection id="accounts" heading="Accounts and your organisation">
@@ -171,7 +180,7 @@ export default function PrivacyPolicyPage() {
           items={[
             "To provide the app: your account, projects, assets, workflows, inspections, evidence, issues, reports and electronic signatures.",
             "To keep accounts secure, including sign-in sessions and account activity records.",
-            "To send service emails and push notifications, such as invitations, password resets, signing requests and alerts.",
+            "To send service emails, such as invitations, password resets, one-time signing codes and reports, and to register your device for notifications.",
             "To investigate and fix problems reported by users and to provide support.",
           ]}
         />
@@ -243,7 +252,8 @@ export default function PrivacyPolicyPage() {
 
       <PublicSection id="contact" heading="Contact us">
         <Typography>
-          Questions about this policy or requests about your information: email{" "}
+          {APP_NAME} is operated by {OPERATOR_NAME}. Questions about this policy or requests about your information:
+          email{" "}
           <Link href={`mailto:${SUPPORT_EMAIL}`} underline="hover" fontWeight={700}>
             {SUPPORT_EMAIL}
           </Link>

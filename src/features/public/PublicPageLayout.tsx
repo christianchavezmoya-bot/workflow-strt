@@ -2,7 +2,7 @@ import { useEffect, type ReactNode } from "react";
 import { Box, Container, Divider, Link, Stack, Typography } from "@mui/material";
 import strataLogo from "../../assets/strata_transparent.png";
 import { APP_NAME } from "../../constants/branding";
-import { PRIVACY_URL, SUPPORT_URL } from "./publicSite";
+import { OPERATOR_NAME, PRIVACY_URL, SUPPORT_URL } from "./publicSite";
 
 interface PublicPageLayoutProps {
   /** Document title suffix, e.g. "Support". */
@@ -45,7 +45,7 @@ export default function PublicPageLayout({ title, children }: PublicPageLayoutPr
             alignItems={{ xs: "flex-start", sm: "center" }}
           >
             <Typography variant="body2" color="text.secondary">
-              © {new Date().getFullYear()} {APP_NAME}
+              © {new Date().getFullYear()} {APP_NAME}, operated by {OPERATOR_NAME}
             </Typography>
             <Stack direction="row" spacing={3}>
               <Link href={SUPPORT_URL} underline="hover" variant="body2">Support</Link>

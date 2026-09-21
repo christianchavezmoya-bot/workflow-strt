@@ -1,10 +1,10 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import PrivacyPolicyPage from "./PrivacyPolicyPage";
 import SupportPage from "./SupportPage";
-import { PRIVACY_URL, SUPPORT_EMAIL } from "./publicSite";
+import { OPERATOR_NAME, PRIVACY_URL, SUPPORT_EMAIL } from "./publicSite";
 
 // Maps NSPrivacyCollectedDataType suffixes in PrivacyInfo.xcprivacy to the headings
 // the policy must show, so the page cannot silently drift from the App Store declarations.
@@ -50,6 +50,11 @@ describe("SupportPage", () => {
     render(<SupportPage />);
     expect(document.title).toBe("Support · Strata N-go");
   });
+
+  it("names the legal operator in the footer", () => {
+    render(<SupportPage />);
+    expect(screen.getByRole("contentinfo")).toHaveTextContent(`operated by ${OPERATOR_NAME}`);
+  });
 });
 
 describe("PrivacyPolicyPage", () => {
@@ -79,9 +84,42 @@ describe("PrivacyPolicyPage", () => {
     ]) {
       expect(screen.getByRole("heading", { level: 2, name: heading })).toBeInTheDocument();
     }
-    for (const provider of ["Amazon Web Services", "Resend", "OpenStreetMap"]) {
-      expect(screen.getByText(provider)).toBeInTheDocument();
-    }
+  });
+
+  it("lists exactly the providers used by production, and no optional/unconfigured integrations", () => {
+    render(<PrivacyPolicyPage />);
+    const sharing = screen.getByRole("heading", { level: 2, name: "Who receives or processes your information" })
+      .closest("section") as HTMLElement;
+    const listed = within(sharing).getAllByRole("heading", { level: 3 }).map((h) => h.textContent);
+    expect(listed).toEqual([
+      "Amazon Web Services",
+      "Cloudflare and Amazon CloudFront",
+      "Resend",
+      "Apple Push Notification service",
+      "OpenStreetMap",
+      "Google Fonts",
+      "jsDelivr",
+    ]);
+    // Optional / unconfigured / not-in-production: must not appear anywhere on the page.
+    expect(document.body.textContent).not.toMatch(/Quickbase|Firebase|Twilio|Sentry|Microsoft|Google Analytics/i);
+  });
+
+  it("states the legal operator and makes no unsupported claims", () => {
+    render(<PrivacyPolicyPage />);
+    expect(document.body.textContent).toContain(`is operated by ${OPERATOR_NAME}`);
+    expect(document.body.textContent).toContain("STRATA PRODUCTS AUSTRALIA PTY. LIMITED");
+    expect(document.body.textContent).not.toMatch(/\bsell\b|\bsold\b/i);
+    // The production backend has no push delivery configured, so the page must not claim we send pushes.
+    expect(document.body.textContent).not.toMatch(/send(s|ing)? push/i);
+  });
+
+  it("keeps the truthful retention, audit-record and children wording", () => {
+    render(<PrivacyPolicyPage />);
+    const text = document.body.textContent ?? "";
+    expect(text).toContain("We do not publish fixed retention periods.");
+    expect(text).toContain("are not automatically removed when an account is deleted");
+    expect(text).toContain("we will work with your organisation's administrator to action the request");
+    expect(text).toContain("is a workplace application and is not directed at children");
   });
 
   it("uses only the approved support address", () => {
