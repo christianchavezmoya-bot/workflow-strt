@@ -31,9 +31,12 @@ import { useRouteBreadcrumbs } from "../hooks/useRouteBreadcrumbs";
 // /mobile-upload is scanned from a phone that has never logged in; its token in
 // the query string is the credential, and the API endpoints it calls are
 // [AllowAnonymous].
+// /support and /privacy are the public App Store support / privacy-policy pages;
+// they are static content with no API calls.
 const isPublicDeepLinkPath = (pathname: string) =>
   pathname === "/reset-password"
   || pathname === "/mobile-upload"
+  || /^\/(support|privacy)\/?$/i.test(pathname) // router also matches a trailing slash / any case
   || pathname.startsWith("/sign/")
   || pathname.startsWith("/share/reports/");
 

@@ -59,7 +59,7 @@ function parseRouteEntries(routesSource) {
     if (line.includes("<Navigate ")) component = "Navigate";
     if (line.includes("<ProjectInspectionsRedirect")) component = "ProjectInspectionsRedirect";
 
-    const auth = ["/login", "/reset-password"].includes(routePath) || routePath.startsWith("/sign/")
+    const auth = ["/login", "/reset-password", "/support", "/privacy"].includes(routePath) || routePath.startsWith("/sign/")
       ? "Public"
       : "Required";
 

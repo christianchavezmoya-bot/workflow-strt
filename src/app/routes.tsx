@@ -29,6 +29,8 @@ const IssuesBoard = lazyWithChunkReload(() => import("../features/issues/IssuesB
 const MobileUploadPage = lazyWithChunkReload(() => import("../features/mobile-upload/MobileUploadPage"));
 const TimeAnalyticsPage = lazyWithChunkReload(() => import("../features/timeAnalytics"));
 const FaultReportsPage = lazyWithChunkReload(() => import("../features/support/FaultReportsPage"));
+const SupportPage = lazyWithChunkReload(() => import("../features/public/SupportPage"));
+const PrivacyPolicyPage = lazyWithChunkReload(() => import("../features/public/PrivacyPolicyPage"));
 
 const BomProjectProvider = lazyWithChunkReload(() =>
   import("../modules/bom-project").then((module) => ({ default: module.BomProjectProvider }))
@@ -135,6 +137,8 @@ const AppRoutes = () => {
       <Route path="/reset-password" element={<LazyRoute><ResetPassword /></LazyRoute>} />
       <Route path="/sign/:tokenId" element={<LazyRoute><ExternalSignPage /></LazyRoute>} />
       <Route path="/share/reports/:shareId" element={<LazyRoute><AssetReportShareViewPage /></LazyRoute>} />
+      <Route path="/support" element={<LazyRoute><SupportPage /></LazyRoute>} />
+      <Route path="/privacy" element={<LazyRoute><PrivacyPolicyPage /></LazyRoute>} />
 
       <Route element={<AppShell />}>
         <Route index element={<LazyRoute><Dashboard /></LazyRoute>} />
