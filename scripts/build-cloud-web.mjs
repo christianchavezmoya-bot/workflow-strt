@@ -12,11 +12,14 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { execSync } from "node:child_process";
 import {
+  BOM_FLAG_ENV,
   loadProfileEnv,
+  resolveBomModuleFlag,
   resolveProfile,
   validateApiBaseForProfile,
   validateAppEnvForProfile,
 } from "./build-profiles.mjs";
+import { analyzeBomModule } from "./lib/artifact-isolation.mjs";
 import { writeBuildManifest } from "./write-build-manifest.mjs";
 
 const args = process.argv.slice(2);
@@ -81,6 +84,18 @@ if (profile.id === "prod") {
   process.env.VITE_API_BASE = profile.defaultApiBase;
 }
 
+// BOM to Project: resolved from the PROFILE, never from whatever env file happens to exist.
+// prod is pinned (an untracked .env / shell value can neither enable nor disable it), so a clean
+// checkout builds exactly what production expects. The compiled bundle is verified below.
+const bom = resolveBomModuleFlag(profile, process.env[BOM_FLAG_ENV]);
+if (bom.ignoredEnvValue) {
+  console.warn(
+    `[build-cloud-web] Ignoring ${BOM_FLAG_ENV}=${bom.ignoredEnvValue} from env files/shell — ` +
+      `the ${profile.id} profile ${bom.source === "profile-pin" ? "pins" : "defaults"} it to ${bom.enabled}.`,
+  );
+}
+process.env[BOM_FLAG_ENV] = String(bom.enabled);
+
 let gitSha = "unknown";
 try {
   gitSha = execSync("git rev-parse HEAD", { cwd: root, encoding: "utf8" }).trim();
@@ -111,6 +126,7 @@ if (profile.id === "prod" && apiBase !== profile.defaultApiBase) {
 console.log(`[build-cloud-web] profile=${profile.id}`);
 console.log(`[build-cloud-web] VITE_APP_ENV=${process.env.VITE_APP_ENV}`);
 console.log(`[build-cloud-web] VITE_API_BASE=${apiBase}`);
+console.log(`[build-cloud-web] ${BOM_FLAG_ENV}=${bom.enabled} (${bom.source})`);
 console.log(`[build-cloud-web] VITE_BUILD_SHA=${process.env.VITE_BUILD_SHA}`);
 console.log("[build-cloud-web] Running tsc -b && vite build…");
 
@@ -125,11 +141,24 @@ if ((result.status ?? 1) !== 0) {
   process.exit(result.status ?? 1);
 }
 
+// Hard assertion on what was actually COMPILED, not on what we asked for: fail the build rather
+// than ship a bundle whose BOM module state disagrees with the profile.
+const bomCheck = analyzeBomModule(resolve(root, "dist"), profile.id, bom.enabled);
+if (!bomCheck.pass) {
+  fail(
+    `BOM module mismatch in built artifact: expected ${bom.enabled ? "ENABLED" : "DISABLED"}, ` +
+      `found sidebar=${bomCheck.detected.sidebar} routes=${bomCheck.detected.routes}. Refusing to produce a ` +
+      `${profile.id} build that silently differs from the profile.`,
+  );
+}
+console.log(`[build-cloud-web] BOM module verified in artifact: ${bomCheck.detected.enabled ? "enabled" : "disabled"}`);
+
 writeBuildManifest({
   profile: profile.id,
   appEnv: process.env.VITE_APP_ENV,
   apiBase,
   debugFeaturesEnabled: profile.debugFeaturesEnabled,
+  features: { bomModule: bom.enabled },
 });
 
 console.log("[build-cloud-web] build-manifest.json written");

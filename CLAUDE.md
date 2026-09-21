@@ -79,7 +79,7 @@ Sqlite is the default; **Postgres** is used for cloud parity (Docker staging, `a
 - Verify with the opt-in tests: `COMMTRAC_POSTGRES_TEST=1 dotnet test` runs the full chain against a real Postgres plus `PostgresSchemaParityTests`, which diffs every mapped property against `information_schema`. `scripts/pgtest.sh` is the local helper.
 
 ### Feature-flagged BOM module
-`src/modules/bom-project/` is a self-contained, flag-gated module. Import it **only** through `src/modules/bom-project/index.ts` (never reach into internals). Enabled by `VITE_ENABLE_BOM_MODULE=true` (frontend) and `ENABLE_BOM_PROJECT_MODULE=true` (backend, set in `launchSettings.json`). Routes/menus/APIs all disappear when off.
+`src/modules/bom-project/` is a self-contained, flag-gated module. Import it **only** through `src/modules/bom-project/index.ts` (never reach into internals). Enabled by `VITE_ENABLE_BOM_MODULE=true` (frontend) and `ENABLE_BOM_PROJECT_MODULE=true` (backend, set in `launchSettings.json`). Routes/menus/APIs all disappear when off. **Production is pinned on:** `build-cloud-web.mjs --profile prod` takes the value from `features.bomModule` in `scripts/build-profiles.mjs` (ignoring env files/shell), verifies the compiled bundle really contains the module, and records it in `build-manifest.json`; `check:artifact-isolation` re-checks it and CI builds the prod profile from a clean checkout. Only a plain `npm run build` still reads the flag from `.env`.
 
 ## Conventions & gotchas
 

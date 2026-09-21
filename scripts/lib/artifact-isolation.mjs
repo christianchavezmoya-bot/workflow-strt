@@ -3,7 +3,7 @@
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { BUILD_PROFILES, resolveProfile } from "../build-profiles.mjs";
+import { BOM_ARTIFACT_MARKERS, BUILD_PROFILES, resolveProfile } from "../build-profiles.mjs";
 
 function readJsChunks(distDir) {
   const assetsDir = join(distDir, "assets");
@@ -16,6 +16,26 @@ function readJsChunks(distDir) {
       name,
       content: readFileSync(join(assetsDir, name), "utf8"),
     }));
+}
+
+/**
+ * Detect whether the compiled bundle has the BOM module enabled.
+ * `enabled` requires BOTH gated markers; exactly one means a half-built/inconsistent artifact.
+ */
+export function detectBomModule(combinedJs) {
+  const sidebar = combinedJs.includes(BOM_ARTIFACT_MARKERS.sidebar);
+  const routes = combinedJs.includes(BOM_ARTIFACT_MARKERS.routes);
+  return { sidebar, routes, enabled: sidebar && routes, inconsistent: sidebar !== routes };
+}
+
+/** Read dist/ and compare the BOM state actually compiled in against what the profile requires. */
+export function analyzeBomModule(distDir, profileId, expectedEnabled) {
+  const profile = resolveProfile(profileId);
+  const combined = readJsChunks(distDir).map((c) => c.content).join("\n");
+  const detected = detectBomModule(combined);
+  const expected = expectedEnabled ?? profile.features.bomModule;
+  const pass = !detected.inconsistent && detected.enabled === expected;
+  return { profile: profile.id, expected, detected, pass };
 }
 
 function readManifest(distDir) {
@@ -61,6 +81,31 @@ export function analyzeArtifact(distDir, profileId) {
     }
   } else {
     violations.push("missing build-manifest.json — rebuild with build-cloud-web.mjs");
+  }
+
+  // BOM module: the compiled bundle must match the profile (prod is pinned to enabled).
+  // Also cross-check the manifest, when it records the flag, against what was really compiled.
+  const bom = detectBomModule(combined);
+  // prod: always the profile pin. dev: an explicit override is recorded in the manifest.
+  const bomExpected =
+    profile.id !== "prod" && typeof manifest?.features?.bomModule === "boolean"
+      ? manifest.features.bomModule
+      : profile.features.bomModule;
+  const bomPass = !bom.inconsistent && bom.enabled === bomExpected;
+  checks.push({ id: "bom-module", pass: bomPass });
+  if (!bomPass) {
+    violations.push(
+      bom.inconsistent
+        ? `BOM module markers inconsistent (sidebar=${bom.sidebar}, routes=${bom.routes}) — half-built artifact`
+        : `BOM module ${bom.enabled ? "enabled" : "DISABLED"} in artifact but profile ${profile.id} requires ${bomExpected ? "enabled" : "disabled"}`,
+    );
+  }
+  if (manifest && typeof manifest.features?.bomModule === "boolean") {
+    const consistent = manifest.features.bomModule === bom.enabled;
+    checks.push({ id: "bom-manifest-consistent", pass: consistent });
+    if (!consistent) {
+      violations.push(`build-manifest features.bomModule=${manifest.features.bomModule} but artifact has BOM ${bom.enabled ? "enabled" : "disabled"}`);
+    }
   }
 
   for (const rule of profile.prohibitedInArtifact) {
