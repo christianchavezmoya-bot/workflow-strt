@@ -708,7 +708,10 @@ export const projectAssetService = {
         throw new Error("Offline - asset not cached yet; open this project once while online");
       }
 
-      const persistedIssuesJson = await mediaStore.persistIssueMediaInJson(issuesJson, id);
+      const persistedIssuesJson = await mediaStore.persistIssueMediaInJson(issuesJson, id, {
+        projectId: local.projectId,
+        assetId: id,
+      });
       const merged = fromDto({
         ...(local.data as ProjectAsset),
         issuesJson: persistedIssuesJson,

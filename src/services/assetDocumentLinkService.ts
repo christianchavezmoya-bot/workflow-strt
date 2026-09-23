@@ -299,7 +299,7 @@ export const assetDocumentLinkService = {
 
       const temporaryDocumentId = `${OFFLINE_DOCUMENT_PREFIX}${randomId()}`;
       const temporaryLinkId = `${OFFLINE_LINK_PREFIX}${randomId()}`;
-      const fileData = await mediaStore.persistMediaValue(file, "document", "document", temporaryDocumentId, file.name);
+      const fileData = await mediaStore.persistMediaValue(file, "document", "document", temporaryDocumentId, file.name, { assetId });
       const syntheticDocument = buildSyntheticDocument(
         temporaryDocumentId,
         name ?? file.name,

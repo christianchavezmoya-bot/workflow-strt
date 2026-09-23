@@ -231,11 +231,16 @@ async function getCachedDocumentBlob(downloadUrl: string): Promise<Blob | null> 
 
 async function cacheDocumentBlob(downloadUrl: string, blob: Blob, record?: Pick<DocumentRecord, "contentType" | "fileSize">): Promise<Blob> {
   const contentType = blob.type || record?.contentType || "application/octet-stream";
+  // Documents are shared, many-to-many with assets (assetDocumentLinkService) — never
+  // project-scoped at write time. documentId is the real server id, used later for the
+  // reference-count check at project-discard time (Phase 1F).
   const storedValue = await mediaStore.persistMediaValue(
     new Blob([await blob.arrayBuffer()], { type: contentType }),
     "document",
     "document",
     downloadUrl,
+    undefined,
+    { documentId: extractDocumentIdFromDownloadUrl(downloadUrl) ?? undefined, shared: true },
   );
   await offlineStore.saveCache(documentFileCacheKey(downloadUrl), {
     downloadUrl,

@@ -239,6 +239,19 @@ interface CommtracDB extends DBSchema {
     key: string;
     value: PendingFaultReportRecord;
   };
+  storage_manifest: {
+    key: string;
+    value: StorageManifestEntry;
+    indexes: {
+      by_category: string;
+      by_project: string;
+      by_asset: string;
+      by_workflow_run: string;
+      by_issue: string;
+      by_config: string;
+      by_document: string;
+    };
+  };
 }
 
 /** A fault report awaiting submission. `payload` is the request body sent verbatim. */
@@ -251,10 +264,62 @@ export interface PendingFaultReportRecord {
   payload: Record<string, unknown>;
 }
 
+// ── Storage manifest (offline storage management — Phase 1B) ───────────────────
+//
+// A lightweight, additive index over locally-stored binary content, so the Manage Offline
+// Storage screen (and project-discard) never need an O(number-of-files) Filesystem walk on
+// open. Populated going forward by mediaStore.ts (CAPTURED_MEDIA + DOCUMENT, via
+// persistMediaValue) and configMediaCache.ts (CONFIG_MEDIA). Files written before this store
+// existed are NOT migrated/backfilled eagerly — see offlineStorageService.ts's lazy backfill,
+// which discovers a legacy reference the next time it is naturally read and stats it in the
+// background. Never treat an absent manifest entry as "this file doesn't exist" — it may simply
+// predate the manifest.
+export type StorageManifestCategory = "CAPTURED_MEDIA" | "CONFIG_MEDIA" | "DOCUMENT" | "REPORT" | "OTHER";
+
+export interface StorageManifestEntry {
+  /** Stable id: for CAPTURED_MEDIA/DOCUMENT the mediaStore mediaId; for CONFIG_MEDIA
+   *  `${configId}:${mediaId}`; for cached documents the documentFileCacheKey. */
+  id: string;
+  category: StorageManifestCategory;
+  /** Filesystem path (native) or the IndexedDB `cache` key it is embedded under (web fallback). */
+  path: string;
+  /** Where the bytes actually live — see mediaStore.ts's native/web split in the audit. */
+  locationKind: "filesystem" | "indexeddb-cache";
+  /** ACTUAL binary bytes — never a base64 string length. See src/utils/byteSize.ts. */
+  sizeBytes: number;
+  mimeType?: string;
+  /** Best-effort direct attribution, set only when free to compute at write time. Absent here
+   *  does NOT mean "unattributable" — offlineStorageService resolves projectId lazily via
+   *  workflowRunId/assetId joins against the already-indexed entity stores when this is unset. */
+  projectId?: string;
+  assetId?: string;
+  workflowRunId?: string;
+  issueId?: string;
+  configId?: string;
+  documentId?: string;
+  /** True for content that is legitimately shared across projects (config reference media,
+   *  documents linked from more than one asset) — see the dependency graph in the audit. Such
+   *  entries must survive a single project's discard; only reference-counting at discard time
+   *  (not this flag alone) proves it's safe to actually delete one. */
+  shared: boolean;
+  createdAt: string;
+  /** Set by the lazy-backfill pass when a legacy (pre-manifest) file is discovered and stat'd. */
+  lastVerifiedAt?: string;
+}
+
 // ── Singleton ─────────────────────────────────────────────────────────────────
 
 let _db: IDBPDatabase<CommtracDB> | null = null;
 let _dbOpenPerfStarted = false;
+
+/** Test-only: closes and drops the cached handle so the next getDB() call re-opens a fresh
+ *  connection (real schema-upgrade tests delete/recreate the underlying database between runs
+ *  and must not reuse a stale in-memory handle). Never called from production code. */
+export function __resetDbHandleForTests(): void {
+  _db?.close();
+  _db = null;
+  _dbOpenPerfStarted = false;
+}
 
 export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   if (_db) return _db;
@@ -276,7 +341,9 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
   // v2 (schema version 2) adds offline-bootstrap stores: workflow_assignments,
   // features, reference_data, config_media. The upgrade is additive and
   // idempotent so existing v1 databases migrate without data loss.
-  _db = await openDB<CommtracDB>("commtrac_offline_v2", 4, {
+  // v5 adds storage_manifest (offline storage management, Phase 1B) — additive only;
+  // every existing store/record from v1-v4 is left completely untouched by this upgrade.
+  _db = await openDB<CommtracDB>("commtrac_offline_v2", 5, {
     upgrade(db, oldVersion) {
       if (!db.objectStoreNames.contains("cache")) {
         db.createObjectStore("cache", { keyPath: "key" });
@@ -328,6 +395,16 @@ export async function getDB(): Promise<IDBPDatabase<CommtracDB>> {
       }
       if (oldVersion < 4 && !db.objectStoreNames.contains("fault_reports_pending")) {
         db.createObjectStore("fault_reports_pending", { keyPath: "id" });
+      }
+      if (oldVersion < 5 && !db.objectStoreNames.contains("storage_manifest")) {
+        const store = db.createObjectStore("storage_manifest", { keyPath: "id" });
+        store.createIndex("by_category", "category");
+        store.createIndex("by_project", "projectId");
+        store.createIndex("by_asset", "assetId");
+        store.createIndex("by_workflow_run", "workflowRunId");
+        store.createIndex("by_issue", "issueId");
+        store.createIndex("by_config", "configId");
+        store.createIndex("by_document", "documentId");
       }
     },
   });
@@ -839,6 +916,16 @@ export async function entityGetAllProjects(): Promise<unknown[]> {
   } catch { return []; }
 }
 
+/** Single indexed project lookup (offline storage management — Phase 1E). Returns the full
+ *  local record, including `dirty`, which entityGetAllProjects()'s callers don't need but the
+ *  project-discard sync-safety check does. */
+export async function entityGetProjectRecord(id: string): Promise<ProjectRecord | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("projects", id)) ?? null;
+  } catch { return null; }
+}
+
 // ── Asset entity helpers ──────────────────────────────────────────────────────
 
 export async function entityPutAsset(record: { id: string; productId: string; projectId: string; data: unknown; dirty?: boolean }): Promise<void> {
@@ -978,6 +1065,16 @@ export async function entityGetAssetsByProject(projectId: string): Promise<unkno
   } catch { return []; }
 }
 
+/** Full records (id/dirty, not just .data) for one project — offline storage management
+ *  (Phase 1E sync-safety check, Phase 1F project-scoped cascade). Uses the existing by_project
+ *  index, never a full-table scan. */
+export async function entityGetAssetRecordsByProject(projectId: string): Promise<AssetRecord[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("assets", "by_project", projectId);
+  } catch { return []; }
+}
+
 export async function entityGetAllAssets(): Promise<unknown[]> {
   try {
     const db = await getDB();
@@ -1073,6 +1170,14 @@ export async function entityGetIssuesByProject(projectId: string): Promise<unkno
   } catch { return []; }
 }
 
+/** Full records (id/dirty, not just .data) for one project — see entityGetAssetRecordsByProject. */
+export async function entityGetIssueRecordsByProject(projectId: string): Promise<IssueRecord[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("issues", "by_project", projectId);
+  } catch { return []; }
+}
+
 export async function entityGetAllIssues(): Promise<unknown[]> {
   try {
     const db = await getDB();
@@ -1124,6 +1229,14 @@ export async function entityGetWorkflowRunsByProject(projectId: string): Promise
     const db = await getDB();
     const records = await db.getAllFromIndex("workflow_runs", "by_project", projectId);
     return records.map((r) => r.data);
+  } catch { return []; }
+}
+
+/** Full records (id/dirty, not just .data) for one project — see entityGetAssetRecordsByProject. */
+export async function entityGetWorkflowRunRecordsByProject(projectId: string): Promise<WorkflowRunRecord[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("workflow_runs", "by_project", projectId);
   } catch { return []; }
 }
 
@@ -1337,4 +1450,83 @@ export async function configMediaPut(record: Omit<ConfigMediaRecord, "syncedAt">
     const db = await getDB();
     await db.put("config_media", { ...record, syncedAt: new Date().toISOString() });
   } catch { /* ignore */ }
+}
+
+// ── Storage manifest helpers ──────────────────────────────────────────────────
+
+export async function storageManifestPut(entry: StorageManifestEntry): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.put("storage_manifest", entry);
+  } catch { /* ignore — bookkeeping must never block the write it's describing */ }
+}
+
+export async function storageManifestGet(id: string): Promise<StorageManifestEntry | null> {
+  try {
+    const db = await getDB();
+    return (await db.get("storage_manifest", id)) ?? null;
+  } catch { return null; }
+}
+
+export async function storageManifestDelete(id: string): Promise<void> {
+  try {
+    const db = await getDB();
+    await db.delete("storage_manifest", id);
+  } catch { /* ignore */ }
+}
+
+export async function storageManifestGetAll(): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAll("storage_manifest");
+  } catch { return []; }
+}
+
+export async function storageManifestGetByCategory(category: StorageManifestCategory): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_category", category);
+  } catch { return []; }
+}
+
+export async function storageManifestGetByProject(projectId: string): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_project", projectId);
+  } catch { return []; }
+}
+
+export async function storageManifestGetByWorkflowRun(workflowRunId: string): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_workflow_run", workflowRunId);
+  } catch { return []; }
+}
+
+export async function storageManifestGetByIssue(issueId: string): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_issue", issueId);
+  } catch { return []; }
+}
+
+export async function storageManifestGetByAsset(assetId: string): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_asset", assetId);
+  } catch { return []; }
+}
+
+export async function storageManifestGetByConfig(configId: string): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_config", configId);
+  } catch { return []; }
+}
+
+export async function storageManifestGetByDocument(documentId: string): Promise<StorageManifestEntry[]> {
+  try {
+    const db = await getDB();
+    return await db.getAllFromIndex("storage_manifest", "by_document", documentId);
+  } catch { return []; }
 }

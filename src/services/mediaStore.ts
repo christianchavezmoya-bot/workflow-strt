@@ -3,7 +3,28 @@ import type { OfflineMediaRef } from "./offlineStore";
 import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { randomId } from "../utils/randomId";
+import { base64ByteLength } from "../utils/byteSize";
+import { storageManifestGet, storageManifestPut, type StorageManifestEntry } from "./localDB";
 import { MediaMissingError } from "./mediaErrors";
+
+/**
+ * Best-effort attribution passed through to the storage manifest (offline storage management,
+ * Phase 1B). Every field is optional and set only when the caller already has it in scope —
+ * offlineStorageService resolves project attribution lazily via workflowRunId/assetId joins for
+ * entries where it wasn't free to compute here, so omitting a field is never destructive.
+ */
+export interface MediaAttribution {
+  projectId?: string;
+  assetId?: string;
+  workflowRunId?: string;
+  issueId?: string;
+  configId?: string;
+  documentId?: string;
+  /** True for content legitimately shared across projects (e.g. a pre-existing library/asset-
+   *  linked document). Defaults to false — an offline-created, not-yet-linked document is
+   *  exclusively owned by the project/asset that created it until it syncs. */
+  shared?: boolean;
+}
 
 /**
  * Native media filesystem policy:
@@ -62,22 +83,33 @@ async function ensureRoot(): Promise<void> {
   await ensureNativeDataDir(MEDIA_ROOT);
 }
 
+/** Storage-manifest category for a media kind — see StorageManifestCategory in localDB.ts. */
+function categoryForKind(kind: OfflineMediaRef["kind"]): "CAPTURED_MEDIA" | "DOCUMENT" {
+  return kind === "document" ? "DOCUMENT" : "CAPTURED_MEDIA";
+}
+
 async function writeMedia(
   kind: OfflineMediaRef["kind"],
   source: string | Blob,
   linkedToType: OfflineMediaRef["linkedToType"],
   linkedToId: string,
   fileName?: string,
+  attribution?: MediaAttribution,
 ): Promise<OfflineMediaRef> {
   await ensureRoot();
 
-  const dataUrl = typeof source === "string" ? source : await blobToDataUrl(source);
+  // Exact byte size: Blob.size is authoritative when we have the source Blob; a bare base64
+  // string (already a data: URL, e.g. camera capture) needs the exact base64->bytes formula —
+  // never the base64 STRING length, which overstates true bytes by ~33% (src/utils/byteSize.ts).
+  const sourceIsBlob = typeof source !== "string";
+  const dataUrl = sourceIsBlob ? await blobToDataUrl(source) : source;
   const mimeType = mimeFromDataUrl(dataUrl);
   const ext = extFromMime(mimeType);
   const mediaId = randomId();
   const safeName = fileName ?? `${kind}-${mediaId}.${ext}`;
   const path = `${MEDIA_ROOT}/${safeName}`;
   const data = stripDataUrlPrefix(dataUrl);
+  const sizeBytes = sourceIsBlob ? (source as Blob).size : base64ByteLength(data);
 
   await Filesystem.writeFile({
     path,
@@ -86,16 +118,36 @@ async function writeMedia(
     recursive: true,
   });
 
+  const createdAt = new Date().toISOString();
+
+  const manifestEntry: StorageManifestEntry = {
+    id: mediaId,
+    category: categoryForKind(kind),
+    path,
+    locationKind: "filesystem",
+    sizeBytes,
+    mimeType,
+    shared: attribution?.shared ?? false,
+    createdAt,
+    ...(attribution?.projectId ? { projectId: attribution.projectId } : {}),
+    ...(attribution?.assetId ? { assetId: attribution.assetId } : {}),
+    ...(attribution?.workflowRunId ? { workflowRunId: attribution.workflowRunId } : {}),
+    ...(attribution?.issueId ? { issueId: attribution.issueId } : {}),
+    ...(attribution?.configId ? { configId: attribution.configId } : {}),
+    ...(attribution?.documentId ? { documentId: attribution.documentId } : {}),
+  };
+  await storageManifestPut(manifestEntry);
+
   return {
     mediaId,
     kind,
     path,
     mimeType,
     fileName: safeName,
-    size: data.length,
+    size: sizeBytes,
     linkedToType,
     linkedToId,
-    createdAt: new Date().toISOString(),
+    createdAt,
     uploaded: false,
   };
 }
@@ -167,16 +219,16 @@ export interface ResolveUploadPayloadResult<T> {
 }
 
 export const mediaStore = {
-  async savePhoto(source: string | Blob, linkedToType: OfflineMediaRef["linkedToType"], linkedToId: string, fileName?: string) {
-    return await writeMedia("photo", source, linkedToType, linkedToId, fileName);
+  async savePhoto(source: string | Blob, linkedToType: OfflineMediaRef["linkedToType"], linkedToId: string, fileName?: string, attribution?: MediaAttribution) {
+    return await writeMedia("photo", source, linkedToType, linkedToId, fileName, attribution);
   },
 
-  async saveVideo(source: string | Blob, linkedToType: OfflineMediaRef["linkedToType"], linkedToId: string, fileName?: string) {
-    return await writeMedia("video", source, linkedToType, linkedToId, fileName);
+  async saveVideo(source: string | Blob, linkedToType: OfflineMediaRef["linkedToType"], linkedToId: string, fileName?: string, attribution?: MediaAttribution) {
+    return await writeMedia("video", source, linkedToType, linkedToId, fileName, attribution);
   },
 
-  async saveSignature(source: string | Blob, linkedToId: string, fileName?: string) {
-    return await writeMedia("signature", source, "signature", linkedToId, fileName);
+  async saveSignature(source: string | Blob, linkedToId: string, fileName?: string, attribution?: MediaAttribution) {
+    return await writeMedia("signature", source, "signature", linkedToId, fileName, attribution);
   },
 
   async readMedia(path: string, mimeType = "application/octet-stream"): Promise<string> {
@@ -186,10 +238,62 @@ export const mediaStore = {
         directory: Directory.Data,
       });
       const base64 = typeof result.data === "string" ? result.data : "";
+      // Lazy legacy backfill (Phase 1C): this is the generic, universal read path for every
+      // captured-media/document reference resolved from stored JSON (resolveUploadValue,
+      // resolveMediaValue). A file written before the storage manifest existed has no true
+      // mediaId to key against here (the stored reference string carries kind|mimeType|path
+      // only — see parseStoredMediaValue), so a deterministic path-derived id is used instead;
+      // repeated reads of the same legacy file converge on the same manifest row rather than
+      // duplicating it. Category defaults to CAPTURED_MEDIA (the overwhelming majority of ad-hoc
+      // reads through this generic path); configMediaCache.ts backfills CONFIG_MEDIA separately
+      // with its own known configId, since that path knows its true category precisely.
+      this.backfillManifestEntryIfMissing(`legacy:${path}`, path, "CAPTURED_MEDIA");
       return toDataUrl(base64, mimeType);
     } catch (error) {
       throw new MediaMissingError(path, { cause: error });
     }
+  },
+
+  /**
+   * Lazy legacy-file backfill (Phase 1C): called on the natural read path for a media reference
+   * that predates the storage manifest. Fire-and-forget, never blocks or throws into the caller —
+   * a failed/slow stat here must never break an actual media read. Never re-stats an already
+   *-known entry (cheap existence check first).
+   */
+  backfillManifestEntryIfMissing(
+    mediaId: string,
+    path: string,
+    category: "CAPTURED_MEDIA" | "CONFIG_MEDIA" | "DOCUMENT",
+    attribution?: MediaAttribution,
+  ): void {
+    if (!isMobileNativePlatform()) return;
+    void (async () => {
+      try {
+        const existing = await storageManifestGet(mediaId);
+        if (existing) return;
+        const stat = await Filesystem.stat({ path, directory: Directory.Data });
+        const now = new Date().toISOString();
+        await storageManifestPut({
+          id: mediaId,
+          category,
+          path,
+          locationKind: "filesystem",
+          sizeBytes: stat.size,
+          shared: category === "CONFIG_MEDIA",
+          createdAt: stat.ctime ? new Date(stat.ctime).toISOString() : now,
+          lastVerifiedAt: now,
+          ...(attribution?.projectId ? { projectId: attribution.projectId } : {}),
+          ...(attribution?.assetId ? { assetId: attribution.assetId } : {}),
+          ...(attribution?.workflowRunId ? { workflowRunId: attribution.workflowRunId } : {}),
+          ...(attribution?.issueId ? { issueId: attribution.issueId } : {}),
+          ...(attribution?.configId ? { configId: attribution.configId } : {}),
+          ...(attribution?.documentId ? { documentId: attribution.documentId } : {}),
+        });
+      } catch {
+        // Missing/unreadable file, or a race with a concurrent write — non-fatal, will be
+        // retried the next time this same path is naturally read.
+      }
+    })();
   },
 
   async deleteMedia(path: string): Promise<void> {
@@ -225,20 +329,24 @@ export const mediaStore = {
     linkedToType: OfflineMediaRef["linkedToType"],
     linkedToId: string,
     fileName?: string,
+    attribution?: MediaAttribution,
   ): Promise<string> {
     if (typeof source === "string" && this.isStoredMediaValue(source)) {
       return source;
     }
     if (!this.isNativeFilesystemAvailable()) {
+      // Web fallback: no separate Filesystem/manifest entry — the bytes are embedded directly
+      // into the owning JSON blob, so they are already accounted for when that record's own
+      // IndexedDB value size is measured (see offlineStorageService.ts).
       return typeof source === "string" ? source : await blobToDataUrl(source);
     }
     const ref = kind === "photo"
-      ? await this.savePhoto(source, linkedToType, linkedToId, fileName)
+      ? await this.savePhoto(source, linkedToType, linkedToId, fileName, attribution)
       : kind === "video"
-        ? await this.saveVideo(source, linkedToType, linkedToId, fileName)
+        ? await this.saveVideo(source, linkedToType, linkedToId, fileName, attribution)
         : kind === "signature"
-          ? await this.saveSignature(source, linkedToId, fileName)
-          : await writeMedia("document", source, linkedToType, linkedToId, fileName);
+          ? await this.saveSignature(source, linkedToId, fileName, attribution)
+          : await writeMedia("document", source, linkedToType, linkedToId, fileName, attribution);
     return toStoredMediaValue(ref);
   },
 
@@ -257,7 +365,7 @@ export const mediaStore = {
    * Persist resolution photo blobs in issuesJson to the filesystem before
    * queuing offline. Returns the original string when nothing changed.
    */
-  async persistIssueMediaInJson(issuesJson: string, scopeId: string): Promise<string> {
+  async persistIssueMediaInJson(issuesJson: string, scopeId: string, attribution?: MediaAttribution): Promise<string> {
     if (!this.isNativeFilesystemAvailable()) return issuesJson;
     let issues: Array<{ id?: string; resolutionMedia?: string[] }>;
     try {
@@ -285,6 +393,8 @@ export const mediaStore = {
               "photo",
               "issue-resolution",
               `${scopeId}:${issueKey}:${mediaIndex}`,
+              undefined,
+              { ...attribution, issueId: issue.id ?? issueKey },
             );
           }),
         );
@@ -298,7 +408,7 @@ export const mediaStore = {
   /**
    * Persist capture photo/video blobs in stepResultsJson before queuing offline.
    */
-  async persistStepMediaInJson(stepResultsJson: string, scopeId: string): Promise<string> {
+  async persistStepMediaInJson(stepResultsJson: string, scopeId: string, attribution?: MediaAttribution): Promise<string> {
     if (!this.isNativeFilesystemAvailable()) return stepResultsJson;
     let steps: Array<{ stepId?: string; values?: Record<string, string> }>;
     try {
@@ -316,7 +426,7 @@ export const mediaStore = {
         const stepKey = step.stepId ?? String(stepIndex);
         const valueEntries = await Promise.all(
           Object.entries(step.values).map(async ([inputId, raw]) => {
-            const persisted = await this.persistCaptureValueMedia(raw, scopeId, stepKey, inputId);
+            const persisted = await this.persistCaptureValueMedia(raw, scopeId, stepKey, inputId, attribution);
             if (persisted !== raw) changed = true;
             return [inputId, persisted] as const;
           }),
@@ -333,11 +443,12 @@ export const mediaStore = {
     scopeId: string,
     stepKey: string,
     inputId: string,
+    attribution?: MediaAttribution,
   ): Promise<string> {
     if (this.isStoredMediaValue(value)) return value;
     if (value.startsWith("data:") || value.startsWith("blob:")) {
       const kind = value.startsWith("data:video") ? "video" : "photo";
-      return this.persistMediaValue(value, kind, "run-step", `${scopeId}:${stepKey}:${inputId}`);
+      return this.persistMediaValue(value, kind, "run-step", `${scopeId}:${stepKey}:${inputId}`, undefined, attribution);
     }
     try {
       const parsed = JSON.parse(value);
@@ -355,6 +466,8 @@ export const mediaStore = {
             kind,
             "run-step",
             `${scopeId}:${stepKey}:${inputId}:${index}`,
+            undefined,
+            attribution,
           );
         }),
       );
