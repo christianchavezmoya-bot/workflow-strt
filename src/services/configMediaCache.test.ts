@@ -4,6 +4,7 @@ const filesystemMocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   getUri: vi.fn(),
   writeFile: vi.fn(),
+  stat: vi.fn(),
 }));
 
 const capacitorMocks = vi.hoisted(() => ({
@@ -19,6 +20,8 @@ const localDBMocks = vi.hoisted(() => ({
   configMediaGet: vi.fn(),
   configMediaGetByConfig: vi.fn(),
   configMediaPut: vi.fn(),
+  storageManifestGet: vi.fn(),
+  storageManifestPut: vi.fn(),
 }));
 
 const localMediaServerMocks = vi.hoisted(() => ({
@@ -86,6 +89,7 @@ beforeEach(() => {
   capacitorMocks.convertFileSrc.mockImplementation((uri: string) => `capacitor://localhost/_capacitor_file_${uri}`);
   capacitorMocks.getPlatform.mockReturnValue("android");
   localDBMocks.configMediaGetByConfig.mockResolvedValue([]);
+  localDBMocks.storageManifestGet.mockResolvedValue(null);
 });
 
 // These tests run with Capacitor.getPlatform() === "android" (the beforeEach default),
@@ -387,5 +391,106 @@ describe("configMediaCache offline video hydration (iOS local media server path)
 
     expect(result.media[0].url).toBe("http://127.0.0.1:54321/media/abc-token");
     expect(localDBMocks.configMediaPut).not.toHaveBeenCalled();
+  });
+});
+
+// ── Offline storage management (Phase 1B/1C): storage manifest bookkeeping ─────────────────
+describe("configMediaCache storage manifest bookkeeping", () => {
+  it("L. prefetchConfig writes a CONFIG_MEDIA manifest entry with the ACTUAL blob byte size (not base64 length), shared: true", async () => {
+    const bytes = "x".repeat(999); // deliberately NOT a multiple of base64's 4-char grouping story
+    const blob = new Blob([bytes], { type: "image/jpeg" });
+    expect(blob.size).toBe(999);
+
+    localDBMocks.configMediaGet.mockResolvedValue(undefined); // not already downloaded
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, blob: () => Promise.resolve(blob) }));
+
+    const photoItem: MediaItem = {
+      id: "photo-9",
+      type: "image",
+      name: "Diagram",
+      size: 999,
+      mime: "image/jpeg",
+      url: "/api/workflow-configs/wf-1/media/photo-9/file",
+      createdAt: Date.now(),
+    };
+
+    await configMediaCache.prefetchConfig({ id: "wf-1", mediaJson: JSON.stringify([photoItem]) });
+
+    expect(localDBMocks.storageManifestPut).toHaveBeenCalledTimes(1);
+    const entry = localDBMocks.storageManifestPut.mock.calls[0][0];
+    expect(entry).toMatchObject({
+      id: "wf-1:photo-9",
+      category: "CONFIG_MEDIA",
+      locationKind: "filesystem",
+      sizeBytes: 999, // exact — proves the fix reads blob.size, never the base64 string length
+      configId: "wf-1",
+      shared: true,
+    });
+    expect(entry.projectId).toBeUndefined(); // config media is never project-scoped at write time
+
+    vi.unstubAllGlobals();
+  });
+
+  it("M. hydrateWorkflowMedia lazily backfills a manifest entry for a legacy (pre-manifest) cached video, without blocking hydration", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
+    filesystemMocks.getUri.mockResolvedValue({ uri: "file:///var/mobile/offline-config-media/wf-1/video-1.mp4" });
+    filesystemMocks.stat.mockResolvedValue({ size: 555_000, ctime: 1735689600000 });
+    localDBMocks.storageManifestGet.mockResolvedValue(null); // no manifest row yet — legacy file
+
+    const videoItem: MediaItem = {
+      id: "video-1",
+      type: "video",
+      name: "Panel install",
+      size: 1024,
+      mime: "video/mp4",
+      url: "/api/workflow-configs/wf-1/media/video-1/file",
+      createdAt: Date.now(),
+    };
+    const result = await configMediaCache.hydrateWorkflowMedia(makeWorkflow([videoItem]));
+
+    // Hydration itself must not be blocked/altered by the backfill.
+    expect(result.media[0].url).toContain("capacitor://localhost/_capacitor_file_");
+
+    // Backfill is fire-and-forget (mediaStore.backfillManifestEntryIfMissing is not awaited by
+    // its caller) — flush pending microtasks before asserting it ran.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(localDBMocks.storageManifestGet).toHaveBeenCalledWith(videoRecord.id);
+    expect(localDBMocks.storageManifestPut).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: videoRecord.id,
+        category: "CONFIG_MEDIA",
+        path: videoRecord.localPath,
+        sizeBytes: 555_000,
+        configId: "wf-1",
+        shared: true,
+      }),
+    );
+  });
+
+  it("N. does NOT re-backfill when a manifest entry already exists for that id", async () => {
+    localDBMocks.configMediaGetByConfig.mockResolvedValue([videoRecord]);
+    localDBMocks.configMediaGet.mockResolvedValue(videoRecord);
+    filesystemMocks.getUri.mockResolvedValue({ uri: "file:///var/mobile/offline-config-media/wf-1/video-1.mp4" });
+    
+    localDBMocks.storageManifestGet.mockResolvedValue({ id: videoRecord.id, category: "CONFIG_MEDIA" });
+
+    const videoItem: MediaItem = {
+      id: "video-1",
+      type: "video",
+      name: "Panel install",
+      size: 1024,
+      mime: "video/mp4",
+      url: "/api/workflow-configs/wf-1/media/video-1/file",
+      createdAt: Date.now(),
+    };
+    await configMediaCache.hydrateWorkflowMedia(makeWorkflow([videoItem]));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(filesystemMocks.stat).not.toHaveBeenCalled();
+    expect(localDBMocks.storageManifestPut).not.toHaveBeenCalled();
   });
 });

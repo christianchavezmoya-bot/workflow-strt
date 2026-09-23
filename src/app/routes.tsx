@@ -21,6 +21,7 @@ const DocumentsPage = lazyWithChunkReload(() => import("../features/documents/Do
 const TipsAndTricksPage = lazyWithChunkReload(() => import("../features/tips/TipsAndTricksPage"));
 const ProfileWizard = lazyWithChunkReload(() => import("../features/profile/ProfileWizard"));
 const Settings = lazyWithChunkReload(() => import("../features/settings/Settings"));
+const OfflineStorageScreen = lazyWithChunkReload(() => import("../features/settings/OfflineStorageScreen"));
 const Login = lazyWithChunkReload(() => import("../features/auth/Login"));
 const ResetPassword = lazyWithChunkReload(() => import("../features/auth/ResetPassword"));
 const ExternalSignPage = lazyWithChunkReload(() => import("../features/sign/ExternalSignPage"));
@@ -75,6 +76,18 @@ const SettingsRoute = () => {
 // Every guard below waits for permissionsReady for the same reason SettingsRoute does:
 // usePermissions returns a Viewer placeholder until the role config settles, so deciding
 // before then bounces authorised users off their own pages on a cold load.
+// Offline storage management is meaningful only on the native app (Capacitor Filesystem +
+// IndexedDB manifest) — on web there is nothing device-specific to manage, so this redirects
+// back to Settings rather than showing an empty/misleading screen. No extra permission is
+// required beyond being signed in: every field user manages their own device's storage, this
+// is not an admin function.
+const OfflineStorageRoute = () => {
+  if (!isMobileNativePlatform()) {
+    return <Navigate to="/settings" replace />;
+  }
+  return <OfflineStorageScreen />;
+};
+
 const TimeAnalyticsRoute = () => {
   const can = usePermissions();
   if (isMobileNativePlatform()) {
@@ -161,6 +174,7 @@ const AppRoutes = () => {
         <Route path="/time-analytics" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
         <Route path="/time-analytics/:view" element={<LazyRoute><TimeAnalyticsRoute /></LazyRoute>} />
         <Route path="/settings" element={<LazyRoute><SettingsRoute /></LazyRoute>} />
+        <Route path="/settings/offline-storage" element={<LazyRoute><OfflineStorageRoute /></LazyRoute>} />
         <Route path="/profile" element={<LazyRoute><ProfileWizard /></LazyRoute>} />
         {BOM_MODULE_ENABLED && (
           <Route

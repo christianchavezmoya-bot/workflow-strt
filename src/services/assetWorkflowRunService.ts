@@ -1499,9 +1499,10 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
-      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId);
+      const attribution = { projectId: cachedRun.projectId, assetId: cachedRun.assetId, workflowRunId: resolvedRunId };
+      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId, attribution);
       const persistedIssues = issuesJson
-        ? await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId)
+        ? await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId, attribution)
         : undefined;
 
       const now = new Date().toISOString();
@@ -1684,8 +1685,9 @@ export const assetWorkflowRunService = {
 
       assertNoBlockingIssuesForComplete(issuesJson);
 
-      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId);
-      const persistedIssues = await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId);
+      const attribution = { projectId: cachedRun.projectId, assetId: cachedRun.assetId, workflowRunId: resolvedRunId };
+      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId, attribution);
+      const persistedIssues = await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId, attribution);
 
       const now = new Date().toISOString();
 
@@ -1805,7 +1807,9 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
-      const persistedIssuesJson = await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId);
+      const persistedIssuesJson = await mediaStore.persistIssueMediaInJson(issuesJson, resolvedRunId, {
+        projectId: cachedRun.projectId, assetId: cachedRun.assetId, workflowRunId: resolvedRunId,
+      });
       const now = new Date().toISOString();
       const offlineRun: OfflineRun = {
         ...cachedRun,
@@ -2026,7 +2030,9 @@ export const assetWorkflowRunService = {
       const cachedRun = await getCachedRun(runId);
       if (!cachedRun) throw error;
 
-      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId);
+      const persistedStepResults = await mediaStore.persistStepMediaInJson(stepResultsJson, resolvedRunId, {
+        projectId: cachedRun.projectId, assetId: cachedRun.assetId, workflowRunId: resolvedRunId,
+      });
 
       const now = new Date().toISOString();
       const offlineRun: OfflineRun = {
@@ -2108,6 +2114,7 @@ export const assetWorkflowRunService = {
             "run-step",
             `${resolvedRunId}:${upload.stepId}:${upload.inputId}:${index}`,
             upload.file.name,
+            { projectId: cachedRun.projectId, assetId: cachedRun.assetId, workflowRunId: resolvedRunId },
           );
           return {
             fileName: upload.file.name,

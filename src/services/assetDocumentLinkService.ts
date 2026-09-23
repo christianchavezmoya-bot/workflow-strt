@@ -57,6 +57,20 @@ async function getCachedLinks(assetId: string): Promise<AssetDocumentLink[]> {
   return (await offlineStore.getCache<AssetDocumentLink[]>(linksCacheKey(assetId))) ?? [];
 }
 
+/** Every assetId whose document links have EVER been cached locally — the completeness signal
+ *  projectDiscardService.ts needs to tell "no cached link references this document" apart from
+ *  "this asset's links were simply never fetched" (an unknown, not proof of anything). */
+export async function getCachedLinksIndexAssetIds(): Promise<string[]> {
+  const index = (await offlineStore.getCache<Record<string, true>>(LINKS_INDEX_KEY)) ?? {};
+  return Object.keys(index);
+}
+
+/** Public accessor for a specific asset's cached document links (offline storage management —
+ *  shared-document reference-count check). Never fetches from the network. */
+export async function getCachedLinksForAsset(assetId: string): Promise<AssetDocumentLink[]> {
+  return getCachedLinks(assetId);
+}
+
 export async function saveCachedLinks(assetId: string, links: AssetDocumentLink[]): Promise<void> {
   const index = (await offlineStore.getCache<Record<string, true>>(LINKS_INDEX_KEY)) ?? {};
   if (!index[assetId]) {
@@ -299,7 +313,7 @@ export const assetDocumentLinkService = {
 
       const temporaryDocumentId = `${OFFLINE_DOCUMENT_PREFIX}${randomId()}`;
       const temporaryLinkId = `${OFFLINE_LINK_PREFIX}${randomId()}`;
-      const fileData = await mediaStore.persistMediaValue(file, "document", "document", temporaryDocumentId, file.name);
+      const fileData = await mediaStore.persistMediaValue(file, "document", "document", temporaryDocumentId, file.name, { assetId });
       const syntheticDocument = buildSyntheticDocument(
         temporaryDocumentId,
         name ?? file.name,

@@ -79,7 +79,7 @@ export const signatureService = {
 
     const resolvedRunId = await offlineStore.getMappedId("workflow-run", runId) ?? runId;
     const signatureData = payload.signatureData
-      ? await mediaStore.persistMediaValue(payload.signatureData, "signature", "signature", `${runId}:${payload.signerRole}`)
+      ? await mediaStore.persistMediaValue(payload.signatureData, "signature", "signature", `${runId}:${payload.signerRole}`, undefined, { workflowRunId: resolvedRunId })
       : undefined;
     const queuedPayload: SubmitSignaturePayload = { ...payload, signatureData };
 

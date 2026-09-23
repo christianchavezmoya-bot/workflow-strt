@@ -2,11 +2,12 @@ import { Capacitor } from "@capacitor/core";
 import { Directory, Filesystem } from "@capacitor/filesystem";
 import type { WorkflowConfig } from "../types/workflowConfig";
 import type { MediaItem, Workflow } from "../types/workflow";
-import { configMediaGet, configMediaGetByConfig, configMediaPut, type ConfigMediaRecord } from "./localDB";
+import { configMediaGet, configMediaGetByConfig, configMediaPut, storageManifestPut, type ConfigMediaRecord } from "./localDB";
 import { ensureNativeDataDir } from "../utils/ensureNativeDataDir";
 import { isMobileNativePlatform } from "../utils/platform";
 import { resolveMediaUrl } from "../utils/mediaUrl";
 import { LocalMediaServer } from "./nativePlugins/localMediaServer";
+import { mediaStore } from "./mediaStore";
 
 /**
  * configMediaCache — downloads a workflow config's (or legacy workflow
@@ -181,6 +182,14 @@ async function hydrateMediaItems(sourceId: string, media: MediaItem[]): Promise<
       const record = await configMediaGet(`${sourceId}:${item.id}`);
       if (!record) return item;
 
+      // Lazy legacy backfill (Phase 1C): a config_media row written before the storage
+      // manifest existed has no manifest entry yet — discover and stat it here, on this
+      // natural read path, never as a blocking startup scan.
+      mediaStore.backfillManifestEntryIfMissing(record.id, record.localPath, "CONFIG_MEDIA", {
+        configId: record.configId,
+        shared: true,
+      });
+
       const localUrl = isVideoRecord(item, record)
         ? await readCachedVideoUrl(record)
         : await readCachedDataUrl(record);
@@ -232,7 +241,7 @@ export const configMediaCache = {
       try {
         const resp = await fetch(absoluteUrl, { mode: "cors" });
         if (!resp.ok) continue;
-        const blob = await resp.blob();
+        const blob = await resp.blob(); // blob.size is the ACTUAL byte count — never the base64 length below
         const { base64, mime } = await blobToBase64(blob);
         await ensureDir(config.id);
         const path = `${CONFIG_MEDIA_ROOT}/${config.id}/${item.id}.${extFromMime(mime)}`;
@@ -244,6 +253,19 @@ export const configMediaCache = {
           remoteUrl: item.url,
           localPath: path,
           mimeType: mime,
+        });
+        // Config reference media is shared across every project that uses this product/config
+        // (see the offline-storage-management dependency graph) — never project-scoped.
+        await storageManifestPut({
+          id: recordId,
+          category: "CONFIG_MEDIA",
+          path,
+          locationKind: "filesystem",
+          sizeBytes: blob.size,
+          mimeType: mime,
+          configId: config.id,
+          shared: true,
+          createdAt: new Date().toISOString(),
         });
       } catch {
         // Network/quota failure — non-fatal, will retry on next bootstrap.
