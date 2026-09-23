@@ -8,18 +8,26 @@ import {
   Button,
   Chip,
   CircularProgress,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
   FormControlLabel,
   Stack,
   Switch,
   Typography,
 } from "@mui/material";
 import { useCallback, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useOfflineMode } from "../../contexts/OfflineModeContext";
 import { useSyncEngine } from "../../hooks/useSyncEngine";
 import {
   offlineBootstrapService,
   type BootstrapStatus,
 } from "../../services/offlineBootstrapService";
+import { getOfflineStorageOverview } from "../../services/offlineStorageService";
+import { shouldWarnBeforeForcedDownload } from "../../utils/storageHealth";
+import { formatStorageBytes } from "../../utils/formatStorageBytes";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { getManualDownloadOnly, setManualDownloadOnly } from "../../utils/syncPreferences";
 
@@ -33,11 +41,13 @@ function formatWhen(date: Date | null): string {
 }
 
 export default function OfflineReadinessPanel() {
+  const navigate = useNavigate();
   const { isManualOffline, isOfflineMode, goOffline, goOnline } = useOfflineMode();
   const { triggerSync, canSync, syncing } = useSyncEngine();
   const [status, setStatus] = useState<BootstrapStatus | null>(null);
   const [retrying, setRetrying] = useState(false);
   const [manualDownloadOnly, setManualDownloadOnlyState] = useState(getManualDownloadOnly);
+  const [storageWarningBytes, setStorageWarningBytes] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     const next = await offlineBootstrapService.getStatus();
@@ -64,8 +74,7 @@ export default function OfflineReadinessPanel() {
   const summary = status.summary;
   const running = status.isRunning || retrying || syncing;
 
-  async function handleRetry() {
-    if (!canSync) return;
+  async function runForcedDownload() {
     setRetrying(true);
     try {
       await triggerSync({ forceDownload: true });
@@ -73,6 +82,27 @@ export default function OfflineReadinessPanel() {
       setRetrying(false);
       await reload();
     }
+  }
+
+  /**
+   * Phase 1H: this button's "forceDownload: true" call removes the normal byte/file prefetch
+   * caps entirely (getBootstrapPrefetchLimits(force=true)), so it is the one place a routine tap
+   * can meaningfully worsen an already-tight device. Uploading pending local work is NEVER
+   * gated here — reconnectAndFlushNow() inside triggerSync() always runs regardless of this
+   * check; this only ever delays/confirms the DOWNLOAD portion, and only at HIGH/CRITICAL.
+   */
+  async function handleRetry() {
+    if (!canSync) return;
+    try {
+      const overview = await getOfflineStorageOverview();
+      if (shouldWarnBeforeForcedDownload(overview.health.level)) {
+        setStorageWarningBytes(overview.nGoUsageBytes);
+        return;
+      }
+    } catch {
+      // Health check itself failing must never block a sync the user asked for.
+    }
+    await runForcedDownload();
   }
 
   return (
@@ -185,7 +215,45 @@ export default function OfflineReadinessPanel() {
         >
           {status.isStale ? "Sync & download" : "Refresh field data"}
         </Button>
+
+        <Button
+          variant="text"
+          size="small"
+          onClick={() => navigate("/settings/offline-storage")}
+          sx={{ alignSelf: "flex-start" }}
+        >
+          Manage offline storage
+        </Button>
       </Stack>
+
+      <Dialog open={storageWarningBytes != null} onClose={() => setStorageWarningBytes(null)}>
+        <DialogTitle>Storage is running low</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2">
+            N-Go is using {storageWarningBytes != null ? formatStorageBytes(storageWarningBytes) : ""} of storage
+            on this device. Downloading more field data now may use significantly more space. Your pending
+            uploads will still be sent regardless of this download.
+          </Typography>
+          <Typography variant="body2" sx={{ mt: 1.5 }}>
+            You can free space first from Manage Offline Storage, or continue anyway.
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setStorageWarningBytes(null)}>Cancel</Button>
+          <Button
+            onClick={() => navigate("/settings/offline-storage")}
+            variant="outlined"
+          >
+            Manage Offline Storage
+          </Button>
+          <Button
+            onClick={() => { setStorageWarningBytes(null); void runForcedDownload(); }}
+            variant="contained"
+          >
+            Continue Anyway
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 }
