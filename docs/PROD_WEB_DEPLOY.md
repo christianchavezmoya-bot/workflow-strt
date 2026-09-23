@@ -41,7 +41,62 @@ node scripts/deploy-prod-web.mjs cleanup --apply --expect-count <N>
 the live analysis is verified safe, every referenced chunk was readable, and `--expect-count` equals the
 stale count found.
 
+## Storage retention — noncurrent version lifecycle
+
+`infra/s3/strata-ngo-web-prod-lifecycle.json` (see `infra/s3/README.md` for the full rationale) is the
+reviewed lifecycle configuration for `strata-ngo-web-prod`: it expires **noncurrent** versions under
+`assets/` after 60 days, and leaves current versions and the three root files (`index.html`,
+`build-manifest.json`, `favicon.png`) untouched at any age. It exists in this repo as a proposal/record
+— nothing applies it automatically; a human runs the commands below after review.
+
+**Pre-apply: back up whatever is currently configured** (expect `NoSuchLifecycleConfiguration` on a
+bucket with no existing rule — that absence of output *is* the backup):
+```bash
+aws s3api get-bucket-lifecycle-configuration --bucket strata-ngo-web-prod \
+  --profile strata-agent --region ap-southeast-2 \
+  > lifecycle-backup-$(date +%Y%m%d).json \
+  || echo "no pre-existing lifecycle configuration (expected)"
+```
+
+**Apply:**
+```bash
+aws s3api put-bucket-lifecycle-configuration --bucket strata-ngo-web-prod \
+  --lifecycle-configuration file://infra/s3/strata-ngo-web-prod-lifecycle.json \
+  --profile strata-agent --region ap-southeast-2
+```
+
+**Read back** — must show exactly one rule, `Enabled`, `Filter.Prefix` = `assets/`,
+`NoncurrentVersionExpiration.NoncurrentDays` = `60`, and no `Expiration`/`Transitions`:
+```bash
+aws s3api get-bucket-lifecycle-configuration --bucket strata-ngo-web-prod \
+  --profile strata-agent --region ap-southeast-2
+```
+
+**Verify versioning is still enabled** (a lifecycle change never touches this, but confirm anyway):
+```bash
+aws s3api get-bucket-versioning --bucket strata-ngo-web-prod \
+  --profile strata-agent --region ap-southeast-2
+```
+
+**Verify current objects are unchanged** (applying a lifecycle rule modifies no object):
+```bash
+aws s3api list-objects-v2 --bucket strata-ngo-web-prod --query 'length(Contents)' \
+  --profile strata-agent --region ap-southeast-2
+```
+
+**Rollback / removal** — deletes the lifecycle configuration entirely (safe: nothing can have expired
+before the bucket is 60 days old, and removal only stops *future* expirations, it cannot un-expire
+anything already gone):
+```bash
+aws s3api delete-bucket-lifecycle --bucket strata-ngo-web-prod \
+  --profile strata-agent --region ap-southeast-2
+```
+
 ## Recovery
 The bucket is versioned: `delete-objects` adds delete markers, so removed files remain as noncurrent
-versions until a lifecycle rule (if any) expires them. Confirm that rule before a large cleanup. A user with a
-tab open from before the deploy may hit a missing lazy chunk once; the app's `lazyWithChunkReload` reloads.
+versions until a lifecycle rule expires them (see "Storage retention" above — 60 days for `assets/`,
+indefinite for the three root files). A user with a tab open from before the deploy may hit a missing
+lazy chunk once; the app's `lazyWithChunkReload` reloads. **Git, not an S3 version, is the authoritative
+rollback**: `build-manifest.json` records the exact `buildSha` for every deploy, so
+`git checkout <sha> && npm run build:prod-web` reproduces the artifact deterministically — this remains
+true even after a version has expired.

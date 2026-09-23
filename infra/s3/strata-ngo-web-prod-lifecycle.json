@@ -1,0 +1,14 @@
+{
+  "Rules": [
+    {
+      "ID": "prod-web-assets-noncurrent-retention-60d",
+      "Status": "Enabled",
+      "Filter": {
+        "Prefix": "assets/"
+      },
+      "NoncurrentVersionExpiration": {
+        "NoncurrentDays": 60
+      }
+    }
+  ]
+}
