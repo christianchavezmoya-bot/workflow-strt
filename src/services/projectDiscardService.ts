@@ -18,7 +18,9 @@ import {
   entityDeleteAsset,
   entityDeleteProject,
   entityDeleteWorkflowRun,
+  entityGetAllProjects,
   entityGetAssetRecordsByProject,
+  entityGetAssignmentsByAsset,
   entityGetIssueRecordsByProject,
   entityGetProjectRecord,
   entityGetWorkflowRunRecordsByProject,
@@ -26,8 +28,6 @@ import {
   pendingGetAll,
   storageManifestDelete,
   storageManifestGetByAsset,
-  storageManifestGetByConfig,
-  storageManifestGetByDocument,
   storageManifestGetByIssue,
   storageManifestGetByProject,
   storageManifestGetByWorkflowRun,
@@ -39,6 +39,8 @@ import {
   type WorkflowRunRecord,
 } from "./localDB";
 import { extractMediaReferencePathsFromJsonField } from "../utils/mediaReferenceExtraction";
+import { getCachedLinksForAsset, getCachedLinksIndexAssetIds } from "./assetDocumentLinkService";
+import type { ProjectAsset } from "../types/projectAsset";
 import mediaStore from "./mediaStore";
 
 export type DiscardEligibility =
@@ -320,17 +322,39 @@ export async function discardProjectFromDevice(projectId: string): Promise<Proje
     mediaFilesDeleted++;
   }
 
-  // 3. Reference-count shared entries (config media, documents) this project's assets/runs
-  //    pointed at, and delete only those with zero remaining references from any OTHER project's
-  //    still-cached data. Any lookup failure here is treated conservatively — keep the item.
+  // 3. Reference-count shared entries (config media, documents) against the ACTUAL remaining
+  //    local reference graph (other projects' cached assets/assignments/document-links) — never
+  //    against storage_manifest sibling rows alone, which do not prove anything about sharing
+  //    (a shared file can have exactly one manifest row while many assets reference it). Delete
+  //    only those with zero remaining references PROVEN from that real graph. Any uncertainty —
+  //    a lookup failure, an incomplete graph — keeps the item; see isConfigMediaStillReferencedLocally
+  //    / isDocumentStillReferencedLocally below.
   const sharedEntries = manifestEntries.filter((e) => e.shared);
   let manifestEntriesDeleted = mediaFilesDeleted; // exclusive entries already counted their own manifest row
-  for (const entry of sharedEntries) {
-    const stillReferenced = await isSharedEntryStillReferencedElsewhere(entry, projectId);
-    if (stillReferenced !== false) continue; // true OR "uncertain" (null) -> keep it, never guess
-    await mediaStore.deleteMedia(entry.path);
-    await storageManifestDelete(entry.id);
-    manifestEntriesDeleted++;
+  if (sharedEntries.length > 0) {
+    // Building the "outside assets" graph is itself a lookup that can fail (e.g. an IndexedDB
+    // error enumerating other projects). A failure here must NOT reject the whole discard — the
+    // project itself already passed its own sync-safety check — it must only make every shared
+    // entry's reference-count "uncertain," which keeps it, same as a per-entry lookup failure.
+    let outsideAssets: AssetRecord[] | null = null;
+    try {
+      outsideAssets = await getAssetsOutsideProject(projectId);
+    } catch {
+      outsideAssets = null;
+    }
+    for (const entry of sharedEntries) {
+      const stillReferenced = outsideAssets === null
+        ? null // could not determine the outside reference graph at all — keep, never guess
+        : entry.configId
+          ? await isConfigMediaStillReferencedLocally(entry.configId, assets, outsideAssets)
+          : entry.documentId
+            ? await isDocumentStillReferencedLocally(entry.documentId, outsideAssets)
+            : null; // neither id present — nothing to reference-count against; keep it
+      if (stillReferenced !== false) continue; // true OR "uncertain" (null) -> keep it, never guess
+      await mediaStore.deleteMedia(entry.path);
+      await storageManifestDelete(entry.id);
+      manifestEntriesDeleted++;
+    }
   }
 
   // 4. Project-scoped entity rows — safe unconditionally now that sync-safety passed.
@@ -358,26 +382,94 @@ export async function discardProjectFromDevice(projectId: string): Promise<Proje
   };
 }
 
+// ── Shared-resource reference counting (Blocker 2 fix) ─────────────────────────────────────
+//
+// storage_manifest sibling rows are NOT proof of sharing (a config downloaded once has exactly
+// one manifest row no matter how many assets/projects use it) — see the module doc comment on
+// discardProjectFromDevice. These functions instead inspect the ACTUAL local reference graph:
+// which OTHER locally-cached assets (outside the project being discarded) point at this
+// configId/documentId, via the real fields the app itself uses to resolve them at runtime.
+
+/** Every asset record cached locally for a project OTHER than `excludingProjectId`, gathered via
+ *  indexed by-project queries (never entityGetAllAssets()'s full-table scan) — entityGetAllProjects()
+ *  is the one already-accepted whole-list read this feature uses (see docs/OFFLINE_STORAGE_MANAGEMENT.md). */
+async function getAssetsOutsideProject(excludingProjectId: string): Promise<AssetRecord[]> {
+  const allProjects = (await entityGetAllProjects()) as { id: string }[];
+  const otherProjectIds = allProjects.map((p) => p.id).filter((id) => id !== excludingProjectId);
+  const perProject = await Promise.all(otherProjectIds.map((id) => entityGetAssetRecordsByProject(id)));
+  return perProject.flat();
+}
+
 /**
- * true = still referenced elsewhere (keep); false = confirmed no other locally-cached project
- * needs it (safe to delete); null = could not determine confidently (keep — never guess).
+ * true = still referenced (keep); false = PROVEN zero local references (safe to delete);
+ * null = could not determine confidently (keep — never guess).
+ *
+ * Checks, against `outsideAssets` (every asset cached for a project other than the one being
+ * discarded): (1) a direct `productConfigId` match — the field the app itself sets on an asset
+ * to record which WorkflowConfig it uses; (2) that asset's cached workflow_assignments
+ * (`AssetWorkflowAssignment.workflowConfigId`) — a second, independent local signal; (3) whether
+ * any outside asset shares the same PRODUCT as one of the discarded project's own assets that
+ * referenced this config — Published config media is downloaded per-product (see
+ * offlineBootstrapService.ts), so any other asset of that product could need it even without its
+ * own direct link. If none of these find a match, and every check completed without error, the
+ * local graph proves zero references. Any exception makes the result uncertain, not "zero".
  */
-async function isSharedEntryStillReferencedElsewhere(
-  entry: StorageManifestEntry,
-  excludingProjectId: string,
+async function isConfigMediaStillReferencedLocally(
+  configId: string,
+  discardedProjectAssets: AssetRecord[],
+  outsideAssets: AssetRecord[],
 ): Promise<boolean | null> {
   try {
-    const related = entry.configId
-      ? await storageManifestGetByConfig(entry.configId)
-      : entry.documentId
-        ? await storageManifestGetByDocument(entry.documentId)
-        : null;
-    if (related == null) return null; // no way to reference-count this entry — keep it
-    for (const other of related) {
-      if (other.id === entry.id) continue;
-      if (other.projectId && other.projectId !== excludingProjectId) return true;
-      if (!other.projectId) return true; // an unattributed sibling entry — cannot prove it's unused
+    const anchorProductIds = new Set(
+      discardedProjectAssets
+        .filter((a) => (a.data as ProjectAsset | undefined)?.productConfigId === configId)
+        .map((a) => a.productId),
+    );
+
+    for (const asset of outsideAssets) {
+      const data = asset.data as ProjectAsset | undefined;
+      if (data?.productConfigId === configId) return true;
+      if (anchorProductIds.has(asset.productId)) return true;
+
+      const assignments = (await entityGetAssignmentsByAsset(asset.id)) as { workflowConfigId?: string }[];
+      if (assignments.some((assignment) => assignment.workflowConfigId === configId)) return true;
     }
+    return false;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * true = still referenced (keep); false = PROVEN zero local references (safe to delete);
+ * null = could not determine confidently (keep — never guess).
+ *
+ * Checks the ACTUAL cached asset-document link metadata (assetDocumentLinkService.ts), never
+ * manifest sibling rows. Only assets whose link list has actually been cached locally
+ * (getCachedLinksIndexAssetIds()) can be checked at all — an asset that was never opened in
+ * Documents has no cached links, and its absence proves nothing about whether it links to this
+ * document. The reference graph is only "complete" (able to prove zero) when EVERY outside asset
+ * has a definitively cached link list; if even one is uncached, the result is uncertain, matching
+ * "if reference resolution is incomplete/uncertain, KEEP it".
+ */
+async function isDocumentStillReferencedLocally(
+  documentId: string,
+  outsideAssets: AssetRecord[],
+): Promise<boolean | null> {
+  try {
+    const cachedAssetIds = new Set(await getCachedLinksIndexAssetIds());
+    let sawUncachedOutsideAsset = false;
+
+    for (const asset of outsideAssets) {
+      if (!cachedAssetIds.has(asset.id)) {
+        sawUncachedOutsideAsset = true; // unknown — cannot rule this asset out
+        continue;
+      }
+      const links = await getCachedLinksForAsset(asset.id);
+      if (links.some((link) => link.documentId === documentId)) return true;
+    }
+
+    if (sawUncachedOutsideAsset) return null; // incomplete graph — never prove zero from partial data
     return false;
   } catch {
     return null;

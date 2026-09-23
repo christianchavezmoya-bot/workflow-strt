@@ -71,7 +71,7 @@ describe("getProjectStorageSummaries", () => {
     expect(summary).toMatchObject({
       projectId: "proj-1", name: "JOB-1", status: "Closed",
       lastSyncedAt: "2026-09-20T00:00:00.000Z", closedAtUtc: "2026-08-01T00:00:00.000Z",
-      discardEligibility: "SAFE_TO_REMOVE",
+      discardCheck: { eligibility: "SAFE_TO_REMOVE" },
     });
     expect(summary).not.toHaveProperty("lastUsed");
     expect(summary).not.toHaveProperty("lastOpened");

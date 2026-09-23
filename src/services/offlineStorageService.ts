@@ -20,7 +20,7 @@ import {
   storageManifestGetByWorkflowRun,
   type StorageManifestCategory,
 } from "./localDB";
-import { checkProjectDiscardEligibility, type DiscardEligibility } from "./projectDiscardService";
+import { checkProjectDiscardEligibility, type ProjectDiscardCheckResult } from "./projectDiscardService";
 import { computeNGoBudgetBytes, computeStorageHealth, type StorageHealthResult } from "../utils/storageHealth";
 import { readDeviceStorage, type DeviceStorageReading } from "./deviceStorageCapability";
 import type { Project } from "../types/project";
@@ -70,7 +70,10 @@ export interface ProjectStorageSummary {
    *  "last opened on this device" tracking today — never label this "Last used." */
   lastSyncedAt: string | null;
   closedAtUtc: string | null;
-  discardEligibility: DiscardEligibility;
+  /** The full sync-safety result (eligibility + structured blocker counts + a ready-to-display
+   *  message) — not just the eligibility enum, so the screen can show blocker details and offer
+   *  Sync Now for a blocked project WITHOUT a second round-trip when the user asks to manage it. */
+  discardCheck: ProjectDiscardCheckResult;
 }
 
 async function estimateProjectBytes(projectId: string): Promise<number> {
@@ -120,7 +123,7 @@ export async function getProjectStorageSummaries(): Promise<ProjectStorageSummar
         estimatedBytes,
         lastSyncedAt: record?.syncedAt ?? null,
         closedAtUtc: project.closedAtUtc ?? null,
-        discardEligibility: discard.eligibility,
+        discardCheck: discard,
       };
     }),
   );

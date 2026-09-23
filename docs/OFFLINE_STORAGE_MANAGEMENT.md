@@ -79,9 +79,15 @@ unconditionally (project record, its assets, workflow runs, issues, and their ex
 captured media — both manifest-tracked and legacy files discovered by parsing run/issue JSON, using
 the same shapes `mediaStore.resolveUploadValue()` already handles). **Shared resources** (config
 media, documents) are only removed after reference-counting proves no other locally-cached project
-still needs them; on any uncertainty (a lookup failure, an unattributed sibling entry), the shared
-item is kept — "prefer keeping an unnecessary shared cache item over deleting something another
-offline project needs."
+still needs them — proven against the ACTUAL local reference graph (other projects' cached assets'
+`productConfigId`, their cached `workflow_assignments`, and cached asset-document-link metadata via
+`assetDocumentLinkService.ts`), **never** against `storage_manifest` sibling rows, which do not
+prove sharing (a shared file can have exactly one manifest row while many assets reference it — see
+`isConfigMediaStillReferencedLocally`/`isDocumentStillReferencedLocally`). On any uncertainty (a
+lookup failure, an incomplete graph — e.g. an outside asset whose document links were never
+cached), the shared item is kept — "prefer keeping an unnecessary shared cache item over deleting
+something another offline project needs"; a false-positive KEEP is acceptable, a false-positive
+DELETE is not.
 
 ## Screen (`src/features/settings/OfflineStorageScreen.tsx`, `/settings/offline-storage`)
 
@@ -115,8 +121,16 @@ against. Worth reconsidering in a later phase with real usage data.
 
 ## Known O(N) call sites (documented, not touched — future performance PR)
 
-The audit found these call IndexedDB's unindexed `getAll()` (full-store scan), and none of them are
-touched by this feature (no new code here calls `entityGetAll*` — every new query is indexed):
+The audit found these call IndexedDB's unindexed `getAll()` (full-store scan). This feature does
+call a few of these deliberately — `entityGetAllProjects()` (once, for the whole project list any
+screen like this needs, and again inside `projectDiscardService.ts`'s shared-resource reference
+check, to enumerate "every other locally-cached project"), `pendingGetAll()`, and
+`droppedActionsGetAll()` (the sync queue and dropped-action log have no per-project index, so a
+project's own blockers are filtered out of the full list in memory) — accepted for Phase 1 because
+these lists are small (device-local project/queue counts, not server-wide data) and every other
+per-project lookup this feature adds (`entityGetAssetRecordsByProject`, `storageManifestGetBy*`,
+etc.) IS indexed. The sites below are the ones the audit found elsewhere in the app, untouched by
+this feature:
 
 - `entityGetAllWorkflowRuns()` / `entityGetAllAssets()` / `entityGetAllProjects()` — `assetWorkflowRunService.ts` (~L875, ~L1005), `projectAssetService.ts` (~L162, ~L968, ~L1024), `useSyncTelemetry.ts` (~L114-116), `syncConflictProbe.ts` (~L40)
 - `entityGetAllIssues()` — `IssueRepository.ts` (~L43, ~L62, ~L68), `useSyncEngine.ts` (~L492)

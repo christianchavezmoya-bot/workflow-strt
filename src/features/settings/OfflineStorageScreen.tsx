@@ -39,7 +39,11 @@ import {
   type OfflineStorageOverview,
   type ProjectStorageSummary,
 } from "../../services/offlineStorageService";
-import { discardProjectFromDevice, type ProjectDiscardResult } from "../../services/projectDiscardService";
+import {
+  discardProjectFromDevice,
+  type DiscardBlockerCounts,
+  type ProjectDiscardResult,
+} from "../../services/projectDiscardService";
 import type { StorageHealthLevel } from "../../utils/storageHealth";
 import type { StorageManifestCategory } from "../../services/localDB";
 import { formatStorageBytes } from "../../utils/formatStorageBytes";
@@ -68,6 +72,25 @@ const CATEGORY_LABEL: Record<StorageManifestCategory, string> = {
   OTHER: "Other cache",
 };
 
+interface BlockedDialogState {
+  project: ProjectStorageSummary;
+  message: string;
+  blockers?: DiscardBlockerCounts;
+}
+
+/** Non-zero blocker counts as display rows — mirrors projectDiscardService.ts's buildMessage(). */
+function blockerRows(blockers: DiscardBlockerCounts | undefined): { label: string; count: number }[] {
+  if (!blockers) return [];
+  return [
+    { label: "Workflow changes", count: blockers.workflowChanges },
+    { label: "Photos/videos", count: blockers.photosVideosPending },
+    { label: "Issues", count: blockers.issuesPending },
+    { label: "Time entries", count: blockers.timeTrackingPending },
+    { label: "Other changes", count: blockers.otherPendingOperations },
+    { label: "Failed sync operations", count: blockers.failedSyncOperations },
+  ].filter((row) => row.count > 0);
+}
+
 export default function OfflineStorageScreen() {
   const navigate = useNavigate();
   const { triggerSync, canSync } = useSyncEngine();
@@ -75,7 +98,7 @@ export default function OfflineStorageScreen() {
   const [projects, setProjects] = useState<ProjectStorageSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [pendingProject, setPendingProject] = useState<ProjectStorageSummary | null>(null);
-  const [blockedResult, setBlockedResult] = useState<{ project: ProjectStorageSummary; message: string } | null>(null);
+  const [blockedDialog, setBlockedDialog] = useState<BlockedDialogState | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [removing, setRemoving] = useState(false);
   const [lastRemoval, setLastRemoval] = useState<ProjectDiscardResult | null>(null);
@@ -95,8 +118,20 @@ export default function OfflineStorageScreen() {
     void reload();
   }, [reload]);
 
-  async function handleRemoveClick(project: ProjectStorageSummary) {
+  function handleRemoveClick(project: ProjectStorageSummary) {
     setPendingProject(project);
+  }
+
+  /** "Manage" on a project the screen already knows is blocked — reuses the pre-computed check
+   *  from getProjectStorageSummaries() (Blocker 1 fix): no second round-trip, and the dialog is
+   *  reachable proactively rather than only as a failed-Remove fallback. Never offers a
+   *  destructive Remove action. */
+  function handleManageClick(project: ProjectStorageSummary) {
+    setBlockedDialog({
+      project,
+      message: project.discardCheck.message,
+      blockers: project.discardCheck.blockers,
+    });
   }
 
   async function confirmRemove() {
@@ -105,7 +140,10 @@ export default function OfflineStorageScreen() {
     try {
       const result = await discardProjectFromDevice(pendingProject.projectId);
       if (!result.removed) {
-        setBlockedResult({ project: pendingProject, message: result.message });
+        // Defense in depth: the screen believed this project was safe, but the service's own
+        // (re-run) check refused — e.g. a queued action arrived between load and tap. Show the
+        // SAME blocked dialog, using the fresh result rather than any stale cached one.
+        setBlockedDialog({ project: pendingProject, message: result.message, blockers: result.blockers });
       } else {
         setLastRemoval(result);
       }
@@ -122,7 +160,10 @@ export default function OfflineStorageScreen() {
       await triggerSync();
     } finally {
       setSyncing(false);
-      setBlockedResult(null);
+      setBlockedDialog(null);
+      // Refresh both eligibility (has the project become safe?) and the storage summary —
+      // required test #5: after a successful sync, a previously-blocked project can now show
+      // "Remove from device" instead of "Manage".
       await reload();
     }
   }
@@ -241,22 +282,24 @@ export default function OfflineStorageScreen() {
               <Typography variant="body2" fontWeight={600}>{formatStorageBytes(project.estimatedBytes)}</Typography>
             </Stack>
             <Stack direction="row" justifyContent="flex-end" sx={{ mt: 1 }}>
-              {project.discardEligibility === "SAFE_TO_REMOVE" ? (
+              {project.discardCheck.eligibility === "SAFE_TO_REMOVE" ? (
                 <Button
                   size="small"
                   color="error"
                   variant="text"
                   startIcon={<DeleteOutlineOutlinedIcon fontSize="small" />}
-                  onClick={() => void handleRemoveClick(project)}
+                  onClick={() => handleRemoveClick(project)}
                 >
                   Remove from device
                 </Button>
               ) : (
+                // Enabled (Blocker 1 fix): tapping it surfaces WHY the project is blocked,
+                // structured counts, and Sync Now — never a disabled dead-end and never a
+                // destructive Remove action.
                 <Button
                   size="small"
                   variant="text"
-                  disabled
-                  title="This project has unsynced changes and cannot be removed from this device yet."
+                  onClick={() => handleManageClick(project)}
                 >
                   Manage
                 </Button>
@@ -291,14 +334,27 @@ export default function OfflineStorageScreen() {
         </DialogActions>
       </Dialog>
 
-      {/* Blocked: unsynced work — no destructive bypass in Phase 1. */}
-      <Dialog open={!!blockedResult} onClose={() => setBlockedResult(null)}>
+      {/* Blocked: unsynced work — no destructive bypass in Phase 1. Reached either proactively
+          (tapping "Manage" on a known-blocked project) or as a defense-in-depth fallback from a
+          Remove attempt the service itself refused. */}
+      <Dialog open={!!blockedDialog} onClose={() => setBlockedDialog(null)}>
         <DialogTitle>Can't remove this project yet</DialogTitle>
         <DialogContent>
-          <Typography variant="body2">{blockedResult?.message}</Typography>
+          <Typography variant="body2">
+            This project has unsynced changes and cannot be removed from this device yet.
+          </Typography>
+          {blockerRows(blockedDialog?.blockers).length > 0 && (
+            <List dense disablePadding sx={{ mt: 1.5 }}>
+              {blockerRows(blockedDialog?.blockers).map((row) => (
+                <ListItem key={row.label} disableGutters sx={{ py: 0.25 }}>
+                  <ListItemText primary={`${row.count} ${row.label.toLowerCase()}`} />
+                </ListItem>
+              ))}
+            </List>
+          )}
         </DialogContent>
         <DialogActions>
-          <Button onClick={() => setBlockedResult(null)}>Cancel</Button>
+          <Button onClick={() => setBlockedDialog(null)}>Cancel</Button>
           <Button
             onClick={() => void handleSyncNow()}
             variant="contained"

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 
@@ -37,11 +37,19 @@ const baseOverview = {
   ],
 };
 
+const ZERO_BLOCKERS = {
+  workflowChanges: 0, photosVideosPending: 0, issuesPending: 0,
+  timeTrackingPending: 0, failedSyncOperations: 0, otherPendingOperations: 0,
+};
+
 function safeProject() {
   return {
     projectId: "proj-safe", name: "JOB-100", status: "Closed",
     estimatedBytes: 1_932_735_283, closedAtUtc: "2026-08-01T00:00:00.000Z", lastSyncedAt: null,
-    discardEligibility: "SAFE_TO_REMOVE" as const,
+    discardCheck: {
+      projectId: "proj-safe", eligibility: "SAFE_TO_REMOVE" as const, blockers: ZERO_BLOCKERS,
+      message: "This project has no unsynced changes and can be safely removed from this device.",
+    },
   };
 }
 
@@ -49,13 +57,23 @@ function unsafeProject() {
   return {
     projectId: "proj-unsafe", name: "JOB-200", status: "In Progress",
     estimatedBytes: 500_000_000, closedAtUtc: null, lastSyncedAt: "2026-09-20T00:00:00.000Z",
-    discardEligibility: "UNSYNCED_CHANGES" as const,
+    discardCheck: {
+      projectId: "proj-unsafe", eligibility: "UNSYNCED_CHANGES" as const,
+      blockers: { ...ZERO_BLOCKERS, workflowChanges: 3, photosVideosPending: 4, issuesPending: 1 },
+      message: "This project has unsynced changes and cannot be removed from this device yet (3 workflow changes, 4 photos/videos, 1 issue).",
+    },
   };
 }
 
 function renderScreen() {
   return render(<MemoryRouter><OfflineStorageScreen /></MemoryRouter>);
 }
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  syncEngineMocks.triggerSync.mockResolvedValue({});
+  syncEngineMocks.canSync = true;
+});
 
 describe("OfflineStorageScreen", () => {
   it("renders the overview using REAL fields only — never a 'Last used' label", async () => {
@@ -71,7 +89,7 @@ describe("OfflineStorageScreen", () => {
     expect(screen.queryByText(/Last used/i)).not.toBeInTheDocument();
   });
 
-  it("shows 'Remove from device' only for a SAFE_TO_REMOVE project, and a disabled 'Manage' for a blocked one — never 'Delete Project'", async () => {
+  it("shows 'Remove from device' only for a SAFE_TO_REMOVE project, and an ENABLED 'Manage' for a blocked one — never 'Delete Project' (Blocker 1)", async () => {
     serviceMocks.getOfflineStorageOverview.mockResolvedValue(baseOverview);
     serviceMocks.getProjectStorageSummaries.mockResolvedValue([safeProject(), unsafeProject()]);
 
@@ -79,8 +97,21 @@ describe("OfflineStorageScreen", () => {
     await screen.findByText("JOB-100");
 
     expect(screen.getByRole("button", { name: /remove from device/i })).toBeEnabled();
-    expect(screen.getByRole("button", { name: /^manage$/i })).toBeDisabled();
+    // Required test: unsafe project's Manage button is ENABLED, not a disabled dead-end.
+    expect(screen.getByRole("button", { name: /^manage$/i })).toBeEnabled();
     expect(screen.queryByText(/delete project/i)).not.toBeInTheDocument();
+  });
+
+  // Required test: "Remove from device" is NOT available for unsafe projects.
+  it("never renders a 'Remove from device' button for an unsafe (blocked) project", async () => {
+    serviceMocks.getOfflineStorageOverview.mockResolvedValue(baseOverview);
+    serviceMocks.getProjectStorageSummaries.mockResolvedValue([unsafeProject()]);
+
+    renderScreen();
+    await screen.findByText("JOB-200");
+
+    expect(screen.queryByRole("button", { name: /remove from device/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^manage$/i })).toBeInTheDocument();
   });
 
   it("clicking Remove shows the exact required confirmation copy, and confirming calls discardProjectFromDevice", async () => {
@@ -122,6 +153,61 @@ describe("OfflineStorageScreen", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /sync now/i }));
     await waitFor(() => expect(syncEngineMocks.triggerSync).toHaveBeenCalled());
+  });
+
+  // Required test: tapping "Manage" on a known-blocked project surfaces WHY it's blocked — the
+  // fixed required text, plus structured blocker counts — reusing the pre-computed discardCheck
+  // (no second round-trip to discardProjectFromDevice).
+  it("clicking Manage on a blocked project shows the fixed blocked message and structured blocker counts — never Remove", async () => {
+    serviceMocks.getOfflineStorageOverview.mockResolvedValue(baseOverview);
+    serviceMocks.getProjectStorageSummaries.mockResolvedValue([unsafeProject()]);
+
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: /^manage$/i }));
+
+    expect(discardMocks.discardProjectFromDevice).not.toHaveBeenCalled();
+    expect(await screen.findByText("This project has unsynced changes and cannot be removed from this device yet.")).toBeInTheDocument();
+    expect(screen.getByText("3 workflow changes")).toBeInTheDocument();
+    expect(screen.getByText("4 photos/videos")).toBeInTheDocument();
+    expect(screen.getByText("1 issues")).toBeInTheDocument();
+    // No destructive bypass reachable from this dialog.
+    expect(screen.queryByRole("button", { name: /remove from device/i })).not.toBeInTheDocument();
+  });
+
+  // Required test: Sync Now is available (and functions) from the Manage dialog for a blocked
+  // project — not only as a defense-in-depth fallback off a failed Remove attempt.
+  it("Sync Now is available directly from the Manage dialog for a blocked project", async () => {
+    serviceMocks.getOfflineStorageOverview.mockResolvedValue(baseOverview);
+    serviceMocks.getProjectStorageSummaries.mockResolvedValue([unsafeProject()]);
+
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: /^manage$/i }));
+
+    const syncNowButton = await screen.findByRole("button", { name: /sync now/i });
+    expect(syncNowButton).toBeEnabled();
+    fireEvent.click(syncNowButton);
+
+    await waitFor(() => expect(syncEngineMocks.triggerSync).toHaveBeenCalled());
+    // The dialog closes and the summary reloads after sync.
+    await waitFor(() => expect(serviceMocks.getProjectStorageSummaries).toHaveBeenCalledTimes(2));
+  });
+
+  // Required test: after a successful Sync Now (which refreshes eligibility + storage summary),
+  // a previously-blocked project becomes eligible and shows "Remove from device" instead of
+  // "Manage" — no page reload/navigation required.
+  it("after Sync Now completes and eligibility is re-fetched, a project that became safe shows 'Remove from device' instead of 'Manage'", async () => {
+    serviceMocks.getOfflineStorageOverview.mockResolvedValue(baseOverview);
+    serviceMocks.getProjectStorageSummaries
+      .mockResolvedValueOnce([unsafeProject()])
+      .mockResolvedValueOnce([safeProject()]); // after Sync Now, the same project (re-keyed) is now safe
+
+    renderScreen();
+    fireEvent.click(await screen.findByRole("button", { name: /^manage$/i }));
+    fireEvent.click(await screen.findByRole("button", { name: /sync now/i }));
+
+    await waitFor(() => expect(syncEngineMocks.triggerSync).toHaveBeenCalled());
+    expect(await screen.findByRole("button", { name: /remove from device/i })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^manage$/i })).not.toBeInTheDocument();
   });
 
   it("shows an empty state when no projects are cached, without erroring", async () => {
