@@ -96,8 +96,11 @@ describe("native free space independently drives health levels (Section I)", () 
     expect(health.drivenBy).toBe("device-absolute"); // <= 1 GB absolute rule
   });
 
-  it("drives WARNING from device free space alone (18% free on a healthy-budget device)", async () => {
-    deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 128 * GB, freeBytes: 23 * GB }); // ~18%
+  it("drives WARNING from device free space alone (~13.3% free, guardrail-qualified: 17GB <= WARNING's 20GB guardrail)", async () => {
+    // Post-refinement: percentage is QUALIFIED by an absolute guardrail per tier (see
+    // storageHealth.ts). 17GB also fails HIGH's tighter 10GB guardrail, so this lands at WARNING,
+    // not HIGH — matching the 128GB/17GB worked example from the policy refinement PR.
+    deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 128 * GB, freeBytes: 17 * GB }); // ~13.3%
 
     const { health } = await healthFor(100 * MB);
 
@@ -105,8 +108,8 @@ describe("native free space independently drives health levels (Section I)", () 
     expect(health.drivenBy).toBe("device-percent");
   });
 
-  it("drives HIGH from device free space alone (~13% free)", async () => {
-    deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 128 * GB, freeBytes: 17 * GB }); // ~13.3%
+  it("drives HIGH from device free space alone (~9.4% free, guardrail-qualified: 6GB <= HIGH's 10GB guardrail)", async () => {
+    deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 64 * GB, freeBytes: 6 * GB }); // ~9.375%
 
     const { health } = await healthFor(100 * MB);
 
@@ -124,21 +127,33 @@ describe("native free space independently drives health levels (Section I)", () 
   });
 });
 
-describe("OBSERVED CONSEQUENCE of the approved thresholds — reported, not changed (Section I)", () => {
-  it("a 512 GB phone with 40 GB free (7.8%) is CRITICAL on the percentage rule despite a large absolute margin", async () => {
-    // Deliberately asserted as-is rather than 'fixed': the percentage rule (free <= 10% ->
-    // CRITICAL) fires even though 40 GB is objectively plenty of room for N-Go to keep working.
-    // Flagged in the PR for an owner decision on whether the percentage and absolute rules should
-    // be refined later; NOT silently changed here.
+// RESOLVED (storage-health policy refinement, following PR #369): the false-severity behavior
+// below — a large-capacity phone reading CRITICAL from percentage-free alone despite tens of GB
+// of real headroom — was reported as an "owner decision required" item in PR #369 and is now
+// fixed by qualifying every percentage rule with an absolute-bytes guardrail (see the THRESHOLDS
+// doc comment in storageHealth.ts). This end-to-end proof supersedes the old test that asserted
+// the false CRITICAL "as-is, not changed" — it now asserts the corrected, resolved behavior.
+describe("large-capacity-device false-severity case — RESOLVED end-to-end", () => {
+  it("a 512 GB phone with 40 GB free (7.8%) no longer reads CRITICAL — the qualified percentage rule requires free <= 20GB and 40GB exceeds every guardrail", async () => {
     deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 512 * GB, freeBytes: 40 * GB });
 
     const { health } = await healthFor(1 * GB);
 
     expect(health.deviceFreeRatio).toBeCloseTo(0.078, 3);
-    expect(health.level).toBe("CRITICAL");
-    expect(health.drivenBy).toBe("device-percent");
+    expect(health.level).toBe("HEALTHY");
   });
 
+  it("the 372.5 GB / 21.7 GB reading recorded from the iOS Simulator in PR #369 also no longer reads CRITICAL", async () => {
+    deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 372.5 * GB, freeBytes: 21.7 * GB });
+
+    const { health } = await healthFor(1 * GB);
+
+    expect(health.deviceFreeRatio).toBeCloseTo(0.0583, 3);
+    expect(health.level).toBe("HEALTHY");
+  });
+});
+
+describe("native bridge boundary safety — unaffected by the policy refinement (Section I)", () => {
   it("an IMPOSSIBLE freeBytes > totalBytes reading is rejected end-to-end, falling back to budget-only rather than computing an impossible ratio", async () => {
     // isValidNativeStorageInfo() rejects freeBytes > totalBytes (a review fix — the two figures
     // describe the SAME volume, so "available" can never legitimately exceed "total"). The whole

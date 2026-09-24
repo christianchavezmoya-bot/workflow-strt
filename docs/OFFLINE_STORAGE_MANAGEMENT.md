@@ -41,20 +41,44 @@ record in every existing store (including `dirty`/unsynced ones) survives unchan
 
 ## Storage health (`src/utils/storageHealth.ts`)
 
-Two independent signals, worst-wins:
+Worst-wins across three signals:
 
 1. **N-Go's own usage vs. a budget.** The budget is device-relative, not one fixed number: 5% of
    device total capacity, clamped to [2GB, 20GB], falling back to a fixed 5GB only when device
-   total capacity is unknown (see below — that is the current native reality).
-2. **Real device free space**, both as a percentage of device total and as an absolute GB floor
-   (a tiny percentage can still mean tens of GB on a large device; a tiny absolute margin is
-   dangerous on any device).
+   total capacity is unknown (see below — that is the current native reality). Unqualified OR.
+2. **Real device free space, absolute.** A GB floor, independent of percentage (a tiny absolute
+   margin is dangerous regardless of how large the device is). Unqualified OR.
+3. **Real device free space, percentage — QUALIFIED by an absolute guardrail.** Percentage is a
+   genuinely useful EARLY-PRESSURE signal on smaller/constrained devices, but percentage **alone**
+   is misleading once a device is large enough that a small percentage still represents a large
+   absolute margin — a 512 GB phone with 40 GB free is 7.8% free, which read CRITICAL under the
+   original percentage-only rule despite 40 GB being plenty of real headroom (confirmed during the
+   native-capacity PR; a 372.5 GB / 21.7 GB reading recorded live from the iOS Simulator hit the
+   same rule). The fix is not to drop percentage, and not to loosen it into an OR with a large
+   absolute number (that just moves the same problem) — it is to require **both**: percentage only
+   escalates a tier when device free bytes are **also** at or under that tier's own absolute
+   guardrail.
 
-| Level | Budget usage | OR device free % | OR device free absolute |
+| Level | Budget usage | OR device free absolute | OR (device free % AND device free absolute ≤ guardrail) |
 |---|---|---|---|
-| WARNING | ≥ 50% | ≤ 20% | ≤ 5 GB |
-| HIGH | ≥ 70% | ≤ 15% | ≤ 2 GB |
-| CRITICAL | ≥ 85% | ≤ 10% | ≤ 1 GB |
+| WARNING | ≥ 50% | ≤ 5 GB | ≤ 15% **and** ≤ 20 GB |
+| HIGH | ≥ 70% | ≤ 2 GB | ≤ 10% **and** ≤ 10 GB |
+| CRITICAL | ≥ 85% | ≤ 1 GB | ≤ 5% **and** ≤ 5 GB |
+
+Worked examples:
+
+| Device | Free | % free | Result | Why |
+|---|---|---|---|---|
+| 512 GB | 40 GB | 7.8% | **HEALTHY** | percentage qualifies (≤15%) but 40 GB exceeds every guardrail |
+| 372.5 GB | 21.7 GB | 5.8% | **HEALTHY** | same shape — the PR #369 simulator reading |
+| 128 GB | 17 GB | 13.3% | **WARNING** | 17 GB ≤ WARNING's 20 GB guardrail (fails HIGH's 10 GB one) |
+| 64 GB | 6 GB | 9.4% | **HIGH** | 6 GB ≤ HIGH's 10 GB guardrail |
+| 64 GB | 3 GB | 4.7% | **CRITICAL** | 3 GB ≤ CRITICAL's 5 GB guardrail |
+| 64 GB | 800 MB | 1.2% | **CRITICAL** | from the absolute rule alone, regardless of percentage |
+
+The independent absolute rule and the N-Go budget rule are unchanged by this refinement — only the
+percentage rule gained a guardrail. Budget thresholds (≥50/70/85%) and the budget formula itself
+(`computeNGoBudgetBytes()`) were not touched.
 
 **Device free/total space now comes from a repo-owned Capacitor plugin** — see "Native device
 capacity" below. The earlier blocker is resolved: `@capacitor/device@8.0.3` was installed, inspected
@@ -194,14 +218,9 @@ this feature:
 1. ~~**No native device free/total space API**~~ — **RESOLVED** by the repo-owned `DeviceStorage`
    plugin (option (a), the custom-plugin route, following the `LocalMediaServerPlugin.swift` /
    `SyncKeepAlivePlugin.java` precedents). See "Native device capacity" above.
-2. **The percentage rule and the absolute rule can disagree sharply on large devices.** Now that
-   real capacity is available, this is observable rather than theoretical: a 512 GB phone with
-   40 GB free is **7.8% free → CRITICAL** on the percentage rule, even though 40 GB is objectively
-   plenty of room for N-Go to keep working. A real measured example from the iOS Simulator during
-   this work: 372.5 GB total / 21.7 GB available = 5.8% → CRITICAL. This behavior is **left exactly
-   as approved and was not silently tuned**; it is asserted as-is in
-   `deviceStorageHealth.integration.test.ts` so any future change is deliberate. Owner decision
-   needed on whether the percentage rule should be skipped (or its threshold lowered) once absolute
-   free space is comfortably above the absolute tier — e.g. requiring BOTH signals on large devices.
+2. ~~**The percentage rule and the absolute rule can disagree sharply on large devices**~~ —
+   **RESOLVED** by qualifying the percentage rule with a per-tier absolute-bytes guardrail; see
+   "Storage health" above. The 512 GB / 40 GB and 372.5 GB / 21.7 GB cases that previously read
+   CRITICAL from percentage alone now correctly read HEALTHY.
 3. **"Last used" (per-device open tracking)** does not exist and was not invented — the screen
    shows "Last synced" instead, which is real data.
