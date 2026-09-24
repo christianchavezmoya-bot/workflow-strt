@@ -879,6 +879,10 @@ const WorkInstructions = () => {
   // Creating a workflow asks for the product first, so a draft can never land on
   // whichever product tab happened to be open.
   const [newConfigProductId, setNewConfigProductId] = useState("");
+  // Optional Description, collected in the SAME "New Workflow" step as the product picker (not
+  // deferred entirely to Publish/Edit) — see the workflow-metadata audit's root cause #2: the
+  // primary creation path never asked for it, so newly-created drafts started with Notes empty.
+  const [newConfigNotes, setNewConfigNotes] = useState("");
   const pendingBuilderConfigIdRef = useRef<string | null>(null);
   const creatingDraftRef = useRef(false);
 
@@ -1129,6 +1133,7 @@ const WorkInstructions = () => {
     setEditingConfig(null);
     setConfigForm(emptyConfigForm());
     setNewConfigProductId(activeProduct?.id ?? products[0]?.id ?? "");
+    setNewConfigNotes("");
     setConfigError(null);
     setConfigDialogOpen(true);
   }
@@ -1195,8 +1200,10 @@ const WorkInstructions = () => {
 
   /**
    * Product-first create: the draft is named after the product and opened straight in
-   * the Builder for that product. Name, type, description and installed features are
-   * all set when publishing.
+   * the Builder for that product. Name, type, and installed features are all set when
+   * publishing. Description (notes) is the one exception — collected right here, in this
+   * same step, rather than deferred entirely to Publish/Edit (see the workflow-metadata
+   * audit's root cause #2).
    */
   async function createDraftForSelectedProduct() {
     const product = products.find((p) => p.id === newConfigProductId);
@@ -1210,6 +1217,7 @@ const WorkInstructions = () => {
       const created = await workflowConfigService.create({
         name: product.name,
         productId: product.id,
+        notes: newConfigNotes.trim() || undefined,
         featureSelectionsJson: JSON.stringify([]),
       });
       const productIdx = products.findIndex((p) => p.id === product.id);
@@ -1813,6 +1821,17 @@ const WorkInstructions = () => {
                   <option key={product.id} value={product.id}>{product.name}</option>
                 ))}
               </TextField>
+              <TextField
+                label="Description"
+                value={newConfigNotes}
+                onChange={(e) => setNewConfigNotes(e.target.value)}
+                fullWidth
+                multiline
+                rows={2}
+                placeholder="Optional description or notes"
+                disabled={configSaving}
+                InputLabelProps={{ shrink: true }}
+              />
               {configError && (
                 <Typography variant="body2" color="error">{configError}</Typography>
               )}

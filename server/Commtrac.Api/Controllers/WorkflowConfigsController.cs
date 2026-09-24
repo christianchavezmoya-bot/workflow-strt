@@ -5,6 +5,7 @@ using Commtrac.Api.Services.Storage;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -33,6 +34,19 @@ public class WorkflowConfigsController : ControllerBase
 
     private string WorkflowMediaDirectory(string workflowId)
         => _files.BuildRelativePath("Storage", "WorkflowMedia", workflowId);
+
+    /// <summary>Authenticated user's display name for CreatedBy — the established, working
+    /// identity-resolution pattern already used by WorkInstructionTemplatesController and
+    /// elsewhere in this codebase (e.g. AssetWorkflowAssignmentsController's selfAssignerName).
+    /// Deliberately NOT User.Identity?.Name: this app's JWT is minted via a raw
+    /// `new JwtSecurityToken(claims: ...)` construction (AuthController.CreateToken), which does
+    /// not apply System.IdentityModel.Tokens.Jwt's outbound short-claim-name mapping, so the
+    /// token carries the long ClaimTypes.* URIs verbatim — never the short "unique_name"/"email"
+    /// strings Program.cs's NameClaimType/a bare FindFirst("email") would need to find a match.
+    /// User.Identity?.Name (which looks up NameClaimType = "unique_name") and FindFirst("email")
+    /// both silently resolve to null against this token shape — see the workflow-metadata audit.</summary>
+    private string? GetCurrentUserDisplayName()
+        => User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue(ClaimTypes.Email);
 
     /// <summary>WF-3: deterministic, GUID-shaped id derived from a stable seed string — the same
     /// seed always produces the same id (so republishing with no feature/unit changes is
@@ -318,7 +332,7 @@ public class WorkflowConfigsController : ControllerBase
         if (string.IsNullOrWhiteSpace(req.Name))    return BadRequest(new { message = "Name is required." });
         if (string.IsNullOrWhiteSpace(req.ProductId)) return BadRequest(new { message = "ProductId is required." });
 
-        var createdBy = User.Identity?.Name ?? User.FindFirst("email")?.Value;
+        var createdBy = GetCurrentUserDisplayName();
         var entity = new WorkflowConfigEntity
         {
             Id                    = Guid.NewGuid().ToString(),
@@ -1476,7 +1490,9 @@ public class WorkflowConfigsController : ControllerBase
         var source = await _db.WorkflowConfigs.FirstOrDefaultAsync(x => x.Id == id);
         if (source is null) return NotFound();
 
-        var createdBy = User.Identity?.Name ?? User.FindFirst("email")?.Value;
+        // The CLONING user becomes the new row's creator — never source.CreatedBy. A clone is a
+        // genuinely new WorkflowConfigEntity (new Id, its own CreatedAt), not a copy of authorship.
+        var createdBy = GetCurrentUserDisplayName();
         var clone = new WorkflowConfigEntity
         {
             Id                    = Guid.NewGuid().ToString(),
