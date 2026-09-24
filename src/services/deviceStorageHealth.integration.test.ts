@@ -139,15 +139,20 @@ describe("OBSERVED CONSEQUENCE of the approved thresholds — reported, not chan
     expect(health.drivenBy).toBe("device-percent");
   });
 
-  it("an over-large free figure (iOS purgeable semantics) can never manufacture a false CRITICAL", async () => {
-    // freeBytes > totalBytes is passed through unclamped (see isValidNativeStorageInfo). Because
-    // every device rule is a "<= threshold" comparison, a too-large free figure only ever reads
-    // as healthier, never as pressure.
+  it("an IMPOSSIBLE freeBytes > totalBytes reading is rejected end-to-end, falling back to budget-only rather than computing an impossible ratio", async () => {
+    // isValidNativeStorageInfo() rejects freeBytes > totalBytes (a review fix — the two figures
+    // describe the SAME volume, so "available" can never legitimately exceed "total"). The whole
+    // chain must therefore degrade to UNAVAILABLE/budget-only here, never surface a >1 device
+    // free ratio, and never let a malformed reading masquerade as healthy OR as pressure.
     deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 64 * GB, freeBytes: 70 * GB });
 
-    const { health } = await healthFor(100 * MB);
+    const { device, nGoBudgetBytes, health } = await healthFor(100 * MB);
 
-    expect(health.level).toBe("HEALTHY");
-    expect(health.deviceFreeRatio).toBeGreaterThan(1);
+    expect(device.source).toBe("UNAVAILABLE");
+    expect(device.freeBytes).toBeNull();
+    expect(device.totalBytes).toBeNull();
+    expect(nGoBudgetBytes).toBe(5 * GB); // the 5 GB fallback, exactly as when the plugin is absent
+    expect(health.drivenBy).toBe("budget-only");
+    expect(health.deviceFreeRatio).toBeNull();
   });
 });

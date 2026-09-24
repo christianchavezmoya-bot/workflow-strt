@@ -88,18 +88,21 @@ Notes:
   overflows `int` on large volumes. No manifest entry, no runtime permission, no file enumeration.
 - **iOS** deliberately prefers `volumeAvailableCapacityForImportantUsage` over raw free bytes. That
   figure **includes space the system can reclaim** by purging caches/offloadable content, so it can
-  exceed a naive free-space reading — which is the point: it is Apple's documented answer to "can I
-  store something the user asked for," and therefore a better operational estimate of what N-Go can
-  still write than a raw number that would call a device full while iOS still holds purgeable data.
+  exceed a naive RAW free-space reading — which is the point: it is Apple's documented answer to
+  "can I store something the user asked for," and therefore a better operational estimate of what
+  N-Go can still write than a raw number that would call a device full while iOS still holds
+  purgeable data. It is still bounded by the volume's own total capacity, though — `freeBytes` and
+  `totalBytes` describe the same filesystem, so a reading where `freeBytes` exceeds `totalBytes` is
+  not a legitimate reclaimable-space case, it is a malformed/inconsistent one (see validation below).
 - **These figures are not byte-perfect or directly comparable across OSes.** They are two different
   vendors' answers to "how much room is there," measured on different filesystems with different
   reclamation semantics. They are good enough to drive a health level; they are not an audit.
 - **Fallback:** plugin absent (e.g. an older native build), platform unsupported, a bridge exception,
   or a malformed response → `UNAVAILABLE` → budget-only health. Validation lives in
   `isValidNativeStorageInfo()` (`deviceStorageCapability.ts`), which rejects NaN/Infinity/negatives/
-  non-numbers/non-positive totals. It deliberately does **not** clamp `freeBytes > totalBytes`: that
-  would silently normalize a malformed reading into a healthy-looking one, and every device rule is a
-  `<= threshold` comparison, so an over-large free figure can never manufacture a false CRITICAL.
+  non-numbers/non-positive totals, **and rejects `freeBytes > totalBytes`** — an impossible reading
+  on a single volume is treated as malformed, not clamped or silently reinterpreted as `totalBytes`,
+  so it fails safe into `UNAVAILABLE`/budget-only mode rather than reporting an inconsistent ratio.
 - **Privacy:** the plugin returns two integers. No filenames, directory contents, photos, user
   documents, other apps, identifiers, or personal data; no iCloud query; no new permission prompt.
 

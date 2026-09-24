@@ -50,11 +50,22 @@ describe("isValidNativeStorageInfo (pure validator for the native bridge boundar
     expect(isValidNativeStorageInfo(42)).toBe(false);
   });
 
-  it("passes through freeBytes > totalBytes rather than clamping (iOS purgeable-space semantics)", () => {
-    // Documented, deliberate: see the validator's doc comment. It stays visible instead of being
-    // silently normalized; computeStorageHealth only ever applies "<= threshold" rules, so an
-    // over-large free figure can never manufacture a false CRITICAL.
-    expect(isValidNativeStorageInfo({ totalBytes: 64 * GB, freeBytes: 70 * GB })).toBe(true);
+  // Required test #1: an impossible reading (free > total on the SAME volume) must be rejected,
+  // never accepted or clamped. See the validator's doc comment for why iOS's "important usage"
+  // figure exceeding RAW free bytes is legitimate, but exceeding TOTAL capacity is not.
+  it("rejects freeBytes > totalBytes as an impossible reading", () => {
+    expect(isValidNativeStorageInfo({ totalBytes: 64 * GB, freeBytes: 70 * GB })).toBe(false);
+  });
+
+  // Required test #3: freeBytes === totalBytes (a completely empty/unused volume) is valid.
+  it("accepts freeBytes === totalBytes (a fully-free volume)", () => {
+    expect(isValidNativeStorageInfo({ totalBytes: 64 * GB, freeBytes: 64 * GB })).toBe(true);
+  });
+
+  // Required test #4: a legitimate iOS-style reclaimable reading that is high but still bounded
+  // by total capacity must remain valid — the fix must not overcorrect into rejecting real data.
+  it("accepts a high-but-bounded iOS 'important usage' reading (reclaimable space, still <= total)", () => {
+    expect(isValidNativeStorageInfo({ totalBytes: 256 * GB, freeBytes: 200 * GB })).toBe(true);
   });
 });
 
@@ -100,6 +111,19 @@ describe("readDeviceStorage — native", () => {
 
   it("falls back to UNAVAILABLE on a malformed native result, never surfacing the bad numbers", async () => {
     deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: -1, freeBytes: Number.NaN });
+
+    const reading = await readDeviceStorage();
+
+    expect(reading.source).toBe("UNAVAILABLE");
+    expect(reading.freeBytes).toBeNull();
+    expect(reading.totalBytes).toBeNull();
+    expect(reading.unavailableReason).toMatch(/malformed/i);
+  });
+
+  // Required test #2: an impossible freeBytes > totalBytes native response must resolve to
+  // UNAVAILABLE with BOTH bytes null — never surfaced, clamped, or reinterpreted as totalBytes.
+  it("falls back to UNAVAILABLE (both bytes null) when the native response reports freeBytes > totalBytes", async () => {
+    deviceStorageMocks.getStorageInfo.mockResolvedValue({ totalBytes: 64 * GB, freeBytes: 70 * GB });
 
     const reading = await readDeviceStorage();
 

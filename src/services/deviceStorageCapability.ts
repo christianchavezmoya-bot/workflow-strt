@@ -63,17 +63,18 @@ function unavailable(reason: string): DeviceStorageReading {
  * Pure validator for whatever the native bridge hands back. A native bridge is an untyped JSON
  * boundary: TypeScript's `Promise<DeviceStorageInfo>` is a claim, not a guarantee, so every field
  * is re-checked here rather than trusted. Rejects NaN, Infinity, negatives, non-numbers, a
- * non-positive total, and a null/non-object response.
+ * non-positive total, a null/non-object response, and freeBytes > totalBytes.
  *
- * NOTE on freeBytes > totalBytes: this is NOT rejected and NOT clamped, and that is deliberate.
- * On iOS the available figure is `volumeAvailableCapacityForImportantUsage`, which includes space
- * the system can reclaim by purging caches — Apple's documented answer to "can I write this?" —
- * so it can legitimately exceed a naive free-space reading. It is still bounded by the volume, so
- * exceeding TOTAL capacity would indicate a genuinely malformed reading rather than purgeable
- * semantics; it is passed through unchanged so it stays visible instead of being silently
- * normalized into a healthy-looking number. computeStorageHealth() tolerates a ratio above 1
- * (it only ever compares against "<= threshold" rules, so a too-large free figure can never
- * manufacture a false CRITICAL).
+ * NOTE on freeBytes > totalBytes: totalBytes and freeBytes both describe the SAME filesystem/
+ * volume (StatFs.getTotalBytes()/getAvailableBytes() on Android; volumeTotalCapacity vs.
+ * volumeAvailableCapacityForImportantUsage/volumeAvailableCapacity on iOS), so "available" can
+ * never legitimately exceed "total" on that volume. iOS's `volumeAvailableCapacityForImportantUsage`
+ * can exceed a naive RAW free-bytes reading — it includes space the system can reclaim by purging
+ * caches, which is exactly why the plugin prefers it — but it is still bounded by the volume's own
+ * total capacity; a reading above totalBytes is not a legitimate reclaimable-space case, it is a
+ * malformed/inconsistent one. Such a reading is rejected here (never clamped, never silently
+ * normalized into totalBytes) so it fails safe into UNAVAILABLE / budget-only mode instead of
+ * reporting an impossible ratio.
  */
 export function isValidNativeStorageInfo(value: unknown): value is DeviceStorageInfo {
   if (typeof value !== "object" || value === null) return false;
@@ -81,6 +82,7 @@ export function isValidNativeStorageInfo(value: unknown): value is DeviceStorage
   if (typeof totalBytes !== "number" || typeof freeBytes !== "number") return false;
   if (!Number.isFinite(totalBytes) || !Number.isFinite(freeBytes)) return false;
   if (totalBytes <= 0 || freeBytes < 0) return false;
+  if (freeBytes > totalBytes) return false;
   return true;
 }
 
