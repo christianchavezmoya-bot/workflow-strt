@@ -32,15 +32,49 @@ export interface StorageHealthResult {
 
 interface Thresholds {
   budgetRatio: number;
+  /** The percentage-free rule is QUALIFIED (see the "Percentage guardrail" note below on
+   *  computeStorageHealth) — this alone is never sufficient to escalate. */
   deviceFreeRatioMax: number;
+  /** Guardrail for the percentage rule: it only applies when device free bytes ALSO fall at or
+   *  under this absolute ceiling. Distinct from deviceFreeAbsoluteBytesMax, which is the
+   *  independent, unqualified absolute-free-space rule below. */
+  devicePercentGuardrailBytesMax: number;
   deviceFreeAbsoluteBytesMax: number;
 }
 
-/** Owner-approved thresholds (do not silently tune — see the audit for why these values). */
+/**
+ * Owner-approved thresholds (do not silently tune — see the audit for why these values).
+ *
+ * Policy refinement (post-PR #369): percentage-free alone was found to over-escalate on
+ * high-capacity devices — a 512 GB phone with 40 GB free (7.8%) read CRITICAL despite tens of
+ * GB of real headroom. Percentage is a genuinely useful EARLY-PRESSURE signal on smaller/
+ * constrained devices, but becomes misleading in isolation once a device is large enough that a
+ * small percentage still represents a large absolute margin. The fix is NOT to drop percentage,
+ * and NOT to loosen it into an OR with a big absolute number (that would just move the same
+ * problem) — it is to QUALIFY it: the percentage rule for a tier only applies when device free
+ * bytes ALSO fall at or under that tier's `devicePercentGuardrailBytesMax`. The independent
+ * `deviceFreeAbsoluteBytesMax` rule (and the N-Go budget rule) remain plain, unqualified ORs —
+ * only percentage gained a guardrail.
+ */
 const THRESHOLDS: Record<Exclude<StorageHealthLevel, "HEALTHY">, Thresholds> = {
-  WARNING: { budgetRatio: 0.5, deviceFreeRatioMax: 0.2, deviceFreeAbsoluteBytesMax: 5 * 1024 ** 3 },
-  HIGH: { budgetRatio: 0.7, deviceFreeRatioMax: 0.15, deviceFreeAbsoluteBytesMax: 2 * 1024 ** 3 },
-  CRITICAL: { budgetRatio: 0.85, deviceFreeRatioMax: 0.1, deviceFreeAbsoluteBytesMax: 1 * 1024 ** 3 },
+  WARNING: {
+    budgetRatio: 0.5,
+    deviceFreeRatioMax: 0.15,
+    devicePercentGuardrailBytesMax: 20 * 1024 ** 3,
+    deviceFreeAbsoluteBytesMax: 5 * 1024 ** 3,
+  },
+  HIGH: {
+    budgetRatio: 0.7,
+    deviceFreeRatioMax: 0.1,
+    devicePercentGuardrailBytesMax: 10 * 1024 ** 3,
+    deviceFreeAbsoluteBytesMax: 2 * 1024 ** 3,
+  },
+  CRITICAL: {
+    budgetRatio: 0.85,
+    deviceFreeRatioMax: 0.05,
+    devicePercentGuardrailBytesMax: 5 * 1024 ** 3,
+    deviceFreeAbsoluteBytesMax: 1 * 1024 ** 3,
+  },
 };
 
 const LEVEL_ORDER: StorageHealthLevel[] = ["HEALTHY", "WARNING", "HIGH", "CRITICAL"];
@@ -111,10 +145,19 @@ export function computeStorageHealth(input: StorageHealthInput): StorageHealthRe
       level = worse(level, tier);
       if (level === tier) drivenBy = deviceFreeRatio == null ? "budget-only" : "budget";
     }
-    if (deviceFreeRatio != null && deviceFreeRatio <= t.deviceFreeRatioMax) {
+    // Percentage guardrail: the percentage-free rule ALONE is not sufficient to escalate — it
+    // only applies when device free bytes are ALSO at or under this tier's absolute guardrail
+    // (see the THRESHOLDS doc comment). This is an AND with the guardrail, never an OR.
+    if (
+      deviceFreeRatio != null &&
+      deviceFreeRatio <= t.deviceFreeRatioMax &&
+      input.deviceFreeBytes != null &&
+      input.deviceFreeBytes <= t.devicePercentGuardrailBytesMax
+    ) {
       level = worse(level, tier);
       if (level === tier) drivenBy = "device-percent";
     }
+    // Independent absolute-free-space rule — unqualified, unchanged from before this refinement.
     if (input.deviceFreeBytes != null && input.deviceFreeBytes <= t.deviceFreeAbsoluteBytesMax) {
       level = worse(level, tier);
       if (level === tier) drivenBy = "device-absolute";
