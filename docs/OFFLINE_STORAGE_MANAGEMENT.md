@@ -56,13 +56,59 @@ Two independent signals, worst-wins:
 | HIGH | ≥ 70% | ≤ 15% | ≤ 2 GB |
 | CRITICAL | ≥ 85% | ≤ 10% | ≤ 1 GB |
 
-**Device free/total space is not available today.** `@capacitor/device@8.0.3` was installed,
-inspected against its own shipped type definitions, and found to have no disk-space fields at all
-(only `memUsed`, app memory) — see `deviceStorageCapability.ts`'s doc comment. It was removed again
-(net dependency change: zero). Health today runs in "budget-only" mode on native; `WEB_QUOTA_ESTIMATE`
-via `navigator.storage.estimate()` is available on web/PWA but is a browser origin quota, explicitly
-never presented as device free space. **A working native free-space API is a prerequisite for this
-feature's full value** and needs an owner decision — see "Known gaps" below.
+**Device free/total space now comes from a repo-owned Capacitor plugin** — see "Native device
+capacity" below. The earlier blocker is resolved: `@capacitor/device@8.0.3` was installed, inspected
+against its own shipped type definitions, found to have no disk-space fields at all (only `memUsed`,
+app memory), and removed again (net dependency change: zero). Rather than adopt an unvetted
+third-party plugin, the bridge was written in this repo against the platform APIs directly. On web/PWA
+`WEB_QUOTA_ESTIMATE` via `navigator.storage.estimate()` remains a browser origin quota and is still
+explicitly never presented as device free space. When the native plugin is missing or fails, health
+degrades to "budget-only" mode exactly as before.
+
+## Native device capacity (`DeviceStorage` plugin)
+
+A small, repo-owned Capacitor plugin — no third-party dependency — reports the real capacity of the
+filesystem N-Go's app data lives on. JS bridge: `src/services/nativePlugins/deviceStorage.ts`
+(`DeviceStorage.getStorageInfo() -> { totalBytes, freeBytes }`, **bytes only**, never formatted
+strings or percentages).
+
+| | Android | iOS |
+|---|---|---|
+| Source | `android/app/.../DeviceStoragePlugin.java` | `ios/App/App/DeviceStoragePlugin.swift` |
+| API | `android.os.StatFs` — `getTotalBytes()` / `getAvailableBytes()` | `URL.resourceValues` — `.volumeTotalCapacityKey` / `.volumeAvailableCapacityForImportantUsageKey` (fallback `.volumeAvailableCapacityKey`) |
+| Filesystem measured | `Context.getFilesDir()` — the app's **internal** data volume | the volume containing the app's documents directory |
+| Registration | `registerPlugin(DeviceStoragePlugin.class)` in `MainActivity.onCreate()` | `bridge?.registerPluginInstance(DeviceStoragePlugin())` in `ViewController.capacitorDidLoad()` |
+| Permission required | **none** | **none** |
+
+Notes:
+
+- **Android** measures `getFilesDir()`, not external/removable storage: an SD card's free space says
+  nothing about whether N-Go can write. `getTotalBytes()`/`getAvailableBytes()` (API 18+, well under
+  minSdk 24) replace the deprecated `getBlockCount() * getBlockSize()` multiplication, which also
+  overflows `int` on large volumes. No manifest entry, no runtime permission, no file enumeration.
+- **iOS** deliberately prefers `volumeAvailableCapacityForImportantUsage` over raw free bytes. That
+  figure **includes space the system can reclaim** by purging caches/offloadable content, so it can
+  exceed a naive RAW free-space reading — which is the point: it is Apple's documented answer to
+  "can I store something the user asked for," and therefore a better operational estimate of what
+  N-Go can still write than a raw number that would call a device full while iOS still holds
+  purgeable data. It is still bounded by the volume's own total capacity, though — `freeBytes` and
+  `totalBytes` describe the same filesystem, so a reading where `freeBytes` exceeds `totalBytes` is
+  not a legitimate reclaimable-space case, it is a malformed/inconsistent one (see validation below).
+- **These figures are not byte-perfect or directly comparable across OSes.** They are two different
+  vendors' answers to "how much room is there," measured on different filesystems with different
+  reclamation semantics. They are good enough to drive a health level; they are not an audit.
+- **Fallback:** plugin absent (e.g. an older native build), platform unsupported, a bridge exception,
+  or a malformed response → `UNAVAILABLE` → budget-only health. Validation lives in
+  `isValidNativeStorageInfo()` (`deviceStorageCapability.ts`), which rejects NaN/Infinity/negatives/
+  non-numbers/non-positive totals, **and rejects `freeBytes > totalBytes`** — an impossible reading
+  on a single volume is treated as malformed, not clamped or silently reinterpreted as `totalBytes`,
+  so it fails safe into `UNAVAILABLE`/budget-only mode rather than reporting an inconsistent ratio.
+- **Privacy:** the plugin returns two integers. No filenames, directory contents, photos, user
+  documents, other apps, identifiers, or personal data; no iCloud query; no new permission prompt.
+
+Once a real `deviceTotalBytes` arrives, `computeNGoBudgetBytes()` switches itself off the fixed 5 GB
+fallback and onto the device-relative formula (5% of device total, clamped to [2 GB, 20 GB]) with no
+other change — see `deviceStorageHealth.integration.test.ts`, which exercises that whole chain.
 
 ## Project discard (`src/services/projectDiscardService.ts`)
 
@@ -145,10 +191,17 @@ this feature:
 
 ## Known gaps requiring an owner decision
 
-1. **No native device free/total space API** — see "Storage health" above. Options: (a) a small
-   custom Capacitor plugin (the codebase already has two precedents —
-   `ios/App/App/LocalMediaServerPlugin.swift`, `SyncKeepAlivePlugin.java`), (b) a different
-   community plugin (unverified — must be inspected the same way `@capacitor/device` was, never
-   assumed), or (c) accept budget-only health indefinitely.
-2. **"Last used" (per-device open tracking)** does not exist and was not invented — the screen
+1. ~~**No native device free/total space API**~~ — **RESOLVED** by the repo-owned `DeviceStorage`
+   plugin (option (a), the custom-plugin route, following the `LocalMediaServerPlugin.swift` /
+   `SyncKeepAlivePlugin.java` precedents). See "Native device capacity" above.
+2. **The percentage rule and the absolute rule can disagree sharply on large devices.** Now that
+   real capacity is available, this is observable rather than theoretical: a 512 GB phone with
+   40 GB free is **7.8% free → CRITICAL** on the percentage rule, even though 40 GB is objectively
+   plenty of room for N-Go to keep working. A real measured example from the iOS Simulator during
+   this work: 372.5 GB total / 21.7 GB available = 5.8% → CRITICAL. This behavior is **left exactly
+   as approved and was not silently tuned**; it is asserted as-is in
+   `deviceStorageHealth.integration.test.ts` so any future change is deliberate. Owner decision
+   needed on whether the percentage rule should be skipped (or its threshold lowered) once absolute
+   free space is comfortably above the absolute tier — e.g. requiring BOTH signals on large devices.
+3. **"Last used" (per-device open tracking)** does not exist and was not invented — the screen
    shows "Last synced" instead, which is real data.

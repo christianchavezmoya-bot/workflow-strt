@@ -210,6 +210,43 @@ describe("OfflineStorageScreen", () => {
     expect(screen.queryByRole("button", { name: /^manage$/i })).not.toBeInTheDocument();
   });
 
+  // Native device capacity: the screen must show a REAL "Available on device" figure once the
+  // DeviceStorage plugin reports one, with the API name kept to an internal data-* attribute.
+  it("shows real device free space on native, exposing the source only as an internal diagnostic attribute", async () => {
+    serviceMocks.getOfflineStorageOverview.mockResolvedValue({
+      ...baseOverview,
+      device: {
+        source: "NATIVE_DEVICE_API",
+        freeBytes: 45_755_838_464, // 42.6 GB
+        totalBytes: 128 * 1024 ** 3,
+        quotaBytes: null,
+        quotaUsageBytes: null,
+      },
+    });
+    serviceMocks.getProjectStorageSummaries.mockResolvedValue([safeProject()]);
+
+    renderScreen();
+
+    const value = await screen.findByText("42.6 GB");
+    expect(value).toBeInTheDocument();
+    // Developers can tell the sources apart in the DOM...
+    expect(value).toHaveAttribute("data-device-storage-source", "NATIVE_DEVICE_API");
+    // ...but users never see a technical API name, and a native reading is never labelled an estimate.
+    expect(screen.queryByText(/NATIVE_DEVICE_API/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/browser estimate/i)).not.toBeInTheDocument();
+    expect(screen.queryByText("Unknown")).not.toBeInTheDocument();
+  });
+
+  it("still shows 'Unknown' (never a fabricated figure) when device capacity is unavailable", async () => {
+    serviceMocks.getOfflineStorageOverview.mockResolvedValue(baseOverview); // device.source UNAVAILABLE
+    serviceMocks.getProjectStorageSummaries.mockResolvedValue([safeProject()]);
+
+    renderScreen();
+
+    const value = await screen.findByText("Unknown");
+    expect(value).toHaveAttribute("data-device-storage-source", "UNAVAILABLE");
+  });
+
   it("shows an empty state when no projects are cached, without erroring", async () => {
     serviceMocks.getOfflineStorageOverview.mockResolvedValue({ ...baseOverview, offlineProjectCount: 0 });
     serviceMocks.getProjectStorageSummaries.mockResolvedValue([]);

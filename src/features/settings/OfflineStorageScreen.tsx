@@ -201,7 +201,14 @@ export default function OfflineStorageScreen() {
           </Stack>
           <Stack direction="row" justifyContent="space-between">
             <Typography variant="body2" color="text.secondary">Available on device</Typography>
-            <Typography variant="body2" fontWeight={600}>
+            {/* data-device-storage-source is an internal diagnostic only: it lets a developer tell
+                NATIVE_DEVICE_API / WEB_QUOTA_ESTIMATE / UNAVAILABLE apart in the DOM inspector.
+                Users only ever see the plain figure ("42.6 GB") — never an API name. */}
+            <Typography
+              variant="body2"
+              fontWeight={600}
+              data-device-storage-source={overview.device.source}
+            >
               {overview.device.freeBytes != null
                 ? formatStorageBytes(overview.device.freeBytes)
                 : overview.device.quotaBytes != null

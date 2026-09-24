@@ -2,30 +2,32 @@
  * deviceStorageCapability — reports what this session can learn about DEVICE free/total
  * storage, as distinct from N-Go's own footprint (see offlineStorageService.ts).
  *
- * PHASE 1A FINDING (audit-verified against the installed package, not assumed from memory):
- * @capacitor/device 8.0.3's DeviceInfo has NO disk-space fields. Its full interface (checked
- * directly against node_modules/@capacitor/device/dist/esm/definitions.d.ts) is: name, model,
- * platform, operatingSystem, osVersion, iOSVersion, androidSDKVersion, manufacturer, isVirtual,
- * memUsed (app MEMORY, not disk), webViewVersion. There is no diskFree/diskTotal/realDiskFree/
- * realDiskTotal — that shape existed on an older/different plugin lineage, not this one. Per
- * instruction, this sub-task STOPS here rather than guessing at fields or writing an unreviewed
- * native plugin: @capacitor/device was installed, inspected, and removed again (see PR — net
- * dependency change is zero) because it provides nothing this module could use.
+ * NATIVE (Android + iOS): a repo-owned Capacitor plugin, "DeviceStorage", reports real total/free
+ * bytes for the filesystem N-Go's app data lives on — see src/services/nativePlugins/deviceStorage.ts
+ * for the bridge and the two native implementations it points at. This replaces the Phase 1A state
+ * where no installed API could answer the question at all (@capacitor/device 8.0.3 has no disk
+ * fields — it was installed, inspected against its own shipped type definitions, found to expose
+ * only memUsed/app memory, and removed again; net dependency change zero). No third-party plugin
+ * was added for this: the bridge is ~60 lines of platform code in this repo, using
+ * android.os.StatFs and Foundation's volume-capacity resource values.
  *
- * Consequence: DEVICE_FREE_UNAVAILABLE is a real, expected, first-class state on native today,
- * not an error path. storageHealth.ts must produce a meaningful result without a free-space
- * figure (see its "budget-only" mode) rather than treating this as a fatal condition.
+ * Native failure is still a real, first-class state, NOT an error path: an old build without the
+ * plugin, an unsupported platform, a bridge exception, or a malformed response all resolve to
+ * UNAVAILABLE with both figures null, and storageHealth.ts continues in its budget-only mode.
+ * The Offline Storage screen must never break because a device could not answer.
  *
  * WEB: navigator.storage.estimate() is real and installed-library-typed
  * (lib.dom.d.ts StorageEstimate: `{ quota?: number; usage?: number }`), but it reports the
  * BROWSER ORIGIN'S storage quota/usage — not actual device free disk. It is intentionally
- * labeled DEVICE_QUOTA_ESTIMATE (never "free space") everywhere it surfaces, per instruction.
+ * labeled WEB_QUOTA_ESTIMATE (never "free space") everywhere it surfaces, per instruction, and
+ * that behavior is unchanged by the native work above.
  */
 
 import { isMobileNativePlatform } from "../utils/platform";
+import { DeviceStorage, type DeviceStorageInfo } from "./nativePlugins/deviceStorage";
 
 export type DeviceStorageSource =
-  /** Real device free/total bytes. Not achievable today — see module doc comment. */
+  /** Real device free/total bytes from the repo-owned DeviceStorage plugin (Android/iOS). */
   | "NATIVE_DEVICE_API"
   /** Browser StorageManager.estimate() — an origin quota estimate, not true device free space. */
   | "WEB_QUOTA_ESTIMATE"
@@ -34,9 +36,9 @@ export type DeviceStorageSource =
 
 export interface DeviceStorageReading {
   source: DeviceStorageSource;
-  /** True device free bytes. Only ever set when source === "NATIVE_DEVICE_API" (never today). */
+  /** True device free bytes. Only ever set when source === "NATIVE_DEVICE_API". */
   freeBytes: number | null;
-  /** True device total bytes. Only ever set when source === "NATIVE_DEVICE_API" (never today). */
+  /** True device total bytes. Only ever set when source === "NATIVE_DEVICE_API". */
   totalBytes: number | null;
   /** Browser storage-quota bytes (origin-scoped, NOT device free space). WEB_QUOTA_ESTIMATE only. */
   quotaBytes: number | null;
@@ -46,16 +48,43 @@ export interface DeviceStorageReading {
   unavailableReason?: string;
 }
 
-const UNAVAILABLE_NATIVE: DeviceStorageReading = {
-  source: "UNAVAILABLE",
-  freeBytes: null,
-  totalBytes: null,
-  quotaBytes: null,
-  quotaUsageBytes: null,
-  unavailableReason:
-    "No installed API reports real device free/total storage on this platform " +
-    "(see deviceStorageCapability.ts doc comment — @capacitor/device 8.0.3 has no disk fields).",
-};
+function unavailable(reason: string): DeviceStorageReading {
+  return {
+    source: "UNAVAILABLE",
+    freeBytes: null,
+    totalBytes: null,
+    quotaBytes: null,
+    quotaUsageBytes: null,
+    unavailableReason: reason,
+  };
+}
+
+/**
+ * Pure validator for whatever the native bridge hands back. A native bridge is an untyped JSON
+ * boundary: TypeScript's `Promise<DeviceStorageInfo>` is a claim, not a guarantee, so every field
+ * is re-checked here rather than trusted. Rejects NaN, Infinity, negatives, non-numbers, a
+ * non-positive total, a null/non-object response, and freeBytes > totalBytes.
+ *
+ * NOTE on freeBytes > totalBytes: totalBytes and freeBytes both describe the SAME filesystem/
+ * volume (StatFs.getTotalBytes()/getAvailableBytes() on Android; volumeTotalCapacity vs.
+ * volumeAvailableCapacityForImportantUsage/volumeAvailableCapacity on iOS), so "available" can
+ * never legitimately exceed "total" on that volume. iOS's `volumeAvailableCapacityForImportantUsage`
+ * can exceed a naive RAW free-bytes reading — it includes space the system can reclaim by purging
+ * caches, which is exactly why the plugin prefers it — but it is still bounded by the volume's own
+ * total capacity; a reading above totalBytes is not a legitimate reclaimable-space case, it is a
+ * malformed/inconsistent one. Such a reading is rejected here (never clamped, never silently
+ * normalized into totalBytes) so it fails safe into UNAVAILABLE / budget-only mode instead of
+ * reporting an impossible ratio.
+ */
+export function isValidNativeStorageInfo(value: unknown): value is DeviceStorageInfo {
+  if (typeof value !== "object" || value === null) return false;
+  const { totalBytes, freeBytes } = value as Record<string, unknown>;
+  if (typeof totalBytes !== "number" || typeof freeBytes !== "number") return false;
+  if (!Number.isFinite(totalBytes) || !Number.isFinite(freeBytes)) return false;
+  if (totalBytes <= 0 || freeBytes < 0) return false;
+  if (freeBytes > totalBytes) return false;
+  return true;
+}
 
 /**
  * Best-effort device storage reading for the current platform. Never throws; a failed or
@@ -64,8 +93,29 @@ const UNAVAILABLE_NATIVE: DeviceStorageReading = {
  */
 export async function readDeviceStorage(): Promise<DeviceStorageReading> {
   if (isMobileNativePlatform()) {
-    // See module doc comment: no native API in this dependency set provides this today.
-    return UNAVAILABLE_NATIVE;
+    try {
+      const info = await DeviceStorage.getStorageInfo();
+      if (!isValidNativeStorageInfo(info)) {
+        return unavailable(
+          "The DeviceStorage plugin returned a malformed storage reading (expected finite, " +
+            "non-negative totalBytes/freeBytes in bytes).",
+        );
+      }
+      return {
+        source: "NATIVE_DEVICE_API",
+        freeBytes: info.freeBytes,
+        totalBytes: info.totalBytes,
+        quotaBytes: null,
+        quotaUsageBytes: null,
+      };
+    } catch {
+      // Plugin not present in this build, method unimplemented on this platform, or a native
+      // exception. All are non-fatal: fall back to budget-only health.
+      return unavailable(
+        "The DeviceStorage native plugin is unavailable or failed on this device; " +
+          "storage health falls back to budget-only mode.",
+      );
+    }
   }
 
   if (typeof navigator !== "undefined" && navigator.storage?.estimate) {
@@ -85,12 +135,5 @@ export async function readDeviceStorage(): Promise<DeviceStorageReading> {
     }
   }
 
-  return {
-    source: "UNAVAILABLE",
-    freeBytes: null,
-    totalBytes: null,
-    quotaBytes: null,
-    quotaUsageBytes: null,
-    unavailableReason: "navigator.storage.estimate() is not available in this browser/context.",
-  };
+  return unavailable("navigator.storage.estimate() is not available in this browser/context.");
 }
