@@ -1,5 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { configureStore } from "@reduxjs/toolkit";
 import { Provider } from "react-redux";
 import { MemoryRouter } from "react-router-dom";
@@ -32,18 +32,23 @@ vi.mock("../../services/featureService", () => ({
   },
 }));
 
+const listByProductMock = vi.fn().mockResolvedValue([]);
+const createConfigMock = vi.fn();
+const updateConfigMock = vi.fn();
 vi.mock("../../services/workflowConfigService", () => ({
   workflowConfigService: {
-    listByProduct: vi.fn().mockResolvedValue([]),
+    listByProduct: (...args: unknown[]) => listByProductMock(...args),
     getById: vi.fn().mockResolvedValue(null),
-    update: vi.fn(),
+    create: (...args: unknown[]) => createConfigMock(...args),
+    update: (...args: unknown[]) => updateConfigMock(...args),
     archive: vi.fn(),
   },
 }));
 
+const listWorkflowTypesMock = vi.fn().mockResolvedValue([]);
 vi.mock("../../services/workflowTypeService", () => ({
   workflowTypeService: {
-    list: vi.fn().mockResolvedValue([]),
+    list: (...args: unknown[]) => listWorkflowTypesMock(...args),
   },
 }));
 
@@ -167,5 +172,176 @@ describe("parseSteps — reference Content reaches the Preview runner (TEST E)",
     const workflow = parseSteps(cfg);
 
     expect(workflow?.media).toEqual([]);
+  });
+});
+
+// ── Workflow metadata fix: Description in the New Workflow flow + list rendering ────────────
+
+function makeConfig(overrides: Partial<WorkflowConfig> = {}): WorkflowConfig {
+  return {
+    id: "cfg-1",
+    name: "Test Workflow",
+    productId: "prod-1",
+    version: 1,
+    status: "Draft",
+    stepsJson: "[]",
+    mediaJson: "[]",
+    featureSelectionsJson: "[]",
+    configType: "Install",
+    displayName: "Test Workflow",
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    ...overrides,
+  };
+}
+
+async function renderInstructionsView(product: Product) {
+  const store = buildStore([product]);
+  render(
+    <Provider store={store}>
+      <AppToastProvider>
+        <MemoryRouter initialEntries={[`/work-instructions?product=${product.id}&view=instructions`]}>
+          <WorkInstructions />
+        </MemoryRouter>
+      </AppToastProvider>
+    </Provider>,
+  );
+  await waitFor(() => expect(listByProductMock).toHaveBeenCalled());
+}
+
+describe("New Workflow dialog — Description (workflow-metadata fix)", () => {
+  beforeEach(() => {
+    listByProductMock.mockClear();
+    listByProductMock.mockResolvedValue([]);
+    createConfigMock.mockClear();
+  });
+
+  it("shows both Product and Description in the primary New Workflow step, before entering the Builder", async () => {
+    const product = makeProduct("prod-1", "Test Product");
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+
+    expect(await screen.findByLabelText(/select product/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/description/i)).toBeInTheDocument();
+  });
+
+  it("Description is optional — Continue is not blocked by leaving it empty", async () => {
+    const product = makeProduct("prod-1", "Test Product");
+    createConfigMock.mockResolvedValue(makeConfig({ id: "cfg-new", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+    // Product defaults to the active product already; Description is left untouched (empty).
+    const continueButton = screen.getByRole("button", { name: /continue/i });
+    expect(continueButton).toBeEnabled();
+
+    fireEvent.click(continueButton);
+
+    await waitFor(() => expect(createConfigMock).toHaveBeenCalled());
+    expect(createConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({ productId: "prod-1", notes: undefined }),
+    );
+  });
+
+  it("Description typed during New Workflow creation is sent as `notes` on the create request", async () => {
+    const product = makeProduct("prod-1", "Test Product");
+    createConfigMock.mockResolvedValue(makeConfig({ id: "cfg-new", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+
+    fireEvent.change(screen.getByLabelText(/description/i), {
+      target: { value: "Installs the front-facing camera and wiring harness." },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+
+    await waitFor(() => expect(createConfigMock).toHaveBeenCalled());
+    expect(createConfigMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        productId: "prod-1",
+        notes: "Installs the front-facing camera and wiring harness.",
+      }),
+    );
+    // Never a second, separately-named "description" property — the API/DTO field is notes.
+    expect(createConfigMock.mock.calls[0]?.[0]).not.toHaveProperty("description");
+  });
+});
+
+describe("Edit Workflow dialog — Description still works (workflow-metadata fix, pre-existing path unchanged)", () => {
+  beforeEach(() => {
+    listByProductMock.mockClear();
+    updateConfigMock.mockClear();
+    listWorkflowTypesMock.mockClear();
+    listWorkflowTypesMock.mockResolvedValue([
+      { id: "wftype-installation", name: "Installation", sortOrder: 1, isActive: true },
+    ]);
+  });
+
+  it("pre-fills the existing Description, and saving an edit still sends the updated notes", async () => {
+    const product = makeProduct("prod-1", "Test Product");
+    const existing = makeConfig({
+      id: "cfg-edit",
+      status: "Draft",
+      notes: "Original description.",
+      workflowTypeId: "wftype-installation",
+    });
+    listByProductMock.mockResolvedValue([existing]);
+    updateConfigMock.mockResolvedValue({ ...existing, notes: "Revised description." });
+
+    await renderInstructionsView(product);
+    await screen.findByText("Test Workflow");
+
+    fireEvent.click(screen.getByRole("button", { name: /details/i }));
+
+    const descriptionField = await screen.findByLabelText(/description/i);
+    expect(descriptionField).toHaveValue("Original description.");
+
+    fireEvent.change(descriptionField, { target: { value: "Revised description." } });
+    fireEvent.click(screen.getByRole("button", { name: /save changes/i }));
+
+    await waitFor(() => expect(updateConfigMock).toHaveBeenCalled());
+    expect(updateConfigMock).toHaveBeenCalledWith(
+      "cfg-edit",
+      expect.objectContaining({ notes: "Revised description." }),
+    );
+  });
+});
+
+describe("Workflow list — Description / Created By rendering (workflow-metadata fix)", () => {
+  beforeEach(() => {
+    listByProductMock.mockClear();
+  });
+
+  it("renders the actual description and creator text for a populated workflow", async () => {
+    const product = makeProduct("prod-1", "Test Product");
+    listByProductMock.mockResolvedValue([
+      makeConfig({
+        id: "cfg-populated",
+        notes: "Installs two cameras and a reverse-input harness.",
+        createdBy: "Chris Chavez",
+      }),
+    ]);
+
+    await renderInstructionsView(product);
+
+    expect(await screen.findByText("Installs two cameras and a reverse-input harness.")).toBeInTheDocument();
+    expect(screen.getByText("Chris Chavez")).toBeInTheDocument();
+  });
+
+  it("renders '—' for both Description and Created By on a historical/null-metadata workflow, never 'undefined'", async () => {
+    const product = makeProduct("prod-1", "Test Product");
+    listByProductMock.mockResolvedValue([
+      makeConfig({ id: "cfg-historical", notes: undefined, createdBy: undefined }),
+    ]);
+
+    await renderInstructionsView(product);
+
+    await screen.findByText("Test Workflow"); // the row rendered at all
+    const dashes = screen.getAllByText("—");
+    expect(dashes.length).toBeGreaterThanOrEqual(2); // at least Description + Created By
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
   });
 });
