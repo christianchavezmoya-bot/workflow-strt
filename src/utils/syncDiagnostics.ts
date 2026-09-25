@@ -149,6 +149,14 @@ const COPY_ALLOWLIST: Array<keyof PendingAction> = [
   "nextRetryAt",
   "createdAt",
   "dependsOnOpId",
+  // Queue eligibility diagnostics — all scalars/enums, no payload content.
+  "lastEligibilityCheckAt",
+  "lastEligible",
+  "lastSkipReason",
+  "lastDependencyExists",
+  "lastDependencyOpType",
+  "lastDependencyStatus",
+  "lastBundleCandidate",
 ];
 
 /** Safe JSON for clipboard — no body, tokens, or step content. */
