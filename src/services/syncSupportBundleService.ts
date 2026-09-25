@@ -20,6 +20,15 @@ import { getOfflinePerfLog, type OfflinePerfEntry } from "../utils/offlinePerf";
 import { safeApiHost, toAllowlistedDiagnostics } from "../utils/syncDiagnostics";
 import { syncDiagnosticList, type SyncDiagnosticEntry } from "./syncDiagnosticsLog";
 import { checkPendingMediaIntegrity, type PendingMediaIntegrityRow } from "./pendingMediaIntegrity";
+import { getLastFlushPassDiagnostic, type FlushPassDiagnostic } from "./flushPassDiagnostics";
+import { isCircuitOpen, getCircuitOpenUntilMs, getCircuitFailureCount } from "../utils/circuitBreaker";
+import { getKnownMissingAssetIdsSnapshot } from "../utils/staleAssetIds";
+import {
+  getStaleAssetFetchTrace,
+  getStaleAssetReconcileTrace,
+  type StaleAssetFetchAttempt,
+  type StaleAssetReconcilePass,
+} from "../utils/staleAssetDiagnostics";
 
 export const SUPPORT_BUNDLE_SCHEMA_VERSION = 2;
 
@@ -55,6 +64,18 @@ export interface SyncSupportBundle {
   offlinePerf?: OfflinePerfEntry[];
   syncDiagnostics?: SyncDiagnosticEntry[];
   pendingMediaIntegrity?: PendingMediaIntegrityRow[];
+  // ── Observability-only diagnostics (native) ────────────────────────────────
+  // None of the below influences sync, reconciliation, or network behavior;
+  // they only make "why did nothing sync?" answerable from a support bundle.
+  circuitBreaker?: {
+    open: boolean;
+    openUntilMs: number;
+    failureCount: number;
+  };
+  lastFlushPass?: FlushPassDiagnostic | null;
+  knownMissingAssetIds?: string[];
+  staleAssetReconcileTrace?: StaleAssetReconcilePass[];
+  staleAssetFetchTrace?: StaleAssetFetchAttempt[];
   reportedFault?: {
     kind: FaultReportDraft["kind"];
     severity: FaultReportDraft["severity"];
@@ -148,12 +169,24 @@ export function toReportedFaultDiagnostics(draft?: FaultReportDraft | null): Syn
 export async function buildSyncSupportBundle(options?: {
   faultDraft?: FaultReportDraft | null;
 }): Promise<SyncSupportBundle> {
-  const [pending, dropped, bootstrap, diagnostics, mediaIntegrity] = await Promise.all([
+  const [
+    pending,
+    dropped,
+    bootstrap,
+    diagnostics,
+    mediaIntegrity,
+    lastFlushPass,
+    staleAssetReconcileTrace,
+    staleAssetFetchTrace,
+  ] = await Promise.all([
     pendingGetAll(),
     droppedActionsGetAll(),
     isMobileNativePlatform() ? offlineBootstrapService.getStatus() : Promise.resolve(null),
     syncDiagnosticList(50),
     isMobileNativePlatform() ? checkPendingMediaIntegrity() : Promise.resolve([]),
+    getLastFlushPassDiagnostic(),
+    getStaleAssetReconcileTrace(),
+    getStaleAssetFetchTrace(),
   ]);
 
   const conflicts = pending.filter((a) => a.conflictDetected);
@@ -188,6 +221,15 @@ export async function buildSyncSupportBundle(options?: {
     offlinePerf: isMobileNativePlatform() ? getOfflinePerfLog().slice(-40) : undefined,
     syncDiagnostics: diagnostics,
     pendingMediaIntegrity: mediaIntegrity.filter((row) => row.missingPaths.length > 0),
+    circuitBreaker: {
+      open: isCircuitOpen(),
+      openUntilMs: getCircuitOpenUntilMs(),
+      failureCount: getCircuitFailureCount(),
+    },
+    lastFlushPass,
+    knownMissingAssetIds: getKnownMissingAssetIdsSnapshot(),
+    staleAssetReconcileTrace,
+    staleAssetFetchTrace,
     reportedFault: toReportedFaultDiagnostics(options?.faultDraft),
   };
 }

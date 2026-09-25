@@ -63,7 +63,33 @@ export interface PendingAction {
   lastConnectivity?: string;
   lastOpType?: string;
   lastApiHost?: string;
+  // Queue eligibility diagnostics (observability only). Written by
+  // pendingRecordEligibility right before/around the flush loop's per-action
+  // skip checks — never read by sync logic, never influences status,
+  // retries, nextRetryAt, or ordering. See useSyncEngine's flush().
+  lastEligibilityCheckAt?: string;
+  lastEligible?: boolean;
+  lastSkipReason?: QueueEligibilitySkipReason;
+  lastDependencyExists?: boolean;
+  lastDependencyOpType?: string;
+  lastDependencyStatus?: PendingAction["status"];
+  lastBundleCandidate?: boolean;
 }
+
+/**
+ * Every reason flush() can decide NOT to attempt a due queue entry this pass,
+ * before any HTTP request is sent. Audited against current useSyncEngine.ts —
+ * do not extend this without re-checking the flush loop; do not assume it is
+ * exhaustive for other repos/branches.
+ */
+export type QueueEligibilitySkipReason =
+  | "DEPENDENCY_PENDING"           // dependsOnOpId still present in the queue
+  | "DEPENDENCY_DROPPED"           // dependency permanently failed (dropped_actions)
+  | "BUNDLED_WITH_RUN_COMPLETE"    // SIGNATURE_SUBMIT deferred to flush atomically via RUN_BUNDLE
+  | "EARLIER_OP_DROPPED_THIS_PASS" // an earlier op for the same run was rejected this pass
+  | "CONFLICT_ALREADY_FLAGGED"     // action.conflictDetected, not auto-cleared this pass
+  | "ASSET_CONCURRENCY_CONFLICT"   // pre-write snapshot check found a newer server version
+  | "MEDIA_MISSING";               // referenced local media file(s) not found on disk
 
 /** A sync action that permanently failed after exhausting all retries. */
 export interface DroppedAction {
@@ -719,6 +745,40 @@ export async function pendingMarkRetry(
       status: "failed",
     });
     window.dispatchEvent(new Event("sync-pending-changed"));
+  } catch { /* ignore */ }
+}
+
+type PendingEligibilityPatch = Partial<Pick<PendingAction,
+  | "lastEligible"
+  | "lastSkipReason"
+  | "lastDependencyExists"
+  | "lastDependencyOpType"
+  | "lastDependencyStatus"
+  | "lastBundleCandidate"
+>>;
+
+/**
+ * Diagnostic-only: record whether a due queue entry was judged eligible to
+ * attempt this flush pass, and why not when it wasn't. Narrowly scoped on
+ * purpose — unlike pendingSetStatus/pendingMarkRetry/pendingMarkConflict,
+ * this NEVER changes status, retries, or nextRetryAt, and never dispatches
+ * sync-pending-changed, so it cannot add UI churn or influence which action
+ * flush() attempts next. Best-effort: a write failure here must never affect
+ * sync behavior, so it's swallowed like every other pending* helper.
+ */
+export async function pendingRecordEligibility(
+  id: string,
+  patch: PendingEligibilityPatch,
+): Promise<void> {
+  try {
+    const db = await getDB();
+    const item = await db.get("pending_actions", id);
+    if (!item) return;
+    await db.put("pending_actions", {
+      ...item,
+      ...patch,
+      lastEligibilityCheckAt: new Date().toISOString(),
+    });
   } catch { /* ignore */ }
 }
 

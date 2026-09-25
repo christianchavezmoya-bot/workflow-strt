@@ -51,6 +51,15 @@ export function isKnownMissingAssetId(id: string): boolean {
   return knownMissingAssetIds.has(id);
 }
 
+/**
+ * Read-only copy of the known-missing set, for diagnostics/support-bundle
+ * consumers. Returns a new array each call — mutating it cannot affect the
+ * guard's actual behavior.
+ */
+export function getKnownMissingAssetIdsSnapshot(): string[] {
+  return [...knownMissingAssetIds];
+}
+
 export function markKnownMissingAssetId(id: string): void {
   if (!id) return;
   knownMissingAssetIds.add(id);

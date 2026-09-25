@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  getKnownMissingAssetIdsSnapshot,
   hydrateKnownMissingAssetIds,
   isKnownMissingAssetId,
   markKnownMissingAssetId,
@@ -79,5 +80,35 @@ describe("staleAssetIds", () => {
   it("seedKnownMissingAssetIdsForTests simulates post-hydrate state", () => {
     seedKnownMissingAssetIdsForTests(["ghost-9"]);
     expect(isKnownMissingAssetId("ghost-9")).toBe(true);
+  });
+
+  // Required test #7 — the diagnostics/support-bundle snapshot must be a copy,
+  // so a consumer cannot reach in and change what the guard actually blocks.
+  describe("getKnownMissingAssetIdsSnapshot", () => {
+    it("returns the current known-missing ids", () => {
+      markKnownMissingAssetId("ghost-1");
+      markKnownMissingAssetId("ghost-2");
+      expect(getKnownMissingAssetIdsSnapshot().sort()).toEqual(["ghost-1", "ghost-2"]);
+    });
+
+    it("returns a fresh copy each call — mutating it cannot affect the guard", () => {
+      markKnownMissingAssetId("ghost-1");
+
+      const first = getKnownMissingAssetIdsSnapshot();
+      first.push("not-really-missing");
+      first.length = 0;
+
+      expect(getKnownMissingAssetIdsSnapshot()).toEqual(["ghost-1"]);
+      expect(isKnownMissingAssetId("ghost-1")).toBe(true);
+      expect(isKnownMissingAssetId("not-really-missing")).toBe(false);
+      expect(getKnownMissingAssetIdsSnapshot()).not.toBe(first);
+    });
+
+    it("reflects a reconcile that cleared a marker", () => {
+      markKnownMissingAssetId("ghost-1");
+      markKnownMissingAssetId("ghost-2");
+      reconcileKnownMissingAssetIds(["ghost-1"]);
+      expect(getKnownMissingAssetIdsSnapshot()).toEqual(["ghost-2"]);
+    });
   });
 });
