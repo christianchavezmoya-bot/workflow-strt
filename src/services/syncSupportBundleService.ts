@@ -221,15 +221,16 @@ export async function buildSyncSupportBundle(options?: {
     offlinePerf: isMobileNativePlatform() ? getOfflinePerfLog().slice(-40) : undefined,
     syncDiagnostics: diagnostics,
     pendingMediaIntegrity: mediaIntegrity.filter((row) => row.missingPaths.length > 0),
-    circuitBreaker: {
-      open: isCircuitOpen(),
-      openUntilMs: getCircuitOpenUntilMs(),
-      failureCount: getCircuitFailureCount(),
-    },
-    lastFlushPass,
-    knownMissingAssetIds: getKnownMissingAssetIdsSnapshot(),
-    staleAssetReconcileTrace,
-    staleAssetFetchTrace,
+    // Mobile/offline-only diagnostics — omitted entirely on web rather than
+    // sent as empty/null, so the contract matches offlinePerf above and the
+    // "native-only" claim in docs/SYNC_OBSERVABILITY_DIAGNOSTICS.md is exact.
+    circuitBreaker: isMobileNativePlatform()
+      ? { open: isCircuitOpen(), openUntilMs: getCircuitOpenUntilMs(), failureCount: getCircuitFailureCount() }
+      : undefined,
+    lastFlushPass: isMobileNativePlatform() ? lastFlushPass : undefined,
+    knownMissingAssetIds: isMobileNativePlatform() ? getKnownMissingAssetIdsSnapshot() : undefined,
+    staleAssetReconcileTrace: isMobileNativePlatform() ? staleAssetReconcileTrace : undefined,
+    staleAssetFetchTrace: isMobileNativePlatform() ? staleAssetFetchTrace : undefined,
     reportedFault: toReportedFaultDiagnostics(options?.faultDraft),
   };
 }

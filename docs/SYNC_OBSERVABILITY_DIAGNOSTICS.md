@@ -13,12 +13,21 @@ timeout policy, circuit-breaker behavior, run bundling, signature ordering, conf
 stale-asset reconciliation decisions, known-missing/tombstone decisions, asset deletion, dashboard
 behavior, offline bootstrap, SSE, the API, or the database schema.
 
-**A diagnostics failure must never become a sync failure.** Every write is best-effort, bounded,
-and swallows its own errors, so it cannot throw into the flush loop or an asset fetch. This is
-covered by explicit regression tests (a closed IndexedDB handle, a rejecting cache write).
+**A diagnostics failure must never become a sync failure, and diagnostics must never add latency to
+the flush loop.** Every write is best-effort, bounded, and swallows its own errors, so it cannot
+throw into the flush loop or an asset fetch. Every call site inside `useSyncEngine.ts`'s hot path is
+fire-and-forget (`void pendingRecordEligibility(...)`, `void recordFlushPassEnd(...)`) rather than
+awaited, so a diagnostic write can never add IndexedDB latency to queue processing. This is safe
+because each helper resets/finalizes its own in-memory state (`recordFlushPassEnd`'s `inFlightPass`
+guard) synchronously, before its first `await` — not after the write lands — so firing it without
+awaiting cannot race a second call. This is covered by explicit regression tests (a closed IndexedDB
+handle, a rejecting cache write, a fire-and-forget call whose write is asserted after the fact).
 
-All of it is **native-only** (`isMobileNativePlatform()`), matching the rest of the offline stack;
-on web these functions are no-ops that return empty/null.
+All of it is **native-only** on the same, single condition throughout (`isMobileNativePlatform()`
+checked once inside `buildSyncSupportBundle()` itself, not left to each field's own reader), matching
+the rest of the offline stack. On web, `circuitBreaker`, `lastFlushPass`, `knownMissingAssetIds`,
+`staleAssetReconcileTrace`, and `staleAssetFetchTrace` are all omitted from the support bundle
+entirely (not sent as `null`/`[]`) — the same contract as the pre-existing `offlinePerf` field.
 
 ## What is recorded
 
@@ -33,6 +42,15 @@ It is deliberately **narrower than the other `pending*` mutators**: unlike `pend
 and never dispatches `sync-pending-changed` — so it cannot add UI churn or nudge the retry
 schedule. A regression test seeds a row mid-backoff (`status: "failed"`, `retries: 3`, a future
 `nextRetryAt`) and asserts all three survive the diagnostic write untouched.
+
+Every write represents **one coherent latest decision**: before applying the new patch,
+`pendingRecordEligibility()` resets every context field (`lastSkipReason`,
+`lastDependencyExists`/`lastDependencyOpType`/`lastDependencyStatus`, `lastBundleCandidate`) to
+`undefined`, then applies the caller's patch on top. Without this, a `DEPENDENCY_PENDING` pass's
+`lastDependencyOpType` could survive into a later pass that skips for `MEDIA_MISSING` (or into the
+`eligible: true` write right before the request attempt), producing a support bundle that mixes
+context from two different decisions. Regression tests cover exactly this: `DEPENDENCY_PENDING` →
+eligible, and `BUNDLED_WITH_RUN_COMPLETE` → `MEDIA_MISSING`.
 
 `QueueEligibilitySkipReason` was audited against the **current** flush loop, not inherited:
 

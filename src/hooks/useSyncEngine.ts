@@ -890,7 +890,7 @@ export function useSyncEngine(): SyncState {
         const dep = all.find((a) => a.id === action.dependsOnOpId);
         const depStillPending = dep !== undefined;
         if (depStillPending) {
-          await pendingRecordEligibility(action.id, {
+          void pendingRecordEligibility(action.id, {
             lastEligible: false,
             lastSkipReason: "DEPENDENCY_PENDING",
             lastDependencyExists: true,
@@ -914,7 +914,7 @@ export function useSyncEngine(): SyncState {
             message,
             retries: action.retries,
           });
-          await pendingRecordEligibility(action.id, {
+          void pendingRecordEligibility(action.id, {
             lastEligible: false,
             lastSkipReason: "DEPENDENCY_DROPPED",
             lastDependencyExists: false,
@@ -933,7 +933,7 @@ export function useSyncEngine(): SyncState {
 
       // Signatures for this run flush atomically with RUN_COMPLETE when both are queued.
       if (action.opType === "SIGNATURE_SUBMIT" && await isRunBundleCandidate(action.entityId)) {
-        await pendingRecordEligibility(action.id, {
+        void pendingRecordEligibility(action.id, {
           lastEligible: false,
           lastSkipReason: "BUNDLED_WITH_RUN_COMPLETE",
           lastBundleCandidate: true,
@@ -945,7 +945,7 @@ export function useSyncEngine(): SyncState {
       // dependent ops (e.g. signatures after a rejected RUN_COMPLETE)
       // against a bad state.
       if (action.entityType === "workflow-run" && droppedRunEntityIds.has(action.entityId)) {
-        await pendingRecordEligibility(action.id, {
+        void pendingRecordEligibility(action.id, {
           lastEligible: false,
           lastSkipReason: "EARLIER_OP_DROPPED_THIS_PASS",
         });
@@ -957,7 +957,7 @@ export function useSyncEngine(): SyncState {
         if (isPhoneWinsFieldSync() && isMobileNativePlatform()) {
           await pendingClearConflict(action.id);
         } else {
-          await pendingRecordEligibility(action.id, {
+          void pendingRecordEligibility(action.id, {
             lastEligible: false,
             lastSkipReason: "CONFLICT_ALREADY_FLAGGED",
           });
@@ -985,7 +985,7 @@ export function useSyncEngine(): SyncState {
             window.dispatchEvent(new CustomEvent("sync-conflict-detected", {
               detail: { actionId: action.id, entityId: action.entityId, entityType: action.entityType },
             }));
-            await pendingRecordEligibility(action.id, {
+            void pendingRecordEligibility(action.id, {
               lastEligible: false,
               lastSkipReason: "ASSET_CONCURRENCY_CONFLICT",
             });
@@ -1045,7 +1045,7 @@ export function useSyncEngine(): SyncState {
             if (action.entityType === "workflow-run") {
               await markRunSyncFailed(action.entityId, message);
             }
-            await pendingRecordEligibility(action.id, {
+            void pendingRecordEligibility(action.id, {
               lastEligible: false,
               lastSkipReason: "MEDIA_MISSING",
             });
@@ -1088,7 +1088,7 @@ export function useSyncEngine(): SyncState {
           if (action.entityType === "workflow-run") {
             await markRunSyncFailed(action.entityId, message);
           }
-          await pendingRecordEligibility(action.id, {
+          void pendingRecordEligibility(action.id, {
             lastEligible: false,
             lastSkipReason: "MEDIA_MISSING",
           });
@@ -1103,7 +1103,7 @@ export function useSyncEngine(): SyncState {
         // Diagnostics only — this action passed every skip check and is
         // genuinely about to be sent. Does not affect what happens next.
         attemptedCount += 1;
-        await pendingRecordEligibility(action.id, { lastEligible: true, lastSkipReason: undefined });
+        void pendingRecordEligibility(action.id, { lastEligible: true, lastSkipReason: undefined });
         await pendingSetStatus(action.id, "uploading");
         if (action.entityType === "workflow-run") {
           await markRunSyncing(action.entityId);
@@ -1306,7 +1306,10 @@ export function useSyncEngine(): SyncState {
             }
             setConnectivityState(hasNetworkSignal() ? "server-unreachable" : "offline");
             networkFailureStoppedPass = true;
-            await recordFlushPassEnd({
+            // Diagnostic-only — the inFlightPass guard/clear runs synchronously
+            // inside recordFlushPassEnd before its first await, so firing this
+            // without awaiting cannot race a second call or block the break below.
+            void recordFlushPassEnd({
               attemptedCount,
               syncedCount,
               stoppedEarly: true,
@@ -1326,7 +1329,7 @@ export function useSyncEngine(): SyncState {
     }
 
       if (!networkFailureStoppedPass) {
-        await recordFlushPassEnd({
+        void recordFlushPassEnd({
           attemptedCount,
           syncedCount,
           stoppedEarly: authExpired,

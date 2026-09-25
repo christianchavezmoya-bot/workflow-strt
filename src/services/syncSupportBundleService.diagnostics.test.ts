@@ -67,6 +67,7 @@ vi.mock("../utils/staleAssetDiagnostics", () => ({
 import { buildSyncSupportBundle } from "./syncSupportBundleService";
 import { getLastFlushPassDiagnostic, type FlushPassDiagnostic } from "./flushPassDiagnostics";
 import { getStaleAssetFetchTrace, getStaleAssetReconcileTrace } from "../utils/staleAssetDiagnostics";
+import { isMobileNativePlatform } from "../utils/platform";
 
 const lastFlushPass: FlushPassDiagnostic = {
   timestamp: "2026-09-25T02:00:00.000Z",
@@ -115,6 +116,7 @@ function pendingAction(overrides: Partial<PendingAction> = {}): PendingAction {
 describe("buildSyncSupportBundle — observability diagnostics", () => {
   beforeEach(() => {
     pendingRows.length = 0;
+    vi.mocked(isMobileNativePlatform).mockReturnValue(true);
     vi.mocked(getLastFlushPassDiagnostic).mockResolvedValue(lastFlushPass);
     vi.mocked(getStaleAssetReconcileTrace).mockResolvedValue([
       {
@@ -212,5 +214,51 @@ describe("buildSyncSupportBundle — observability diagnostics", () => {
     expect(bundle.lastFlushPass).toBeNull();
     expect(bundle.staleAssetReconcileTrace).toEqual([]);
     expect(bundle.staleAssetFetchTrace).toEqual([]);
+  });
+
+  describe("native-only contract", () => {
+    // Review fix: circuitBreaker/knownMissingAssetIds were previously emitted
+    // unconditionally while lastFlushPass/stale traces were already
+    // native-gated by their readers — an inconsistent contract that
+    // contradicted docs/SYNC_OBSERVABILITY_DIAGNOSTICS.md's "native-only"
+    // claim. All five mobile/offline diagnostic fields must now agree.
+    it("includes all five mobile/offline diagnostic fields on native", async () => {
+      const bundle = await buildSyncSupportBundle();
+      expect(bundle.circuitBreaker).toEqual({ open: true, openUntilMs: 1_767_225_600_000, failureCount: 4 });
+      expect(bundle.lastFlushPass).not.toBeUndefined();
+      expect(bundle.knownMissingAssetIds).toEqual(["ghost-1", "ghost-2"]);
+      expect(bundle.staleAssetReconcileTrace).not.toBeUndefined();
+      expect(bundle.staleAssetFetchTrace).not.toBeUndefined();
+    });
+
+    it("omits all five mobile/offline diagnostic fields on web", async () => {
+      vi.mocked(isMobileNativePlatform).mockReturnValue(false);
+
+      const bundle = await buildSyncSupportBundle();
+      expect(bundle.circuitBreaker).toBeUndefined();
+      expect(bundle.lastFlushPass).toBeUndefined();
+      expect(bundle.knownMissingAssetIds).toBeUndefined();
+      expect(bundle.staleAssetReconcileTrace).toBeUndefined();
+      expect(bundle.staleAssetFetchTrace).toBeUndefined();
+
+      // Pre-existing, non-diagnostic fields must be completely unaffected.
+      expect(bundle.platform).toBe("web");
+      expect(bundle.schemaVersion).toBe(2);
+      expect(bundle.buildIdentity).toBeDefined();
+      expect(bundle.summary).toBeDefined();
+      expect(bundle.pendingActions).toEqual([]);
+      expect(bundle.droppedActions).toEqual([]);
+    });
+
+    it("omitted web fields do not appear as literal keys in the serialized bundle", async () => {
+      vi.mocked(isMobileNativePlatform).mockReturnValue(false);
+      const bundle = await buildSyncSupportBundle();
+      // JSON.stringify drops keys whose value is `undefined` — this proves
+      // the fields are truly omitted, not sent as an explicit null.
+      const serialized = JSON.stringify(bundle);
+      for (const key of ["circuitBreaker", "lastFlushPass", "knownMissingAssetIds", "staleAssetReconcileTrace", "staleAssetFetchTrace"]) {
+        expect(JSON.parse(serialized)).not.toHaveProperty(key);
+      }
+    });
   });
 });

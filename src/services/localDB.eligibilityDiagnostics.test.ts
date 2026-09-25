@@ -8,7 +8,7 @@
  * functions would prove nothing about that.
  */
 import "fake-indexeddb/auto";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   __resetDbHandleForTests,
   getDB,
@@ -98,8 +98,88 @@ describe("pendingRecordEligibility", () => {
     const after = await readAction("act-2");
     expect(after?.lastEligible).toBe(true);
     expect(after?.lastSkipReason).toBeUndefined();
+    // Context from the PRIOR decision (BUNDLED_WITH_RUN_COMPLETE) must not survive.
+    expect(after?.lastBundleCandidate).toBeUndefined();
     expect(after?.status).toBe("pending");
     expect(after?.retries).toBe(0);
+  });
+
+  // Review fix: every eligibility write must represent ONE coherent latest
+  // decision — stale context fields from a prior pass's different skip
+  // reason must never survive into the next write.
+  describe("stale eligibility context is cleared on every write", () => {
+    it("DEPENDENCY_PENDING -> eligible clears dependency context", async () => {
+      await pendingAdd(seedAction({ id: "act-4" }));
+      await pendingRecordEligibility("act-4", {
+        lastEligible: false,
+        lastSkipReason: "DEPENDENCY_PENDING",
+        lastDependencyExists: true,
+        lastDependencyOpType: "TIME_ENTRY",
+        lastDependencyStatus: "pending",
+      });
+      const mid = await readAction("act-4");
+      expect(mid?.lastDependencyExists).toBe(true);
+      expect(mid?.lastDependencyOpType).toBe("TIME_ENTRY");
+      expect(mid?.lastDependencyStatus).toBe("pending");
+
+      await pendingRecordEligibility("act-4", { lastEligible: true, lastSkipReason: undefined });
+
+      const after = await readAction("act-4");
+      expect(after?.lastEligible).toBe(true);
+      expect(after?.lastSkipReason).toBeUndefined();
+      expect(after?.lastDependencyExists).toBeUndefined();
+      expect(after?.lastDependencyOpType).toBeUndefined();
+      expect(after?.lastDependencyStatus).toBeUndefined();
+    });
+
+    it("BUNDLED_WITH_RUN_COMPLETE -> MEDIA_MISSING does not leak bundle context into the new reason", async () => {
+      await pendingAdd(seedAction({ id: "act-5", opType: "SIGNATURE_SUBMIT" }));
+      await pendingRecordEligibility("act-5", {
+        lastEligible: false,
+        lastSkipReason: "BUNDLED_WITH_RUN_COMPLETE",
+        lastBundleCandidate: true,
+      });
+      const mid = await readAction("act-5");
+      expect(mid?.lastBundleCandidate).toBe(true);
+
+      // A later pass skips this same action for an unrelated reason.
+      await pendingRecordEligibility("act-5", {
+        lastEligible: false,
+        lastSkipReason: "MEDIA_MISSING",
+      });
+
+      const after = await readAction("act-5");
+      expect(after?.lastSkipReason).toBe("MEDIA_MISSING");
+      // lastBundleCandidate from the PRIOR reason must not survive — it would
+      // misleadingly imply this MEDIA_MISSING skip was also a bundle wait.
+      expect(after?.lastBundleCandidate).toBeUndefined();
+      expect(after?.lastDependencyExists).toBeUndefined();
+    });
+
+    it("DEPENDENCY_DROPPED -> ASSET_CONCURRENCY_CONFLICT does not leak dependency context", async () => {
+      await pendingAdd(seedAction({ id: "act-6" }));
+      await pendingRecordEligibility("act-6", {
+        lastEligible: false,
+        lastSkipReason: "DEPENDENCY_DROPPED",
+        lastDependencyExists: false,
+      });
+      await pendingRecordEligibility("act-6", {
+        lastEligible: false,
+        lastSkipReason: "ASSET_CONCURRENCY_CONFLICT",
+      });
+      const after = await readAction("act-6");
+      expect(after?.lastSkipReason).toBe("ASSET_CONCURRENCY_CONFLICT");
+      expect(after?.lastDependencyExists).toBeUndefined();
+    });
+  });
+
+  it("is safe to call fire-and-forget (not awaited by the caller) — the write still lands", async () => {
+    await pendingAdd(seedAction({ id: "act-7" }));
+    // This mirrors how useSyncEngine's flush loop calls it: `void pendingRecordEligibility(...)`.
+    void pendingRecordEligibility("act-7", { lastEligible: false, lastSkipReason: "MEDIA_MISSING" });
+    await vi.waitFor(async () => {
+      expect((await readAction("act-7"))?.lastSkipReason).toBe("MEDIA_MISSING");
+    });
   });
 
   // Required test #3

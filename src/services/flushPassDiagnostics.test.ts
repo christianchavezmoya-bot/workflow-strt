@@ -130,6 +130,20 @@ describe("flushPassDiagnostics", () => {
     await expect(recordFlushPassEnd({ attemptedCount: 1, syncedCount: 0 })).resolves.toBeUndefined();
   });
 
+  it("clears the in-flight pass synchronously, before its first await — safe to call fire-and-forget", async () => {
+    // useSyncEngine calls this as `void recordFlushPassEnd(...)`. The guard
+    // against a second call (`if (!inFlightPass) return;`) must take effect
+    // immediately, in the same tick, not after the write completes.
+    await recordFlushPassStart(passStart);
+    void recordFlushPassEnd({ attemptedCount: 1, syncedCount: 1 }); // not awaited
+    void recordFlushPassEnd({ attemptedCount: 99, syncedCount: 99 }); // would be a no-op
+
+    await vi.waitFor(() => {
+      expect(offlineStore.saveCache).toHaveBeenCalledTimes(2); // start + one end
+    });
+    expect(lastSaved().attemptedCount).toBe(1);
+  });
+
   it("is a native-only diagnostic — web does not read or write it", async () => {
     vi.mocked(isMobileNativePlatform).mockReturnValue(false);
     await recordFlushPassStart(passStart);

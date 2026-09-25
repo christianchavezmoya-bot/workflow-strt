@@ -776,6 +776,17 @@ export async function pendingRecordEligibility(
     if (!item) return;
     await db.put("pending_actions", {
       ...item,
+      // Reset every eligibility CONTEXT field before applying the new patch,
+      // so each write represents ONE coherent latest decision rather than
+      // accumulating stale context from a previous pass's different skip
+      // reason (e.g. a DEPENDENCY_PENDING pass's lastDependencyOpType must
+      // not survive into a later pass that skips for MEDIA_MISSING, or into
+      // an eligible=true write that clears the skip reason entirely).
+      lastSkipReason: undefined,
+      lastDependencyExists: undefined,
+      lastDependencyOpType: undefined,
+      lastDependencyStatus: undefined,
+      lastBundleCandidate: undefined,
       ...patch,
       lastEligibilityCheckAt: new Date().toISOString(),
     });
