@@ -1206,6 +1206,11 @@ const WorkInstructions = () => {
    * audit's root cause #2).
    */
   async function createDraftForSelectedProduct() {
+    // Defense in depth, independent of the DOM-lifecycle fix above: this dialog is only
+    // ever rendered while configDialogOpen is true, but don't rely on that (or on the
+    // disabled state) alone for data integrity — a stale invocation reaching this handler
+    // after the dialog has already logically closed must not create a second config.
+    if (!configDialogOpen) return;
     const product = products.find((p) => p.id === newConfigProductId);
     if (!product) { setConfigError("Select a product to continue."); return; }
     // The disabled state alone loses the race on a slow link: a second tap before the
@@ -1780,9 +1785,15 @@ const WorkInstructions = () => {
         />
       )}
 
-      {/* Workflow create/edit dialog */}
+      {/* Workflow create/edit dialog. Conditionally MOUNTED (not just open=false) — MUI
+          keeps a closing Dialog's backdrop/focus-trap alive for its exit transition, and
+          Continue navigates straight into the Builder underneath it, so a merely-closed
+          Dialog stays mounted (invisible, but still intercepting clicks) exactly long
+          enough to make the Builder appear frozen. Unmounting removes it from the DOM in
+          the same commit that closes it, independent of any transition timing. */}
+      {configDialogOpen && (
       <Dialog
-        open={configDialogOpen}
+        open
         onClose={() => !configSaving && closeConfigDialog()}
         maxWidth="sm"
         fullWidth
@@ -1946,6 +1957,7 @@ const WorkInstructions = () => {
           )}
         </DialogActions>
       </Dialog>
+      )}
 
       {/* Delete confirmation */}
       <Dialog
