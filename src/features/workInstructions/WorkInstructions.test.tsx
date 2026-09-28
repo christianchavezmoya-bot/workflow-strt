@@ -1,9 +1,10 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { configureStore } from "@reduxjs/toolkit";
 import { Provider } from "react-redux";
 import { MemoryRouter } from "react-router-dom";
 import { AppToastProvider } from "../../contexts/AppToastContext";
+import { ConfirmProvider } from "../../contexts/ConfirmContext";
 import productsReducer from "../../store/productsSlice";
 import projectsReducer from "../../store/projectSlice";
 import usersReducer from "../../store/usersSlice";
@@ -200,9 +201,11 @@ async function renderInstructionsView(product: Product) {
   render(
     <Provider store={store}>
       <AppToastProvider>
-        <MemoryRouter initialEntries={[`/work-instructions?product=${product.id}&view=instructions`]}>
-          <WorkInstructions />
-        </MemoryRouter>
+        <ConfirmProvider>
+          <MemoryRouter initialEntries={[`/work-instructions?product=${product.id}&view=instructions`]}>
+            <WorkInstructions />
+          </MemoryRouter>
+        </ConfirmProvider>
       </AppToastProvider>
     </Provider>,
   );
@@ -344,4 +347,207 @@ describe("Workflow list — Description / Created By rendering (workflow-metadat
     expect(dashes.length).toBeGreaterThanOrEqual(2); // at least Description + Created By
     expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
   });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regression: New Workflow → Continue → Builder left a stale, invisible modal
+// layer over the Builder (backdrop opacity 0, Continue button still enabled,
+// aria-hidden/body-lock still applied) for the length of MUI's exit transition,
+// because the Dialog was only ever told open=false, never unmounted. Fixed by
+// conditionally mounting the Dialog on configDialogOpen.
+// ─────────────────────────────────────────────────────────────────────────────
+describe("New Workflow → Continue → Builder — stale modal regression", () => {
+  beforeEach(() => {
+    listByProductMock.mockClear().mockResolvedValue([]);
+    createConfigMock.mockClear();
+  });
+
+  // Deterministically drains the microtask queue (the create() promise resolving, and the
+  // synchronous state updates chained after its `await`) WITHOUT advancing any real timer.
+  // This is the crux of what makes these tests a reliable regression guard: waitFor()/
+  // findBy*() poll using real setTimeout-based intervals, so inserting one between the
+  // Continue click and the "no stale modal" assertion can accidentally give MUI's real
+  // 195ms exit-transition timer enough wall-clock time to complete for real — which would
+  // make the assertion pass even against the UNFIXED code, hiding the regression instead of
+  // catching it. Confirmed by running this suite against the unfixed component.
+  async function flushCreateSideEffects() {
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+  }
+
+  function assertNoStaleModalInfrastructure() {
+    expect(document.querySelectorAll(".MuiModal-root")).toHaveLength(0);
+    expect(document.querySelectorAll(".MuiBackdrop-root")).toHaveLength(0);
+    expect(document.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+    expect(screen.queryByRole("button", { name: /^continue$/i })).not.toBeInTheDocument();
+    expect(screen.queryByText("New Workflow", { selector: "h2, [class*=DialogTitle]" })).not.toBeInTheDocument();
+    // MUI's focus trap and scroll lock both mark up <body> while a modal is open.
+    expect(document.body.style.overflow).not.toBe("hidden");
+    // The modal marks every OTHER root-level sibling aria-hidden while open; once
+    // it's gone nothing modal-induced should still be hiding the app from a11y tree.
+    for (const el of Array.from(document.body.children)) {
+      expect(el.getAttribute("aria-hidden")).not.toBe("true");
+    }
+  }
+
+  it("removes the New Workflow dialog and all its modal infrastructure the instant the Builder appears — no waiting", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    createConfigMock.mockResolvedValue(makeConfig({ id: "cfg-new", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await flushCreateSideEffects();
+
+    expect(createConfigMock).toHaveBeenCalledTimes(1);
+    // The regression is specifically that the Builder IS visible while blocked —
+    // assert both, not just Builder visibility.
+    expect(screen.getByRole("button", { name: /back to instructions/i })).toBeInTheDocument();
+    assertNoStaleModalInfrastructure();
+  });
+
+  it("the Builder responds on the very first click right after creation (no invisible layer intercepts it)", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    createConfigMock.mockResolvedValue(makeConfig({ id: "cfg-new", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await flushCreateSideEffects();
+    // The regression proof itself must stay on the deterministic flush above, before any
+    // further real-timer wait — see assertNoStaleModalInfrastructure's own comment.
+    assertNoStaleModalInfrastructure();
+
+    // The lazy-loaded Builder chunk finishes mounting on its own schedule (Suspense +
+    // dynamic import) — waiting for ITS control to appear is fine here since we already
+    // proved no stale modal exists at the deterministic point above. A real Builder
+    // control, once present, must respond on the very first click. (jsdom doesn't
+    // hit-test, so this proves DOM/state correctness; real pointer-interception is
+    // proven by the Playwright regression.)
+    const newWorkflowInBuilder = await screen.findByRole("button", { name: /^new workflow$/i });
+    fireEvent.click(newWorkflowInBuilder);
+    expect(screen.getByLabelText(/select product/i)).toBeInTheDocument();
+  });
+
+  it("New Workflow remains available from inside the Builder — the render gate does not hide it", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    createConfigMock.mockResolvedValue(makeConfig({ id: "cfg-new", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await flushCreateSideEffects();
+    assertNoStaleModalInfrastructure();
+
+    // Wait for the lazy Builder chunk's own "New Workflow" control (unrelated to the
+    // regression — it's Suspense/dynamic-import settling, not the stale-dialog bug).
+    fireEvent.click(await screen.findByRole("button", { name: /^new workflow$/i }));
+
+    expect(screen.getByLabelText(/select product/i)).toBeInTheDocument();
+    expect(document.querySelectorAll(".MuiModal-root")).toHaveLength(1);
+    // Still in the Builder underneath — opening New Workflow from the Builder must not
+    // navigate away from it. The dialog being open correctly marks the Builder
+    // aria-hidden (real modal semantics), so query with hidden:true rather than
+    // getByRole's default, which excludes aria-hidden elements.
+    expect(screen.getByRole("button", { name: /back to instructions/i, hidden: true })).toBeInTheDocument();
+  });
+
+  it("rapid repeated Continue clicks cannot create more than one workflow config", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    let resolveCreate: (cfg: WorkflowConfig) => void = () => {};
+    createConfigMock.mockImplementation(
+      () => new Promise<WorkflowConfig>((resolve) => { resolveCreate = resolve; }),
+    );
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+
+    const continueBtn = screen.getByRole("button", { name: /continue/i });
+    // Two clicks before the (in-flight, unresolved) create request settles.
+    fireEvent.click(continueBtn);
+    fireEvent.click(continueBtn);
+    fireEvent.click(continueBtn);
+
+    await act(async () => { resolveCreate(makeConfig({ id: "cfg-new", productId: "prod-1" })); });
+    await flushCreateSideEffects();
+
+    expect(createConfigMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole("button", { name: /back to instructions/i })).toBeInTheDocument();
+    assertNoStaleModalInfrastructure();
+  });
+
+  it("Cancel leaves no stale modal and the Workflows page is immediately interactive", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /^cancel$/i }));
+
+    assertNoStaleModalInfrastructure();
+    expect(createConfigMock).not.toHaveBeenCalled();
+    // The instructions view (not Builder) is still what's showing.
+    expect(screen.queryByRole("button", { name: /back to instructions/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /\+ new workflow/i })).toBeEnabled();
+  });
+
+  it("a failed creation leaves the dialog open with an error, no orphan modal, and retry works", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    createConfigMock
+      .mockRejectedValueOnce(new Error("network error"))
+      .mockResolvedValueOnce(makeConfig({ id: "cfg-retry", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    fireEvent.click(await screen.findByRole("button", { name: /\+ new workflow/i }));
+    await screen.findByLabelText(/select product/i);
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await flushCreateSideEffects();
+
+    expect(createConfigMock).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/failed to create workflow/i)).toBeInTheDocument();
+    // Still exactly one dialog — no orphaned second modal layer from the failed attempt.
+    expect(document.querySelectorAll(".MuiModal-root")).toHaveLength(1);
+    expect(screen.getByLabelText(/select product/i)).toBeInTheDocument();
+
+    // Retry succeeds and now unmounts cleanly, same as the happy path.
+    fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+    await flushCreateSideEffects();
+    expect(createConfigMock).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole("button", { name: /back to instructions/i })).toBeInTheDocument();
+    assertNoStaleModalInfrastructure();
+  });
+
+  // Two full create+Builder-mount cycles (each mounting the real, heavy WorkflowBuilder via
+  // lazy()/Suspense) comfortably clears the 5s default in isolation, but can exceed it
+  // under full-suite parallel CPU contention — explicit timeout rather than a flaky test.
+  it("repeating the full create lifecycle multiple times never leaks modal state into the next cycle", async () => {
+    const product = makeProduct("prod-1", "FAT testing");
+    createConfigMock
+      .mockResolvedValueOnce(makeConfig({ id: "cfg-1", productId: "prod-1" }))
+      .mockResolvedValueOnce(makeConfig({ id: "cfg-2", productId: "prod-1" }));
+    await renderInstructionsView(product);
+
+    for (let i = 0; i < 2; i++) {
+      // findByRole in both cases: on i===1 this is the lazy Builder chunk's own control,
+      // which finishes mounting on its own schedule — unrelated to the regression itself.
+      const trigger = i === 0
+        ? await screen.findByRole("button", { name: /\+ new workflow/i })
+        : await screen.findByRole("button", { name: /^new workflow$/i }); // from inside the Builder
+      fireEvent.click(trigger);
+      await screen.findByLabelText(/select product/i);
+      fireEvent.click(screen.getByRole("button", { name: /continue/i }));
+      await flushCreateSideEffects();
+      expect(createConfigMock).toHaveBeenCalledTimes(i + 1);
+      expect(screen.getByRole("button", { name: /back to instructions/i })).toBeInTheDocument();
+      assertNoStaleModalInfrastructure();
+    }
+  }, 15_000);
 });

@@ -77,6 +77,77 @@ test.describe("work instructions builder navigation", () => {
     });
   });
 
+  // Regression: New Workflow → Continue used to leave the dialog's Dialog/Modal/Backdrop
+  // mounted (invisible, mid MUI exit-transition) directly over the freshly-opened Builder.
+  // It absorbed pointer events for the length of the transition, so the first real click
+  // on a Builder control was silently swallowed. Fixed by conditionally MOUNTING the
+  // dialog on configDialogOpen rather than only toggling `open`. This must be proven in a
+  // real browser — jsdom (the Vitest component tests) has no hit-testing, so it cannot
+  // detect an invisible element intercepting a click the way a real browser does.
+  test("Builder responds on the very first real click after New Workflow → Continue, with no stale modal left behind", async ({ page }) => {
+    test.setTimeout(90_000);
+
+    await login(page);
+    await page.goto("http://127.0.0.1:5173/work-instructions", { waitUntil: "domcontentloaded" });
+    await expect(page.getByText("Workflows", { exact: true }).first()).toBeVisible({ timeout: 30_000 });
+
+    const newWorkflowButton = page.getByRole("button", { name: /\+ new workflow/i });
+    await expect(newWorkflowButton).toBeVisible({ timeout: 30_000 });
+    await newWorkflowButton.click();
+
+    await expect(page.getByLabel(/select product/i)).toBeVisible({ timeout: 15_000 });
+
+    // The regression window is ~195ms (MUI's default dialog exit-transition duration).
+    // Playwright locators (toBeVisible/click) each poll on their own ~100ms+ cadence, so
+    // chaining ordinary awaits after Continue reliably lets the real transition finish
+    // before any check runs — masking the bug entirely (confirmed empirically: an earlier,
+    // naive version of this test passed even against the unfixed component). Instead,
+    // install an in-page sampler BEFORE clicking Continue that polls every 5ms via the
+    // browser's own setInterval — fine-grained and independent of Playwright's IPC/polling
+    // latency — and records whether the Builder and any leftover New Workflow modal
+    // infrastructure were EVER both present at the same instant.
+    await page.evaluate(() => {
+      const w = window as unknown as { __overlapDetected?: boolean; __overlapSamples?: number; __overlapTimer?: number };
+      w.__overlapDetected = false;
+      w.__overlapSamples = 0;
+      w.__overlapTimer = window.setInterval(() => {
+        w.__overlapSamples = (w.__overlapSamples ?? 0) + 1;
+        const builderActive = Array.from(document.querySelectorAll("button"))
+          .some((b) => /back to instructions/i.test(b.textContent ?? ""));
+        const staleModalLayer = document.querySelector(".MuiDialog-root, .MuiModal-root, .MuiBackdrop-root") !== null;
+        if (builderActive && staleModalLayer) w.__overlapDetected = true;
+      }, 5);
+    });
+
+    await page.getByRole("button", { name: /^continue$/i }).click();
+    await expect(page.getByRole("button", { name: /back to instructions/i })).toBeVisible({ timeout: 30_000 });
+    // Keep sampling a little past the point the Builder becomes visible, so the sampler
+    // covers the full length of any exit transition that started just before/at that point.
+    await page.waitForTimeout(500);
+
+    const overlap = await page.evaluate(() => {
+      const w = window as unknown as { __overlapDetected?: boolean; __overlapSamples?: number; __overlapTimer?: number };
+      window.clearInterval(w.__overlapTimer);
+      return { detected: w.__overlapDetected, samples: w.__overlapSamples };
+    });
+    expect(overlap.samples ?? 0).toBeGreaterThan(5); // sanity: the sampler actually ran
+    expect(overlap.detected).toBe(false);
+
+    // The New Workflow dialog's modal infrastructure must be gone by now — not merely
+    // invisible — confirmed via the normal (slower) locator API too.
+    await expect(page.locator(".MuiDialog-root, .MuiModal-root, .MuiBackdrop-root")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /^continue$/i })).toHaveCount(0);
+
+    // CRITICAL ACCEPTANCE TEST: a real, un-forced click on a Builder control must work on
+    // the very first attempt. No { force: true } — a forced click bypasses the exact
+    // pointer-interception hit-test this regression is about, and would pass even on the
+    // broken build.
+    const workflowActions = page.getByRole("button", { name: /workflow actions/i });
+    await expect(workflowActions).toBeVisible({ timeout: 30_000 });
+    await workflowActions.click();
+    await expect(page.getByRole("menu")).toBeVisible({ timeout: 5_000 });
+  });
+
   // Guards the root cause directly: an effect in the builder's StepEditorPanel
   // depended on an array rebuilt every render and stored a fresh Set each time,
   // re-rendering ~180x/sec forever. Any equivalent loop starves navigation again.
