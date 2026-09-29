@@ -113,3 +113,52 @@ export function computeSourceCropRect(input: ComputeSourceCropRectInput): Source
     height: clampedBottom - clampedY,
   };
 }
+
+// ── OCR single-value targeting band ─────────────────────────────────────────────────────────
+
+/**
+ * Layout of the OCR target band inside the preview container, as fractions of the container.
+ * The band is deliberately NOT thin: it must hold a full character height plus room for modest
+ * rotation, perspective and curved-surface baselines. Selecting ONE line out of it is the job of
+ * the text-line isolation step (ocrLineIsolation.ts), guided by the centre alignment guide —
+ * the guide is an aiming aid, not the crop.
+ */
+export const OCR_TARGET_BAND = {
+  /** Horizontal inset from each side of the preview. */
+  insetX: 0.05,
+  /** Band height as a fraction of the preview height. */
+  height: 0.24,
+  /** Vertical centre of the band (and of the alignment guide) in the preview. */
+  centerY: 0.5,
+} as const;
+
+/** The OCR band's CSS rect for a preview container rect. */
+export function ocrTargetBandRect(container: Rect): Rect {
+  const height = container.height * OCR_TARGET_BAND.height;
+  return {
+    left: container.left + container.width * OCR_TARGET_BAND.insetX,
+    top: container.top + container.height * OCR_TARGET_BAND.centerY - height / 2,
+    width: container.width * (1 - 2 * OCR_TARGET_BAND.insetX),
+    height,
+  };
+}
+
+export interface OcrTargetMapping {
+  /** The band in source (intrinsic video) pixels — what gets captured. */
+  crop: SourceCropRect;
+  /** The alignment guide's y within `crop`, in source pixels. Computed from the guide's own
+   *  position rather than assumed to be crop.height/2, so it stays right if the crop is clamped
+   *  at a frame edge. */
+  guideY: number;
+}
+
+/** Maps the on-screen OCR band (and its centre guide) onto the video's own pixel grid. */
+export function mapOcrTarget(input: ComputeSourceCropRectInput): OcrTargetMapping {
+  const crop = computeSourceCropRect(input);
+  const { overlayRect } = input;
+  const guideRect: Rect = { left: overlayRect.left, top: overlayRect.top + overlayRect.height / 2, width: overlayRect.width, height: 0 };
+  // Unclamped source y of the guide: map a zero-height rect and read its (clamped) top.
+  const guideSrc = computeSourceCropRect({ ...input, overlayRect: guideRect });
+  const guideY = Math.max(0, Math.min(crop.height, guideSrc.y - crop.y));
+  return { crop, guideY };
+}

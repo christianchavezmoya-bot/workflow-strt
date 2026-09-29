@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeSourceCropRect } from "./cameraCropMath";
+import { computeSourceCropRect, mapOcrTarget, ocrTargetBandRect } from "./cameraCropMath";
 
 describe("computeSourceCropRect", () => {
   // Required test #30/#31: same aspect ratio — no letterboxing/clipping, scale is exactly 1:1.
@@ -139,5 +139,57 @@ describe("computeSourceCropRect", () => {
       overlayRect: { left: 100, top: 80, width: 200, height: 60 },
     });
     expect(a).toEqual(b);
+  });
+});
+
+describe("OCR target band → source pixels", () => {
+  it("is a wide, not-thin band centred on the preview", () => {
+    const band = ocrTargetBandRect({ left: 0, top: 0, width: 360, height: 480 });
+    expect(band.width).toBeCloseTo(360 * 0.9, 5);
+    expect(band.height).toBeCloseTo(480 * 0.24, 5);
+    expect(band.height).toBeGreaterThanOrEqual(480 * 0.2); // room for full glyphs + curvature
+    expect(band.top + band.height / 2).toBeCloseTo(240, 5);
+    expect(band.left).toBeCloseTo(18, 5);
+  });
+
+  it.each([
+    ["portrait phone, landscape sensor (16:9) in a 3:4 preview", { width: 1920, height: 1080 }],
+    ["portrait phone, portrait sensor (9:16)", { width: 1080, height: 1920 }],
+    ["4:3 sensor", { width: 1440, height: 1080 }],
+    ["high-resolution 4K sensor", { width: 3840, height: 2160 }],
+  ])("%s: crop matches the on-screen band under object-fit:cover, guide at its centre", (_, size) => {
+    const video = { left: 12, top: 80, width: 360, height: 480 };
+    const band = ocrTargetBandRect(video);
+    const { crop, guideY } = mapOcrTarget({ videoIntrinsicSize: size, videoDisplayRect: video, overlayRect: band });
+
+    const scale = Math.max(video.width / size.width, video.height / size.height);
+    expect(crop.width).toBeCloseTo(band.width / scale, 4);
+    expect(crop.height).toBeCloseTo(band.height / scale, 4);
+    // Horizontally/vertically centred in the source (the band is centred in the preview).
+    expect(crop.x + crop.width / 2).toBeCloseTo(size.width / 2, 4);
+    expect(crop.y + crop.height / 2).toBeCloseTo(size.height / 2, 4);
+    expect(guideY).toBeCloseTo(crop.height / 2, 4);
+    expect(crop.x).toBeGreaterThanOrEqual(0);
+    expect(crop.y + crop.height).toBeLessThanOrEqual(size.height);
+  });
+
+  it("scales with source resolution: the same on-screen band captures proportionally more pixels at 4K", () => {
+    const video = { left: 0, top: 0, width: 360, height: 480 };
+    const band = ocrTargetBandRect(video);
+    const hd = mapOcrTarget({ videoIntrinsicSize: { width: 1920, height: 1080 }, videoDisplayRect: video, overlayRect: band });
+    const uhd = mapOcrTarget({ videoIntrinsicSize: { width: 3840, height: 2160 }, videoDisplayRect: video, overlayRect: band });
+    expect(uhd.crop.width / hd.crop.width).toBeCloseTo(2, 5);
+    expect(uhd.crop.height / hd.crop.height).toBeCloseTo(2, 5);
+  });
+
+  it("near a source boundary: clamps the crop and keeps the guide where it really is", () => {
+    // Band pushed so its top half falls above the displayed content (e.g. a layout shift).
+    const video = { left: 0, top: 0, width: 400, height: 400 };
+    const size = { width: 1000, height: 1000 };
+    const overlay = { left: 20, top: -40, width: 360, height: 100 }; // guide at CSS y=10
+    const { crop, guideY } = mapOcrTarget({ videoIntrinsicSize: size, videoDisplayRect: video, overlayRect: overlay });
+    expect(crop.y).toBe(0);
+    expect(crop.height).toBeCloseTo(60 / 0.4, 5); // only the on-frame part (150px)
+    expect(guideY).toBeCloseTo(10 / 0.4, 5); // 25px from the top — NOT crop.height / 2
   });
 });

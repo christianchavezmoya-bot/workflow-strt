@@ -27,7 +27,17 @@
  * first-class target, not a fallback).
  */
 
-import { normalizeOcrCandidate, preprocessCanvasForOcr } from "../utils/ocrPreprocess";
+import type { PSM } from "tesseract.js";
+import { debugLog } from "../utils/appEnvironment";
+import { planOcrPasses, prepareFieldOcr, type OcrPsm } from "../utils/ocrFieldPipeline";
+import { grayToRgba, type GrayImage } from "../utils/ocrPreprocess";
+import {
+  isConfidentEnough,
+  LOW_CONFIDENCE_SCORE,
+  scoreOcrCandidate,
+  selectOcrCandidate,
+  type OcrPassResult,
+} from "../utils/ocrResultSelection";
 
 export type BarcodeFormat =
   | "qr_code"
@@ -268,34 +278,32 @@ let tesseractWorkerPromise: Promise<import("tesseract.js").Worker> | null = null
 async function getTesseractWorker() {
   if (!tesseractWorkerPromise) {
     tesseractWorkerPromise = import("tesseract.js")
-      .then(async ({ createWorker, OEM, PSM }) => {
-        const worker = await createWorker("eng", OEM.LSTM_ONLY, {
-          workerPath: OCR_ASSET_PATHS.worker,
-          corePath: resolveOcrCorePath(),
-          langPath: OCR_ASSET_PATHS.langDir,
-          // UNCOMPRESSED on every platform, deliberately. Android's AAPT2 build tool silently
-          // gunzips any `.gz`-suffixed asset and strips the extension while packaging the APK,
-          // so a `gzip: true` config (tesseract then requests `${langPath}/eng.traineddata.gz`)
-          // 404s on Android specifically — confirmed by inspecting a real built APK. iOS and web
-          // are unaffected by that Android-only transform, but rather than carry a platform
-          // branch here, every platform ships and requests the same plain `eng.traineddata`
-          // (scripts/sync-ocr-assets.mjs decompresses it once at generation time).
-          gzip: false,
-        });
-        await worker.setParameters({
-          // The target window is a single-line band, and what's aimed at is one value. The
-          // default (fully automatic page layout) hunts for blocks/columns in it and turns edge
-          // texture into extra "words" — the `3247751 ;` for a `324775` label seen on device.
-          tessedit_pageseg_mode: PSM.SINGLE_LINE,
-          // A camera crop carries no DPI; without a hint Tesseract guesses per image, which makes
-          // the same label read differently from one attempt to the next.
-          user_defined_dpi: "300",
-          // Deliberately NO tessedit_char_whitelist: field values mix letters, digits and
-          // punctuation (J000376, V1.2.3, ABC-123, DR040) with no safe universal subset, and a
-          // whitelist silently forces a wrong-but-allowed character instead of an obvious error.
-        });
-        return worker;
-      })
+      .then(({ createWorker, OEM }) =>
+        createWorker(
+          "eng",
+          OEM.LSTM_ONLY,
+          {
+            workerPath: OCR_ASSET_PATHS.worker,
+            corePath: resolveOcrCorePath(),
+            langPath: OCR_ASSET_PATHS.langDir,
+            // UNCOMPRESSED on every platform, deliberately. Android's AAPT2 build tool silently
+            // gunzips any `.gz`-suffixed asset and strips the extension while packaging the APK,
+            // so a `gzip: true` config (tesseract then requests `${langPath}/eng.traineddata.gz`)
+            // 404s on Android specifically — confirmed by inspecting a real built APK. iOS and web
+            // are unaffected by that Android-only transform, but rather than carry a platform
+            // branch here, every platform ships and requests the same plain `eng.traineddata`
+            // (scripts/sync-ocr-assets.mjs decompresses it once at generation time).
+            gzip: false,
+          },
+          // Identifier profile: field values (S4912/89, J000376, 19.0006X, DR040) are not English
+          // prose, so the English word lists would only pull reads toward dictionary words.
+          // These are init-only settings. Punctuation/number patterns stay on, and there is
+          // deliberately NO character whitelist: values mix letters, digits and punctuation with
+          // no safe universal subset, and a whitelist silently forces a wrong-but-allowed
+          // character instead of an obvious error the technician can see and fix.
+          { load_system_dawg: "0", load_freq_dawg: "0" },
+        ),
+      )
       .catch((err) => {
         tesseractWorkerPromise = null;
         throw err;
@@ -314,18 +322,20 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+export interface OcrPassOutput {
+  /** Raw engine text. */
+  text: string;
+  /** Engine confidence 0–100. */
+  confidence: number;
+}
+
 /**
- * Recognizes text from a canvas that has ALREADY been cropped to the target-window region — the
- * OCR engine never receives the full camera frame. The crop is upscaled and contrast-normalized
- * first (ocrPreprocess.ts — pixels only). Returns the recognized string with whitespace-only
- * cleanup and NO character substitution (no O->0, no I->1) — ambiguity resolution is the
- * technician's job via the editable review/confirm step, never this function's.
- *
- * Bounded by OCR_TIMEOUT_MS so a stalled asset load surfaces as a normal, recoverable error in
- * the capture dialog instead of an indefinite "Reading…". On timeout the cached worker promise
- * is dropped, so the next attempt re-initialises from scratch.
+ * ONE recognition pass over an already-isolated, already-preprocessed line image, with the given
+ * page-segmentation mode. Bounded by OCR_TIMEOUT_MS so a stalled asset load surfaces as a normal,
+ * recoverable error in the capture dialog instead of an indefinite "Reading…". On any failure the
+ * cached worker is dropped, so the next attempt re-initialises from scratch.
  */
-export async function recognizeTextFromCanvas(canvas: HTMLCanvasElement): Promise<string> {
+export async function runOcrPass(image: HTMLCanvasElement, psm: OcrPsm): Promise<OcrPassOutput> {
   const pendingWorker = getTesseractWorker();
   try {
     const worker = await withTimeout(
@@ -333,12 +343,19 @@ export async function recognizeTextFromCanvas(canvas: HTMLCanvasElement): Promis
       OCR_TIMEOUT_MS,
       "Timed out preparing the text recogniser.",
     );
+    await worker.setParameters({
+      // Never automatic page layout: the input is one isolated line (see ocrFieldPipeline.ts).
+      tessedit_pageseg_mode: psm as PSM, // our literals are PSM enum values (ocrFieldPipeline.ts)
+      // A camera crop carries no DPI; without a hint Tesseract guesses per image, which makes
+      // the same label read differently from one attempt to the next.
+      user_defined_dpi: "300",
+    });
     const { data } = await withTimeout(
-      worker.recognize(preprocessCanvasForOcr(canvas)),
+      worker.recognize(image),
       OCR_TIMEOUT_MS,
       "Timed out reading text from the image.",
     );
-    return normalizeOcrCandidate(data.text);
+    return { text: data.text, confidence: data.confidence };
   } catch (err) {
     tesseractWorkerPromise = null; // a timed-out/failed worker must not be reused
     // Dropping the reference is not enough on the timeout path: the underlying createWorker()
@@ -350,6 +367,95 @@ export async function recognizeTextFromCanvas(canvas: HTMLCanvasElement): Promis
     );
     throw err;
   }
+}
+
+function grayToCanvas(img: GrayImage): HTMLCanvasElement {
+  const canvas = document.createElement("canvas");
+  canvas.width = img.width;
+  canvas.height = img.height;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) throw new Error("Couldn't prepare the image for text recognition.");
+  const imageData = ctx.createImageData(img.width, img.height);
+  imageData.data.set(grayToRgba(img));
+  ctx.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+export type FieldOcrResult =
+  | {
+      status: "ok";
+      /** The chosen engine candidate, whitespace-normalized only — never corrected. */
+      text: string;
+      confidence: number;
+      /** The review screen should suggest checking this one carefully. */
+      lowConfidence: boolean;
+    }
+  /** No plausible text line on the guide, or nothing alphanumeric was read. */
+  | { status: "no-text" }
+  /** The aimed value runs off the target band — a retake will do better than a partial read. */
+  | { status: "clipped" };
+
+const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
+/**
+ * Industrial field-value OCR for the captured target band (source pixels — never the full frame).
+ *
+ *   1. image side, pure and local: isolate the ONE line on the alignment guide, mask neighbours,
+ *      deskew when confident, build ≤3 variants (utils/ocrFieldPipeline.ts)
+ *   2. a bounded pass plan (≤4 Tesseract runs, line/raw-line/word modes — never automatic page
+ *      layout), stopping after the first pass when it's already clean and confident
+ *   3. deterministic candidate selection (utils/ocrResultSelection.ts) — ranking only; the
+ *      returned text is exactly the engine's, whitespace-normalized
+ *
+ * Everything runs on-device: no network, no cloud OCR. The technician confirms or corrects the
+ * result in the editable review step.
+ */
+export async function recognizeFieldValueFromCanvas(
+  canvas: HTMLCanvasElement,
+  options: { guideY?: number } = {},
+): Promise<FieldOcrResult> {
+  const started = now();
+  const ctx = canvas.getContext("2d", { willReadFrequently: true }) as CanvasRenderingContext2D | null;
+  if (!ctx) throw new Error("Couldn't read the captured image.");
+  const { width, height } = canvas;
+  const pixels = ctx.getImageData(0, 0, width, height).data;
+  const prepared = prepareFieldOcr(pixels, width, height, options.guideY ?? height / 2);
+  const prepMs = now() - started;
+  if (prepared.status !== "ok") {
+    debugLog(`[FieldOCR] ${prepared.status} after ${prepMs.toFixed(0)}ms (${width}×${height})`);
+    return prepared;
+  }
+
+  const results: OcrPassResult[] = [];
+  const passTimes: string[] = [];
+  for (const pass of planOcrPasses(prepared)) {
+    const image = prepared.variants.find((v) => v.id === pass.variant)?.image;
+    if (!image) continue;
+    const passStarted = now();
+    let output: OcrPassOutput;
+    try {
+      output = await runOcrPass(grayToCanvas(image), pass.psm);
+    } catch (err) {
+      if (!results.length) throw err;
+      break; // keep what earlier passes already read
+    }
+    passTimes.push(`${pass.id}=${(now() - passStarted).toFixed(0)}ms`);
+    results.push({ passId: pass.id, text: output.text, confidence: output.confidence });
+    if (results.length === 1 && isConfidentEnough(scoreOcrCandidate(results[0]))) break;
+  }
+
+  const best = selectOcrCandidate(results);
+  debugLog(
+    `[FieldOCR] prep=${prepMs.toFixed(0)}ms ${passTimes.join(" ")} total=${(now() - started).toFixed(0)}ms ` +
+      `deskew=${prepared.deskewDegrees.toFixed(1)}° chose=${best ? `${best.passId} (${best.score.toFixed(0)})` : "none"}`,
+  );
+  if (!best) return { status: "no-text" };
+  return {
+    status: "ok",
+    text: best.text,
+    confidence: best.confidence,
+    lowConfidence: best.score < LOW_CONFIDENCE_SCORE,
+  };
 }
 
 /** Test-only: resets cached lazy singletons between test cases. Never called from app code. */

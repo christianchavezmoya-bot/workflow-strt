@@ -7,6 +7,9 @@
  * rather than permanently poisoned.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { prepareFieldOcr } from "../utils/ocrFieldPipeline";
+import type { GrayImage } from "../utils/ocrPreprocess";
+import { blank, drawRun, toRgba } from "../utils/ocrSyntheticImages.testutil";
 import {
   OCR_ASSET_PATHS,
   OCR_TIMEOUT_MS,
@@ -15,8 +18,9 @@ import {
   decodeBarcodeFromCanvas,
   detectWasmSimdSupport,
   getNativeBarcodeDetectorSupportedFormats,
-  recognizeTextFromCanvas,
+  recognizeFieldValueFromCanvas,
   resolveOcrCorePath,
+  runOcrPass,
   stopCameraStream,
 } from "./cameraCaptureService";
 
@@ -25,21 +29,10 @@ const setParameters = vi.fn();
 const BrowserMultiFormatReader = vi.fn();
 
 // Individual tests only describe the worker behaviour they care about (recognize/terminate); every
-// fake worker also gets the shared setParameters spy so the configuration step can be asserted.
+// fake worker also gets the shared setParameters spy so per-pass configuration can be asserted.
 vi.mock("tesseract.js", () => ({
   createWorker: async (...args: unknown[]) => ({ setParameters, ...(await createWorker(...args)) }),
   OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
-  PSM: { AUTO: "3", SINGLE_BLOCK: "6", SINGLE_LINE: "7" },
-}));
-
-// jsdom has no 2D canvas, so the real preprocessing would just fall back to the input. Swap it for
-// a marker so tests can prove recognize() receives the PREPROCESSED image, not the raw crop. The
-// preprocessing itself is covered deterministically in src/utils/ocrPreprocess.test.ts.
-const preprocessedMarker = document.createElement("canvas");
-const preprocessCanvasForOcr = vi.fn();
-vi.mock("../utils/ocrPreprocess", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../utils/ocrPreprocess")>()),
-  preprocessCanvasForOcr: (...args: unknown[]) => preprocessCanvasForOcr(...args),
 }));
 
 vi.mock("@zxing/browser", () => ({
@@ -52,11 +45,33 @@ function fakeCanvas(): HTMLCanvasElement {
   return document.createElement("canvas");
 }
 
+/** A worker whose successive recognize() calls return the given reads. */
+function workerReading(...reads: Array<[string, number]>) {
+  const recognize = vi.fn();
+  reads.forEach(([text, confidence]) => recognize.mockResolvedValueOnce({ data: { text, confidence } }));
+  recognize.mockResolvedValue({ data: { text: reads[reads.length - 1]?.[0] ?? "", confidence: reads[reads.length - 1]?.[1] ?? 0 } });
+  return { recognize };
+}
+
+/** jsdom has no 2D canvas: a stub context that serves `band` as the captured pixels and accepts
+ *  the line images the pipeline renders for Tesseract. */
+function stubCanvas2d(band: GrayImage) {
+  const rgba = toRgba(band);
+  vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
+    getImageData: () => ({ data: rgba, width: band.width, height: band.height }),
+    createImageData: (w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
+    putImageData: vi.fn(),
+  } as unknown as CanvasRenderingContext2D);
+  const canvas = document.createElement("canvas");
+  canvas.width = band.width;
+  canvas.height = band.height;
+  return canvas;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   _resetCameraCaptureServiceForTests();
   setParameters.mockResolvedValue({});
-  preprocessCanvasForOcr.mockReturnValue(preprocessedMarker);
 });
 
 afterEach(() => {
@@ -117,11 +132,9 @@ describe("OCR asset paths are N-Go-controlled, not a third-party CDN", () => {
 
 describe("Tesseract worker is created against the local assets", () => {
   it("passes our self-hosted worker/core/lang paths and the LSTM-only engine mode", async () => {
-    const recognize = vi.fn().mockResolvedValue({ data: { text: "SN-123 " } });
-    createWorker.mockResolvedValue({ recognize });
+    createWorker.mockResolvedValue(workerReading(["SN-123 ", 91]));
 
-    const text = await recognizeTextFromCanvas(fakeCanvas());
-    expect(text).toBe("SN-123");
+    expect(await runOcrPass(fakeCanvas(), "7")).toEqual({ text: "SN-123 ", confidence: 91 });
 
     expect(createWorker).toHaveBeenCalledTimes(1);
     const [lang, oem, options] = createWorker.mock.calls[0] as [string, number, Record<string, unknown>];
@@ -139,80 +152,135 @@ describe("Tesseract worker is created against the local assets", () => {
   });
 
   it("never mentions an external CDN host in any option passed to createWorker", async () => {
-    createWorker.mockResolvedValue({ recognize: vi.fn().mockResolvedValue({ data: { text: "x" } }) });
-    await recognizeTextFromCanvas(fakeCanvas());
+    createWorker.mockResolvedValue(workerReading(["x", 90]));
+    await runOcrPass(fakeCanvas(), "7");
     const serialized = JSON.stringify(createWorker.mock.calls[0]);
     expect(serialized).not.toContain("jsdelivr");
     expect(serialized).not.toContain("unpkg");
     expect(serialized).not.toContain("cdn.");
   });
 
-  it("returns raw recognized text with no character substitution", async () => {
-    createWorker.mockResolvedValue({
-      recognize: vi.fn().mockResolvedValue({ data: { text: "  O0O l1I-Z2  " } }),
-    });
-    expect(await recognizeTextFromCanvas(fakeCanvas())).toBe("O0O l1I-Z2");
-  });
-
-  it("reuses a successfully initialised worker instead of spawning one per capture", async () => {
-    createWorker.mockResolvedValue({ recognize: vi.fn().mockResolvedValue({ data: { text: "a" } }) });
-    await recognizeTextFromCanvas(fakeCanvas());
-    await recognizeTextFromCanvas(fakeCanvas());
+  it("reuses a successfully initialised worker instead of spawning one per pass", async () => {
+    createWorker.mockResolvedValue(workerReading(["a", 90]));
+    await runOcrPass(fakeCanvas(), "7");
+    await runOcrPass(fakeCanvas(), "13");
     expect(createWorker).toHaveBeenCalledTimes(1);
   });
 });
 
-describe("OCR recognition settings for short identifiers", () => {
-  it("configures single-line segmentation and a fixed DPI once per worker — and no character whitelist", async () => {
-    createWorker.mockResolvedValue({ recognize: vi.fn().mockResolvedValue({ data: { text: "324775" } }) });
-    await recognizeTextFromCanvas(fakeCanvas());
-    await recognizeTextFromCanvas(fakeCanvas());
-
-    expect(setParameters).toHaveBeenCalledTimes(1);
+describe("identifier OCR profile", () => {
+  it("turns off the English word lists at init (identifiers aren't prose) — and sets no whitelist", async () => {
+    createWorker.mockResolvedValue(workerReading(["S4912/89", 90]));
+    await runOcrPass(fakeCanvas(), "7");
+    const config = createWorker.mock.calls[0][3] as Record<string, string>;
+    expect(config).toEqual({ load_system_dawg: "0", load_freq_dawg: "0" });
     const params = setParameters.mock.calls[0][0] as Record<string, unknown>;
-    expect(params.tessedit_pageseg_mode).toBe("7"); // PSM.SINGLE_LINE
-    expect(params.user_defined_dpi).toBe("300");
-    // Identifiers mix letters/digits/punctuation (J000376, V1.2.3, ABC-123) — never restricted.
     expect(params).not.toHaveProperty("tessedit_char_whitelist");
+    expect(params).not.toHaveProperty("tessedit_char_blacklist");
   });
 
-  it("recognizes the PREPROCESSED crop, derived from the cropped canvas it was given", async () => {
-    const recognize = vi.fn().mockResolvedValue({ data: { text: "x" } });
-    createWorker.mockResolvedValue({ recognize });
-    const crop = fakeCanvas();
-    await recognizeTextFromCanvas(crop);
-    expect(preprocessCanvasForOcr).toHaveBeenCalledWith(crop);
-    expect(recognize).toHaveBeenCalledWith(preprocessedMarker);
+  it("sets the requested segmentation mode per pass, with a fixed DPI", async () => {
+    createWorker.mockResolvedValue(workerReading(["x", 90]));
+    await runOcrPass(fakeCanvas(), "7");
+    await runOcrPass(fakeCanvas(), "8");
+    await runOcrPass(fakeCanvas(), "13");
+    expect(setParameters.mock.calls.map((c) => (c[0] as Record<string, unknown>).tessedit_pageseg_mode)).toEqual(["7", "8", "13"]);
+    expect(setParameters.mock.calls.every((c) => (c[0] as Record<string, unknown>).user_defined_dpi === "300")).toBe(true);
   });
 
-  it("returns a multi-line/padded engine result as one trimmed line, with every character kept", async () => {
-    // Device regression shape: the old pipeline read a `324775` label as `3247751 ;`. Whitespace
-    // cleanup must not paper over that by dropping characters — the technician corrects it in the
-    // editable review field; this layer only removes whitespace noise.
-    createWorker.mockResolvedValue({
-      recognize: vi.fn().mockResolvedValue({ data: { text: "\n 3247751 ;\n\n" } }),
-    });
-    expect(await recognizeTextFromCanvas(fakeCanvas())).toBe("3247751 ;");
-  });
-
-  it("a failed setParameters is treated like any failed initialisation and retried next time", async () => {
-    createWorker.mockResolvedValue({ recognize: vi.fn().mockResolvedValue({ data: { text: "ok" } }) });
+  it("a failed setParameters drops the worker so the next attempt re-initialises", async () => {
+    createWorker.mockResolvedValue(workerReading(["ok", 90]));
     setParameters.mockRejectedValueOnce(new Error("config failed"));
-    await expect(recognizeTextFromCanvas(fakeCanvas())).rejects.toThrow();
-    await expect(recognizeTextFromCanvas(fakeCanvas())).resolves.toBe("ok");
+    await expect(runOcrPass(fakeCanvas(), "7")).rejects.toThrow();
+    await expect(runOcrPass(fakeCanvas(), "7")).resolves.toEqual({ text: "ok", confidence: 90 });
     expect(createWorker).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("recognizeFieldValueFromCanvas — isolated line, bounded passes, deterministic choice", () => {
+  function band() {
+    const img = blank(900, 220);
+    drawRun(img, { x: 300, centerY: 110, count: 6, charH: 48 }); // a centred value
+    return img;
+  }
+
+  it("stops after ONE pass when the first read is clean and confident", async () => {
+    const worker = workerReading(["324775\n", 93]);
+    createWorker.mockResolvedValue(worker);
+    const result = await recognizeFieldValueFromCanvas(stubCanvas2d(band()));
+    expect(result).toEqual({ status: "ok", text: "324775", confidence: 93, lowConfidence: false });
+    expect(worker.recognize).toHaveBeenCalledTimes(1);
+    expect((setParameters.mock.calls[0][0] as Record<string, unknown>).tessedit_pageseg_mode).toBe("7");
+  });
+
+  it("runs the bounded plan (≤4 passes) when the first read is doubtful, and picks the clean candidate", async () => {
+    const worker = workerReading(["3247751 ;", 62], ["324775", 78], ["324775", 74]);
+    createWorker.mockResolvedValue(worker);
+    const result = await recognizeFieldValueFromCanvas(stubCanvas2d(band()));
+    expect(result.status).toBe("ok");
+    if (result.status === "ok") expect(result.text).toBe("324775");
+    expect(worker.recognize.mock.calls.length).toBeGreaterThan(1);
+    expect(worker.recognize.mock.calls.length).toBeLessThanOrEqual(4);
+    // Never general automatic page layout.
+    expect(setParameters.mock.calls.every((c) => ["7", "8", "13"].includes((c[0] as Record<string, string>).tessedit_pageseg_mode))).toBe(true);
+  });
+
+  it("returns the chosen engine text EXACTLY (whitespace-normalized) — never corrected", async () => {
+    createWorker.mockResolvedValue(workerReading(["S49l2/89", 40], ["S49l2/89", 38], ["S49l2/89", 35]));
+    const result = await recognizeFieldValueFromCanvas(stubCanvas2d(band()));
+    // Even with passes agreeing, a weak read is flagged for careful review — but not changed.
+    expect(result).toMatchObject({ status: "ok", text: "S49l2/89", lowConfidence: true });
+  });
+
+  it("reports clipped / no-text from geometry WITHOUT running the OCR engine", async () => {
+    const clipped = blank(900, 220);
+    drawRun(clipped, { x: -15, centerY: 110, count: 8, charH: 48 });
+    expect(await recognizeFieldValueFromCanvas(stubCanvas2d(clipped))).toEqual({ status: "clipped" });
+    vi.restoreAllMocks();
+    expect(await recognizeFieldValueFromCanvas(stubCanvas2d(blank(900, 220)))).toEqual({ status: "no-text" });
+    expect(createWorker).not.toHaveBeenCalled();
+  });
+
+  it("no-text when every pass reads nothing alphanumeric", async () => {
+    createWorker.mockResolvedValue(workerReading([" ; ", 30], ["", 0], ["'", 10]));
+    expect(await recognizeFieldValueFromCanvas(stubCanvas2d(band()))).toEqual({ status: "no-text" });
+  });
+
+  it("follows the guide it is given (the line on the guide, not the band centre)", async () => {
+    const img = blank(900, 220);
+    drawRun(img, { x: 300, centerY: 50, count: 3, charH: 40 }); // short line, aimed at
+    drawRun(img, { x: 200, centerY: 165, count: 9, charH: 40 }); // long line below
+    const worker = workerReading(["C25", 95]);
+    createWorker.mockResolvedValue(worker);
+    await recognizeFieldValueFromCanvas(stubCanvas2d(img), { guideY: 50 });
+    const expected = prepareFieldOcr(toRgba(img), img.width, img.height, 50);
+    if (expected.status !== "ok") throw new Error("fixture should isolate a line");
+    const sent = worker.recognize.mock.calls[0][0] as HTMLCanvasElement;
+    expect(sent.width).toBe(expected.variants[0].image.width); // the 3-character line's image
+    const other = prepareFieldOcr(toRgba(img), img.width, img.height, 165);
+    if (other.status !== "ok") throw new Error("fixture should isolate a line");
+    expect(sent.width).not.toBe(other.variants[0].image.width);
+  });
+
+  it("a failure on the FIRST pass is an error; a failure on a later pass keeps earlier reads", async () => {
+    createWorker.mockResolvedValueOnce({ recognize: vi.fn().mockRejectedValue(new Error("worker died")) });
+    await expect(recognizeFieldValueFromCanvas(stubCanvas2d(band()))).rejects.toThrow();
+
+    const recognize = vi.fn()
+      .mockResolvedValueOnce({ data: { text: "324775", confidence: 70 } })
+      .mockRejectedValueOnce(new Error("worker died"));
+    createWorker.mockResolvedValueOnce({ recognize });
+    await expect(recognizeFieldValueFromCanvas(stubCanvas2d(band()))).resolves.toMatchObject({ status: "ok", text: "324775" });
   });
 });
 
 describe("initialisation failures are recoverable, not permanently cached", () => {
   it("a failed worker initialisation can be retried successfully on a later attempt", async () => {
     createWorker.mockRejectedValueOnce(new Error("offline: asset unreachable"));
-    await expect(recognizeTextFromCanvas(fakeCanvas())).rejects.toThrow();
+    await expect(runOcrPass(fakeCanvas(), "7")).rejects.toThrow();
 
-    createWorker.mockResolvedValueOnce({
-      recognize: vi.fn().mockResolvedValue({ data: { text: "recovered" } }),
-    });
-    await expect(recognizeTextFromCanvas(fakeCanvas())).resolves.toBe("recovered");
+    createWorker.mockResolvedValueOnce(workerReading(["recovered", 90]));
+    await expect(runOcrPass(fakeCanvas(), "7")).resolves.toMatchObject({ text: "recovered" });
     expect(createWorker).toHaveBeenCalledTimes(2);
   });
 
@@ -220,12 +288,10 @@ describe("initialisation failures are recoverable, not permanently cached", () =
     createWorker.mockResolvedValueOnce({
       recognize: vi.fn().mockRejectedValue(new Error("worker died")),
     });
-    await expect(recognizeTextFromCanvas(fakeCanvas())).rejects.toThrow();
+    await expect(runOcrPass(fakeCanvas(), "7")).rejects.toThrow();
 
-    createWorker.mockResolvedValueOnce({
-      recognize: vi.fn().mockResolvedValue({ data: { text: "second try" } }),
-    });
-    await expect(recognizeTextFromCanvas(fakeCanvas())).resolves.toBe("second try");
+    createWorker.mockResolvedValueOnce(workerReading(["second try", 90]));
+    await expect(runOcrPass(fakeCanvas(), "7")).resolves.toMatchObject({ text: "second try" });
     expect(createWorker).toHaveBeenCalledTimes(2);
   });
 
@@ -253,7 +319,7 @@ describe("OCR is time-bounded so the dialog can never hang on 'Reading…'", () 
     vi.useFakeTimers();
     createWorker.mockReturnValue(new Promise(() => { /* never settles — unreachable asset */ }));
 
-    const attempt = recognizeTextFromCanvas(fakeCanvas());
+    const attempt = runOcrPass(fakeCanvas(), "7");
     const assertion = expect(attempt).rejects.toThrow(/Timed out/);
     await vi.advanceTimersByTimeAsync(OCR_TIMEOUT_MS + 1000);
     await assertion;
@@ -263,7 +329,7 @@ describe("OCR is time-bounded so the dialog can never hang on 'Reading…'", () 
     vi.useFakeTimers();
     createWorker.mockResolvedValue({ recognize: () => new Promise(() => {}) });
 
-    const attempt = recognizeTextFromCanvas(fakeCanvas());
+    const attempt = runOcrPass(fakeCanvas(), "7");
     const assertion = expect(attempt).rejects.toThrow(/Timed out/);
     await vi.advanceTimersByTimeAsync(OCR_TIMEOUT_MS + 1000);
     await assertion;
@@ -275,7 +341,7 @@ describe("OCR is time-bounded so the dialog can never hang on 'Reading…'", () 
     let settleWorker: ((w: unknown) => void) | undefined;
     createWorker.mockReturnValue(new Promise((res) => { settleWorker = res; }));
 
-    const attempt = recognizeTextFromCanvas(fakeCanvas());
+    const attempt = runOcrPass(fakeCanvas(), "7");
     const assertion = expect(attempt).rejects.toThrow(/Timed out/);
     await vi.advanceTimersByTimeAsync(OCR_TIMEOUT_MS + 1000);
     await assertion;

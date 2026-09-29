@@ -11,7 +11,16 @@
  *
  * QR/barcode and OCR share one camera preview + target-window + crop pipeline
  * (cameraCropMath.ts) so neither mode ever processes anything outside the region the technician
- * aimed at — a full, unconstrained camera frame is never handed to a decoder or to OCR.
+ * aimed at — a full, unconstrained camera frame is never handed to a decoder or to OCR. Both share
+ * real camera zoom (cameraZoom.ts — applyConstraints, so the crop stays in true source pixels).
+ *
+ * Text/OCR is an industrial single-value scanner, not document OCR: the technician aligns ONE
+ * value on the guide inside a band; the band is analysed on-device to isolate just that line
+ * (ocrLineIsolation.ts / ocrFieldPipeline.ts), a small bounded set of Tesseract passes reads it,
+ * and the best candidate is chosen deterministically (ocrResultSelection.ts) — never corrected.
+ * Everything runs locally and offline. It is tuned for PRINTED labels, plates and stencils;
+ * handwriting is best-effort only (Tesseract's model isn't a handwriting recogniser) — the
+ * editable review step is the safeguard for both.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -35,11 +44,21 @@ import QrCodeScannerOutlined from "@mui/icons-material/QrCodeScannerOutlined";
 import {
   decodeBarcodeFromCanvas,
   isCameraCaptureSupported,
-  recognizeTextFromCanvas,
+  recognizeFieldValueFromCanvas,
   startCameraStream,
   stopCameraStream,
 } from "../../services/cameraCaptureService";
-import { computeSourceCropRect } from "../../utils/cameraCropMath";
+import { mapOcrTarget, OCR_TARGET_BAND } from "../../utils/cameraCropMath";
+import {
+  applyZoom,
+  formatZoom,
+  liveVideoTrack,
+  readCurrentZoom,
+  readZoomRange,
+  touchDistance,
+  zoomForPinch,
+  type ZoomRange,
+} from "../../utils/cameraZoom";
 import {
   nativeDialogActionsSx,
   nativeDialogPaperSx,
@@ -133,7 +152,15 @@ interface Candidate {
   value: string;
   format?: string;
   croppedDataUrl?: string;
+  /** OCR read the engine itself wasn't sure about — shown as a hint, never a block. */
+  lowConfidence?: boolean;
 }
+
+// On-screen OCR band, from the same constants the crop geometry is tested against.
+const OCR_BAND_TOP = `${(OCR_TARGET_BAND.centerY - OCR_TARGET_BAND.height / 2) * 100}%`;
+const OCR_BAND_BOTTOM = `${(1 - OCR_TARGET_BAND.centerY - OCR_TARGET_BAND.height / 2) * 100}%`;
+const OCR_BAND_INSET = `${OCR_TARGET_BAND.insetX * 100}%`;
+const OCR_BAND_HEIGHT = `${OCR_TARGET_BAND.height * 100}%`;
 
 function describeCameraError(err: unknown): string {
   const name = (err as { name?: string } | undefined)?.name;
@@ -181,6 +208,9 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   // What the technician is about to commit: starts as the exact decoder/OCR candidate and is
   // freely editable. Lives only in this dialog — the workflow field is untouched until Use Value.
   const [draftValue, setDraftValue] = useState("");
+  // Real camera zoom (applyConstraints) — null range = this camera/WebView doesn't expose zoom.
+  const [zoomRange, setZoomRange] = useState<ZoomRange | null>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -202,6 +232,89 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   // and never attached — so a slow permission prompt can't bind a stream to a closed dialog.
   const streamGenRef = useRef(0);
 
+  // Zoom plumbing. Pinch updates arrive far faster than a camera can apply constraints, so at
+  // most one applyConstraints() is in flight and only the latest requested level is applied next.
+  const zoomRangeRef = useRef<ZoomRange | null>(null);
+  const zoomRef = useRef<number | null>(null);
+  const zoomQueueRef = useRef<{ inFlight: boolean; pending: number | null }>({ inFlight: false, pending: null });
+  const pinchRef = useRef<{ startDistance: number; startZoom: number } | null>(null);
+
+  /** (Re)reads zoom support from a NEWLY acquired stream. A reused stream keeps its zoom. */
+  function initZoom(stream: MediaStream) {
+    const track = liveVideoTrack(stream);
+    const range = readZoomRange(track);
+    const current = range && track ? readCurrentZoom(track, range) : null;
+    zoomRangeRef.current = range;
+    zoomRef.current = current;
+    zoomQueueRef.current = { inFlight: false, pending: null };
+    setZoomRange(range);
+    setZoom(current);
+  }
+
+  function requestZoom(target: number) {
+    zoomRef.current = target;
+    setZoom(target);
+    const queue = zoomQueueRef.current;
+    queue.pending = target;
+    if (queue.inFlight) return;
+    queue.inFlight = true;
+    void (async () => {
+      while (queue.pending !== null) {
+        const next = queue.pending;
+        queue.pending = null;
+        const track = liveVideoTrack(streamRef.current);
+        if (!track) break;
+        const applied = await applyZoom(track, next);
+        if (!applied && isLive() && zoomRangeRef.current && queue.pending === null) {
+          // The camera refused: show the zoom it is actually at, not the one we asked for.
+          const actual = readCurrentZoom(track, zoomRangeRef.current);
+          zoomRef.current = actual;
+          setZoom(actual);
+        }
+      }
+      queue.inFlight = false;
+    })();
+  }
+
+  function handlePinchStart(e: React.TouchEvent) {
+    if (e.touches.length !== 2 || !zoomRangeRef.current || zoomRef.current === null) return;
+    pinchRef.current = { startDistance: touchDistance(e.touches[0], e.touches[1]), startZoom: zoomRef.current };
+  }
+
+  function handlePinchMove(e: React.TouchEvent) {
+    const pinch = pinchRef.current;
+    const range = zoomRangeRef.current;
+    if (!pinch || !range || e.touches.length !== 2) return;
+    const next = zoomForPinch(pinch.startZoom, pinch.startDistance, touchDistance(e.touches[0], e.touches[1]), range);
+    if (next !== zoomRef.current) requestZoom(next);
+  }
+
+  function handlePinchEnd(e: React.TouchEvent) {
+    if (e.touches.length < 2) pinchRef.current = null;
+  }
+
+  // A pinch on the preview must zoom the CAMERA — never the page/WebView, and never scroll or
+  // drag the surrounding workflow dialog. React's touch listeners are passive, so the browser
+  // default is blocked with native non-passive listeners (plus touch-action: none in CSS).
+  const previewCleanupRef = useRef<(() => void) | null>(null);
+  const attachPreview = useCallback((el: HTMLDivElement | null) => {
+    previewCleanupRef.current?.();
+    previewCleanupRef.current = null;
+    if (!el) return;
+    const blockMultiTouch = (ev: Event) => {
+      if ((ev as TouchEvent).touches?.length >= 2) ev.preventDefault();
+    };
+    const blockGesture = (ev: Event) => ev.preventDefault(); // WebKit page-zoom gesture events
+    el.addEventListener("touchmove", blockMultiTouch, { passive: false });
+    el.addEventListener("gesturestart", blockGesture);
+    el.addEventListener("gesturechange", blockGesture);
+    previewCleanupRef.current = () => {
+      el.removeEventListener("touchmove", blockMultiTouch);
+      el.removeEventListener("gesturestart", blockGesture);
+      el.removeEventListener("gesturechange", blockGesture);
+    };
+  }, []);
+
   // The preview <video> only exists while the preview is on screen: "reviewing" unmounts it, and
   // Retake/Scan Again mounts a brand-new element. Binding the stream here, whenever an element
   // mounts, is what keeps the preview live across that remount — assigning srcObject once at
@@ -222,6 +335,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
         return;
       }
       streamRef.current = stream;
+      initZoom(stream); // a NEW stream: reinitialise zoom from its own capabilities
       if (videoRef.current) bindStreamToVideo(videoRef.current, stream);
       setPhase("previewing");
     } catch (err) {
@@ -260,7 +374,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
 
     const tick = () => {
       if (!active) return;
-      const cropped = captureCroppedFrame();
+      const cropped = captureTargetFrame()?.canvas;
       if (cropped) {
         void decodeBarcodeFromCanvas(cropped).then((result) => {
           if (!active || !isLive()) return;
@@ -284,16 +398,17 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     };
   }, [mode, phase]);
 
-  /** Crops the CURRENT video frame to the target-window region only. Returns null (never a
-   *  full-frame canvas) if geometry isn't ready yet (e.g. stream metadata not loaded) — callers
-   *  must treat null as "try again next tick" / "can't capture yet", never fall back to the full
-   *  frame. */
-  function captureCroppedFrame(): HTMLCanvasElement | null {
+  /** Crops the CURRENT video frame to the target region only, in the video's own source pixels
+   *  (so it agrees with the on-screen target at any zoom — zoom is applied to the camera, not by
+   *  CSS). Returns null (never a full-frame canvas) if geometry isn't ready yet (e.g. stream
+   *  metadata not loaded) — callers must treat null as "try again next tick" / "can't capture
+   *  yet", never fall back to the full frame. `guideY` is the alignment guide's row in the crop. */
+  function captureTargetFrame(): { canvas: HTMLCanvasElement; guideY: number } | null {
     const video = videoRef.current;
     const overlay = overlayRef.current;
     if (!video || !overlay || !video.videoWidth || !video.videoHeight) return null;
 
-    const crop = computeSourceCropRect({
+    const { crop, guideY } = mapOcrTarget({
       videoIntrinsicSize: { width: video.videoWidth, height: video.videoHeight },
       videoDisplayRect: video.getBoundingClientRect(),
       overlayRect: overlay.getBoundingClientRect(),
@@ -303,10 +418,10 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     const canvas = document.createElement("canvas");
     canvas.width = Math.max(1, Math.round(crop.width));
     canvas.height = Math.max(1, Math.round(crop.height));
-    const ctx = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return null;
     ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
-    return canvas;
+    return { canvas, guideY: guideY * (canvas.height / crop.height) };
   }
 
   /** OCR only — explicit user-initiated Capture. Never runs automatically, never fires from the
@@ -314,28 +429,40 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   async function handleCapture() {
     setErrorMessage(null); // a previous attempt's warning must not linger over a fresh capture
     setPhase("capturing");
-    const cropped = captureCroppedFrame();
-    if (!cropped) {
+    const target = captureTargetFrame();
+    if (!target) {
       setErrorMessage("Couldn't read the camera yet — reposition and try again.");
       setPhase("previewing");
       return;
     }
+    const cropped = target.canvas;
     setPhase("recognizing");
     try {
-      const text = await recognizeTextFromCanvas(cropped);
+      const result = await recognizeFieldValueFromCanvas(cropped, { guideY: target.guideY });
       // Dropped on purpose if the dialog closed while recognition was running: a late result must
       // never resurrect a dismissed dialog, and must never reach the field.
       if (!isLive()) return;
+      if (result.status === "clipped") {
+        // Never read (or guess) a partial value — the technician reframes and captures again.
+        setErrorMessage("Keep the complete value inside the frame, then capture again.");
+        setPhase("previewing");
+        return;
+      }
+      if (result.status === "no-text") {
+        setErrorMessage("No text found on the guide line. Centre ONE value on the line and try again, or type it.");
+        setPhase("previewing");
+        return;
+      }
       let croppedDataUrl: string | undefined;
       try { croppedDataUrl = cropped.toDataURL("image/png"); } catch { /* preview is best-effort */ }
-      setCandidate({ value: text, croppedDataUrl });
-      setDraftValue(text);
+      setCandidate({ value: result.text, croppedDataUrl, lowConfidence: result.lowConfidence });
+      setDraftValue(result.text);
       setPhase("reviewing");
     } catch {
       if (!isLive()) return;
-      // Always leaves "Reading…" — recognizeTextFromCanvas() is time-bounded, so even an
-      // unreachable/corrupt OCR asset lands here rather than hanging. The field keeps its
-      // existing value, and Capture/Retake/Cancel/manual entry all stay available.
+      // Always leaves "Reading…" — recognition is time-bounded, so even an unreachable/corrupt
+      // OCR asset lands here rather than hanging. The field keeps its existing value, and
+      // Capture/Retake/Cancel/manual entry all stay available.
       setErrorMessage("Couldn't read text from that image. Reposition and try again, or type the value.");
       setPhase("previewing");
     }
@@ -406,7 +533,15 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
         )}
 
         {(phase === "opening" || phase === "previewing" || phase === "capturing" || phase === "recognizing") && (
-          <Box sx={{ position: "relative", width: "100%", aspectRatio: "3 / 4", bgcolor: "#000", overflow: "hidden", borderRadius: 1 }}>
+          <Box
+            ref={attachPreview}
+            data-testid="camera-capture-preview"
+            onTouchStart={handlePinchStart}
+            onTouchMove={handlePinchMove}
+            onTouchEnd={handlePinchEnd}
+            onTouchCancel={handlePinchEnd}
+            sx={{ position: "relative", width: "100%", aspectRatio: "3 / 4", bgcolor: "#000", overflow: "hidden", borderRadius: 1, touchAction: "none" }}
+          >
             <video
               ref={attachVideo}
               data-testid="camera-capture-video"
@@ -414,31 +549,68 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
               muted
               style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
             />
-            {/* Target window — the FUNCTIONAL crop region, not merely cosmetic: captureCroppedFrame()
-                reads this exact element's own bounding rect. */}
-            <Box
-              ref={overlayRef}
-              data-testid="camera-capture-target-window"
-              sx={
-                isOcr
-                  ? {
-                      position: "absolute", left: "10%", right: "10%", top: "45%", height: "14%",
-                      border: "2px solid #fff", borderRadius: 1, boxShadow: "0 0 0 2000px rgba(0,0,0,0.35)",
-                      pointerEvents: "none",
-                    }
-                  : {
-                      position: "absolute", left: "20%", right: "20%", top: "30%", bottom: "30%",
-                      border: "2px solid #fff", borderRadius: 1, boxShadow: "0 0 0 2000px rgba(0,0,0,0.35)",
-                      pointerEvents: "none",
-                    }
-              }
-            />
-            <Typography
-              variant="caption"
-              sx={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", color: "#fff" }}
-            >
-              {isOcr ? "Position text inside frame" : "Place code in frame"}
-            </Typography>
+            {isOcr ? (
+              <>
+                <Typography
+                  variant="body2"
+                  sx={{ position: "absolute", left: 0, right: 0, bottom: `calc(100% - ${OCR_BAND_TOP} + 8px)`, textAlign: "center", color: "#fff", fontWeight: 600, textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
+                >
+                  Position ONE value inside frame
+                </Typography>
+                {/* The acquisition band — the FUNCTIONAL crop region (captureTargetFrame() reads this
+                    element's own rect). Tall enough for full characters plus modest tilt/curvature;
+                    everything outside it is dimmed because it is never sent to OCR. */}
+                <Box
+                  ref={overlayRef}
+                  data-testid="camera-capture-target-window"
+                  sx={{
+                    position: "absolute", left: OCR_BAND_INSET, right: OCR_BAND_INSET, top: OCR_BAND_TOP, height: OCR_BAND_HEIGHT,
+                    border: "2px solid #fff", borderRadius: 1, boxShadow: "0 0 0 2000px rgba(0,0,0,0.5)",
+                    pointerEvents: "none",
+                  }}
+                >
+                  {/* Alignment guide: an aiming aid for the ONE line to read — NOT the crop. Text
+                      only needs to sit on/near it, not touch it exactly. */}
+                  <Box
+                    data-testid="ocr-alignment-guide"
+                    sx={{ position: "absolute", left: 10, right: 10, top: "50%", borderTop: "1.5px dashed rgba(255,255,255,0.75)" }}
+                  />
+                  <Box sx={{ position: "absolute", left: "50%", top: "50%", width: 2, height: 16, bgcolor: "rgba(255,255,255,0.9)", transform: "translate(-50%, -50%)" }} />
+                </Box>
+                <Typography
+                  variant="caption"
+                  sx={{ position: "absolute", left: 0, right: 0, top: `calc(100% - ${OCR_BAND_BOTTOM} + 8px)`, textAlign: "center", color: "rgba(255,255,255,0.9)", textShadow: "0 1px 2px rgba(0,0,0,0.8)" }}
+                >
+                  {zoomRange ? "Pinch to zoom · align the value on the line" : "Align the value on the line"}
+                </Typography>
+              </>
+            ) : (
+              <>
+                <Box
+                  ref={overlayRef}
+                  data-testid="camera-capture-target-window"
+                  sx={{
+                    position: "absolute", left: "20%", right: "20%", top: "30%", bottom: "30%",
+                    border: "2px solid #fff", borderRadius: 1, boxShadow: "0 0 0 2000px rgba(0,0,0,0.35)",
+                    pointerEvents: "none",
+                  }}
+                />
+                <Typography
+                  variant="caption"
+                  sx={{ position: "absolute", bottom: 8, left: 0, right: 0, textAlign: "center", color: "#fff" }}
+                >
+                  {zoomRange ? "Place code in frame · pinch to zoom" : "Place code in frame"}
+                </Typography>
+              </>
+            )}
+            {zoomRange && zoom !== null && (
+              <Box
+                data-testid="camera-zoom-indicator"
+                sx={{ position: "absolute", top: 8, right: 8, px: 1, py: 0.25, borderRadius: 1, bgcolor: "rgba(0,0,0,0.55)", color: "#fff", pointerEvents: "none" }}
+              >
+                <Typography variant="caption" sx={{ fontWeight: 600 }}>{formatZoom(zoom)}</Typography>
+              </Box>
+            )}
             {(phase === "recognizing" || phase === "capturing") && (
               <Box sx={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "rgba(0,0,0,0.4)" }}>
                 <Typography variant="body2" sx={{ color: "#fff" }}>Reading…</Typography>
@@ -456,6 +628,11 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
               <Typography variant="caption" color="text.secondary">
                 Detected: {candidate.format.toUpperCase()}
               </Typography>
+            )}
+            {candidate.lowConfidence && (
+              <Alert severity="info" variant="outlined" sx={{ py: 0 }}>
+                Low-confidence read — check every character against the label.
+              </Alert>
             )}
             <TextField
               label="Detected value"
