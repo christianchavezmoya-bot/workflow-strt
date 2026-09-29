@@ -1,6 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CameraCaptureAction, CameraCaptureDialog } from "./CameraCaptureAction";
+import { NATIVE_DIALOG_Z_INDEX } from "../../utils/nativeDialogInsets";
+
+// A plain variable rather than vi.fn(): afterEach's restoreAllMocks must not wipe the default.
+let nativePlatform = false;
+vi.mock("../../utils/platform", () => ({
+  isMobileNativePlatform: () => nativePlatform,
+}));
 
 const isCameraCaptureSupported = vi.fn();
 const startCameraStream = vi.fn();
@@ -50,6 +57,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  nativePlatform = false;
   vi.restoreAllMocks();
 });
 
@@ -338,5 +346,64 @@ describe("field eligibility (integration-level expectations)", () => {
   it.each(["text", "number", "scan"] as const)("renders the camera action for eligible field kind %s", (kind) => {
     render(<CameraCaptureAction value="" onChange={vi.fn()} fieldKind={kind} />);
     expect(screen.getByRole("button", { name: /capture value with camera/i })).toBeInTheDocument();
+  });
+});
+
+// Regression for the PR #376 on-device blocker: on native, WorkOrderRunner's Dialog is pinned to
+// NATIVE_DIALOG_Z_INDEX (1500). A camera Menu/Dialog left at MUI's default 1300 opened BEHIND the
+// runner — invisible and undismissable — while its focus trap stole focus from every workflow
+// field. These assert the actual rendered stacking, not merely that a helper was called.
+describe("CameraCaptureAction — native modal stacking above WorkOrderRunner", () => {
+  function modalRootZIndex(el: HTMLElement, rootClass: string): number {
+    const root = el.closest(`.${rootClass}`) as HTMLElement | null;
+    expect(root).not.toBeNull();
+    return Number(getComputedStyle(root!).zIndex);
+  }
+
+  async function openMenu() {
+    render(<CameraCaptureAction value="" onChange={vi.fn()} fieldKind="text" ariaLabel="Serial Number" />);
+    fireEvent.click(screen.getByRole("button", { name: /Capture Serial Number with camera/i }));
+    return screen.findByRole("menu");
+  }
+
+  it("native: the camera mode Menu renders above the runner's native Dialog", async () => {
+    nativePlatform = true;
+    const menu = await openMenu();
+    expect(modalRootZIndex(menu, "MuiPopover-root")).toBeGreaterThan(NATIVE_DIALOG_Z_INDEX);
+  });
+
+  it.each([
+    ["QR / Barcode", /Scan QR \/ Barcode/],
+    ["Text / OCR", /Capture Text/],
+  ])("native: choosing %s opens a capture Dialog above the runner's native Dialog", async (item, title) => {
+    nativePlatform = true;
+    await openMenu();
+    fireEvent.click(screen.getByText(item));
+    const heading = await screen.findByText(title);
+    expect(modalRootZIndex(heading, "MuiDialog-root")).toBeGreaterThan(NATIVE_DIALOG_Z_INDEX);
+    // Cancel still closes without touching the field on native.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByText(title)).not.toBeInTheDocument());
+  });
+
+  it("native: Cancel in the mode Menu closes it and releases the modal layer", async () => {
+    nativePlatform = true;
+    const onChange = vi.fn();
+    render(<CameraCaptureAction value="existing" onChange={onChange} fieldKind="text" />);
+    fireEvent.click(screen.getByRole("button", { name: /capture value with camera/i }));
+    await screen.findByRole("menu");
+    fireEvent.click(screen.getByText("Cancel"));
+    await waitFor(() => expect(screen.queryByRole("menu")).not.toBeInTheDocument());
+    await waitFor(() => expect(document.querySelector(".MuiPopover-root")).toBeNull());
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("web: no native z-index override — Menu and capture Dialog keep MUI's default stacking", async () => {
+    nativePlatform = false;
+    const menu = await openMenu();
+    expect(modalRootZIndex(menu, "MuiPopover-root")).toBe(1300);
+    fireEvent.click(screen.getByText("QR / Barcode"));
+    const heading = await screen.findByText(/Scan QR \/ Barcode/);
+    expect(modalRootZIndex(heading, "MuiDialog-root")).toBe(1300);
   });
 });

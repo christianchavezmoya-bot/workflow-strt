@@ -39,6 +39,12 @@ import {
   stopCameraStream,
 } from "../../services/cameraCaptureService";
 import { computeSourceCropRect } from "../../utils/cameraCropMath";
+import {
+  nativeDialogActionsSx,
+  nativeDialogPaperSx,
+  nativeNestedDialogSx,
+  nativePopoverSx,
+} from "../../utils/nativeDialogInsets";
 
 export type CameraCaptureFieldKind = "text" | "number" | "scan";
 
@@ -81,7 +87,10 @@ export function CameraCaptureAction({ value, onChange, fieldKind, disabled, aria
           </IconButton>
         </span>
       </Tooltip>
-      <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)}>
+      {/* Rendered from inside WorkOrderRunner, whose Dialog is pinned to NATIVE_DIALOG_Z_INDEX on
+          native. Without the nested z-index this Menu opens behind the runner — invisible and
+          undismissable — while its focus trap still steals focus from every workflow field. */}
+      <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)} sx={nativePopoverSx()}>
         <MenuItem
           onClick={() => {
             setDialogMode("qr-barcode");
@@ -330,7 +339,15 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   const title = isOcr ? "Capture Text" : "Scan QR / Barcode";
 
   return (
-    <Dialog open onClose={handleCancel} maxWidth="sm" fullWidth>
+    <Dialog
+      open
+      onClose={handleCancel}
+      maxWidth="sm"
+      fullWidth
+      // Same native stacking requirement as the mode Menu above: must sit above the runner.
+      sx={nativeNestedDialogSx()}
+      PaperProps={{ sx: nativeDialogPaperSx() }}
+    >
       <DialogTitle>{phase === "reviewing" ? "Review Capture" : title}</DialogTitle>
       <DialogContent>
         {/* Shown for BOTH the terminal "error" phase (camera unavailable) and a recoverable
@@ -397,7 +414,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
           </Stack>
         )}
       </DialogContent>
-      <DialogActions>
+      <DialogActions sx={nativeDialogActionsSx()}>
         {phase === "reviewing" ? (
           <>
             <Button onClick={handleCancel}>Cancel</Button>
