@@ -14,7 +14,6 @@ import {
   PhotoCameraOutlined,
   PlayArrowOutlined,
   PlayCircleOutlineOutlined,
-  QrCodeScannerOutlined,
   ReportProblemOutlined,
   SyncOutlined,
   VideocamOutlined,
@@ -65,6 +64,7 @@ import WheelPicker from "../../components/ui/WheelPicker";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
 import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
 import SignaturePad from "../../components/ui/SignaturePad";
+import { CameraCaptureAction } from "../../components/capture/CameraCaptureAction";
 import { useAuth } from "../../hooks/useAuth";
 import { useIsKeyboardOpen } from "../../hooks/useIsKeyboardOpen";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
@@ -1533,8 +1533,11 @@ function WorkOrderRunner({
     }
     if (inp.type === "number") {
       return (
-        <TextField size="small" fullWidth type="number" error={isReq}
-          value={val} onChange={(e) => onChange(e.target.value)} />
+        <Stack direction="row" spacing={1} alignItems="center">
+          <TextField size="small" fullWidth type="number" error={isReq}
+            value={val} onChange={(e) => onChange(e.target.value)} />
+          <CameraCaptureAction value={val} onChange={onChange} fieldKind="number" ariaLabel={inp.label} />
+        </Stack>
       );
     }
     if (inp.type === "date") {
@@ -1551,9 +1554,7 @@ function WorkOrderRunner({
     if (inp.type === "scan") {
       return (
         <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title="Scan barcode / QR (type manually in browser)" {...nativeTooltipTouchProps()}>
-            <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
-          </Tooltip>
+          <CameraCaptureAction value={val} onChange={onChange} fieldKind="scan" ariaLabel={inp.label} />
           <TextField size="small" fullWidth error={isReq} placeholder="Scan or enter value"
             value={val} onChange={(e) => onChange(e.target.value)} />
         </Stack>
@@ -1733,8 +1734,11 @@ function WorkOrderRunner({
       );
     }
     return (
-      <TextField size="small" fullWidth error={isReq} placeholder="Enter text"
-        value={val} onChange={(e) => onChange(e.target.value)} />
+      <Stack direction="row" spacing={1} alignItems="center">
+        <TextField size="small" fullWidth error={isReq} placeholder="Enter text"
+          value={val} onChange={(e) => onChange(e.target.value)} />
+        <CameraCaptureAction value={val} onChange={onChange} fieldKind="text" ariaLabel={inp.label} />
+      </Stack>
     );
   }
 
@@ -1788,9 +1792,7 @@ function WorkOrderRunner({
     if (field.type === "scan") {
       return (
         <Stack direction="row" spacing={1} alignItems="center">
-          <Tooltip title="Scan barcode / QR (or type manually)" {...nativeTooltipTouchProps()}>
-            <IconButton size="small"><QrCodeScannerOutlined fontSize="small" /></IconButton>
-          </Tooltip>
+          <CameraCaptureAction value={val} onChange={onChange} fieldKind="scan" ariaLabel={field.label} />
           <TextField size="small" fullWidth error={isReq}
             placeholder={field.hint || "Scan or enter value"}
             value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
@@ -1812,15 +1814,21 @@ function WorkOrderRunner({
     }
     if (field.type === "number") {
       return (
-        <TextField size="small" fullWidth type="number" error={isReq}
-          placeholder={field.hint || field.unit || ""}
-          value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
+        <Stack direction="row" spacing={1} alignItems="center">
+          <TextField size="small" fullWidth type="number" error={isReq}
+            placeholder={field.hint || field.unit || ""}
+            value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
+          <CameraCaptureAction value={val} onChange={onChange} fieldKind="number" ariaLabel={field.label} />
+        </Stack>
       );
     }
     return (
-      <TextField size="small" fullWidth error={isReq}
-        placeholder={field.hint || "Enter value"}
-        value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
+      <Stack direction="row" spacing={1} alignItems="center">
+        <TextField size="small" fullWidth error={isReq}
+          placeholder={field.hint || "Enter value"}
+          value={val} onChange={(e) => onChange(e.target.value)} onFocus={handleCaptureFieldFocus} />
+        <CameraCaptureAction value={val} onChange={onChange} fieldKind="text" ariaLabel={field.label} />
+      </Stack>
     );
   }
 
