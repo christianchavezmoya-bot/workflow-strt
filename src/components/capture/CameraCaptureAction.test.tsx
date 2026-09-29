@@ -169,6 +169,124 @@ describe("CameraCaptureDialog — OCR mode", () => {
   });
 });
 
+describe("CameraCaptureDialog — OCR failure and lifecycle races", () => {
+  it("never leaves the dialog stuck on 'Reading…': a failed/timed-out recognition returns to the preview with a visible explanation", async () => {
+    recognizeTextFromCanvas.mockRejectedValue(new Error("Timed out preparing the text recogniser."));
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="EXISTING-VALUE" onClose={vi.fn()} onConfirm={onConfirm} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+
+    expect(await screen.findByText(/couldn't read text from that image/i)).toBeInTheDocument();
+    expect(screen.queryByText("Reading…")).not.toBeInTheDocument();
+    // Capture stays available for a retry, and the field was never touched.
+    expect(screen.getByRole("button", { name: "Capture" })).toBeInTheDocument();
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("a second OCR attempt can succeed after the first one failed", async () => {
+    recognizeTextFromCanvas.mockRejectedValueOnce(new Error("init failed"));
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    expect(await screen.findByText(/couldn't read text from that image/i)).toBeInTheDocument();
+
+    recognizeTextFromCanvas.mockResolvedValueOnce("RECOVERED-123");
+    fireEvent.click(screen.getByRole("button", { name: "Capture" }));
+
+    expect(await screen.findByText("RECOVERED-123")).toBeInTheDocument();
+    // The stale warning from the first attempt is cleared once a new capture starts.
+    expect(screen.queryByText(/couldn't read text from that image/i)).not.toBeInTheDocument();
+  });
+
+  it("closing the dialog during recognition drops the late result — it never reaches the field", async () => {
+    let resolveRecognition: ((text: string) => void) | undefined;
+    recognizeTextFromCanvas.mockReturnValue(new Promise<string>((res) => { resolveRecognition = res; }));
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="ORIGINAL" onClose={onClose} onConfirm={onConfirm} />);
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await waitFor(() => expect(recognizeTextFromCanvas).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+
+    // The OCR promise settles only after the dialog was dismissed.
+    resolveRecognition?.("LATE-RESULT");
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(screen.queryByText("LATE-RESULT")).not.toBeInTheDocument();
+  });
+
+  it("unmounting during recognition is safe and releases the camera", async () => {
+    let resolveRecognition: ((text: string) => void) | undefined;
+    recognizeTextFromCanvas.mockReturnValue(new Promise<string>((res) => { resolveRecognition = res; }));
+    const onConfirm = vi.fn();
+    const { unmount } = render(
+      <CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await waitFor(() => expect(recognizeTextFromCanvas).toHaveBeenCalled());
+
+    unmount();
+    expect(stopCameraStream).toHaveBeenCalledTimes(1);
+
+    resolveRecognition?.("LATE-RESULT");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("unmounting while a barcode decode is in flight does not commit a late result", async () => {
+    let resolveDecode: ((v: { value: string; format: string } | null) => void) | undefined;
+    decodeBarcodeFromCanvas.mockReturnValue(new Promise((res) => { resolveDecode = res; }));
+    const onConfirm = vi.fn();
+    const { unmount } = render(
+      <CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />,
+    );
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalled());
+
+    unmount();
+    resolveDecode?.({ value: "LATE-CODE", format: "qr_code" });
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(stopCameraStream).toHaveBeenCalledTimes(1);
+  });
+
+  it("releases a camera stream that only arrives after the dialog was already dismissed", async () => {
+    let resolveStream: ((s: MediaStream) => void) | undefined;
+    startCameraStream.mockReturnValue(new Promise<MediaStream>((res) => { resolveStream = res; }));
+    const { unmount } = render(
+      <CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />,
+    );
+    await waitFor(() => expect(startCameraStream).toHaveBeenCalled());
+
+    unmount();
+    resolveStream?.(fakeStream());
+    await new Promise((r) => setTimeout(r, 20));
+
+    // The late stream must still be stopped, or the camera light stays on with no UI attached.
+    expect(stopCameraStream).toHaveBeenCalled();
+  });
+
+  it("repeated Retake cycles keep working and never stop the stream mid-session", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("READ-1");
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+
+    for (let i = 0; i < 3; i += 1) {
+      fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+      expect(await screen.findByText("READ-1")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    }
+    expect(stopCameraStream).not.toHaveBeenCalled();
+    expect(await screen.findByRole("button", { name: "Capture" })).toBeInTheDocument();
+  });
+});
+
 describe("CameraCaptureDialog — QR/Barcode mode", () => {
   it("renders a viewfinder-style target window distinct from the OCR long-rectangle target", async () => {
     render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);

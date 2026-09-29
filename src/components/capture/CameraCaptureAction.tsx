@@ -156,12 +156,24 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // OCR recognition can take seconds. If the technician cancels, navigates away, or the dialog is
+  // otherwise unmounted while it runs, the late result must be dropped entirely — it must not set
+  // state on a dead component, and above all it must never reach the field.
+  //
+  // Two separate flags on purpose: unmounting is not the only way a capture is abandoned. Cancel
+  // is a dismissal even if the parent keeps this component mounted for its close animation, so
+  // the dialog refuses late results on its own rather than trusting the caller to unmount it.
+  const mountedRef = useRef(true);
+  const dismissedRef = useRef(false);
+  const isLive = () => mountedRef.current && !dismissedRef.current;
 
   // ── Open the camera once on mount; ALWAYS release it on unmount, regardless of how we got
   // there (Use Value / Cancel both unmount this dialog from the parent; this effect's cleanup is
   // the one place a stream can be released, matching the single-release-point requirement). ──
   useEffect(() => {
     let cancelled = false;
+    mountedRef.current = true;
+    dismissedRef.current = false;
     if (!isCameraCaptureSupported()) {
       setPhase("error");
       setErrorMessage("Camera capture isn't supported in this browser. Enter the value manually.");
@@ -188,6 +200,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     })();
     return () => {
       cancelled = true;
+      mountedRef.current = false;
       if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
       stopCameraStream(streamRef.current);
       streamRef.current = null;
@@ -207,7 +220,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
       const cropped = captureCroppedFrame();
       if (cropped) {
         void decodeBarcodeFromCanvas(cropped).then((result) => {
-          if (!active) return;
+          if (!active || !isLive()) return;
           if (result) {
             setCandidate({ value: result.value, format: result.format });
             setPhase("reviewing");
@@ -255,6 +268,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   /** OCR only — explicit user-initiated Capture. Never runs automatically, never fires from the
    *  QR/barcode continuous loop. */
   async function handleCapture() {
+    setErrorMessage(null); // a previous attempt's warning must not linger over a fresh capture
     setPhase("capturing");
     const cropped = captureCroppedFrame();
     if (!cropped) {
@@ -265,18 +279,27 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     setPhase("recognizing");
     try {
       const text = await recognizeTextFromCanvas(cropped);
+      // Dropped on purpose if the dialog closed while recognition was running: a late result must
+      // never resurrect a dismissed dialog, and must never reach the field.
+      if (!isLive()) return;
       let croppedDataUrl: string | undefined;
       try { croppedDataUrl = cropped.toDataURL("image/png"); } catch { /* preview is best-effort */ }
       setCandidate({ value: text, croppedDataUrl });
       setPhase("reviewing");
     } catch {
-      setErrorMessage("Couldn't read text from that image. Reposition and try again.");
+      if (!isLive()) return;
+      // Always leaves "Reading…" — recognizeTextFromCanvas() is time-bounded, so even an
+      // unreachable/corrupt OCR asset lands here rather than hanging. The field keeps its
+      // existing value, and Capture/Retake/Cancel/manual entry all stay available.
+      setErrorMessage("Couldn't read text from that image. Reposition and try again, or type the value.");
       setPhase("previewing");
     }
   }
 
   function handleUseValue() {
-    if (!candidate) return;
+    if (!candidate || !isLive()) return;
+    dismissedRef.current = true; // a double-tap must not fire onChange twice
+    releaseCamera();
     onConfirm(candidate.value); // the ONLY call in this whole component that reaches onChange
   }
 
@@ -288,8 +311,19 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     setPhase("previewing");
   }
 
+  /** Releases the camera immediately and makes the release idempotent, so the unmount cleanup
+   *  that follows is a harmless no-op rather than a second stop on a dead stream. The technician
+   *  should see the camera indicator go out the moment they finish, not whenever React unmounts. */
+  function releaseCamera() {
+    if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
+    stopCameraStream(streamRef.current);
+    streamRef.current = null;
+  }
+
   function handleCancel() {
-    onClose(); // unmounts this dialog -> the mount effect's cleanup releases the stream
+    dismissedRef.current = true; // stop accepting any in-flight decode/recognition result
+    releaseCamera();
+    onClose();
   }
 
   const isOcr = mode === "ocr";
@@ -299,7 +333,10 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     <Dialog open onClose={handleCancel} maxWidth="sm" fullWidth>
       <DialogTitle>{phase === "reviewing" ? "Review Capture" : title}</DialogTitle>
       <DialogContent>
-        {phase === "error" && (
+        {/* Shown for BOTH the terminal "error" phase (camera unavailable) and a recoverable
+            failure that dropped us back to previewing (OCR timed out / couldn't read) — otherwise
+            a failed Capture would silently return to the preview with no explanation at all. */}
+        {errorMessage && (
           <Alert severity="warning" sx={{ mb: 2 }}>{errorMessage}</Alert>
         )}
 
