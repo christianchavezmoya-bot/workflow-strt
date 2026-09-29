@@ -1947,6 +1947,7 @@ const AssetInstallationPage = () => {
     brandSettingsService,
     featureService,
     signatureService,
+    workflowTypeService,
     mediaStore,
     isMobileNativePlatform,
     pickCaptureRun,
