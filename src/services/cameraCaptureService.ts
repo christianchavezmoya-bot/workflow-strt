@@ -302,9 +302,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
  * is dropped, so the next attempt re-initialises from scratch.
  */
 export async function recognizeTextFromCanvas(canvas: HTMLCanvasElement): Promise<string> {
+  const pendingWorker = getTesseractWorker();
   try {
     const worker = await withTimeout(
-      getTesseractWorker(),
+      pendingWorker,
       OCR_TIMEOUT_MS,
       "Timed out preparing the text recogniser.",
     );
@@ -316,6 +317,13 @@ export async function recognizeTextFromCanvas(canvas: HTMLCanvasElement): Promis
     return data.text.trim();
   } catch (err) {
     tesseractWorkerPromise = null; // a timed-out/failed worker must not be reused
+    // Dropping the reference is not enough on the timeout path: the underlying createWorker()
+    // may still be in flight and, when it eventually resolves, would leave a live Web Worker
+    // (and its ~4 MB WASM heap) running with nothing pointing at it. Terminate it on arrival.
+    void pendingWorker.then(
+      (worker) => { try { void worker.terminate(); } catch { /* already gone */ } },
+      () => { /* initialisation failed; nothing to terminate */ },
+    );
     throw err;
   }
 }

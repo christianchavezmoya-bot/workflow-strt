@@ -207,6 +207,23 @@ describe("OCR is time-bounded so the dialog can never hang on 'Reading…'", () 
     await assertion;
   });
 
+  it("terminates a worker that arrives after the attempt already timed out, instead of leaking it", async () => {
+    vi.useFakeTimers();
+    const terminate = vi.fn().mockResolvedValue(undefined);
+    let settleWorker: ((w: unknown) => void) | undefined;
+    createWorker.mockReturnValue(new Promise((res) => { settleWorker = res; }));
+
+    const attempt = recognizeTextFromCanvas(fakeCanvas());
+    const assertion = expect(attempt).rejects.toThrow(/Timed out/);
+    await vi.advanceTimersByTimeAsync(OCR_TIMEOUT_MS + 1000);
+    await assertion;
+
+    // The worker finally finishes initialising, long after nothing is waiting for it.
+    settleWorker?.({ recognize: vi.fn(), terminate });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(terminate).toHaveBeenCalledTimes(1);
+  });
+
   it("uses a timeout long enough for a real first-run model load but short enough to be a UI escape hatch", () => {
     expect(OCR_TIMEOUT_MS).toBeGreaterThanOrEqual(20_000);
     expect(OCR_TIMEOUT_MS).toBeLessThanOrEqual(120_000);
