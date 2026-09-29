@@ -1441,7 +1441,7 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
               />
               <FormHelperText>
                 {errors.projectType?.message ||
-                  "Internal skips approval; External can require approval before work begins."}
+                  "Internal projects move directly between Draft and Approved/Cancelled; External projects pass through Pending Approval first."}
               </FormHelperText>
             </FormControl>
           </Grid>
@@ -1826,25 +1826,28 @@ const ProjectForm = ({ projectId, embedded = false, onClose, onSaved }: ProjectF
               </Grid>
             )}
 
-            {projectType === "External" && (
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth>
-                  <FormLabel>Approval Decision</FormLabel>
-                  <Controller
-                    name="approvalDecision"
-                    control={control}
-                    render={({ field }) => (
-                      <RadioGroup row {...field}>
-                        {"Approved,Rejected".split(",").map((value) => (
-                          <FormControlLabel key={value} value={value} control={<Radio />} label={value} />
-                        ))}
-                      </RadioGroup>
-                    )}
-                  />
-                  <FormHelperText>Approval updates the project status automatically when you save.</FormHelperText>
-                </FormControl>
-              </Grid>
-            )}
+            {/* Same mechanism for both project types — the submit logic below (derivedStatus /
+                requestedDecision) already maps Approved/Rejected to a status update regardless
+                of projectType. Internal projects skip the separate Pending Approval status
+                (see src/utils/status.ts's internalSteps) but still go through this same
+                Draft -> Approved/Cancelled decision. */}
+            <Grid item xs={12} md={6}>
+              <FormControl fullWidth>
+                <FormLabel>Approval Decision</FormLabel>
+                <Controller
+                  name="approvalDecision"
+                  control={control}
+                  render={({ field }) => (
+                    <RadioGroup row {...field}>
+                      {"Approved,Rejected".split(",").map((value) => (
+                        <FormControlLabel key={value} value={value} control={<Radio />} label={value} />
+                      ))}
+                    </RadioGroup>
+                  )}
+                />
+                <FormHelperText>Approval updates the project status automatically when you save.</FormHelperText>
+              </FormControl>
+            </Grid>
 
           </Grid>
           </LocalizationProvider>
