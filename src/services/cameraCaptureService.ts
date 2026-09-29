@@ -68,7 +68,8 @@ export const OCR_ASSET_PATHS = {
   coreBaseline: "/tesseract/tesseract-core-lstm.wasm.js",
   /** SIMD build — materially faster recognition; only requested when SIMD actually validates. */
   coreSimd: "/tesseract/tesseract-core-simd-lstm.wasm.js",
-  /** A DIRECTORY: tesseract.js fetches `${langPath}/eng.traineddata.gz` from it. */
+  /** A DIRECTORY: tesseract.js fetches `${langPath}/eng.traineddata` from it (uncompressed —
+   *  see the `gzip: false` note on the createWorker() call below for why). */
   langDir: "/tesseract/lang",
 } as const;
 
@@ -269,8 +270,14 @@ async function getTesseractWorker() {
           workerPath: OCR_ASSET_PATHS.worker,
           corePath: resolveOcrCorePath(),
           langPath: OCR_ASSET_PATHS.langDir,
-          // The packaged model is `eng.traineddata.gz`; tesseract appends `.gz` when gzip is on.
-          gzip: true,
+          // UNCOMPRESSED on every platform, deliberately. Android's AAPT2 build tool silently
+          // gunzips any `.gz`-suffixed asset and strips the extension while packaging the APK,
+          // so a `gzip: true` config (tesseract then requests `${langPath}/eng.traineddata.gz`)
+          // 404s on Android specifically — confirmed by inspecting a real built APK. iOS and web
+          // are unaffected by that Android-only transform, but rather than carry a platform
+          // branch here, every platform ships and requests the same plain `eng.traineddata`
+          // (scripts/sync-ocr-assets.mjs decompresses it once at generation time).
+          gzip: false,
         }),
       )
       .catch((err) => {

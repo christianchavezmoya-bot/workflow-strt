@@ -113,7 +113,11 @@ describe("Tesseract worker is created against the local assets", () => {
     expect(oem).toBe(1); // OEM.LSTM_ONLY — matches the *-lstm core and 4.0.0_best_int model
     expect(options.workerPath).toBe(OCR_ASSET_PATHS.worker);
     expect(options.langPath).toBe(OCR_ASSET_PATHS.langDir);
-    expect(options.gzip).toBe(true);
+    // Deliberately uncompressed on every platform: Android's AAPT2 build tool silently gunzips
+    // any `.gz`-suffixed asset and strips the extension, so `gzip: true` (which makes tesseract
+    // request `eng.traineddata.gz`) 404s on Android specifically — proven against a real built
+    // APK. gzip: false makes every platform ship and request the same plain `eng.traineddata`.
+    expect(options.gzip).toBe(false);
     expect(String(options.corePath)).not.toContain("jsdelivr");
     expect(String(options.corePath)).not.toContain("unpkg");
   });
