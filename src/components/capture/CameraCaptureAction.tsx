@@ -13,7 +13,7 @@
  * (cameraCropMath.ts) so neither mode ever processes anything outside the region the technician
  * aimed at — a full, unconstrained camera frame is never handed to a decoder or to OCR.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Alert,
   Box,
@@ -26,6 +26,7 @@ import {
   Menu,
   MenuItem,
   Stack,
+  TextField,
   Tooltip,
   Typography,
 } from "@mui/material";
@@ -148,6 +149,23 @@ function describeCameraError(err: unknown): string {
   return "Couldn't start the camera. Enter the value manually.";
 }
 
+/** A stream is only reusable while at least one of its tracks is still "live". The OS can end
+ *  tracks behind our back (camera taken by another app, WebView backgrounded), and an ended
+ *  track renders black forever — so Retake/Scan Again checks this rather than assuming. */
+function isStreamLive(stream: MediaStream | null): stream is MediaStream {
+  return !!stream && stream.getTracks().some((t) => t.readyState === "live");
+}
+
+/** Points a <video> at a stream and starts playback. Idempotent for the same pair. */
+function bindStreamToVideo(video: HTMLVideoElement, stream: MediaStream | null) {
+  if (!stream || video.srcObject === stream) return;
+  video.srcObject = stream;
+  try {
+    const playing = video.play();
+    if (playing) playing.catch(() => { /* autoplay quirks — preview still renders */ });
+  } catch { /* same */ }
+}
+
 export interface CameraCaptureDialogProps {
   mode: DialogMode;
   currentValue: string;
@@ -160,6 +178,9 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   const [phase, setPhase] = useState<Phase>("opening");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
+  // What the technician is about to commit: starts as the exact decoder/OCR candidate and is
+  // freely editable. Lives only in this dialog — the workflow field is untouched until Use Value.
+  const [draftValue, setDraftValue] = useState("");
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
@@ -176,11 +197,42 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   const dismissedRef = useRef(false);
   const isLive = () => mountedRef.current && !dismissedRef.current;
 
-  // ── Open the camera once on mount; ALWAYS release it on unmount, regardless of how we got
-  // there (Use Value / Cancel both unmount this dialog from the parent; this effect's cleanup is
-  // the one place a stream can be released, matching the single-release-point requirement). ──
+  // Bumped whenever the current camera request is superseded (Retake reacquire, Cancel, Use
+  // Value, unmount). A getUserMedia() that resolves under an old generation is stopped on arrival
+  // and never attached — so a slow permission prompt can't bind a stream to a closed dialog.
+  const streamGenRef = useRef(0);
+
+  // The preview <video> only exists while the preview is on screen: "reviewing" unmounts it, and
+  // Retake/Scan Again mounts a brand-new element. Binding the stream here, whenever an element
+  // mounts, is what keeps the preview live across that remount — assigning srcObject once at
+  // open time left the re-mounted <video> with no source, i.e. a black preview on Retake.
+  const attachVideo = useCallback((el: HTMLVideoElement | null) => {
+    if (!el && videoRef.current) videoRef.current.srcObject = null; // detach the outgoing element
+    videoRef.current = el;
+    if (el) bindStreamToVideo(el, streamRef.current);
+  }, []);
+
+  async function openCamera() {
+    const gen = ++streamGenRef.current;
+    setPhase("opening");
+    try {
+      const stream = await startCameraStream();
+      if (gen !== streamGenRef.current || !isLive()) {
+        stopCameraStream(stream);
+        return;
+      }
+      streamRef.current = stream;
+      if (videoRef.current) bindStreamToVideo(videoRef.current, stream);
+      setPhase("previewing");
+    } catch (err) {
+      if (gen !== streamGenRef.current || !isLive()) return;
+      setPhase("error");
+      setErrorMessage(describeCameraError(err));
+    }
+  }
+
+  // ── Open the camera on mount; ALWAYS release it on unmount, regardless of how we got there. ──
   useEffect(() => {
-    let cancelled = false;
     mountedRef.current = true;
     dismissedRef.current = false;
     if (!isCameraCaptureSupported()) {
@@ -188,33 +240,15 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
       setErrorMessage("Camera capture isn't supported in this browser. Enter the value manually.");
       return () => { /* nothing to release — stream never opened */ };
     }
-    void (async () => {
-      try {
-        const stream = await startCameraStream();
-        if (cancelled) {
-          stopCameraStream(stream);
-          return;
-        }
-        streamRef.current = stream;
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          try { await videoRef.current.play(); } catch { /* autoplay quirks — preview still renders */ }
-        }
-        if (!cancelled) setPhase("previewing");
-      } catch (err) {
-        if (cancelled) return;
-        setPhase("error");
-        setErrorMessage(describeCameraError(err));
-      }
-    })();
+    void openCamera();
     return () => {
-      cancelled = true;
       mountedRef.current = false;
-      if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
-      stopCameraStream(streamRef.current);
-      streamRef.current = null;
+      releaseCamera();
     };
-    // Intentionally open-once-per-mount: this dialog is remounted fresh for each capture attempt.
+    // Intentionally once per mount: this dialog is remounted fresh for each capture attempt, and
+    // Retake/Scan Again call openCamera() directly. Re-running on openCamera identity would
+    // reopen the camera on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // ── QR/barcode: continuous decode of ONLY the cropped target region while previewing. Stops
@@ -232,6 +266,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
           if (!active || !isLive()) return;
           if (result) {
             setCandidate({ value: result.value, format: result.format });
+            setDraftValue(result.value);
             setPhase("reviewing");
             return; // do not reschedule — loop stops on a valid candidate
           }
@@ -294,6 +329,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
       let croppedDataUrl: string | undefined;
       try { croppedDataUrl = cropped.toDataURL("image/png"); } catch { /* preview is best-effort */ }
       setCandidate({ value: text, croppedDataUrl });
+      setDraftValue(text);
       setPhase("reviewing");
     } catch {
       if (!isLive()) return;
@@ -306,24 +342,36 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   }
 
   function handleUseValue() {
-    if (!candidate || !isLive()) return;
+    if (!candidate || !draftValue || !isLive()) return;
     dismissedRef.current = true; // a double-tap must not fire onChange twice
     releaseCamera();
-    onConfirm(candidate.value); // the ONLY call in this whole component that reaches onChange
+    // The ONLY call in this whole component that reaches onChange — with exactly what the
+    // technician left in the review field (their correction, if they made one).
+    onConfirm(draftValue);
   }
 
-  /** Retake (OCR) / Scan Again (QR/barcode): discard the candidate only. The existing stream is
-   *  intentionally left open (no re-request of camera permission); the field is never touched. */
+  /** Retake (OCR) / Scan Again (QR/barcode): discard the candidate (and any edit to it) and go
+   *  back to a LIVE preview. A still-live stream is reused — no repeat permission prompt — and
+   *  re-bound to the freshly mounted <video> by attachVideo. A stream whose tracks have ended is
+   *  stopped and replaced with a new one. The field is never touched. */
   function handleRetakeOrScanAgain() {
     setCandidate(null);
+    setDraftValue("");
     setErrorMessage(null);
-    setPhase("previewing");
+    if (isStreamLive(streamRef.current)) {
+      setPhase("previewing");
+      return;
+    }
+    releaseCamera();
+    void openCamera();
   }
 
   /** Releases the camera immediately and makes the release idempotent, so the unmount cleanup
    *  that follows is a harmless no-op rather than a second stop on a dead stream. The technician
-   *  should see the camera indicator go out the moment they finish, not whenever React unmounts. */
+   *  should see the camera indicator go out the moment they finish, not whenever React unmounts.
+   *  Also invalidates any camera request still in flight. */
   function releaseCamera() {
+    streamGenRef.current += 1;
     if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
     stopCameraStream(streamRef.current);
     streamRef.current = null;
@@ -360,7 +408,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
         {(phase === "opening" || phase === "previewing" || phase === "capturing" || phase === "recognizing") && (
           <Box sx={{ position: "relative", width: "100%", aspectRatio: "3 / 4", bgcolor: "#000", overflow: "hidden", borderRadius: 1 }}>
             <video
-              ref={videoRef}
+              ref={attachVideo}
               data-testid="camera-capture-video"
               playsInline
               muted
@@ -409,8 +457,16 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
                 Detected: {candidate.format.toUpperCase()}
               </Typography>
             )}
-            <Typography variant="overline" color="text.secondary">Detected value</Typography>
-            <Typography variant="h6" sx={{ wordBreak: "break-all" }}>{candidate.value || "(no text found)"}</Typography>
+            <TextField
+              label="Detected value"
+              value={draftValue}
+              onChange={(e) => setDraftValue(e.target.value)}
+              placeholder={candidate.value ? undefined : "No text found — type the value"}
+              helperText="Check it against the label and correct it if needed before using it."
+              fullWidth
+              autoComplete="off"
+              inputProps={{ autoCapitalize: "none", autoCorrect: "off", spellCheck: false }}
+            />
           </Stack>
         )}
       </DialogContent>
@@ -419,7 +475,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
           <>
             <Button onClick={handleCancel}>Cancel</Button>
             <Button onClick={handleRetakeOrScanAgain}>{isOcr ? "Retake" : "Scan Again"}</Button>
-            <Button variant="contained" onClick={handleUseValue} disabled={!candidate?.value}>
+            <Button variant="contained" onClick={handleUseValue} disabled={!draftValue}>
               Use Value
             </Button>
           </>

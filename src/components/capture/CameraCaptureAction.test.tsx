@@ -29,8 +29,14 @@ vi.mock("../../utils/cameraCropMath", () => ({
   computeSourceCropRect: () => ({ x: 0, y: 0, width: 100, height: 60 }),
 }));
 
+/** A stream whose track behaves like a real MediaStreamTrack: "live" until stop() ends it. */
 function fakeStream(): MediaStream {
-  return { getTracks: () => [{ stop: vi.fn() }] } as unknown as MediaStream;
+  const track = { readyState: "live" as MediaStreamTrackState, stop: vi.fn(() => { track.readyState = "ended"; }) };
+  return { getTracks: () => [track] } as unknown as MediaStream;
+}
+
+function isEnded(stream: MediaStream): boolean {
+  return stream.getTracks().every((t) => t.readyState === "ended");
 }
 
 function nonDegenerateRect(): DOMRect {
@@ -40,7 +46,12 @@ function nonDegenerateRect(): DOMRect {
 beforeEach(() => {
   vi.clearAllMocks();
   isCameraCaptureSupported.mockReturnValue(true);
-  startCameraStream.mockResolvedValue(fakeStream());
+  // A fresh stream per request, as getUserMedia gives — so leaks/replacements are observable.
+  startCameraStream.mockImplementation(async () => fakeStream());
+  // Mirrors the real stopCameraStream: stops every track.
+  stopCameraStream.mockImplementation((stream: MediaStream | null | undefined) => {
+    stream?.getTracks().forEach((t) => t.stop());
+  });
   decodeBarcodeFromCanvas.mockResolvedValue(null);
   recognizeTextFromCanvas.mockResolvedValue("");
 
@@ -112,7 +123,7 @@ describe("CameraCaptureDialog — OCR mode", () => {
     render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
     fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
 
-    expect(await screen.findByText("ABC-12345")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("ABC-12345")).toBeInTheDocument();
     expect(onConfirm).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
@@ -125,7 +136,7 @@ describe("CameraCaptureDialog — OCR mode", () => {
     const onConfirm = vi.fn();
     render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
     fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
-    expect(await screen.findByText("O0O l1I")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("O0O l1I")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
     expect(onConfirm).toHaveBeenCalledWith("O0O l1I");
   });
@@ -135,7 +146,7 @@ describe("CameraCaptureDialog — OCR mode", () => {
     const onConfirm = vi.fn();
     render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
     fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
-    expect(await screen.findByText("first-read")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("first-read")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "Retake" }));
     expect(onConfirm).not.toHaveBeenCalled();
@@ -203,7 +214,7 @@ describe("CameraCaptureDialog — OCR failure and lifecycle races", () => {
     recognizeTextFromCanvas.mockResolvedValueOnce("RECOVERED-123");
     fireEvent.click(screen.getByRole("button", { name: "Capture" }));
 
-    expect(await screen.findByText("RECOVERED-123")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("RECOVERED-123")).toBeInTheDocument();
     // The stale warning from the first attempt is cleared once a new capture starts.
     expect(screen.queryByText(/couldn't read text from that image/i)).not.toBeInTheDocument();
   });
@@ -226,7 +237,7 @@ describe("CameraCaptureDialog — OCR failure and lifecycle races", () => {
     await new Promise((r) => setTimeout(r, 20));
 
     expect(onConfirm).not.toHaveBeenCalled();
-    expect(screen.queryByText("LATE-RESULT")).not.toBeInTheDocument();
+    expect(screen.queryByDisplayValue("LATE-RESULT")).not.toBeInTheDocument();
   });
 
   it("unmounting during recognition is safe and releases the camera", async () => {
@@ -287,7 +298,7 @@ describe("CameraCaptureDialog — OCR failure and lifecycle races", () => {
 
     for (let i = 0; i < 3; i += 1) {
       fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
-      expect(await screen.findByText("READ-1")).toBeInTheDocument();
+      expect(await screen.findByDisplayValue("READ-1")).toBeInTheDocument();
       fireEvent.click(screen.getByRole("button", { name: "Retake" }));
     }
     expect(stopCameraStream).not.toHaveBeenCalled();
@@ -311,7 +322,7 @@ describe("CameraCaptureDialog — QR/Barcode mode", () => {
     await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalled());
     expect(decodeBarcodeFromCanvas).toHaveBeenCalledWith(expect.any(HTMLCanvasElement));
 
-    expect(await screen.findByText("0123456789012")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("0123456789012")).toBeInTheDocument();
     expect(screen.getByText((_, node) => node?.textContent === "Detected: EAN_13")).toBeInTheDocument();
     expect(onConfirm).not.toHaveBeenCalled(); // confirmation required even for QR/barcode
 
@@ -333,7 +344,7 @@ describe("CameraCaptureDialog — QR/Barcode mode", () => {
     decodeBarcodeFromCanvas.mockResolvedValueOnce({ value: "AAA111", format: "code_128" });
     const onConfirm = vi.fn();
     render(<CameraCaptureDialog mode="qr-barcode" currentValue="original" onClose={vi.fn()} onConfirm={onConfirm} />);
-    expect(await screen.findByText("AAA111")).toBeInTheDocument();
+    expect(await screen.findByDisplayValue("AAA111")).toBeInTheDocument();
 
     decodeBarcodeFromCanvas.mockResolvedValue(null);
     fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
@@ -405,5 +416,260 @@ describe("CameraCaptureAction — native modal stacking above WorkOrderRunner", 
     fireEvent.click(screen.getByText("QR / Barcode"));
     const heading = await screen.findByText(/Scan QR \/ Barcode/);
     expect(modalRootZIndex(heading, "MuiDialog-root")).toBe(1300);
+  });
+});
+
+// Regression for the PR #376 device finding "Retake / Scan Again → black preview": the preview
+// <video> is unmounted during review and a NEW element mounts on Retake/Scan Again. The stream
+// must be bound to whichever element is mounted — not only to the one present at open time.
+describe("CameraCaptureDialog — camera stream lifecycle across Retake / Scan Again", () => {
+  const video = () => screen.getByTestId("camera-capture-video") as HTMLVideoElement;
+  const createdStreams = () =>
+    Promise.all(startCameraStream.mock.results.map((r) => r.value as Promise<MediaStream>));
+
+  it("initial open binds a live stream to the preview", async () => {
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    await screen.findByRole("button", { name: "Capture" });
+    const [stream] = await createdStreams();
+    expect(video().srcObject).toBe(stream);
+    expect(isEnded(stream)).toBe(false);
+  });
+
+  it("OCR Capture → Review → Retake: the NEW preview element is bound to the still-live stream", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("324775");
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    const firstVideo = video();
+    await screen.findByDisplayValue("324775");
+    expect(screen.queryByTestId("camera-capture-video")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    await screen.findByRole("button", { name: "Capture" });
+
+    const [stream] = await createdStreams();
+    expect(video()).not.toBe(firstVideo); // genuinely a remounted element…
+    expect(video().srcObject).toBe(stream); // …that has the stream (it was null → black before)
+    expect(isEnded(stream)).toBe(false);
+    expect(startCameraStream).toHaveBeenCalledTimes(1); // no repeat permission prompt
+    expect(HTMLVideoElement.prototype.play).toHaveBeenCalledTimes(2);
+  });
+
+  it("QR detection → Review → Scan Again: preview re-bound and decoding resumes against the new element", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValueOnce({ value: "AAA111", format: "code_128" });
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    await screen.findByDisplayValue("AAA111");
+    const decodesBefore = decodeBarcodeFromCanvas.mock.calls.length;
+
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
+
+    const [stream] = await createdStreams();
+    await waitFor(() => expect(video().srcObject).toBe(stream));
+    await waitFor(() => expect(decodeBarcodeFromCanvas.mock.calls.length).toBeGreaterThan(decodesBefore));
+    expect(isEnded(stream)).toBe(false);
+  });
+
+  it("a stream whose tracks ENDED during review is stopped and replaced with a new live one", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("V1.2.3");
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("V1.2.3");
+    const [first] = await createdStreams();
+    first.getTracks().forEach((t) => t.stop()); // e.g. OS reclaimed the camera
+
+    fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    await screen.findByRole("button", { name: "Capture" });
+
+    expect(startCameraStream).toHaveBeenCalledTimes(2);
+    const [, second] = await createdStreams();
+    expect(video().srcObject).toBe(second);
+    expect(isEnded(second)).toBe(false);
+  });
+
+  it("Cancel stops the active tracks", async () => {
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    const streams = await createdStreams();
+    expect(streams.every(isEnded)).toBe(true);
+  });
+
+  it("unmount stops the active tracks, including after a Retake", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("DR040");
+    const { unmount } = render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("DR040");
+    fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    await screen.findByRole("button", { name: "Capture" });
+    unmount();
+    const streams = await createdStreams();
+    expect(streams.every(isEnded)).toBe(true);
+  });
+
+  it("a replacement stream that arrives after Cancel is stopped on arrival and never attached", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("J000376");
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={onClose} onConfirm={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("J000376");
+    const [first] = await createdStreams();
+    first.getTracks().forEach((t) => t.stop());
+
+    let resolveLate: ((s: MediaStream) => void) | undefined;
+    startCameraStream.mockImplementationOnce(() => new Promise<MediaStream>((res) => { resolveLate = res; }));
+    fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    await waitFor(() => expect(startCameraStream).toHaveBeenCalledTimes(2));
+    const pendingVideo = video();
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
+    const late = fakeStream();
+    resolveLate?.(late);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(isEnded(late)).toBe(true);
+    expect(pendingVideo.srcObject).not.toBe(late);
+  });
+
+  it("repeated Scan Again cycles reuse ONE stream and never run more than one decoder loop", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue({ value: "ABC-123", format: "code_128" });
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    const cycles = 3;
+    for (let i = 0; i < cycles; i += 1) {
+      await screen.findByDisplayValue("ABC-123");
+      fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
+    }
+    // Final preview: a decode that never settles. One loop = exactly one outstanding call; a
+    // leaked/duplicated loop would keep issuing more.
+    decodeBarcodeFromCanvas.mockReturnValue(new Promise(() => { /* never settles */ }));
+    await screen.findByDisplayValue("ABC-123");
+    fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalledTimes(cycles + 2));
+    await new Promise((r) => setTimeout(r, 400)); // several 150ms loop periods
+    expect(decodeBarcodeFromCanvas).toHaveBeenCalledTimes(cycles + 2);
+
+    expect(startCameraStream).toHaveBeenCalledTimes(1);
+    const [stream] = await createdStreams();
+    expect(isEnded(stream)).toBe(false);
+    expect(video().srcObject).toBe(stream);
+  });
+
+  it("repeated Retake after ended tracks never accumulates live streams", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("SN-1");
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    for (let i = 0; i < 3; i += 1) {
+      fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+      await screen.findByDisplayValue("SN-1");
+      const streams = await createdStreams();
+      streams[streams.length - 1].getTracks().forEach((t) => t.stop());
+      fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    }
+    await screen.findByRole("button", { name: "Capture" });
+    const streams = await createdStreams();
+    expect(streams).toHaveLength(4);
+    expect(streams.filter((s) => !isEnded(s))).toHaveLength(1);
+    expect(video().srcObject).toBe(streams[3]);
+  });
+});
+
+describe("CameraCaptureDialog — editable review value", () => {
+  const reviewField = () => screen.getByLabelText("Detected value") as HTMLInputElement;
+
+  it("OCR: the exact candidate appears in an editable field; Use Value commits the EDITED value", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("3247751 ;"); // device regression reading
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("3247751 ;");
+    expect(reviewField().value).toBe("3247751 ;"); // shown exactly — no silent correction
+
+    fireEvent.change(reviewField(), { target: { value: "324775" } });
+    expect(onConfirm).not.toHaveBeenCalled(); // editing never reaches the field by itself
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
+    expect(onConfirm).toHaveBeenCalledTimes(1);
+    expect(onConfirm).toHaveBeenCalledWith("324775");
+  });
+
+  it("Cancel after editing commits nothing", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("ABC-128");
+    const onConfirm = vi.fn();
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="orig" onClose={onClose} onConfirm={onConfirm} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("ABC-128");
+    fireEvent.change(reviewField(), { target: { value: "ABC-123" } });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onConfirm).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("Retake discards the candidate AND the edit; the next reading replaces it", async () => {
+    recognizeTextFromCanvas.mockResolvedValueOnce("first").mockResolvedValueOnce("second");
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("first");
+    fireEvent.change(reviewField(), { target: { value: "edited-first" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "Retake" }));
+    expect(screen.queryByDisplayValue("edited-first")).not.toBeInTheDocument();
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("second");
+    fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
+    expect(onConfirm).toHaveBeenCalledWith("second");
+  });
+
+  it("QR/barcode: the candidate is editable too, and Use Value commits the edit", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValueOnce({ value: "J000376X", format: "qr_code" });
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
+    await screen.findByDisplayValue("J000376X");
+    fireEvent.change(reviewField(), { target: { value: "J000376" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
+    expect(onConfirm).toHaveBeenCalledWith("J000376");
+  });
+
+  it("Scan Again discards the candidate and edit; a new detection replaces it", async () => {
+    decodeBarcodeFromCanvas
+      .mockResolvedValueOnce({ value: "OLD-1", format: "code_128" })
+      .mockResolvedValueOnce({ value: "NEW-2", format: "code_128" });
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
+    await screen.findByDisplayValue("OLD-1");
+    fireEvent.change(reviewField(), { target: { value: "OLD-1-edited" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
+    expect(screen.queryByDisplayValue("OLD-1-edited")).not.toBeInTheDocument();
+    await screen.findByDisplayValue("NEW-2");
+    fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
+    expect(onConfirm).toHaveBeenCalledWith("NEW-2");
+  });
+
+  it("clearing the review field disables Use Value; an empty reading can be typed in", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("");
+    const onConfirm = vi.fn();
+    render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    const useValue = await screen.findByRole("button", { name: "Use Value" });
+    expect(useValue).toBeDisabled();
+    fireEvent.change(reviewField(), { target: { value: "DR040" } });
+    expect(useValue).toBeEnabled();
+    fireEvent.click(useValue);
+    expect(onConfirm).toHaveBeenCalledWith("DR040");
+  });
+
+  it("number field: the edited string reaches the field's own onChange unconverted, only on Use Value", async () => {
+    recognizeTextFromCanvas.mockResolvedValue("3247751 ;");
+    const onChange = vi.fn();
+    render(<CameraCaptureAction value="" onChange={onChange} fieldKind="number" ariaLabel="Meter" />);
+    fireEvent.click(screen.getByRole("button", { name: /Capture Meter with camera/i }));
+    fireEvent.click(await screen.findByText("Text / OCR"));
+    fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+    await screen.findByDisplayValue("3247751 ;");
+    fireEvent.change(reviewField(), { target: { value: "324775" } });
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith("324775"); // a string — WorkOrderRunner's path decides
   });
 });

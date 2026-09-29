@@ -27,6 +27,8 @@
  * first-class target, not a fallback).
  */
 
+import { normalizeOcrCandidate, preprocessCanvasForOcr } from "../utils/ocrPreprocess";
+
 export type BarcodeFormat =
   | "qr_code"
   | "code_128"
@@ -176,8 +178,9 @@ export async function startCameraStream(): Promise<MediaStream> {
 
 /** Stops every track — the single place a stream is ever released, called from every real exit
  *  path (Use Value, Cancel, unmount, navigation away, error) so there is exactly one place that
- *  could leak a stream, and exactly one place to test that it doesn't. Never called on
- *  Retake/Scan Again — those keep the existing stream open to avoid a repeat permission prompt. */
+ *  could leak a stream, and exactly one place to test that it doesn't. Retake/Scan Again keep a
+ *  still-live stream open (no repeat permission prompt) and only call this to replace a stream
+ *  whose tracks have already ended. */
 export function stopCameraStream(stream: MediaStream | null | undefined): void {
   if (!stream) return;
   for (const track of stream.getTracks()) {
@@ -265,8 +268,8 @@ let tesseractWorkerPromise: Promise<import("tesseract.js").Worker> | null = null
 async function getTesseractWorker() {
   if (!tesseractWorkerPromise) {
     tesseractWorkerPromise = import("tesseract.js")
-      .then(({ createWorker, OEM }) =>
-        createWorker("eng", OEM.LSTM_ONLY, {
+      .then(async ({ createWorker, OEM, PSM }) => {
+        const worker = await createWorker("eng", OEM.LSTM_ONLY, {
           workerPath: OCR_ASSET_PATHS.worker,
           corePath: resolveOcrCorePath(),
           langPath: OCR_ASSET_PATHS.langDir,
@@ -278,8 +281,21 @@ async function getTesseractWorker() {
           // branch here, every platform ships and requests the same plain `eng.traineddata`
           // (scripts/sync-ocr-assets.mjs decompresses it once at generation time).
           gzip: false,
-        }),
-      )
+        });
+        await worker.setParameters({
+          // The target window is a single-line band, and what's aimed at is one value. The
+          // default (fully automatic page layout) hunts for blocks/columns in it and turns edge
+          // texture into extra "words" — the `3247751 ;` for a `324775` label seen on device.
+          tessedit_pageseg_mode: PSM.SINGLE_LINE,
+          // A camera crop carries no DPI; without a hint Tesseract guesses per image, which makes
+          // the same label read differently from one attempt to the next.
+          user_defined_dpi: "300",
+          // Deliberately NO tessedit_char_whitelist: field values mix letters, digits and
+          // punctuation (J000376, V1.2.3, ABC-123, DR040) with no safe universal subset, and a
+          // whitelist silently forces a wrong-but-allowed character instead of an obvious error.
+        });
+        return worker;
+      })
       .catch((err) => {
         tesseractWorkerPromise = null;
         throw err;
@@ -300,9 +316,10 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
 
 /**
  * Recognizes text from a canvas that has ALREADY been cropped to the target-window region — the
- * OCR engine never receives the full camera frame. Returns the RAW recognized string with no
- * character substitution/normalization (no O->0, no I->1) — ambiguity resolution is the
- * technician's job via the mandatory review/confirm step, never this function's.
+ * OCR engine never receives the full camera frame. The crop is upscaled and contrast-normalized
+ * first (ocrPreprocess.ts — pixels only). Returns the recognized string with whitespace-only
+ * cleanup and NO character substitution (no O->0, no I->1) — ambiguity resolution is the
+ * technician's job via the editable review/confirm step, never this function's.
  *
  * Bounded by OCR_TIMEOUT_MS so a stalled asset load surfaces as a normal, recoverable error in
  * the capture dialog instead of an indefinite "Reading…". On timeout the cached worker promise
@@ -317,11 +334,11 @@ export async function recognizeTextFromCanvas(canvas: HTMLCanvasElement): Promis
       "Timed out preparing the text recogniser.",
     );
     const { data } = await withTimeout(
-      worker.recognize(canvas),
+      worker.recognize(preprocessCanvasForOcr(canvas)),
       OCR_TIMEOUT_MS,
       "Timed out reading text from the image.",
     );
-    return data.text.trim();
+    return normalizeOcrCandidate(data.text);
   } catch (err) {
     tesseractWorkerPromise = null; // a timed-out/failed worker must not be reused
     // Dropping the reference is not enough on the timeout path: the underlying createWorker()

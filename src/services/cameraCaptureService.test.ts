@@ -21,11 +21,25 @@ import {
 } from "./cameraCaptureService";
 
 const createWorker = vi.fn();
+const setParameters = vi.fn();
 const BrowserMultiFormatReader = vi.fn();
 
+// Individual tests only describe the worker behaviour they care about (recognize/terminate); every
+// fake worker also gets the shared setParameters spy so the configuration step can be asserted.
 vi.mock("tesseract.js", () => ({
-  createWorker: (...args: unknown[]) => createWorker(...args),
+  createWorker: async (...args: unknown[]) => ({ setParameters, ...(await createWorker(...args)) }),
   OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
+  PSM: { AUTO: "3", SINGLE_BLOCK: "6", SINGLE_LINE: "7" },
+}));
+
+// jsdom has no 2D canvas, so the real preprocessing would just fall back to the input. Swap it for
+// a marker so tests can prove recognize() receives the PREPROCESSED image, not the raw crop. The
+// preprocessing itself is covered deterministically in src/utils/ocrPreprocess.test.ts.
+const preprocessedMarker = document.createElement("canvas");
+const preprocessCanvasForOcr = vi.fn();
+vi.mock("../utils/ocrPreprocess", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/ocrPreprocess")>()),
+  preprocessCanvasForOcr: (...args: unknown[]) => preprocessCanvasForOcr(...args),
 }));
 
 vi.mock("@zxing/browser", () => ({
@@ -41,6 +55,8 @@ function fakeCanvas(): HTMLCanvasElement {
 beforeEach(() => {
   vi.clearAllMocks();
   _resetCameraCaptureServiceForTests();
+  setParameters.mockResolvedValue({});
+  preprocessCanvasForOcr.mockReturnValue(preprocessedMarker);
 });
 
 afterEach(() => {
@@ -143,6 +159,48 @@ describe("Tesseract worker is created against the local assets", () => {
     await recognizeTextFromCanvas(fakeCanvas());
     await recognizeTextFromCanvas(fakeCanvas());
     expect(createWorker).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OCR recognition settings for short identifiers", () => {
+  it("configures single-line segmentation and a fixed DPI once per worker — and no character whitelist", async () => {
+    createWorker.mockResolvedValue({ recognize: vi.fn().mockResolvedValue({ data: { text: "324775" } }) });
+    await recognizeTextFromCanvas(fakeCanvas());
+    await recognizeTextFromCanvas(fakeCanvas());
+
+    expect(setParameters).toHaveBeenCalledTimes(1);
+    const params = setParameters.mock.calls[0][0] as Record<string, unknown>;
+    expect(params.tessedit_pageseg_mode).toBe("7"); // PSM.SINGLE_LINE
+    expect(params.user_defined_dpi).toBe("300");
+    // Identifiers mix letters/digits/punctuation (J000376, V1.2.3, ABC-123) — never restricted.
+    expect(params).not.toHaveProperty("tessedit_char_whitelist");
+  });
+
+  it("recognizes the PREPROCESSED crop, derived from the cropped canvas it was given", async () => {
+    const recognize = vi.fn().mockResolvedValue({ data: { text: "x" } });
+    createWorker.mockResolvedValue({ recognize });
+    const crop = fakeCanvas();
+    await recognizeTextFromCanvas(crop);
+    expect(preprocessCanvasForOcr).toHaveBeenCalledWith(crop);
+    expect(recognize).toHaveBeenCalledWith(preprocessedMarker);
+  });
+
+  it("returns a multi-line/padded engine result as one trimmed line, with every character kept", async () => {
+    // Device regression shape: the old pipeline read a `324775` label as `3247751 ;`. Whitespace
+    // cleanup must not paper over that by dropping characters — the technician corrects it in the
+    // editable review field; this layer only removes whitespace noise.
+    createWorker.mockResolvedValue({
+      recognize: vi.fn().mockResolvedValue({ data: { text: "\n 3247751 ;\n\n" } }),
+    });
+    expect(await recognizeTextFromCanvas(fakeCanvas())).toBe("3247751 ;");
+  });
+
+  it("a failed setParameters is treated like any failed initialisation and retried next time", async () => {
+    createWorker.mockResolvedValue({ recognize: vi.fn().mockResolvedValue({ data: { text: "ok" } }) });
+    setParameters.mockRejectedValueOnce(new Error("config failed"));
+    await expect(recognizeTextFromCanvas(fakeCanvas())).rejects.toThrow();
+    await expect(recognizeTextFromCanvas(fakeCanvas())).resolves.toBe("ok");
+    expect(createWorker).toHaveBeenCalledTimes(2);
   });
 });
 
