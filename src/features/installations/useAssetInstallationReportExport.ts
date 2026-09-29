@@ -6,6 +6,7 @@ import type { customerService } from "../../services/customerService";
 import type { featureService } from "../../services/featureService";
 import type { mediaStore } from "../../services/mediaStore";
 import type { signatureService } from "../../services/signatureService";
+import type { workflowTypeService } from "../../services/workflowTypeService";
 import type { AssetWorkflowRun } from "../../types/assetWorkflowRun";
 import type { runHasCaptureBlobs } from "../../types/assetWorkflowRunSummary";
 import type { Feature as LibFeature } from "../../types/feature";
@@ -25,6 +26,7 @@ export type AssetReportExportServices = {
   brandSettingsService: typeof brandSettingsService;
   featureService: typeof featureService;
   signatureService: typeof signatureService;
+  workflowTypeService: typeof workflowTypeService;
   mediaStore: typeof mediaStore;
   isMobileNativePlatform: typeof isMobileNativePlatform;
   pickCaptureRun: typeof pickCaptureRun;
@@ -63,6 +65,7 @@ export function useAssetInstallationReportExport() {
       brandSettingsService: brandSettingsSvc,
       featureService: features,
       signatureService: signatures,
+      workflowTypeService: workflowTypes,
       mediaStore: media,
       isMobileNativePlatform: isNative,
       pickCaptureRun: pickRun,
@@ -108,7 +111,22 @@ export function useAssetInstallationReportExport() {
       const wfCfg = configId ? wfConfigMap.get(configId) : null;
       const configName = wfCfg?.displayName ?? wfCfg?.name ?? "Installation Record";
       const cfgType = (wfCfg?.configType ?? "").trim().toLowerCase();
+      // Kept for the existing DOCX/JSON export's own (binary installation/inspection) title —
+      // unrelated to the PDF header fix below, out of this fix's scope.
       const docType = cfgType === "inspection" || cfgType === "wftype-inspection" ? "inspection" as const : "installation" as const;
+      // PDF report title: resolve the workflow's ACTUAL type from the live workflow-types catalog
+      // (Settings) rather than guessing from configType — the catalog is admin-editable (can hold
+      // Installation/Inspection/Commissioning/Repair/Other, or any renamed/added type), so this
+      // must never be a hardcoded id->label map. Best-effort: falls back to undefined (which
+      // generateWorkflowReport itself defaults to "Installation") if the lookup fails or the
+      // config's workflowTypeId doesn't resolve — never blocks report generation.
+      let reportTypeLabel: string | undefined;
+      if (wfCfg?.workflowTypeId) {
+        try {
+          const types = await workflowTypes.list();
+          reportTypeLabel = types.find((t) => t.id === wfCfg.workflowTypeId)?.name;
+        } catch { /* fall back to generateWorkflowReport's own default */ }
+      }
       const tech = users.find((u) => u.id === asset.assignedUserId);
       const proj = projects.find((p) => p.id === asset.projectId);
 
@@ -154,6 +172,7 @@ export function useAssetInstallationReportExport() {
         siteLocation: asset.location ?? undefined,
         assignedTechnician: tech?.fullName,
         documentType: docType,
+        reportTypeLabel,
         timeZoneId: await resolveTimeZone(proj),
         signatureEvents,
         productFeatures,

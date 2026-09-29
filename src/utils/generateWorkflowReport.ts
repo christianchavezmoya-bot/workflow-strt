@@ -366,6 +366,13 @@ export interface GenerateReportParams {
   productFeatures?: Feature[];
   /** Optional document type tag (e.g. "inspection") for report labelling. */
   documentType?: string;
+  /** Display name of the workflow's type (e.g. "Installation", "Inspection", "Commissioning",
+   *  "Repair", "Other") — the actual, current WorkflowType.Name from the workflow-types catalog
+   *  (Settings), resolved by the caller. Renders as "<LABEL> REPORT" in the header, replacing what
+   *  used to be a hardcoded "INSTALLATION RECORD" regardless of the workflow's real type. Falls
+   *  back to "Installation" (this report's original behavior) when the caller can't resolve one —
+   *  never renders "undefined"/blank. */
+  reportTypeLabel?: string;
   /** IANA timezone id (project site) to render all wall-clock timestamps in. Undefined = UTC. */
   timeZoneId?: string;
   /** "download" saves the PDF; "open" opens it in a browser viewer/tab; "blob" returns a Blob for in-app preview/export. */
@@ -385,6 +392,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     outputMode = "download",
     allowDownloadFallback = true,
     timeZoneId,
+    reportTypeLabel,
   } = params;
 
   // All wall-clock timestamps render in the project's timezone so the report reads identically
@@ -475,13 +483,29 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
   await addLogoOrText(businessLogoBase64, MARGIN, companyName.toUpperCase());
 
+  // Report/workflow-type title + Asset Tag + Workflow Name, stacked and centered. The title is
+  // never hardcoded to "Installation" — reportTypeLabel is resolved by the caller from the
+  // workflow's actual WorkflowType (Settings catalog), so an Inspection/Commissioning/Repair/Other
+  // workflow's report reads correctly. Missing optional values are omitted rather than rendered as
+  // "undefined"/blank lines, so the header never shows a dangling line for data that isn't there.
+  const reportTitle = `${(reportTypeLabel?.trim() || "Installation").toUpperCase()} REPORT`;
+  const headerLines = [asset.assetTag?.trim(), workflowConfigName?.trim()].filter(
+    (line): line is string => !!line,
+  );
   doc.setTextColor(...WHITE);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
-  doc.text("INSTALLATION RECORD", PAGE_W / 2, HEADER_H / 2 - 1, { align: "center" });
-  doc.setFontSize(8.5);
-  doc.setFont("helvetica", "normal");
-  doc.text(asset.assetTag ?? "", PAGE_W / 2, HEADER_H / 2 + 4.5, { align: "center" });
+  if (headerLines.length === 0) {
+    // No optional lines available — title alone, vertically centered in the band.
+    doc.text(reportTitle, PAGE_W / 2, HEADER_H / 2 + 1.5, { align: "center", baseline: "middle" });
+  } else {
+    doc.text(reportTitle, PAGE_W / 2, HEADER_H / 2 - 4, { align: "center" });
+    doc.setFontSize(8.5);
+    doc.setFont("helvetica", "normal");
+    headerLines.forEach((line, i) => {
+      doc.text(line, PAGE_W / 2, HEADER_H / 2 + 1 + i * 5, { align: "center" });
+    });
+  }
 
   await addLogoOrText(customerLogoBase64, PAGE_W - MARGIN - LOGO_W, "");
 
@@ -675,7 +699,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       doc.setFontSize(7);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...WHITE);
-      doc.text(String(stepNumber).padStart(2, "0"), badgeCX, badgeCY + 2.5, { align: "center" });
+      // True geometric centering, not a tuned magic-number offset: jsPDF's text y-coordinate is
+      // the baseline by default, so a fixed "+2.5" only ever looks right for one specific
+      // font-size/glyph combination. baseline:"middle" centers on the font's own vertical metrics,
+      // so single digits, double digits, and any future badge font-size change all stay centered.
+      doc.text(String(stepNumber).padStart(2, "0"), badgeCX, badgeCY, { align: "center", baseline: "middle" });
 
       // Step title
       doc.setFontSize(9);

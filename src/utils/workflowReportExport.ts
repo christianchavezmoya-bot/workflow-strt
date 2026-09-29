@@ -20,6 +20,9 @@ export interface WorkflowReportExportContext {
   siteLocation?: string;
   assignedTechnician?: string;
   documentType?: string;
+  /** Real workflow-type display name (e.g. "Installation", "Inspection", "Commissioning") for the
+   *  PDF report header — see GenerateReportParams.reportTypeLabel in generateWorkflowReport.ts. */
+  reportTypeLabel?: string;
   /** IANA timezone id (project site) for rendering wall-clock timestamps in reports. */
   timeZoneId?: string;
   signatureEvents: SignatureEvent[];
