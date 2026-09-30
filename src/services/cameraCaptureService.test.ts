@@ -250,12 +250,18 @@ describe("recognizeFieldValueFromCanvas — isolated line, bounded passes, deter
     const img = blank(900, 220);
     drawRun(img, { x: 300, centerY: 50, count: 3, charH: 40 }); // short line, aimed at
     drawRun(img, { x: 200, centerY: 165, count: 9, charH: 40 }); // long line below
-    const worker = workerReading(["C25", 95]);
+    const sentWidths: number[] = [];
+    const worker = {
+      recognize: vi.fn(async (c: HTMLCanvasElement) => {
+        sentWidths.push(c.width); // read at call time — the pass canvas is released afterwards
+        return { data: { text: "C25", confidence: 95 } };
+      }),
+    };
     createWorker.mockResolvedValue(worker);
     await recognizeFieldValueFromCanvas(stubCanvas2d(img), { guideY: 50 });
     const expected = prepareFieldOcr(toRgba(img), img.width, img.height, 50);
     if (expected.status !== "ok") throw new Error("fixture should isolate a line");
-    const sent = worker.recognize.mock.calls[0][0] as HTMLCanvasElement;
+    const sent = { width: sentWidths[0] };
     expect(sent.width).toBe(expected.variants[0].image.width); // the 3-character line's image
     const other = prepareFieldOcr(toRgba(img), img.width, img.height, 165);
     if (other.status !== "ok") throw new Error("fixture should isolate a line");
@@ -421,5 +427,21 @@ describe("stream lifecycle", () => {
     ).not.toThrow();
     expect(stop).toHaveBeenCalledTimes(1);
     expect(throwingStop).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("OCR pass canvases are released after use (iOS caps total canvas memory)", () => {
+  it("every per-pass canvas handed to Tesseract has its pixel memory freed once the pass finishes", async () => {
+    const sent: HTMLCanvasElement[] = [];
+    const recognize = vi.fn(async (c: HTMLCanvasElement) => {
+      sent.push(c);
+      return { data: { text: "3247751 ;", confidence: 60 } };
+    });
+    createWorker.mockResolvedValue({ recognize });
+    const img = blank(900, 220);
+    drawRun(img, { x: 300, centerY: 110, count: 6, charH: 48 });
+    await recognizeFieldValueFromCanvas(stubCanvas2d(img));
+    expect(sent.length).toBeGreaterThan(1);
+    expect(sent.every((c) => c.width === 0 && c.height === 0)).toBe(true);
   });
 });

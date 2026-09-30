@@ -29,6 +29,7 @@
 
 import type { PSM } from "tesseract.js";
 import { debugLog } from "../utils/appEnvironment";
+import { releaseCanvas } from "../utils/fieldCaptureDiagnostics";
 import { planOcrPasses, prepareFieldOcr, type OcrPsm } from "../utils/ocrFieldPipeline";
 import { grayToRgba, type GrayImage } from "../utils/ocrPreprocess";
 import {
@@ -433,11 +434,14 @@ export async function recognizeFieldValueFromCanvas(
     if (!image) continue;
     const passStarted = now();
     let output: OcrPassOutput;
+    const passCanvas = grayToCanvas(image);
     try {
-      output = await runOcrPass(grayToCanvas(image), pass.psm);
+      output = await runOcrPass(passCanvas, pass.psm);
     } catch (err) {
       if (!results.length) throw err;
       break; // keep what earlier passes already read
+    } finally {
+      releaseCanvas(passCanvas); // don't leave per-pass pixel buffers for GC (iOS canvas memory cap)
     }
     passTimes.push(`${pass.id}=${(now() - passStarted).toFixed(0)}ms`);
     results.push({ passId: pass.id, text: output.text, confidence: output.confidence });

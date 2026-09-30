@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { CameraCaptureAction, CameraCaptureDialog } from "./CameraCaptureAction";
 import { NATIVE_DIALOG_Z_INDEX } from "../../utils/nativeDialogInsets";
+import { _resetFieldCaptureDiagnosticsForTests, getCaptureCounters } from "../../utils/fieldCaptureDiagnostics";
 
 // A plain variable rather than vi.fn(): afterEach's restoreAllMocks must not wipe the default.
 let nativePlatform = false;
@@ -50,11 +51,20 @@ function fakeStream(zoom?: { min: number; max: number; step: number; current?: n
       const z = c.advanced?.[0]?.zoom;
       if (typeof z === "number") settings.zoom = z;
     }),
+    listeners: {} as Record<string, Array<() => void>>,
+    addEventListener(type: string, fn: () => void) {
+      (track.listeners[type] ??= []).push(fn);
+    },
+    /** Simulates the OS ending/muting the track (not our own stop(), which fires nothing). */
+    fire(type: "ended" | "mute" | "unmute") {
+      if (type === "ended") track.readyState = "ended";
+      (track.listeners[type] ?? []).forEach((fn) => fn());
+    },
   };
   return { getTracks: () => [track] } as unknown as MediaStream;
 }
 
-type FakeTrack = { applyConstraints: ReturnType<typeof vi.fn>; readyState: MediaStreamTrackState };
+type FakeTrack = { applyConstraints: ReturnType<typeof vi.fn>; readyState: MediaStreamTrackState; fire: (type: "ended" | "mute" | "unmute") => void };
 const trackOf = (stream: MediaStream) => stream.getTracks()[0] as unknown as FakeTrack;
 
 /** Dispatches a touch event with the given finger positions (jsdom's TouchEvent can't take
@@ -76,6 +86,7 @@ function nonDegenerateRect(): DOMRect {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  _resetFieldCaptureDiagnosticsForTests();
   isCameraCaptureSupported.mockReturnValue(true);
   // A fresh stream per request, as getUserMedia gives — so leaks/replacements are observable.
   startCameraStream.mockImplementation(async () => fakeStream());
@@ -716,13 +727,18 @@ describe("CameraCaptureDialog — industrial OCR capture outcomes", () => {
   });
 
   it("passes the alignment guide's row (in capture pixels) to recognition", async () => {
-    recognizeOcr.mockResolvedValue("C250");
+    let heightAtCall = -1;
+    recognizeOcr.mockImplementation(async (c: HTMLCanvasElement) => {
+      heightAtCall = c.height; // read at call time — the capture canvas is released afterwards
+      return "C250";
+    });
     render(<CameraCaptureDialog mode="ocr" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
     fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
     await screen.findByDisplayValue("C250");
     const [canvas, opts] = recognizeOcr.mock.calls[0] as [HTMLCanvasElement, { guideY: number }];
     expect(opts.guideY).toBeGreaterThan(0);
-    expect(opts.guideY).toBeLessThanOrEqual(canvas.height);
+    expect(opts.guideY).toBeLessThanOrEqual(heightAtCall);
+    expect(canvas.width).toBe(0); // released once the capture was read
   });
 
   it("clipped value: asks to keep it inside the frame, stays live for a retake, touches nothing", async () => {
@@ -879,5 +895,274 @@ describe("CameraCaptureDialog — pinch-to-zoom (real camera zoom)", () => {
     const field = await screen.findByDisplayValue("ASM2002566");
     fireEvent.change(field, { target: { value: "ASM2002566-A" } });
     expect(recognizeOcr).not.toHaveBeenCalled(); // QR never goes through the OCR pipeline
+  });
+});
+
+// ── Repeated-use lifecycle (PR #376 device finding: after many QR sessions the capture dialog
+// closed on open / Scan Again until the app was restarted). These drive the REAL component
+// through long open/scan/close sequences and assert that every session gives back what it took.
+describe("repeated-use stress: sessions release everything and never affect each other", () => {
+  const streams = () => Promise.all(startCameraStream.mock.results.map((r) => r.value as Promise<MediaStream>));
+  const video = () => screen.getByTestId("camera-capture-video") as HTMLVideoElement;
+  const idle = { activeSessions: 0, liveStreams: 0, activeScanLoops: 0, captureCanvases: 0 };
+
+  function renderAction(onChange = vi.fn()) {
+    render(<CameraCaptureAction value="" onChange={onChange} fieldKind="scan" ariaLabel="Serial" />);
+    return onChange;
+  }
+  async function openFromMenu(item: "QR / Barcode" | "Text / OCR") {
+    fireEvent.click(screen.getByRole("button", { name: /Capture Serial with camera/i }));
+    fireEvent.click(await screen.findByText(item));
+    await screen.findByRole("dialog");
+  }
+  async function cancelDialog() {
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+  }
+
+  it("1/15. open QR → Cancel, 25 times: every stream stopped, no loops/canvases/sessions left", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    renderAction();
+    for (let i = 0; i < 25; i += 1) {
+      await openFromMenu("QR / Barcode");
+      await waitFor(() => expect(video().srcObject).toBeTruthy());
+      await cancelDialog();
+    }
+    expect(startCameraStream).toHaveBeenCalledTimes(25);
+    expect((await streams()).every(isEnded)).toBe(true);
+    expect(getCaptureCounters()).toEqual(idle);
+  });
+
+  it("2/14. one session, detect → Review → Scan Again × 25: one stream, never more than one loop", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue({ value: "324775", format: "code_128" });
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    for (let i = 0; i < 25; i += 1) {
+      await screen.findByDisplayValue("324775");
+      expect(getCaptureCounters().activeScanLoops).toBe(0); // stopped on detection
+      fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
+      expect(getCaptureCounters().activeScanLoops).toBeLessThanOrEqual(1);
+    }
+    await screen.findByDisplayValue("324775");
+    expect(startCameraStream).toHaveBeenCalledTimes(1);
+    expect(getCaptureCounters()).toMatchObject({ activeSessions: 1, liveStreams: 1, captureCanvases: 1 });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(getCaptureCounters()).toMatchObject({ liveStreams: 0 });
+  });
+
+  it("3. detect → Use Value → reopen, 10 times: each commit lands once, nothing accumulates", async () => {
+    const onChange = renderAction();
+    for (let i = 0; i < 10; i += 1) {
+      decodeBarcodeFromCanvas.mockResolvedValueOnce({ value: `ASM${i}`, format: "code_128" });
+      await openFromMenu("QR / Barcode");
+      await screen.findByDisplayValue(`ASM${i}`);
+      fireEvent.click(screen.getByRole("button", { name: "Use Value" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+    }
+    expect(onChange.mock.calls.map((c) => c[0])).toEqual(Array.from({ length: 10 }, (_, i) => `ASM${i}`));
+    expect((await streams()).every(isEnded)).toBe(true);
+    expect(getCaptureCounters()).toEqual(idle);
+  });
+
+  it("4/5. a decode in flight when the dialog closes can't publish into — or close — the next session", async () => {
+    let resolveOld: ((v: { value: string; format: string } | null) => void) | undefined;
+    decodeBarcodeFromCanvas.mockReturnValueOnce(new Promise((res) => { resolveOld = res; }));
+    const onChange = renderAction();
+    await openFromMenu("QR / Barcode");
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalledTimes(1));
+    await cancelDialog();
+
+    decodeBarcodeFromCanvas.mockReturnValue(new Promise(() => { /* new session: still aiming */ }));
+    await openFromMenu("QR / Barcode");
+    resolveOld?.({ value: "STALE-FROM-SESSION-1", format: "qr_code" });
+    await new Promise((r) => setTimeout(r, 30));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument(); // new session still open
+    expect(screen.queryByDisplayValue("STALE-FROM-SESSION-1")).not.toBeInTheDocument();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("6. a getUserMedia that resolves after its session closed is stopped and never reaches the next session", async () => {
+    let resolveOld: ((s: MediaStream) => void) | undefined;
+    startCameraStream.mockImplementationOnce(() => new Promise<MediaStream>((res) => { resolveOld = res; }));
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    renderAction();
+    await openFromMenu("QR / Barcode");
+    await cancelDialog();
+    await openFromMenu("QR / Barcode");
+    await waitFor(() => expect(video().srcObject).toBeTruthy());
+    const current = video().srcObject;
+
+    const late = fakeStream();
+    resolveOld?.(late);
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(isEnded(late)).toBe(true);
+    expect(video().srcObject).toBe(current);
+    expect(getCaptureCounters().liveStreams).toBe(1);
+  });
+
+  it("7. a video play() that settles after close is harmless", async () => {
+    let resolvePlay: (() => void) | undefined;
+    vi.spyOn(HTMLVideoElement.prototype, "play").mockReturnValue(new Promise<void>((res) => { resolvePlay = res; }));
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    renderAction();
+    await openFromMenu("QR / Barcode");
+    await waitFor(() => expect(HTMLVideoElement.prototype.play).toHaveBeenCalled());
+    await cancelDialog();
+    resolvePlay?.();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(getCaptureCounters()).toEqual(idle);
+    await openFromMenu("QR / Barcode"); // and a new session still opens normally
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("8. no timer from a closed session keeps scanning", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    renderAction();
+    await openFromMenu("QR / Barcode");
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalled());
+    await cancelDialog();
+    const calls = decodeBarcodeFromCanvas.mock.calls.length;
+    await new Promise((r) => setTimeout(r, 500)); // > 3 scan periods
+    expect(decodeBarcodeFromCanvas.mock.calls.length).toBe(calls);
+  });
+
+  it("9/10. a decoder exception (BarcodeDetector or ZXing) is a missed frame — scanning continues, dialog stays", async () => {
+    decodeBarcodeFromCanvas
+      .mockRejectedValueOnce(new Error("BarcodeDetector: detect failed"))
+      .mockRejectedValueOnce(new Error("ZXing: NotFoundException"))
+      .mockResolvedValue({ value: "DR040", format: "code_39" });
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={onClose} onConfirm={vi.fn()} />);
+    expect(await screen.findByDisplayValue("DR040")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("11. a rejected zoom constraint never closes capture", async () => {
+    startCameraStream.mockImplementation(async () => fakeStream({ min: 1, max: 5, step: 0.1 }));
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={onClose} onConfirm={vi.fn()} />);
+    await screen.findByTestId("camera-zoom-indicator");
+    const [stream] = await streams();
+    trackOf(stream).applyConstraints.mockRejectedValue(new Error("OverconstrainedError"));
+    const preview = screen.getByTestId("camera-capture-preview");
+    touch(preview, "touchstart", [[0, 0], [100, 0]]);
+    touch(preview, "touchmove", [[0, 0], [300, 0]]);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("12. a zoom still being applied when the session closes can't touch the next session", async () => {
+    startCameraStream.mockImplementation(async () => fakeStream({ min: 1, max: 5, step: 0.1 }));
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    renderAction();
+    await openFromMenu("QR / Barcode");
+    await screen.findByTestId("camera-zoom-indicator");
+    const [first] = await streams();
+    let finishOldZoom: (() => void) | undefined;
+    trackOf(first).applyConstraints.mockImplementation(() => new Promise<void>((res) => { finishOldZoom = res; }));
+    const preview = screen.getByTestId("camera-capture-preview");
+    touch(preview, "touchstart", [[0, 0], [100, 0]]);
+    touch(preview, "touchmove", [[0, 0], [300, 0]]);
+    touch(preview, "touchmove", [[0, 0], [400, 0]]); // queued behind the in-flight one
+    await cancelDialog();
+
+    await openFromMenu("QR / Barcode");
+    await screen.findByTestId("camera-zoom-indicator");
+    finishOldZoom?.();
+    await new Promise((r) => setTimeout(r, 20));
+    const [, second] = await streams();
+    expect(trackOf(second).applyConstraints).not.toHaveBeenCalled();
+    expect(screen.getByTestId("camera-zoom-indicator")).toHaveTextContent("1.0×");
+  });
+
+  it("13. the OS ending the track mid-preview recovers with a fresh stream (bounded), then offers Try again", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={onClose} onConfirm={vi.fn()} />);
+    await waitFor(() => expect(video().srcObject).toBeTruthy());
+
+    for (let attempt = 1; attempt <= 2; attempt += 1) {
+      const all = await streams();
+      act(() => trackOf(all[all.length - 1]).fire("ended"));
+      await waitFor(() => expect(startCameraStream).toHaveBeenCalledTimes(attempt + 1));
+      const next = (await streams())[attempt];
+      await waitFor(() => expect(video().srcObject).toBe(next)); // live again, no close
+    }
+    const all = await streams();
+    act(() => trackOf(all[all.length - 1]).fire("ended"));
+    expect(await screen.findByText(/The camera stopped/i)).toBeInTheDocument();
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(startCameraStream).toHaveBeenCalledTimes(4));
+    await waitFor(() => expect(screen.getByTestId("camera-capture-video")).toBeInTheDocument());
+    expect(getCaptureCounters().liveStreams).toBe(1);
+  });
+
+  it("a camera start failure shows Try again (never closes); Try again recovers", async () => {
+    startCameraStream.mockRejectedValueOnce(Object.assign(new Error("busy"), { name: "NotReadableError" }));
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={onClose} onConfirm={vi.fn()} />);
+    expect(await screen.findByText(/camera is unavailable right now/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await waitFor(() => expect(video().srcObject).toBeTruthy());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("16. unmount (parent destroyed) releases the stream, loop and canvas", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    const { unmount } = render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalled());
+    expect(getCaptureCounters()).toEqual({ activeSessions: 1, liveStreams: 1, activeScanLoops: 1, captureCanvases: 1 });
+    unmount();
+    expect(getCaptureCounters()).toEqual(idle);
+    expect((await streams()).every(isEnded)).toBe(true);
+  });
+
+  it("the QR loop reuses ONE capture canvas for the whole session (not one per frame)", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    const create = vi.spyOn(document, "createElement");
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    await waitFor(() => expect(decodeBarcodeFromCanvas.mock.calls.length).toBeGreaterThanOrEqual(4));
+    const canvases = create.mock.calls.filter(([tag]) => tag === "canvas").length;
+    expect(canvases).toBe(1);
+    const decoded = new Set(decodeBarcodeFromCanvas.mock.calls.map((c) => c[0]));
+    expect(decoded.size).toBe(1);
+  });
+
+  it("17/18. OCR → close → QR works, and QR → close → OCR works, alternately", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue({ value: "C250", format: "code_128" });
+    recognizeOcr.mockResolvedValue("12/24V");
+    renderAction();
+    for (let i = 0; i < 3; i += 1) {
+      await openFromMenu("Text / OCR");
+      fireEvent.click(await screen.findByRole("button", { name: "Capture" }));
+      await screen.findByDisplayValue("12/24V");
+      await cancelDialog();
+      await openFromMenu("QR / Barcode");
+      await screen.findByDisplayValue("C250");
+      await cancelDialog();
+    }
+    expect((await streams()).every(isEnded)).toBe(true);
+    expect(getCaptureCounters()).toEqual(idle);
+  });
+
+  it("a tap on the dimmed backdrop never ends a capture; Escape still cancels", async () => {
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    const onClose = vi.fn();
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={onClose} onConfirm={vi.fn()} />);
+    await waitFor(() => expect(video().srcObject).toBeTruthy());
+    const container = document.querySelector(".MuiDialog-container") as HTMLElement;
+    fireEvent.mouseDown(container);
+    fireEvent.click(container);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(getCaptureCounters().liveStreams).toBe(1);
+
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(getCaptureCounters().liveStreams).toBe(0);
   });
 });

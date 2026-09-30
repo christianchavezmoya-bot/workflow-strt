@@ -60,6 +60,12 @@ import {
   type ZoomRange,
 } from "../../utils/cameraZoom";
 import {
+  adjustCaptureCounter,
+  newCaptureSessionId,
+  releaseCanvas,
+  traceCapture,
+} from "../../utils/fieldCaptureDiagnostics";
+import {
   nativeDialogActionsSx,
   nativeDialogPaperSx,
   nativeNestedDialogSx,
@@ -90,6 +96,19 @@ export function CameraCaptureAction({ value, onChange, fieldKind, disabled, aria
   const [dialogMode, setDialogMode] = useState<DialogMode | null>(null);
   const supported = isCameraCaptureSupported();
 
+  // DEV diagnostics: if the workflow re-renders this field away while a capture dialog is open,
+  // the dialog vanishes without any close path running — record that distinctly.
+  const dialogModeRef = useRef<DialogMode | null>(null);
+  dialogModeRef.current = dialogMode;
+  const actionIdRef = useRef<string>("");
+  if (!actionIdRef.current) actionIdRef.current = `a${newCaptureSessionId()}`;
+  useEffect(() => {
+    const id = actionIdRef.current;
+    traceCapture(id, "action-mount", { field: ariaLabel });
+    return () => traceCapture(id, "action-unmount", { field: ariaLabel, dialogOpenAtUnmount: dialogModeRef.current ?? "none" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const label = ariaLabel ? `Capture ${ariaLabel} with camera` : "Capture value with camera";
 
   return (
@@ -113,6 +132,7 @@ export function CameraCaptureAction({ value, onChange, fieldKind, disabled, aria
       <Menu anchorEl={menuAnchor} open={!!menuAnchor} onClose={() => setMenuAnchor(null)} sx={nativePopoverSx()}>
         <MenuItem
           onClick={() => {
+            traceCapture(actionIdRef.current, "menu-select", { mode: "qr-barcode" });
             setDialogMode("qr-barcode");
             setMenuAnchor(null);
           }}
@@ -121,6 +141,7 @@ export function CameraCaptureAction({ value, onChange, fieldKind, disabled, aria
         </MenuItem>
         <MenuItem
           onClick={() => {
+            traceCapture(actionIdRef.current, "menu-select", { mode: "ocr" });
             setDialogMode("ocr");
             setMenuAnchor(null);
           }}
@@ -201,8 +222,26 @@ export interface CameraCaptureDialogProps {
 }
 
 /** Exported for testing; used internally by CameraCaptureAction. */
+/** Automatic re-acquisitions allowed per session when the camera track ends on its own (OS took
+ *  the camera, WebView suspended it…). Beyond this the technician gets an explicit Try again. */
+const MAX_AUTO_RECOVERIES = 2;
+
 export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureDialogProps) {
-  const [phase, setPhase] = useState<Phase>("opening");
+  const [phase, setPhaseState] = useState<Phase>("opening");
+  // One identity per dialog mount: every trace line and async callback belongs to this session.
+  const sessionRef = useRef(0);
+  if (!sessionRef.current) sessionRef.current = newCaptureSessionId();
+  const session = sessionRef.current;
+  const phaseRef = useRef<Phase>("opening");
+  const setPhase = (next: Phase) => {
+    if (phaseRef.current !== next) traceCapture(session, "phase", { mode, from: phaseRef.current, to: next });
+    phaseRef.current = next;
+    setPhaseState(next);
+  };
+  const isOcr = mode === "ocr";
+  // Why this session ended — anything that unmounts it without setting this is a parent unmount.
+  const closeReasonRef = useRef<string | null>(null);
+  const autoRecoveriesRef = useRef(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [candidate, setCandidate] = useState<Candidate | null>(null);
   // What the technician is about to commit: starts as the exact decoder/OCR candidate and is
@@ -216,6 +255,8 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const scanLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scanLoopSeqRef = useRef(0);
+  const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
   // OCR recognition can take seconds. If the technician cancels, navigates away, or the dialog is
   // otherwise unmounted while it runs, the late result must be dropped entirely — it must not set
   // state on a dead component, and above all it must never reach the field.
@@ -328,40 +369,124 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   async function openCamera() {
     const gen = ++streamGenRef.current;
     setPhase("opening");
+    traceCapture(session, "camera-request", { mode, gen });
     try {
       const stream = await startCameraStream();
       if (gen !== streamGenRef.current || !isLive()) {
+        // A superseded request (Cancel, unmount, a newer request): release it, never attach it.
         stopCameraStream(stream);
+        traceCapture(session, "camera-stale-stopped", { gen, current: streamGenRef.current, live: isLive() });
         return;
       }
       streamRef.current = stream;
+      adjustCaptureCounter("liveStreams", 1);
+      const track = liveVideoTrack(stream);
+      traceCapture(session, "camera-acquired", { gen, track: track ? (track as MediaStreamTrack).label || "video" : "none" });
+      watchTrack(stream, gen);
       initZoom(stream); // a NEW stream: reinitialise zoom from its own capabilities
       if (videoRef.current) bindStreamToVideo(videoRef.current, stream);
       setPhase("previewing");
     } catch (err) {
+      const e = err as { name?: string; message?: string } | undefined;
+      traceCapture(session, "camera-error", { gen, name: e?.name, message: e?.message, stale: gen !== streamGenRef.current || !isLive() });
       if (gen !== streamGenRef.current || !isLive()) return;
       setPhase("error");
       setErrorMessage(describeCameraError(err));
     }
   }
 
+  /** The OS can end a camera track on its own (camera taken by another app, WebView suspended).
+   *  That must never close the capture: recover with a fresh stream while previewing (bounded),
+   *  or leave it for Scan Again/Retake — which already reacquire a dead stream — while reviewing. */
+  function watchTrack(stream: MediaStream, gen: number) {
+    const track = liveVideoTrack(stream) as (MediaStreamTrack & EventTarget) | null;
+    if (!track || typeof track.addEventListener !== "function") return;
+    const onEnded = () => {
+      traceCapture(session, "track-ended", { gen, current: streamGenRef.current, phase: phaseRef.current });
+      if (gen !== streamGenRef.current || !isLive()) return;
+      recoverDeadCamera("track-ended");
+    };
+    track.addEventListener("ended", onEnded, { once: true });
+    track.addEventListener("mute", () => traceCapture(session, "track-mute", { gen }));
+    track.addEventListener("unmute", () => traceCapture(session, "track-unmute", { gen }));
+  }
+
+  function recoverDeadCamera(why: string) {
+    const p = phaseRef.current;
+    if (p !== "opening" && p !== "previewing") return; // review/error flows reacquire on demand
+    if (autoRecoveriesRef.current >= MAX_AUTO_RECOVERIES) {
+      traceCapture(session, "camera-recovery-exhausted", { why });
+      releaseCamera();
+      setPhase("error");
+      setErrorMessage("The camera stopped. Tap Try again, or enter the value manually.");
+      return;
+    }
+    autoRecoveriesRef.current += 1;
+    traceCapture(session, "camera-recover", { why, attempt: autoRecoveriesRef.current });
+    releaseCamera();
+    void openCamera();
+  }
+
+  /** Explicit retry from the error state — the camera failing is never a reason to close. */
+  function handleTryAgain() {
+    traceCapture(session, "try-again");
+    setErrorMessage(null);
+    autoRecoveriesRef.current = 0;
+    releaseCamera();
+    void openCamera();
+  }
+
   // ── Open the camera on mount; ALWAYS release it on unmount, regardless of how we got there. ──
   useEffect(() => {
     mountedRef.current = true;
     dismissedRef.current = false;
+    adjustCaptureCounter("activeSessions", 1);
+    traceCapture(session, "session-start", { mode });
+    const end = () => {
+      mountedRef.current = false;
+      releaseCamera();
+      if (scanCanvasRef.current) {
+        releaseCanvas(scanCanvasRef.current);
+        scanCanvasRef.current = null;
+        adjustCaptureCounter("captureCanvases", -1);
+      }
+      adjustCaptureCounter("activeSessions", -1);
+      // No recorded reason = nothing inside the dialog closed it: its parent unmounted it.
+      traceCapture(session, "session-end", { mode, reason: closeReasonRef.current ?? "unmounted-by-parent", phase: phaseRef.current });
+    };
     if (!isCameraCaptureSupported()) {
       setPhase("error");
       setErrorMessage("Camera capture isn't supported in this browser. Enter the value manually.");
-      return () => { /* nothing to release — stream never opened */ };
+      return end;
     }
     void openCamera();
-    return () => {
-      mountedRef.current = false;
-      releaseCamera();
-    };
+    return end;
     // Intentionally once per mount: this dialog is remounted fresh for each capture attempt, and
     // Retake/Scan Again call openCamera() directly. Re-running on openCamera identity would
     // reopen the camera on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── Page lifecycle: iOS can suspend/end capture while the app is backgrounded. Trace it (DEV),
+  // and when we come back visible with a dead camera while previewing, reacquire instead of
+  // leaving a black preview. ──
+  useEffect(() => {
+    const onVisibility = () => {
+      traceCapture(session, "visibility", { state: document.visibilityState, streamLive: isStreamLive(streamRef.current) });
+      if (document.visibilityState === "visible" && isLive() && streamRef.current && !isStreamLive(streamRef.current)) {
+        recoverDeadCamera("resumed-with-dead-camera");
+      }
+    };
+    const onPageHide = () => traceCapture(session, "pagehide");
+    const onPageShow = () => traceCapture(session, "pageshow");
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pagehide", onPageHide);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pagehide", onPageHide);
+      window.removeEventListener("pageshow", onPageShow);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -371,31 +496,52 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   useEffect(() => {
     if (mode !== "qr-barcode" || phase !== "previewing") return;
     let active = true;
+    const loopId = ++scanLoopSeqRef.current;
+    adjustCaptureCounter("activeScanLoops", 1);
+    traceCapture(session, "scan-loop-start", { loop: loopId });
+    let frames = 0;
 
+    const schedule = () => {
+      if (active) scanLoopTimerRef.current = setTimeout(tick, 150);
+    };
     const tick = () => {
       if (!active) return;
-      const cropped = captureTargetFrame()?.canvas;
-      if (cropped) {
-        void decodeBarcodeFromCanvas(cropped).then((result) => {
+      // ONE reusable canvas per session (not a new multi-megabyte canvas every 150ms): iOS WebKit
+      // caps total canvas memory per page, and only an app restart would give leaked memory back.
+      const cropped = captureTargetFrame(true)?.canvas;
+      if (!cropped) {
+        schedule();
+        return;
+      }
+      frames += 1;
+      decodeBarcodeFromCanvas(cropped).then(
+        (result) => {
           if (!active || !isLive()) return;
           if (result) {
+            traceCapture(session, "scan-detected", { loop: loopId, frames, format: result.format });
             setCandidate({ value: result.value, format: result.format });
             setDraftValue(result.value);
             setPhase("reviewing");
             return; // do not reschedule — loop stops on a valid candidate
           }
-          scanLoopTimerRef.current = setTimeout(tick, 150);
-        });
-      } else {
-        scanLoopTimerRef.current = setTimeout(tick, 150);
-      }
+          schedule();
+        },
+        (err: unknown) => {
+          // A decoder failure is a missed frame, never a reason to stop scanning or to close.
+          traceCapture(session, "scan-decode-error", { loop: loopId, message: (err as Error)?.message });
+          schedule();
+        },
+      );
     };
     tick();
 
     return () => {
       active = false;
       if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
+      adjustCaptureCounter("activeScanLoops", -1);
+      traceCapture(session, "scan-loop-stop", { loop: loopId, frames });
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, phase]);
 
   /** Crops the CURRENT video frame to the target region only, in the video's own source pixels
@@ -403,7 +549,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
    *  CSS). Returns null (never a full-frame canvas) if geometry isn't ready yet (e.g. stream
    *  metadata not loaded) — callers must treat null as "try again next tick" / "can't capture
    *  yet", never fall back to the full frame. `guideY` is the alignment guide's row in the crop. */
-  function captureTargetFrame(): { canvas: HTMLCanvasElement; guideY: number } | null {
+  function captureTargetFrame(reuse = false): { canvas: HTMLCanvasElement; guideY: number } | null {
     const video = videoRef.current;
     const overlay = overlayRef.current;
     if (!video || !overlay || !video.videoWidth || !video.videoHeight) return null;
@@ -415,11 +561,25 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     });
     if (crop.width <= 0 || crop.height <= 0) return null;
 
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(crop.width));
-    canvas.height = Math.max(1, Math.round(crop.height));
+    let canvas = reuse ? scanCanvasRef.current : null;
+    if (!canvas) {
+      canvas = document.createElement("canvas");
+      adjustCaptureCounter("captureCanvases", 1);
+      if (reuse) scanCanvasRef.current = canvas;
+    }
+    const width = Math.max(1, Math.round(crop.width));
+    const height = Math.max(1, Math.round(crop.height));
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return null;
+    if (!ctx) {
+      traceCapture(session, "canvas-context-unavailable", { width, height });
+      if (!reuse) {
+        releaseCanvas(canvas);
+        adjustCaptureCounter("captureCanvases", -1);
+      }
+      return null;
+    }
     ctx.drawImage(video, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
     return { canvas, guideY: guideY * (canvas.height / crop.height) };
   }
@@ -437,28 +597,41 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     }
     const cropped = target.canvas;
     setPhase("recognizing");
+    const releaseOcrCanvas = () => {
+      releaseCanvas(cropped);
+      adjustCaptureCounter("captureCanvases", -1);
+    };
     try {
       const result = await recognizeFieldValueFromCanvas(cropped, { guideY: target.guideY });
       // Dropped on purpose if the dialog closed while recognition was running: a late result must
       // never resurrect a dismissed dialog, and must never reach the field.
-      if (!isLive()) return;
+      if (!isLive()) {
+        releaseOcrCanvas();
+        return;
+      }
+      traceCapture(session, "ocr-result", { status: result.status });
       if (result.status === "clipped") {
+        releaseOcrCanvas();
         // Never read (or guess) a partial value — the technician reframes and captures again.
         setErrorMessage("Keep the complete value inside the frame, then capture again.");
         setPhase("previewing");
         return;
       }
       if (result.status === "no-text") {
+        releaseOcrCanvas();
         setErrorMessage("No text found on the guide line. Centre ONE value on the line and try again, or type it.");
         setPhase("previewing");
         return;
       }
       let croppedDataUrl: string | undefined;
       try { croppedDataUrl = cropped.toDataURL("image/png"); } catch { /* preview is best-effort */ }
+      releaseOcrCanvas();
       setCandidate({ value: result.text, croppedDataUrl, lowConfidence: result.lowConfidence });
       setDraftValue(result.text);
       setPhase("reviewing");
-    } catch {
+    } catch (err) {
+      releaseOcrCanvas();
+      traceCapture(session, "ocr-error", { message: (err as Error)?.message, live: isLive() });
       if (!isLive()) return;
       // Always leaves "Reading…" — recognition is time-bounded, so even an unreachable/corrupt
       // OCR asset lands here rather than hanging. The field keeps its existing value, and
@@ -471,6 +644,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   function handleUseValue() {
     if (!candidate || !draftValue || !isLive()) return;
     dismissedRef.current = true; // a double-tap must not fire onChange twice
+    closeReasonRef.current = "use-value";
     releaseCamera();
     // The ONLY call in this whole component that reaches onChange — with exactly what the
     // technician left in the review field (their correction, if they made one).
@@ -482,6 +656,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
    *  re-bound to the freshly mounted <video> by attachVideo. A stream whose tracks have ended is
    *  stopped and replaced with a new one. The field is never touched. */
   function handleRetakeOrScanAgain() {
+    traceCapture(session, isOcr ? "retake" : "scan-again", { streamLive: isStreamLive(streamRef.current) });
     setCandidate(null);
     setDraftValue("");
     setErrorMessage(null);
@@ -500,23 +675,37 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   function releaseCamera() {
     streamGenRef.current += 1;
     if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
-    stopCameraStream(streamRef.current);
+    if (streamRef.current) {
+      stopCameraStream(streamRef.current);
+      adjustCaptureCounter("liveStreams", -1);
+      traceCapture(session, "camera-released", { gen: streamGenRef.current });
+    }
     streamRef.current = null;
   }
 
-  function handleCancel() {
+  function handleCancel(reason: string) {
+    if (closeReasonRef.current) return; // already closing
     dismissedRef.current = true; // stop accepting any in-flight decode/recognition result
+    closeReasonRef.current = reason;
+    traceCapture(session, "close-requested", { reason, phase: phaseRef.current });
     releaseCamera();
     onClose();
   }
 
-  const isOcr = mode === "ocr";
   const title = isOcr ? "Capture Text" : "Scan QR / Barcode";
 
   return (
     <Dialog
       open
-      onClose={handleCancel}
+      // Only explicit actions end a capture. A thumb brushing the dimmed area while aiming at a
+      // label is not a request to abandon it, so backdrop taps are ignored; Escape still cancels.
+      onClose={(_event, reason) => {
+        if (reason === "backdropClick") {
+          traceCapture(session, "backdrop-tap-ignored", { phase: phaseRef.current });
+          return;
+        }
+        handleCancel(reason ?? "dialog-close");
+      }}
       maxWidth="sm"
       fullWidth
       // Same native stacking requirement as the mode Menu above: must sit above the runner.
@@ -650,7 +839,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
       <DialogActions sx={nativeDialogActionsSx()}>
         {phase === "reviewing" ? (
           <>
-            <Button onClick={handleCancel}>Cancel</Button>
+            <Button onClick={() => handleCancel("cancel")}>Cancel</Button>
             <Button onClick={handleRetakeOrScanAgain}>{isOcr ? "Retake" : "Scan Again"}</Button>
             <Button variant="contained" onClick={handleUseValue} disabled={!draftValue}>
               Use Value
@@ -658,7 +847,12 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
           </>
         ) : (
           <>
-            <Button onClick={handleCancel}>Cancel</Button>
+            <Button onClick={() => handleCancel("cancel")}>Cancel</Button>
+            {phase === "error" && isCameraCaptureSupported() && (
+              <Button variant="contained" onClick={handleTryAgain}>
+                Try again
+              </Button>
+            )}
             {isOcr && phase === "previewing" && (
               <Button variant="contained" onClick={() => { void handleCapture(); }}>
                 Capture
