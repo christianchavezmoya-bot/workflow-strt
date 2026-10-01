@@ -105,6 +105,8 @@ import WorkOrderRunnerCustomerSignStage from "./WorkOrderRunnerCustomerSignStage
 import WorkOrderRunnerInstallerSignStage from "./WorkOrderRunnerInstallerSignStage";
 import WorkOrderRunnerSetupStage from "./WorkOrderRunnerSetupStage";
 import WorkOrderRunnerSummaryStage from "./WorkOrderRunnerSummaryStage";
+import AssetDocumentsDialog from "../installations/AssetDocumentsDialog";
+import type { ProjectAsset } from "../../types/projectAsset";
 import {
   parseRunTimeEntries,
   renderAssetIdentifier,
@@ -214,6 +216,8 @@ function WorkOrderRunner({
   );
 
   const [stage, setStage] = useState<Stage>("setup");
+  const [supportingDocsOpen, setSupportingDocsOpen] = useState(false);
+  const [supportingDocsCount, setSupportingDocsCount] = useState(0);
   const stageRef = useRef<Stage>("setup");
   const firstRenderMarkedRef = useRef(false);
   const [currentStepId, setCurrentStepId] = useState<string | null>(stepsSorted[0]?.id ?? null);
@@ -2886,6 +2890,8 @@ function WorkOrderRunner({
             onToggleSummaryQtyMods={() => setShowSummaryQtyMods((open) => !open)}
             showSummaryCapturedData={showSummaryCapturedData}
             onToggleSummaryCapturedData={() => setShowSummaryCapturedData((open) => !open)}
+            canManageSupportingDocuments={Boolean(projectAssetId) && !saved && !signoffReviewMode}
+            onOpenSupportingDocuments={() => setSupportingDocsOpen(true)}
             editingIssueId={editingIssueId}
             editIssueDesc={editIssueDesc}
             editIssueSeverity={editIssueSeverity}
@@ -3239,6 +3245,25 @@ function WorkOrderRunner({
           </Button>
         </DialogActions>
       </Dialog>
+      {projectAssetId && (
+        <AssetDocumentsDialog
+          open={supportingDocsOpen}
+          onClose={() => setSupportingDocsOpen(false)}
+          asset={{
+            id: projectAssetId,
+            projectId: projectIdProp ?? "",
+            productId,
+            assetTag: assetTag ?? "",
+            status: "InProgress",
+            featureValuesJson: "{}",
+            issuesJson: "{}",
+            createdAt: "",
+            updatedAt: "",
+          } as ProjectAsset}
+          currentUserName={currentUserName ?? ""}
+          onDocsChanged={(_assetId, count) => setSupportingDocsCount(count)}
+        />
+      )}
     </>
   );
 }
