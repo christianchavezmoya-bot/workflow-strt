@@ -1,4 +1,5 @@
 import {
+  AttachFileOutlined,
   CheckCircleOutlined,
   CommentOutlined,
   DeleteOutlineOutlined,
@@ -97,6 +98,8 @@ export interface WorkOrderRunnerSummaryStageProps {
   onToggleSummaryQtyMods: () => void;
   showSummaryCapturedData: boolean;
   onToggleSummaryCapturedData: () => void;
+  canManageSupportingDocuments: boolean;
+  onOpenSupportingDocuments: () => void;
   editingIssueId: string | null;
   editIssueDesc: string;
   editIssueSeverity: "low" | "medium" | "high";
@@ -158,6 +161,8 @@ export default function WorkOrderRunnerSummaryStage({
   onToggleSummaryQtyMods,
   showSummaryCapturedData,
   onToggleSummaryCapturedData,
+  canManageSupportingDocuments,
+  onOpenSupportingDocuments,
   editingIssueId,
   editIssueDesc,
   editIssueSeverity,
@@ -453,14 +458,25 @@ export default function WorkOrderRunnerSummaryStage({
           {stepsData.length > 0 && (
             <Stack spacing={1.5}>
               <Divider />
-              <Button
-                size="small"
-                variant="outlined"
-                onClick={onToggleSummaryCapturedData}
-                sx={{ alignSelf: "flex-start" }}
-              >
-                {showSummaryCapturedData ? "Hide captured data" : "Show captured data"}
-              </Button>
+              <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+                <Button
+                  size="small"
+                  variant="outlined"
+                  onClick={onToggleSummaryCapturedData}
+                >
+                  {showSummaryCapturedData ? "Hide captured data" : "Review captured data"}
+                </Button>
+                {canManageSupportingDocuments && (
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<AttachFileOutlined />}
+                    onClick={onOpenSupportingDocuments}
+                  >
+                    Supporting documents
+                  </Button>
+                )}
+              </Stack>
               <Collapse in={showSummaryCapturedData}>
                 <Stack spacing={1} sx={{ mt: 1 }}>
                   {stepsData.map((sc, index) => {
