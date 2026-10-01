@@ -217,7 +217,6 @@ function WorkOrderRunner({
 
   const [stage, setStage] = useState<Stage>("setup");
   const [supportingDocsOpen, setSupportingDocsOpen] = useState(false);
-  const [supportingDocsCount, setSupportingDocsCount] = useState(0);
   const stageRef = useRef<Stage>("setup");
   const firstRenderMarkedRef = useRef(false);
   const [currentStepId, setCurrentStepId] = useState<string | null>(stepsSorted[0]?.id ?? null);
@@ -3261,7 +3260,7 @@ function WorkOrderRunner({
             updatedAt: "",
           } as ProjectAsset}
           currentUserName={currentUserName ?? ""}
-          onDocsChanged={(_assetId, count) => setSupportingDocsCount(count)}
+          onDocsChanged={() => {}}
         />
       )}
     </>
