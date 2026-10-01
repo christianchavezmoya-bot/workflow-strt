@@ -42,6 +42,7 @@ import {
 import CameraAltOutlined from "@mui/icons-material/CameraAltOutlined";
 import QrCodeScannerOutlined from "@mui/icons-material/QrCodeScannerOutlined";
 import {
+  createScanBuffers,
   decodeBarcodeFromCanvas,
   isCameraCaptureSupported,
   recognizeFieldValueFromCanvas,
@@ -257,6 +258,8 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
   const scanLoopTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scanLoopSeqRef = useRef(0);
   const scanCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Per-session decode buffers (luminance + its 90°-rotated copy), reused for every frame.
+  const scanBuffersRef = useRef(createScanBuffers());
   // OCR recognition can take seconds. If the technician cancels, navigates away, or the dialog is
   // otherwise unmounted while it runs, the late result must be dropped entirely — it must not set
   // state on a dead component, and above all it must never reach the field.
@@ -450,6 +453,7 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
         scanCanvasRef.current = null;
         adjustCaptureCounter("captureCanvases", -1);
       }
+      scanBuffersRef.current = createScanBuffers(); // drop this session's pixel buffers
       adjustCaptureCounter("activeSessions", -1);
       // No recorded reason = nothing inside the dialog closed it: its parent unmounted it.
       traceCapture(session, "session-end", { mode, reason: closeReasonRef.current ?? "unmounted-by-parent", phase: phaseRef.current });
@@ -500,6 +504,9 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
     adjustCaptureCounter("activeScanLoops", 1);
     traceCapture(session, "scan-loop-start", { loop: loopId });
     let frames = 0;
+    let decodeMsTotal = 0;
+    let decodeMsMax = 0;
+    const now = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
     const schedule = () => {
       if (active) scanLoopTimerRef.current = setTimeout(tick, 150);
@@ -514,11 +521,17 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
         return;
       }
       frames += 1;
-      decodeBarcodeFromCanvas(cropped).then(
+      const started = now();
+      decodeBarcodeFromCanvas(cropped, scanBuffersRef.current).then(
         (result) => {
+          const ms = now() - started;
+          decodeMsTotal += ms;
+          decodeMsMax = Math.max(decodeMsMax, ms);
           if (!active || !isLive()) return;
           if (result) {
-            traceCapture(session, "scan-detected", { loop: loopId, frames, format: result.format });
+            traceCapture(session, "scan-detected", {
+              loop: loopId, frames, format: result.format, rotated: result.rotated ?? false, decodeMs: Math.round(ms),
+            });
             setCandidate({ value: result.value, format: result.format });
             setDraftValue(result.value);
             setPhase("reviewing");
@@ -539,7 +552,9 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
       active = false;
       if (scanLoopTimerRef.current) clearTimeout(scanLoopTimerRef.current);
       adjustCaptureCounter("activeScanLoops", -1);
-      traceCapture(session, "scan-loop-stop", { loop: loopId, frames });
+      traceCapture(session, "scan-loop-stop", {
+        loop: loopId, frames, avgDecodeMs: frames ? Math.round(decodeMsTotal / frames) : 0, maxDecodeMs: Math.round(decodeMsMax),
+      });
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, phase]);
@@ -779,7 +794,9 @@ export function CameraCaptureDialog({ mode, onClose, onConfirm }: CameraCaptureD
                   ref={overlayRef}
                   data-testid="camera-capture-target-window"
                   sx={{
-                    position: "absolute", left: "20%", right: "20%", top: "30%", bottom: "30%",
+                    // Exactly square (60% of the 3:4 preview's width = 45% of its height), so a
+                    // linear code fits the same whether it's mounted horizontally or vertically.
+                    position: "absolute", left: "20%", right: "20%", top: "27.5%", bottom: "27.5%",
                     border: "2px solid #fff", borderRadius: 1, boxShadow: "0 0 0 2000px rgba(0,0,0,0.35)",
                     pointerEvents: "none",
                   }}

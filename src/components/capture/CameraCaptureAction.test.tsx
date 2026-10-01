@@ -23,6 +23,7 @@ vi.mock("../../services/cameraCaptureService", () => ({
   startCameraStream: (...args: unknown[]) => startCameraStream(...args),
   stopCameraStream: (...args: unknown[]) => stopCameraStream(...args),
   decodeBarcodeFromCanvas: (...args: unknown[]) => decodeBarcodeFromCanvas(...args),
+  createScanBuffers: () => ({ luminance: null, rotated: null }),
   recognizeFieldValueFromCanvas: async (...args: unknown[]) => {
     const r = await recognizeOcr(...args);
     if (typeof r !== "string") return r;
@@ -362,7 +363,8 @@ describe("CameraCaptureDialog — QR/Barcode mode", () => {
     render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={onConfirm} />);
 
     await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalled());
-    expect(decodeBarcodeFromCanvas).toHaveBeenCalledWith(expect.any(HTMLCanvasElement));
+    // The cropped canvas plus this session's reusable decode buffers — never the full frame.
+    expect(decodeBarcodeFromCanvas).toHaveBeenCalledWith(expect.any(HTMLCanvasElement), expect.objectContaining({ rotated: null }));
 
     expect(await screen.findByDisplayValue("0123456789012")).toBeInTheDocument();
     expect(screen.getByText((_, node) => node?.textContent === "Detected: EAN_13")).toBeInTheDocument();
@@ -1164,5 +1166,57 @@ describe("repeated-use stress: sessions release everything and never affect each
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(getCaptureCounters().liveStreams).toBe(0);
+  });
+});
+
+describe("rotation-aware scanning: per-session decode buffers", () => {
+  const buffersPassed = () => decodeBarcodeFromCanvas.mock.calls.map((c) => c[1] as object);
+
+  it("every frame — and every Scan Again — of one session reuses the SAME buffers; no extra loops", async () => {
+    decodeBarcodeFromCanvas
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ value: "VERT-128", format: "code_128", rotated: true })
+      .mockResolvedValueOnce(null)
+      .mockResolvedValue({ value: "VERT-128", format: "code_128", rotated: true });
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    for (let i = 0; i < 5; i += 1) {
+      await screen.findByDisplayValue("VERT-128");
+      fireEvent.click(screen.getByRole("button", { name: "Scan Again" }));
+      expect(getCaptureCounters().activeScanLoops).toBeLessThanOrEqual(1);
+    }
+    await screen.findByDisplayValue("VERT-128");
+    expect(new Set(buffersPassed()).size).toBe(1);
+    expect(getCaptureCounters()).toMatchObject({ captureCanvases: 1, liveStreams: 1 });
+  });
+
+  it("each session gets fresh buffers; a decode still running from a closed session can't reach the next", async () => {
+    let finishOld: ((v: null) => void) | undefined;
+    decodeBarcodeFromCanvas.mockReturnValueOnce(new Promise((res) => { finishOld = res; }));
+    render(<CameraCaptureAction value="" onChange={vi.fn()} fieldKind="scan" ariaLabel="Serial" />);
+    fireEvent.click(screen.getByRole("button", { name: /Capture Serial with camera/i }));
+    fireEvent.click(await screen.findByText("QR / Barcode"));
+    await waitFor(() => expect(decodeBarcodeFromCanvas).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await waitFor(() => expect(screen.queryByRole("dialog")).not.toBeInTheDocument());
+
+    decodeBarcodeFromCanvas.mockResolvedValue(null);
+    fireEvent.click(screen.getByRole("button", { name: /Capture Serial with camera/i }));
+    fireEvent.click(await screen.findByText("QR / Barcode"));
+    await waitFor(() => expect(decodeBarcodeFromCanvas.mock.calls.length).toBeGreaterThan(1));
+    finishOld?.(null);
+    await new Promise((r) => setTimeout(r, 20));
+
+    const [oldBuffers, ...newer] = buffersPassed();
+    expect(newer.every((b) => b !== oldBuffers)).toBe(true);
+    expect(getCaptureCounters()).toMatchObject({ activeSessions: 1, liveStreams: 1, activeScanLoops: 1 });
+  });
+
+  it("the QR/barcode target is square, so a vertical linear code fits as well as a horizontal one", async () => {
+    render(<CameraCaptureDialog mode="qr-barcode" currentValue="" onClose={vi.fn()} onConfirm={vi.fn()} />);
+    const target = await screen.findByTestId("camera-capture-target-window");
+    const style = getComputedStyle(target);
+    // 60% of a 3:4 preview's width == 45% of its height → 27.5% top/bottom insets.
+    expect([style.left, style.right, style.top, style.bottom]).toEqual(["20%", "20%", "27.5%", "27.5%"]);
   });
 });

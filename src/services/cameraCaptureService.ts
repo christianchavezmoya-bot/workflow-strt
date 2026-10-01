@@ -4,7 +4,7 @@
  * OBSERVABILITY/PRIVACY NOTE: every function here processes frames entirely in the browser/
  * WebView. Nothing is ever uploaded to a third-party/cloud recognition service — barcode
  * decoding uses the browser's built-in BarcodeDetector where available, falling back to the
- * bundled (lazy-loaded) @zxing/browser library; OCR uses the bundled (lazy-loaded) tesseract.js,
+ * bundled (lazy-loaded) @zxing/library decoder; OCR uses the bundled (lazy-loaded) tesseract.js,
  * which runs its recognition entirely as local WASM.
  *
  * OFFLINE NOTE: tesseract.js defaults its worker/core/language paths to jsDelivr, which would
@@ -121,6 +121,8 @@ export const OCR_TIMEOUT_MS = 45_000;
 export interface BarcodeDecodeResult {
   value: string;
   format: string;
+  /** Found only after turning the crop 90° (a vertical code). Diagnostics only. */
+  rotated?: boolean;
 }
 
 // ── Capability detection ────────────────────────────────────────────────────────────────────
@@ -200,11 +202,87 @@ export function stopCameraStream(stream: MediaStream | null | undefined): void {
 }
 
 // ── Barcode/QR decoding — always against an already-cropped image, never the full frame ──────
+//
+// ORIENTATION. Codes are mounted at any angle on equipment, and the technician shouldn't have to
+// turn the phone. Measured against the shipped ZXing decoder with real generated fixtures
+// (barcodeRotation.test.ts):
+//   - QR and Data Matrix decode at 0°/90°/180°/270° as they are.
+//   - Every linear format (Code 128, Code 39, EAN-13, EAN-8, UPC-A) and PDF417 decode at 0° and
+//     180° (ZXing also scans each row reversed), but NOT at 90°/270°.
+// So ONE extra attempt — the same crop turned 90° — completes the coverage: a 90° code becomes
+// 180° (decodable) and a 270° code becomes 0°. At most two decodes per frame, the second only on
+// a miss; QR/Data Matrix are found by the first in any orientation, so they're not slowed down.
+// Rotation is done on the crop's own luminance pixels into a reusable per-session buffer — no
+// extra canvas, no CSS, no resampling (a quarter turn just swaps width and height).
+//
+// The native BarcodeDetector path (Chromium/Android; absent in iOS WKWebView) is left as is: the
+// platform detectors behind it are orientation-independent, and it can't be exercised in CI.
 
-let zxingReaderPromise: Promise<import("@zxing/browser").BrowserMultiFormatReader> | null = null;
+/** Reusable per-scan-session pixel buffers (see createScanBuffers). */
+export interface ScanBuffers {
+  luminance: Uint8ClampedArray | null;
+  rotated: Uint8ClampedArray | null;
+}
+
+/** One per capture session; reused for every frame so continuous scanning allocates nothing
+ *  per frame beyond what the decoder itself needs. */
+export function createScanBuffers(): ScanBuffers {
+  return { luminance: null, rotated: null };
+}
+
+function bufferOfSize(existing: Uint8ClampedArray | null, size: number): Uint8ClampedArray {
+  return existing && existing.length === size ? existing : new Uint8ClampedArray(size);
+}
+
+/** RGBA → luminance with ZXing's own weighting ((R + 2G + B) / 4), into a reused buffer. */
+export function rgbaToLuminanceInto(rgba: Uint8ClampedArray, width: number, height: number, buffers: ScanBuffers): Uint8ClampedArray {
+  const out = bufferOfSize(buffers.luminance, width * height);
+  buffers.luminance = out;
+  for (let p = 0, i = 0; p < out.length; p += 1, i += 4) {
+    out[p] = (rgba[i] + 2 * rgba[i + 1] + rgba[i + 2]) >> 2;
+  }
+  return out;
+}
 
 /**
- * Lazily loads the ZXing fallback decoder.
+ * Rotates a single-channel image clockwise by quarterTurns × 90°, exactly (pure index mapping —
+ * no interpolation, nothing clipped, nothing stretched). For 90°/270° the output is height×width.
+ * Writes into `dest` when it is already the right size.
+ */
+export function rotateLuminance(
+  src: Uint8ClampedArray,
+  width: number,
+  height: number,
+  quarterTurns: number,
+  dest: Uint8ClampedArray | null = null,
+): { data: Uint8ClampedArray; width: number; height: number } {
+  const q = ((quarterTurns % 4) + 4) % 4;
+  const out = bufferOfSize(dest, width * height);
+  if (q === 0) {
+    out.set(src);
+    return { data: out, width, height };
+  }
+  if (q === 2) {
+    for (let i = 0, n = src.length; i < n; i += 1) out[n - 1 - i] = src[i];
+    return { data: out, width, height };
+  }
+  // q === 1: (x, y) → (height − 1 − y, x) in a height-wide image; q === 3: (x, y) → (y, width − 1 − x).
+  for (let y = 0; y < height; y += 1) {
+    const row = y * width;
+    for (let x = 0; x < width; x += 1) {
+      const target = q === 1 ? x * height + (height - 1 - y) : (width - 1 - x) * height + y;
+      out[target] = src[row + x];
+    }
+  }
+  return { data: out, width: height, height: width };
+}
+
+type ZxingLibrary = typeof import("@zxing/library");
+type ZxingReader = import("@zxing/library").MultiFormatReader;
+let zxingPromise: Promise<{ lib: ZxingLibrary; reader: ZxingReader; sidewaysReader: ZxingReader }> | null = null;
+
+/**
+ * Lazily loads the ZXing fallback decoder — one reader, reused for every frame.
  *
  * The rejection path matters: a cached REJECTED promise would make one unlucky failure (a
  * momentary chunk-load error, a killed network mid-download) permanent for the rest of the
@@ -212,35 +290,96 @@ let zxingReaderPromise: Promise<import("@zxing/browser").BrowserMultiFormatReade
  * restart the app. Clearing the cache on failure makes a later attempt a genuine retry, while a
  * successful load is still only performed once.
  */
-async function getZxingReader() {
-  if (!zxingReaderPromise) {
-    zxingReaderPromise = import("@zxing/browser")
-      .then(({ BrowserMultiFormatReader }) => new BrowserMultiFormatReader())
+async function getZxing() {
+  if (!zxingPromise) {
+    zxingPromise = import("@zxing/library")
+      .then((lib) => {
+        const reader = new lib.MultiFormatReader();
+        reader.setHints(null); // no format hints: try every format, as before
+        // The turned attempt exists only for the formats that fail sideways — QR/Data Matrix are
+        // already found upright in any orientation — so it skips the costly 2D detectors.
+        const sidewaysReader = new lib.MultiFormatReader();
+        sidewaysReader.setHints(new Map([[lib.DecodeHintType.POSSIBLE_FORMATS, [
+          lib.BarcodeFormat.CODE_128, lib.BarcodeFormat.CODE_39, lib.BarcodeFormat.EAN_13,
+          lib.BarcodeFormat.EAN_8, lib.BarcodeFormat.UPC_A, lib.BarcodeFormat.PDF_417,
+        ]]]));
+        return { lib, reader, sidewaysReader };
+      })
       .catch((err) => {
-        zxingReaderPromise = null;
+        zxingPromise = null;
         throw err;
       });
   }
-  return zxingReaderPromise;
+  return zxingPromise;
 }
+
+/** ZXing format names → ours (only PDF417 is spelled differently). */
+function formatName(lib: ZxingLibrary, format: number): string {
+  const name = String(lib.BarcodeFormat[format] ?? format).toLowerCase();
+  return name === "pdf_417" ? "pdf417" : name;
+}
+
+function tryDecode(
+  lib: ZxingLibrary,
+  reader: ZxingReader,
+  luminance: Uint8ClampedArray,
+  width: number,
+  height: number,
+): BarcodeDecodeResult | null {
+  try {
+    const bitmap = new lib.BinaryBitmap(new lib.HybridBinarizer(new lib.RGBLuminanceSource(luminance, width, height)));
+    // decodeWithState keeps the reader's configured hints (decode() would reset them).
+    const result = reader.decodeWithState(bitmap);
+    return { value: result.getText(), format: formatName(lib, result.getBarcodeFormat()) };
+  } catch {
+    return null; // nothing found — normal for most frames
+  } finally {
+    reader.reset();
+  }
+}
+
+/**
+ * Decodes a luminance frame in its original orientation and, only if that finds nothing, once
+ * more turned 90° (see the ORIENTATION note above). Uses and refills the session's buffers.
+ */
+export async function decodeLuminanceAnyOrientation(
+  luminance: Uint8ClampedArray,
+  width: number,
+  height: number,
+  buffers: ScanBuffers,
+): Promise<BarcodeDecodeResult | null> {
+  const { lib, reader, sidewaysReader } = await getZxing();
+  const upright = tryDecode(lib, reader, luminance, width, height);
+  if (upright) return { ...upright, rotated: false };
+  const turned = rotateLuminance(luminance, width, height, 1, buffers.rotated);
+  buffers.rotated = turned.data;
+  const sideways = tryDecode(lib, sidewaysReader, turned.data, turned.width, turned.height);
+  return sideways ? { ...sideways, rotated: true } : null;
+}
+
+let nativeDetector: { formats: string; detector: InstanceType<BarcodeDetectorCtor> } | null = null;
 
 /**
  * Decodes a barcode/QR from a canvas that has ALREADY been cropped to the target-window region
  * (see cameraCropMath.ts + CameraCaptureDialog.tsx) — this function never sees, and therefore
  * can never accidentally select a code from, anything outside that region. Tries the native
  * BarcodeDetector first (fast, on-device, no extra download) if it actually reports support for
- * our formats; otherwise lazy-loads the bundled ZXing fallback (Safari, or any environment
- * without BarcodeDetector).
+ * our formats; otherwise the bundled ZXing fallback (Safari/iOS, or anywhere without
+ * BarcodeDetector), in any of the four orientations.
  */
 export async function decodeBarcodeFromCanvas(
   canvas: HTMLCanvasElement,
+  buffers: ScanBuffers = createScanBuffers(),
 ): Promise<BarcodeDecodeResult | null> {
   const nativeFormats = await getNativeBarcodeDetectorSupportedFormats();
   const Ctor = getBarcodeDetectorCtor();
   if (Ctor && nativeFormats && nativeFormats.length > 0) {
     try {
-      const detector = new Ctor({ formats: nativeFormats });
-      const hits = await detector.detect(canvas);
+      const key = nativeFormats.join(",");
+      if (!nativeDetector || nativeDetector.formats !== key) {
+        nativeDetector = { formats: key, detector: new Ctor({ formats: nativeFormats }) };
+      }
+      const hits = await nativeDetector.detector.detect(canvas);
       if (hits.length > 0) {
         return { value: hits[0].rawValue, format: hits[0].format };
       }
@@ -252,9 +391,11 @@ export async function decodeBarcodeFromCanvas(
   }
 
   try {
-    const reader = await getZxingReader();
-    const result = await reader.decodeFromCanvas(canvas);
-    return { value: result.getText(), format: result.getBarcodeFormat().toString().toLowerCase() };
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx || !canvas.width || !canvas.height) return null;
+    const { width, height } = canvas;
+    const pixels = ctx.getImageData(0, 0, width, height).data;
+    return await decodeLuminanceAnyOrientation(rgbaToLuminanceInto(pixels, width, height, buffers), width, height, buffers);
   } catch {
     return null; // no code found in this frame — normal/expected most of the time in the loop
   }
@@ -464,7 +605,8 @@ export async function recognizeFieldValueFromCanvas(
 
 /** Test-only: resets cached lazy singletons between test cases. Never called from app code. */
 export function _resetCameraCaptureServiceForTests(): void {
-  zxingReaderPromise = null;
+  zxingPromise = null;
   tesseractWorkerPromise = null;
   nativeFormatsCache = null;
+  nativeDetector = null;
 }

@@ -9,7 +9,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { prepareFieldOcr } from "../utils/ocrFieldPipeline";
 import type { GrayImage } from "../utils/ocrPreprocess";
-import { blank, drawRun, toRgba } from "../utils/ocrSyntheticImages.testutil";
+import bwipjs from "bwip-js/browser";
+import { blank, drawRun, fillRect, toRgba } from "../utils/ocrSyntheticImages.testutil";
 import {
   OCR_ASSET_PATHS,
   OCR_TIMEOUT_MS,
@@ -26,7 +27,8 @@ import {
 
 const createWorker = vi.fn();
 const setParameters = vi.fn();
-const BrowserMultiFormatReader = vi.fn();
+// Lets a test make the next lazy ZXing load fail, then succeed — the REAL library otherwise.
+const zxingLoadFailures = vi.hoisted(() => ({ count: 0 }));
 
 // Individual tests only describe the worker behaviour they care about (recognize/terminate); every
 // fake worker also gets the shared setParameters spy so per-pass configuration can be asserted.
@@ -35,11 +37,19 @@ vi.mock("tesseract.js", () => ({
   OEM: { TESSERACT_ONLY: 0, LSTM_ONLY: 1, TESSERACT_LSTM_COMBINED: 2, DEFAULT: 3 },
 }));
 
-vi.mock("@zxing/browser", () => ({
-  BrowserMultiFormatReader: class {
-    constructor() { return BrowserMultiFormatReader(); }
-  },
-}));
+vi.mock("@zxing/library", async (importOriginal) => {
+  const real = await importOriginal<typeof import("@zxing/library")>();
+  class MultiFormatReader extends real.MultiFormatReader {
+    constructor() {
+      if (zxingLoadFailures.count > 0) {
+        zxingLoadFailures.count -= 1;
+        throw new Error("chunk load failed");
+      }
+      super();
+    }
+  }
+  return { ...real, MultiFormatReader };
+});
 
 function fakeCanvas(): HTMLCanvasElement {
   return document.createElement("canvas");
@@ -302,21 +312,19 @@ describe("initialisation failures are recoverable, not permanently cached", () =
   });
 
   it("a failed ZXing lazy-load does not poison later scan attempts", async () => {
-    // First attempt: constructing the reader blows up (simulates a failed chunk load).
-    BrowserMultiFormatReader.mockImplementationOnce(() => { throw new Error("chunk load failed"); });
-    await expect(decodeBarcodeFromCanvas(fakeCanvas())).resolves.toBeNull();
+    // A real Code 128 fixture on the (stubbed) canvas.
+    const enc = bwipjs.raw({ bcid: "code128", text: "ASSET-42" })[0] as unknown as { sbs: number[] };
+    const img = blank(600, 160, 255);
+    let x = 40;
+    enc.sbs.forEach((w, i) => { if (i % 2 === 0) fillRect(img, x, 30, w * 3, 100, 0); x += w * 3; });
+    const canvas = stubCanvas2d(img);
 
-    // Second attempt: the module loads fine and a code is found — proving the cache was cleared.
-    BrowserMultiFormatReader.mockImplementationOnce(() => ({
-      decodeFromCanvas: () => ({
-        getText: () => "ASSET-42",
-        getBarcodeFormat: () => "CODE_128",
-      }),
-    }));
-    await expect(decodeBarcodeFromCanvas(fakeCanvas())).resolves.toEqual({
-      value: "ASSET-42",
-      format: "code_128",
-    });
+    // First attempt: loading the decoder blows up (simulates a failed chunk load).
+    zxingLoadFailures.count = 1;
+    await expect(decodeBarcodeFromCanvas(canvas)).resolves.toBeNull();
+
+    // Second attempt: the module loads fine and the code is found — proving the cache was cleared.
+    await expect(decodeBarcodeFromCanvas(canvas)).resolves.toMatchObject({ value: "ASSET-42", format: "code_128" });
   });
 });
 
