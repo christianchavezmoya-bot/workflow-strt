@@ -240,7 +240,7 @@ export default function ClosedSignedAssetsDialog({
         throw new Error("Failed to build signed asset PDF.");
       }
 
-      const fileBase = workflowReportBaseFileName(context.asset, context.run);
+      const fileBase = workflowReportBaseFileName(context.asset, context.run, context.documentType, context.jobNumber, context.workflowConfigName);
       const file = new File([pdfBlob], `${fileBase}.pdf`, { type: "application/pdf" });
       const uploadedDoc = await documentService.uploadDocument(
         file,
