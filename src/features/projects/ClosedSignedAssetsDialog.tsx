@@ -66,7 +66,12 @@ type SignedAssetRow = {
 const REPORT_TYPE = "Closed Signed Asset Report";
 
 function isRunFullySigned(run: AssetWorkflowRun): boolean {
-  return Boolean(run.installerSignedAt) && (Boolean(run.customerSignedAt) || run.signatureStatus === "Signed");
+  const installerComplete = Boolean(run.installerSignedAt);
+  const customerComplete =
+    Boolean(run.customerSignedAt)
+    || run.signatureStatus === "Signed"
+    || run.signatureStatus === "WaivedCustomer";
+  return installerComplete && customerComplete;
 }
 
 function issueCount(run: AssetWorkflowRun): number {
@@ -235,7 +240,7 @@ export default function ClosedSignedAssetsDialog({
         throw new Error("Failed to build signed asset PDF.");
       }
 
-      const fileBase = workflowReportBaseFileName(context.asset, context.run);
+      const fileBase = workflowReportBaseFileName(context.asset, context.run, context.documentType, context.jobNumber, context.workflowConfigName);
       const file = new File([pdfBlob], `${fileBase}.pdf`, { type: "application/pdf" });
       const uploadedDoc = await documentService.uploadDocument(
         file,

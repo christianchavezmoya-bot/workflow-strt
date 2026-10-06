@@ -185,7 +185,7 @@ export function useAssetInstallationReportExport() {
         const reportContext = await buildAssetReportContext(contextParams);
         const { generateWorkflowReport } = await import("../../utils/generateWorkflowReport");
         const { workflowReportBaseFileName } = await import("../../utils/workflowReportExport");
-        const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run);
+        const fileBase = workflowReportBaseFileName(reportContext.asset, reportContext.run, reportContext.documentType, reportContext.jobNumber, reportContext.workflowConfigName);
         const pdfBlob = await generateWorkflowReport({
           ...reportContext,
           outputMode: "blob",
@@ -222,7 +222,7 @@ export function useAssetInstallationReportExport() {
           createWorkflowReportDocx,
           workflowReportBaseFileName,
         } = await import("../../utils/workflowReportExport");
-        const fileBase = reportPreviewFileBase ?? workflowReportBaseFileName(reportContext.asset, reportContext.run);
+        const fileBase = reportPreviewFileBase ?? workflowReportBaseFileName(reportContext.asset, reportContext.run, reportContext.documentType, reportContext.jobNumber, reportContext.workflowConfigName);
 
         if (format === "pdf") {
           await generateWorkflowReport({

@@ -53,6 +53,28 @@ describe("buildPublicSignReportContext", () => {
     expect(ctx.signatureEvents).toHaveLength(1);
   });
 
+  it("preserves the actual installer signature payload for report rendering", async () => {
+    const signatureData = "data:image/png;base64,aW5zdGFsbGVy";
+    const ctx = await buildPublicSignReportContext(sampleSummary({
+      installerSignerName: "Juan Perez",
+      installerSignedAt: "2026-08-09T09:25:00.000Z",
+      installerSignatureData: signatureData,
+      installerReasonCode: "Completed",
+      installerNotes: "Commissioning complete",
+    }));
+
+    expect(ctx.signatureEvents).toEqual([
+      expect.objectContaining({
+        runId: "run-1",
+        signerRole: "Installer",
+        signerName: "Juan Perez",
+        signedAtUtc: "2026-08-09T09:25:00.000Z",
+        hasDrawnSignature: true,
+        signatureData,
+      }),
+    ]);
+  });
+
   it("does not collapse startedAt to completedAt when startedAt is provided", async () => {
     const ctx = await buildPublicSignReportContext(sampleSummary({
       startedAt: "2026-08-09T01:23:00.000Z",

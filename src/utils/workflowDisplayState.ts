@@ -264,7 +264,7 @@ export function getWorkflowDisplayState(
   const t = tallyIssues(asset, sorted);
   let blockingIssueCount = t.openBlocking;
   // Slim run placeholders zero out issuesJson — trust server summary when steps are done.
-  if (!hasRunBlobs && summary?.hasOpenIssues && allStepsDone && blockingIssueCount === 0) {
+  if (!hasRunBlobs && summary?.hasOpenBlockingIssues && allStepsDone && blockingIssueCount === 0) {
     blockingIssueCount = 1;
   }
   const highObservationCount = t.openHighObs;
