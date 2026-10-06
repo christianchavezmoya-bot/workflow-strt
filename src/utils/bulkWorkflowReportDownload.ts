@@ -32,7 +32,7 @@ export type WorkflowReportDownloadItem = {
 };
 
 export function workflowReportPdfFileName(context: WorkflowReportExportContext): string {
-  return `${workflowReportBaseFileName(context.asset, context.run)}.pdf`;
+  return `${workflowReportBaseFileName(context.asset, context.run, context.documentType, context.jobNumber, context.workflowConfigName)}.pdf`;
 }
 
 export async function downloadWorkflowReportsAsSeparateFiles(
