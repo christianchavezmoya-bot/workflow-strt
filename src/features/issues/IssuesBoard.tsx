@@ -620,7 +620,7 @@ const IssuesBoard = () => {
             <Table size="small" sx={{ minWidth: 1000 }}>
               <TableHead>
                 <TableRow>
-                  {(["type","severity","description","step","asset","project","reported","closedBy","closed","correctiveAction"] as const).map((k) => {
+                  {(["severity","description","step","asset","project","reported","closedBy","closed","correctiveAction"] as const).map((k) => {
                     const labels: Record<string, string> = { type:"Type", severity:"Sev.", description:"Description", step:"Step", asset:"Asset", project:"Project", reported:"Reported", closedBy:"Closed By", closed:"Closed", correctiveAction:"Corrective Action" };
                     const isSuccess = ["closedBy","closed","correctiveAction"].includes(k);
                     return (
@@ -640,9 +640,6 @@ const IssuesBoard = () => {
               <TableBody>
                 {sortedHistory.map((iss) => (
                   <TableRow key={`${iss.runId}-${iss.issueId}`} hover sx={{ borderLeft: "3px solid", borderLeftColor: "success.main" }}>
-                    <TableCell sx={{ py: 0.75 }}>
-                      <Chip label={typeLabel(iss.issueType)} size="small" color={typeColor(iss.issueType)} variant="outlined" sx={{ fontSize: "0.65rem", height: 18 }} />
-                    </TableCell>
                     <TableCell sx={{ py: 0.75 }}>
                       <Chip label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)} size="small" color={severityColor(iss.severity)} sx={{ fontSize: "0.65rem", height: 18 }} />
                     </TableCell>
@@ -822,11 +819,11 @@ const IssuesBoard = () => {
               <TableRow>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
                 <TableCell sx={{ width: 36, py: 1 }}></TableCell>
-                {(["asset","project","type","severity","description","step","reported","by"] as const).map((k) => (
+                {(["asset","project","severity","description","step","reported","by"] as const).map((k) => (
                   <TableCell key={k} sx={{ py: 1 }}>
                     <Stack direction="row" alignItems="center" spacing={0.25}>
                       <Typography sx={{ fontWeight: 700, fontSize: "0.75rem" }}>
-                        {k === "type" ? "Type" : k === "severity" ? "Severity" : k === "description" ? "Description" : k === "step" ? "Step" : k === "asset" ? "Asset" : k === "project" ? "Project" : k === "reported" ? "Reported" : "By"}
+                        {k === "severity" ? "Severity" : k === "description" ? "Description" : k === "step" ? "Step" : k === "asset" ? "Asset" : k === "project" ? "Project" : k === "reported" ? "Reported" : "By"}
                       </Typography>
                       <IconButton size="small" sx={{ p: 0.25 }} onClick={(e) => setAutoMenu({ anchorEl: e.currentTarget, key: k })}>
                         <ArrowDropDown fontSize="small" />
@@ -892,15 +889,6 @@ const IssuesBoard = () => {
                       </TableCell>
                       <TableCell sx={{ py: 0.75 }}>
                         <Chip
-                          label={typeLabel(iss.issueType)}
-                          size="small"
-                          color={typeColor(iss.issueType)}
-                          variant="outlined"
-                          sx={{ fontSize: "0.65rem", height: 18 }}
-                        />
-                      </TableCell>
-                      <TableCell sx={{ py: 0.75 }}>
-                        <Chip
                           label={iss.severity.charAt(0).toUpperCase() + iss.severity.slice(1)}
                           size="small"
                           color={severityColor(iss.severity)}
@@ -944,7 +932,7 @@ const IssuesBoard = () => {
 
                     {/* Expanded close-issue panel */}
                     <TableRow sx={{ bgcolor: "action.hover" }}>
-                      <TableCell colSpan={11} sx={{ py: 0, px: 0, border: 0 }}>
+                      <TableCell colSpan={10} sx={{ py: 0, px: 0, border: 0 }}>
                         <Collapse in={isExpanded} unmountOnExit>
                           <Paper
                             variant="outlined"
