@@ -1409,12 +1409,14 @@ public class ProjectAssetsController : ControllerBase
                 false,
                 null,
                 HasOpenIssues(asset.IssuesJson),
+                HasOpenBlockingIssues(asset.IssuesJson),
                 null,
                 null
             );
         }
 
         var hasOpenIssues = HasOpenIssues(latestRun.IssuesJson) || HasOpenIssues(asset.IssuesJson);
+        var hasOpenBlockingIssues = HasOpenBlockingIssues(latestRun.IssuesJson) || HasOpenBlockingIssues(asset.IssuesJson);
 
         var counts = CountWorkflowEvidence(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson);
         var allStepsCompleted = HasCompletedAllWorkflowSteps(latestRun.WorkflowSnapshotJson, latestRun.StepResultsJson, latestRun.IsLocked);
@@ -1447,6 +1449,7 @@ public class ProjectAssetsController : ControllerBase
             latestRun.IsLocked,
             latestRun.SignatureStatus,
             hasOpenIssues,
+            hasOpenBlockingIssues,
             latestRun.StartedAt,
             latestRun.CompletedAt
         );
@@ -1461,6 +1464,33 @@ public class ProjectAssetsController : ControllerBase
             return issues.Any(issue =>
                 !issue.TryGetProperty("resolved", out var resolvedEl) ||
                 resolvedEl.ValueKind != JsonValueKind.True);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static bool HasOpenBlockingIssues(string? issuesJson)
+    {
+        if (string.IsNullOrWhiteSpace(issuesJson) || issuesJson == "[]") return false;
+        try
+        {
+            var issues = JsonSerializer.Deserialize<List<JsonElement>>(issuesJson, _json) ?? [];
+            return issues.Any(issue =>
+            {
+                var resolved = issue.TryGetProperty("resolved", out var resolvedEl)
+                    && resolvedEl.ValueKind == JsonValueKind.True;
+                if (resolved) return false;
+
+                var explicitBlocking = issue.TryGetProperty("isBlocking", out var blockingEl)
+                    && blockingEl.ValueKind == JsonValueKind.True;
+                var blockingType = issue.TryGetProperty("issueType", out var typeEl)
+                    && string.Equals(typeEl.GetString(), "blocking", StringComparison.OrdinalIgnoreCase);
+                var highSeverity = issue.TryGetProperty("severity", out var severityEl)
+                    && string.Equals(severityEl.GetString(), "high", StringComparison.OrdinalIgnoreCase);
+                return explicitBlocking || blockingType || highSeverity;
+            });
         }
         catch
         {
