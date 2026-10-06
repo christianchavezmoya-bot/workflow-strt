@@ -19,9 +19,7 @@ export interface AssetIssue {
   reportedAt: string;
   resolved: boolean;
   comments?: IssueComment[];
-  /** Base64 data URLs attached when the issue was reported */
   reportMedia?: string[];
-  /** Base64 data URLs attached when the issue was closed (evidence of fix) */
   resolutionMedia?: string[];
   resolutionNote?: string;
   resolvedAt?: string;
@@ -35,7 +33,6 @@ export interface ProjectAsset {
   productConfigId?: string;
   workflowTemplateId?: string;
   assetTag: string;
-  /** Equipment type/name e.g. "AGI-10", "Shuttle Car", "Skid Steer" */
   assetName?: string;
   serialNumber?: string;
   assetModel?: string;
@@ -45,17 +42,11 @@ export interface ProjectAsset {
   status: ProjectAssetStatus;
   workOrderId?: string;
   notes?: string;
-  /** JSON string: Record<featureId, string> */
   featureValuesJson: string;
-  /** JSON string: AssetIssue[] */
   issuesJson: string;
-  /** Human-readable label for what was installed, e.g. "Strata AI / 2 Cameras + Reverse Input" */
   configLabel?: string;
-  /** ISO timestamp when the installation workflow was completed */
   installedAt?: string;
-  /** Name of the technician who completed the installation */
   installedBy?: string;
-  /** JSON snapshot of all captured data-capture field values from completed workflow runs */
   asBuiltJson?: string;
   createdAt: string;
   updatedAt: string;
@@ -77,6 +68,8 @@ export interface ProjectAssetWorkflowSummary {
   latestRunLocked: boolean;
   signatureStatus?: string;
   hasOpenIssues: boolean;
+  /** Explicit unresolved blocking gate. Generic open issues must never be promoted to blocking. */
+  hasOpenBlockingIssues?: boolean;
   latestRunStartedAt?: string;
   latestRunCompletedAt?: string;
   totalInventoryFeatures?: number;
