@@ -249,10 +249,28 @@ function line(label: string, value?: string | number | null): Paragraph {
   });
 }
 
-export function workflowReportBaseFileName(asset: ProjectAsset, run: AssetWorkflowRun): string {
-  const safeName = (asset.assetTag ?? "asset").replace(/[^a-zA-Z0-9-_]/g, "_");
-  const runNum = run.runNumber ?? 1;
-  return `installation-record_${safeName}_run${runNum}`;
+function safeFilePart(value: string | undefined, fallback: string): string {
+  const cleaned = (value ?? "").trim().replace(/[^a-zA-Z0-9-_]+/g, "_").replace(/^_+|_+$/g, "");
+  return cleaned || fallback;
+}
+
+export function workflowReportBaseFileName(
+  asset: ProjectAsset,
+  run: AssetWorkflowRun,
+  reportType = "workflow",
+  projectNumber = "project",
+  workflowName = "workflow",
+): string {
+  const parts = [
+    safeFilePart(reportType, "workflow"),
+    safeFilePart(projectNumber, "project"),
+    safeFilePart(asset.assetTag, "asset"),
+    safeFilePart(workflowName, "workflow"),
+  ];
+  // Keep the identity fields stable; trim only the workflow-name suffix.
+  const prefix = parts.slice(0, 3).join("_");
+  const remaining = Math.max(24, 180 - prefix.length - 1);
+  return `${prefix}_${parts[3].slice(0, remaining)}`;
 }
 
 export function buildWorkflowReportJson(context: WorkflowReportExportContext): WorkflowReportJson {
