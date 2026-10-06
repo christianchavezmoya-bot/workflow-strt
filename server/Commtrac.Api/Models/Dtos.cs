@@ -902,6 +902,7 @@ public record ProjectAssetWorkflowSummaryDto(
     bool LatestRunLocked,
     string? SignatureStatus,
     bool HasOpenIssues,
+    bool HasOpenBlockingIssues,
     DateTime? LatestRunStartedAt,
     DateTime? LatestRunCompletedAt
 );
