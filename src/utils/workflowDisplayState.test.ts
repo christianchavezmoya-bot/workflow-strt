@@ -110,6 +110,7 @@ describe("getWorkflowDisplayState slim-run + summary fallback", () => {
           missingItems: 0,
           latestRunLocked: true,
           hasOpenIssues: true,
+          hasOpenBlockingIssues: true,
         },
       }),
       [slimRun({ isLocked: true, status: "Complete" })],
@@ -117,6 +118,28 @@ describe("getWorkflowDisplayState slim-run + summary fallback", () => {
     );
     expect(displayState.action?.kind).toBe("resolve-blocking");
     expect(displayState.gates.blockingIssueCount).toBe(1);
+  });
+
+  it("does not promote generic open Medium issues to a blocking action", () => {
+    const displayState = getWorkflowDisplayState(
+      asset({
+        status: "Closed",
+        workflowSummary: {
+          hasWorkflow: true,
+          evidenceStatus: "Complete",
+          requiredItems: 3,
+          completedItems: 3,
+          missingItems: 0,
+          latestRunLocked: true,
+          hasOpenIssues: true,
+          hasOpenBlockingIssues: false,
+        },
+      }),
+      [slimRun({ isLocked: true, status: "Complete" })],
+      { hasRunnableWorkflowSource: true },
+    );
+    expect(displayState.action?.kind).not.toBe("resolve-blocking");
+    expect(displayState.gates.blockingIssueCount).toBe(0);
   });
 
   it("prefers an active in-progress run over stale locked summary", () => {
@@ -176,6 +199,7 @@ describe("getWorkflowDisplayState slim-run + summary fallback", () => {
           missingItems: 0,
           latestRunLocked: false,
           hasOpenIssues: true,
+          hasOpenBlockingIssues: true,
         },
       }),
       [slimRun()],
@@ -197,6 +221,7 @@ describe("getWorkflowDisplayState slim-run + summary fallback", () => {
           missingItems: 1,
           latestRunLocked: false,
           hasOpenIssues: true,
+          hasOpenBlockingIssues: true,
         },
       }),
       [slimRun()],
