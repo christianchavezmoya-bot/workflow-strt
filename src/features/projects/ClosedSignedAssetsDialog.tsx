@@ -66,7 +66,12 @@ type SignedAssetRow = {
 const REPORT_TYPE = "Closed Signed Asset Report";
 
 function isRunFullySigned(run: AssetWorkflowRun): boolean {
-  return Boolean(run.installerSignedAt) && (Boolean(run.customerSignedAt) || run.signatureStatus === "Signed");
+  const installerComplete = Boolean(run.installerSignedAt);
+  const customerComplete =
+    Boolean(run.customerSignedAt)
+    || run.signatureStatus === "Signed"
+    || run.signatureStatus === "WaivedCustomer";
+  return installerComplete && customerComplete;
 }
 
 function issueCount(run: AssetWorkflowRun): number {
