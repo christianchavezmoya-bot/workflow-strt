@@ -24,6 +24,7 @@ import { openObjectUrl } from "./printWindow";
 import { formatInstant, resolveProjectTimeZone, zoneAbbreviation } from "./datetime";
 import { normalizeCapturedValueForDisplay } from "./capturedValueFormat";
 import { normalizeBinaryDataUrl } from "./reportMediaResolve";
+import { workflowReportBaseFileName } from "./workflowReportExport";
 
 // â”€â”€â”€ Colour palette â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const NAVY: [number, number, number]       = [26,  39,  68];   // header band / step card header
@@ -379,6 +380,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     run, asset, workflowConfigName,
     businessLogoBase64, customerLogoBase64, companyName = "Strata N-go",
     customerName, jobNumber, siteName, siteLocation, assignedTechnician,
+    documentType,
     includeAllSteps = false,
     signatureEvents = [],
     productFeatures = [],
@@ -478,10 +480,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   doc.setTextColor(...WHITE);
   doc.setFontSize(12);
   doc.setFont("helvetica", "bold");
-  doc.text("INSTALLATION RECORD", PAGE_W / 2, HEADER_H / 2 - 1, { align: "center" });
-  doc.setFontSize(8.5);
+  const reportTypeLabel = (documentType?.trim() || "Workflow").replace(/\s+report$/i, "");
+  doc.text(`${reportTypeLabel.toUpperCase()} REPORT`, PAGE_W / 2, HEADER_H / 2 - 3, { align: "center" });
+  doc.setFontSize(7.5);
   doc.setFont("helvetica", "normal");
-  doc.text(asset.assetTag ?? "", PAGE_W / 2, HEADER_H / 2 + 4.5, { align: "center" });
+  doc.text([jobNumber, asset.assetTag, workflowConfigName].filter(Boolean).join(" · "), PAGE_W / 2, HEADER_H / 2 + 3, { align: "center", maxWidth: 100 });
 
   await addLogoOrText(customerLogoBase64, PAGE_W - MARGIN - LOGO_W, "");
 
@@ -771,7 +774,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           const val = values[inputDef.id];
           const missing = missingItems.get(inputDef.id);
           const label = inputDef.label ?? inputDef.id;
-          const shouldRender = Boolean(val) || Boolean(missing) || inputDef.type === "photo" || inputDef.type === "video" || inputDef.required;
+          const shouldRender = Boolean(val) || Boolean(missing) || inputDef.required;
           if (!shouldRender) continue;
           handledIds.add(inputDef.id);
 
@@ -794,7 +797,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
 
             if (photos.length > 0) {
               stepMediaItems.push({ label, photos, isSig: inputDef.type === "signature" });
-            } else {
+            } else if (inputDef.required) {
               bodyRows.push([label, "MISSING - image not captured"]);
             }
             continue;
@@ -1040,34 +1043,19 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     doc.text("No issues were recorded for this run.", MARGIN + 2, y + 5);
     y += 10;
   } else {
+    const stepNumberById = new Map(steps.map((step, index) => [step.id, String(index + 1)]));
     const issueRows = issues.map((issue) => {
-      const statusLabel = issue.resolved
-        ? "Closed"
-        : issue.isBlocking ? "Blocking" : "Open";
+      const statusLabel = issue.resolved ? "Closed" : issue.isBlocking ? "Blocking" : "Open";
       const resolution = issue.resolved && issue.resolutionNote
-        ? `${issue.resolutionNote}${issue.resolvedBy ? `
-— ${issue.resolvedBy}` : ""}${issue.resolvedAt ? `, ${fmt(issue.resolvedAt)}` : ""}`
+        ? `${issue.resolutionNote}${issue.resolvedBy ? ` — ${issue.resolvedBy}` : ""}`
         : issue.resolved ? `Resolved${issue.resolvedBy ? ` by ${issue.resolvedBy}` : ""}` : "—";
-      const commentsCount = (issue.comments ?? []).length;
-      const typeLabel = issue.issueType === "blocking" ? "Blocking"
-        : issue.issueType === "scope-deviation" ? "Scope Dev." : "Observation";
-      const impact = issue.issueType === "scope-deviation"
-        ? [
-            issue.extraHours != null ? `+${issue.extraHours}h` : null,
-            issue.costImpact ?? null,
-            issue.approvedBy ? `Approved: ${issue.approvedBy}` : null,
-          ].filter(Boolean).join(" · ") || "—"
-        : "—";
       return [
         issue.description,
-        typeLabel,
         issue.severity.charAt(0).toUpperCase() + issue.severity.slice(1),
-        issue.stepTitle ?? "—",
+        issue.stepId ? (stepNumberById.get(issue.stepId) ?? "—") : "—",
         statusLabel,
         fmt(issue.reportedAt),
         resolution,
-        impact,
-        commentsCount > 0 ? String(commentsCount) : "—",
       ];
     });
 
@@ -1075,55 +1063,33 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       startY: y,
       margin: { left: MARGIN, right: MARGIN },
       theme: "striped",
-      head: [["Description", "Type", "Severity", "Step", "Status", "Reported", "Resolution / Action Taken", "Impact", "Notes"]],
+      head: [["Description", "Severity", "Step", "Status", "Reported", "Resolution / Action Taken"]],
       body: issueRows,
-      styles: {
-        fontSize: 7.5,
-        cellPadding: { top: 2, bottom: 2, left: 3, right: 3 },
-        overflow: "linebreak",
-        lineColor: BORDER,
-        lineWidth: 0.2,
-      },
-      headStyles: {
-        fillColor: NAVY,
-        textColor: WHITE,
-        fontStyle: "bold",
-        fontSize: 7.5,
-      },
+      styles: { fontSize: 7.5, cellPadding: { top: 2, bottom: 2, left: 3, right: 3 }, overflow: "linebreak", lineColor: BORDER, lineWidth: 0.2 },
+      headStyles: { fillColor: NAVY, textColor: WHITE, fontStyle: "bold", fontSize: 7.5 },
       alternateRowStyles: { fillColor: GREY_BG },
       columnStyles: {
-        0: { cellWidth: CONTENT_W * 0.20 },
+        0: { cellWidth: CONTENT_W * 0.34 },
         1: { cellWidth: CONTENT_W * 0.10 },
-        2: { cellWidth: CONTENT_W * 0.08 },
+        2: { cellWidth: CONTENT_W * 0.08, halign: "center" },
         3: { cellWidth: CONTENT_W * 0.10 },
-        4: { cellWidth: CONTENT_W * 0.08 },
-        5: { cellWidth: CONTENT_W * 0.09 },
-        6: { cellWidth: CONTENT_W * 0.18 },
-        7: { cellWidth: CONTENT_W * 0.10 },
-        8: { cellWidth: CONTENT_W * 0.07, halign: "center" },
+        4: { cellWidth: CONTENT_W * 0.12 },
+        5: { cellWidth: CONTENT_W * 0.26 },
       },
       didParseCell: (data) => {
         if (data.section !== "body") return;
-        // Severity colour
-        if (data.column.index === 2) {
+        if (data.column.index === 1) {
           const sev = String(data.cell.raw).toLowerCase();
-          if (sev === "high")        data.cell.styles.textColor = RED;
+          if (sev === "high") data.cell.styles.textColor = RED;
           else if (sev === "medium") data.cell.styles.textColor = ORANGE;
-          else                       data.cell.styles.textColor = BLUE;
+          else data.cell.styles.textColor = BLUE;
           data.cell.styles.fontStyle = "bold";
         }
-        // Status colour
-        if (data.column.index === 4) {
+        if (data.column.index === 3) {
           const s = String(data.cell.raw);
-          if (s === "Blocking")     { data.cell.styles.textColor = RED;    data.cell.styles.fontStyle = "bold"; }
-          else if (s === "Closed")  { data.cell.styles.textColor = GREEN; }
-          else if (s === "Open")    { data.cell.styles.textColor = ORANGE; }
-        }
-        // Type colour
-        if (data.column.index === 1) {
-          const t = String(data.cell.raw);
-          if (t === "Blocking")    data.cell.styles.textColor = RED;
-          if (t === "Scope Dev.")  { data.cell.styles.textColor = ORANGE; data.cell.styles.fontStyle = "bold"; }
+          if (s === "Blocking") { data.cell.styles.textColor = RED; data.cell.styles.fontStyle = "bold"; }
+          else if (s === "Closed") data.cell.styles.textColor = GREEN;
+          else if (s === "Open") data.cell.styles.textColor = ORANGE;
         }
       },
       didDrawPage: (data) => { drawFooter(data.pageNumber); },
@@ -1249,9 +1215,7 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
   }
 
   // â”€â”€ Save â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-  const safeName = (asset.assetTag ?? "asset").replace(/[^a-zA-Z0-9-_]/g, "_");
-  const runNum   = run.runNumber ?? 1;
-  const fileName = `installation-record_${safeName}_run${runNum}.pdf`;
+  const fileName = `${workflowReportBaseFileName(asset, run, documentType, jobNumber, workflowConfigName)}.pdf`;
   if (outputMode === "blob") {
     return doc.output("blob");
   }
