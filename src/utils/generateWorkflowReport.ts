@@ -678,7 +678,9 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       doc.setFontSize(7);
       doc.setFont("helvetica", "bold");
       doc.setTextColor(...WHITE);
-      doc.text(String(stepNumber).padStart(2, "0"), badgeCX, badgeCY + 2.5, { align: "center" });
+      // Centre on the circle with jsPDF's own baseline:"middle" — a fixed "+2.5" baseline offset
+      // only looks right for one font-size/glyph combination and drew the number off-centre.
+      doc.text(String(stepNumber).padStart(2, "0"), badgeCX, badgeCY, { align: "center", baseline: "middle" });
 
       // Step title
       doc.setFontSize(9);
