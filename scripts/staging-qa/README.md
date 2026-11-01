@@ -45,6 +45,13 @@ the prefix.
   for a non-admin staging account confined to ZZQA data and deactivated after each test window.
   Enable 2FA in the UI if the account will live longer.
 - **Writes:** every script is a dry run unless `--apply` is passed.
+- **Errors:** API failures report only method, route, status and a kind (`login_rejected`,
+  `unauthorized`, `forbidden`, `not_found`, `network`, …). Response bodies are never shown,
+  because they can echo submitted credentials. Unexpected errors print "details suppressed".
+- **Identity checks:** an existing account is reused or deactivated only if its recorded ID, email,
+  exact full name (`ZZQA QA Project Manager` / `ZZQA QA Installer`) and role all match. An
+  already-active QA account is never re-invited, because the invite endpoint deactivates the
+  account until the link is used.
 
 ## Procedure
 
@@ -72,8 +79,26 @@ the prefix.
    node scripts/staging-qa/cleanup-project.mjs --apply                 # QA PM: soft-delete project + assets, delete customer
    node scripts/staging-qa/provision-users.mjs --deactivate --apply    # Admin: disable both QA users
    ```
+   Each outcome is verified, never assumed:
+   - `deleted`: the record reads back as deleted (the project via `?includeDeleted=true`; the
+     customer is no longer listed);
+   - `absent` / `already-deleted`: the API confirmed it;
+   - any 401, 403, network or server error aborts the run, and the customer is never touched if
+     the project step failed.
+
    The project and its assets are soft-deleted, which is restorable. An Admin may hard-purge them
    in the app (Admin-only).
+
+## Tests
+
+`scripts/staging-qa/staging-qa.test.mjs` runs in the normal `npm test` (Vitest) against an
+in-memory fake API. It covers:
+- refusal of production and look-alike hosts before any request;
+- dry runs making no writes;
+- account identity mismatches;
+- redaction of credentials and tokens in errors and logs;
+- cleanup outcomes for 401, 403, 404, network failures and deletes that report success without
+  deleting anything.
 
 ## Verified
 
