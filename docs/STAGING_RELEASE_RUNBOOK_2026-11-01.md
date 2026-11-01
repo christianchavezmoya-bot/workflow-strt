@@ -25,10 +25,13 @@ Companion docs: `HANDOFF_STATUS_2026-11-01.md` (state before this release) and
 
 ## 2. Deploy procedure (what is actually run)
 
-`scripts/deploy-phase-c-aws.sh` is the documented staging procedure, but parts of it are stale
-(Step 1 rewrites the CloudFront aliases/cert; Step 4 asserts `www` = staging, which has been false
-since `www` became production on `E1AYVTSTERUCZP`; `EXPECTED_SHA` is hard-coded). Until that's fixed,
-run its steps by hand:
+`scripts/deploy-phase-c-aws.sh` is the documented staging procedure. Before PR #382 (merged
+2026-11-01, `main` `3621eb655`) parts of it were stale: Step 1 rewrote the CloudFront aliases/cert by
+default, Step 4 asserted `www` = staging (false since `www` became production on `E1AYVTSTERUCZP`), and
+`EXPECTED_SHA` was hard-coded. So release `1f31444a2` was deployed by running these steps by hand.
+With #382 merged, the script can be used directly: `EXPECTED_SHA=<sha> ./scripts/deploy-phase-c-aws.sh`
+(CloudFront setup is opt-in; the image is tagged with the git SHA and deployed by digest). The manual
+equivalent:
 
 ```bash
 P="--profile strata-agent --region ap-southeast-2"     # bash; in zsh use an array
@@ -86,6 +89,10 @@ on the deploying Mac):
 | Web | build `56de85086` (entry `index-CDQSUoq1.js`, 176 objects), byte-exact snapshot `rollback-staging-web-56de85086/` + `.sha256` list | `aws s3 sync <snapshot>/ s3://strata-ngo-web-staging/ --delete` (same cache flags, excluding `index.html` + manifest), then `index.html` + manifest no-cache, then invalidate `E1YN5XTWDWRHYP` |
 | Web (no snapshot) | git `56de85086` | clean worktree at that SHA → `npm ci` → `npm run build:dev-web` → deploy as above |
 | Database | unchanged by this release | nothing to roll back (no migrations; migrations disabled at startup) |
+
+**Emergency rollback restores a mixed pair:** API `ab9b365` (`:46`) with web `56de85086`. That's
+the pair staging served from 2026-10-01 to 2026-10-31, but it drops #377–#379 and the two halves no
+longer share one SHA. For a single-SHA rollback, rebuild and deploy the `ab9b365` web instead.
 
 S3 bucket versioning can't be read with the agent role (`s3:GetBucketVersioning` denied), so
 don't count on object versions; use the snapshot.
