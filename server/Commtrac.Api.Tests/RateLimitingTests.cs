@@ -101,7 +101,7 @@ public class RateLimitingTests
     [Fact]
     public async Task Window_expiry_restores_access()
     {
-        using var factory = new RateLimitingTestFactory();
+        using var factory = new RateLimitingTestFactory(window: RateLimitingTestFactory.ShortWindow);
         var client = ClientWithIp(factory, "203.0.113.12");
 
         for (var i = 0; i < SecurityRateLimitPolicies.ResetPasswordIpPermitLimit; i++)
@@ -111,7 +111,7 @@ public class RateLimitingTests
         var limited = await client.PostAsJsonAsync("/api/auth/reset-password", new { token = "nonexistent", newPassword = "irrelevant" });
         Assert.Equal(HttpStatusCode.TooManyRequests, limited.StatusCode);
 
-        await Task.Delay(RateLimitingTestFactory.TestWindow + TimeSpan.FromMilliseconds(500));
+        await Task.Delay(RateLimitingTestFactory.ShortWindow + TimeSpan.FromMilliseconds(500));
 
         var afterWindow = await client.PostAsJsonAsync("/api/auth/reset-password", new { token = "nonexistent", newPassword = "irrelevant" });
         Assert.NotEqual(HttpStatusCode.TooManyRequests, afterWindow.StatusCode);

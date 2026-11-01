@@ -23,8 +23,9 @@ namespace Commtrac.Api.Tests;
 
 /// <summary>
 /// Boots the API with the real Phase 2 rate-limit thresholds (permit limits unchanged from
-/// production) but short windows, so window-expiry tests don't require a real 5-15 minute
-/// wait. Also lets a test set the resolved client IP directly (via a header, applied before
+/// production). Windows default to <see cref="DefaultWindow"/>, far longer than any test runs,
+/// so "limited after N requests" assertions can't be undone by time passing; a window-expiry
+/// test opts into <see cref="ShortWindow"/> instead of waiting a real 5-15 minutes. Also lets a test set the resolved client IP directly (via a header, applied before
 /// routing) and fakes the outbound Resend HTTP call so email-suppression-after-limit tests
 /// can assert on delivery-attempt counts without any network access.
 /// </summary>
@@ -33,8 +34,17 @@ internal sealed class RateLimitingTestFactory : WebApplicationFactory<Program>
     /// <summary>Test-only header setting the connection's resolved client IP directly.</summary>
     public const string ClientIpHeader = "X-Test-Client-Ip";
 
-    /// <summary>All rate-limit windows are shortened to this for every test using this factory.</summary>
-    public static readonly TimeSpan TestWindow = TimeSpan.FromSeconds(2);
+    /// <summary>Default for every window. The limiters are sliding windows that hand permits back
+    /// segment by segment, so with a window of a couple of seconds a slow CI runner could finish
+    /// the N permitted requests after the earliest permits had already returned, and the
+    /// "should be limited" request then got through (seen in CI as 404 instead of 429).
+    /// Ten minutes can't elapse inside a test.</summary>
+    public static readonly TimeSpan DefaultWindow = TimeSpan.FromMinutes(10);
+
+    /// <summary>Opt-in short window for tests that must observe a window expiring.</summary>
+    public static readonly TimeSpan ShortWindow = TimeSpan.FromSeconds(5);
+
+    private readonly TimeSpan _window;
 
     private readonly Func<HttpRequestMessage, HttpResponseMessage>? _resendResponder;
     public int ResendCallCount;
@@ -50,9 +60,11 @@ internal sealed class RateLimitingTestFactory : WebApplicationFactory<Program>
     private static readonly string ApiContentRoot =
         Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "Commtrac.Api"));
 
-    public RateLimitingTestFactory(Func<HttpRequestMessage, HttpResponseMessage>? resendResponder = null)
+    public RateLimitingTestFactory(
+        Func<HttpRequestMessage, HttpResponseMessage>? resendResponder = null, TimeSpan? window = null)
     {
         _resendResponder = resendResponder;
+        _window = window ?? DefaultWindow;
         // Staging (not Development): RequestOtp's Development branch never calls the email
         // service at all (it hands the OTP back directly for local convenience), which would
         // make the email-dispatch-suppression tests this factory exists for meaningless.
@@ -82,16 +94,16 @@ internal sealed class RateLimitingTestFactory : WebApplicationFactory<Program>
             TestDbRegistration.UseTestDatabase(services, options =>
                 options.UseSqlite($"Data Source={_dbPath}"));
 
-            // Short-window registry: same permit limits as production, fast-expiring windows.
+            // Test registry: same permit limits as production, one window for every limiter.
             services.RemoveAll<SecurityRateLimiterRegistry>();
             services.AddSingleton(new SecurityRateLimiterRegistry(
-                credentialIpWindow: TestWindow,
-                emailDispatchIpWindow: TestWindow,
-                forgotPasswordEmailWindow: TestWindow,
-                requestOtpTokenWindow: TestWindow,
-                resetPasswordIpWindow: TestWindow,
-                submitTokenWindow: TestWindow,
-                submitIpWindow: TestWindow));
+                credentialIpWindow: _window,
+                emailDispatchIpWindow: _window,
+                forgotPasswordEmailWindow: _window,
+                requestOtpTokenWindow: _window,
+                resetPasswordIpWindow: _window,
+                submitTokenWindow: _window,
+                submitIpWindow: _window));
 
             if (_resendResponder is not null)
             {
