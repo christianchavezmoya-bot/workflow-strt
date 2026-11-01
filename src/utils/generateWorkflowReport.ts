@@ -1121,9 +1121,11 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
     colX: number,
     title: string,
     event: SignatureEvent | null,
-    sigStatus: string,
+    /** Sign-off was waived for this signer: there is no event, so say so instead of "Sign here". */
+    waived: boolean,
   ): Promise<void> {
-    let cy = y;
+    // Title baseline 3 mm below the content start so its caps clear the section bar.
+    let cy = y + 3;
 
     // Column title
     doc.setFontSize(8);
@@ -1156,6 +1158,16 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
           );
         } catch { /* leave box blank */ }
       }
+    } else if (!event && waived) {
+      // Waived — an explicit notice, never an empty box that reads as "still to be signed"
+      doc.setFontSize(9);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(...ORANGE);
+      doc.text("Customer signature waived", colX + imgW / 2, cy + imgH / 2, { align: "center" });
+      doc.setFontSize(7.5);
+      doc.setFont("helvetica", "italic");
+      doc.setTextColor(...GREY_LABEL);
+      doc.text("No customer signature was captured", colX + imgW / 2, cy + imgH / 2 + 4.5, { align: "center" });
     } else if (!event) {
       // Blank — label inside box for manual signing
       doc.setFontSize(7.5);
@@ -1190,6 +1202,8 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
         doc.text(line, colX, cy);
         cy += 4.5;
       }
+    } else if (waived) {
+      doc.text("Status: Waived", colX, cy);
     } else {
       // Blank lines for manual fill
       const blankLineW = imgW * 0.7;
@@ -1197,17 +1211,13 @@ export async function generateWorkflowReport(params: GenerateReportParams): Prom
       doc.setLineWidth(0.25);
       doc.line(colX, cy + 3,  colX + blankLineW, cy + 3);  cy += 8;
       doc.text("Name / Date", colX, cy);
-      // Check waived status
-      if (sigStatus === "WaivedCustomer" && title.includes("Customer")) {
-        doc.setFont("helvetica", "italic");
-        doc.setTextColor(...ORANGE);
-        doc.text("Customer signature waived", colX, cy - 4);
-      }
     }
   }
 
-  await drawSigColumn(sigCol1, "TECHNICIAN SIGN-OFF",  installer, run.signatureStatus);
-  await drawSigColumn(sigCol2, "CUSTOMER APPROVAL",    customer,  run.signatureStatus);
+  // A customer waiver is recorded only as run.signatureStatus (no customer signature event); a
+  // real customer event still wins if one exists. The waiver never applies to the technician.
+  await drawSigColumn(sigCol1, "TECHNICIAN SIGN-OFF",  installer, false);
+  await drawSigColumn(sigCol2, "CUSTOMER APPROVAL",    customer,  run.signatureStatus === "WaivedCustomer");
 
   // â”€â”€ Draw footer on every page â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const numPages = totalPages();
