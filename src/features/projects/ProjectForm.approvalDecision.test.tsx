@@ -162,7 +162,12 @@ function getApprovalDecisionGroup() {
   return screen.getByText("Approval Decision").closest("div")!;
 }
 
-describe("ProjectForm — Approval Decision (Internal projects, reusing the External mechanism)", () => {
+// Each test mounts the full ProjectForm (large MUI form) in jsdom: ~0.5-1.4 s in isolation,
+// but every test here runs ~4x slower under full-suite parallel CPU contention (measured: first
+// test 4.9-6.2 s, persistence test 5.3-6.3 s, the rest 1.8-3.9 s), so the 5 s default failed
+// intermittently. The work is CPU-bound with no race or timer to fix, so give the whole file
+// a budget with a 3x margin over the worst observed time; a genuine hang still fails.
+describe("ProjectForm — Approval Decision (Internal projects, reusing the External mechanism)", { timeout: 20_000 }, () => {
   beforeEach(() => {
     getProjectMock.mockReset();
     createProjectMock.mockReset();
@@ -246,8 +251,7 @@ describe("ProjectForm — Approval Decision (Internal projects, reusing the Exte
   });
 
   // Required test: persistence — reopen Edit Project and verify state/status
-  // Mounts the full ProjectForm twice (initial edit + reopen) — comfortably under the 5s
-  // default in isolation, but can exceed it under full-suite parallel CPU contention.
+  // Mounts the full ProjectForm twice (initial edit + reopen); covered by the file-wide budget.
   it("persists: reopening Edit Project after Approved shows the Approved status carried into the form", async () => {
     updateProjectMock.mockImplementation(async (_id: string, payload: Partial<Project>) => ({
       ...makeProject({ projectType: "Internal" }),
@@ -281,7 +285,7 @@ describe("ProjectForm — Approval Decision (Internal projects, reusing the Exte
     const groups = screen.getAllByText("Approval Decision").map((el) => el.closest("div")!);
     const reopened = groups[groups.length - 1];
     expect(within(reopened).getByRole("radio", { name: "Approved" })).toBeChecked();
-  }, 15_000);
+  });
 
   // Required test #5 — External behavior unchanged
   it("External Draft + Approved + Save changes still works exactly as before", async () => {
