@@ -7,6 +7,7 @@ import type { WorkflowStep } from "../types/workflow";
 import { isOptionListInputType } from "../types/workflow";
 import { formatInstant, resolveProjectTimeZone } from "./datetime";
 import { normalizeCapturedValueForDisplay } from "./capturedValueFormat";
+import { FALLBACK_REPORT_TYPE } from "./workflowReportType";
 
 export interface WorkflowReportExportContext {
   run: AssetWorkflowRun;
@@ -280,7 +281,9 @@ export function buildWorkflowReportJson(context: WorkflowReportExportContext): W
   const enrichedAsBuilt = { ...asBuilt, fields: enrichAsBuiltFields(asBuilt.fields, capturedFields) };
   return {
     generatedAt: new Date().toISOString(),
-    documentType: documentType ?? "installation",
+    // The resolved workflow type (see workflowReportType.ts) — same value as the PDF title and
+    // filename. Neutral fallback, never a guessed "installation".
+    documentType: documentType?.trim() || FALLBACK_REPORT_TYPE,
     workflowConfigName,
     asset: {
       id: asset.id,
@@ -323,7 +326,7 @@ export function buildWorkflowReportJson(context: WorkflowReportExportContext): W
 export async function createWorkflowReportDocx(context: WorkflowReportExportContext): Promise<Blob> {
   const report = buildWorkflowReportJson(context);
   const tz = context.timeZoneId;
-  const title = report.documentType === "inspection" ? "Inspection Report" : "Installation Report";
+  const title = `${report.documentType.replace(/\s+report$/i, "")} Report`;
   const children: Array<Paragraph> = [
     new Paragraph({ text: title, heading: HeadingLevel.TITLE, spacing: { after: 220 } }),
     new Paragraph({ text: report.workflowConfigName, heading: HeadingLevel.HEADING_1, spacing: { after: 180 } }),

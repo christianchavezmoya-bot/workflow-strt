@@ -84,3 +84,30 @@ describe("buildPublicSignReportContext", () => {
     expect(ctx.run.startedAt).not.toBe(ctx.run.completedAt);
   });
 });
+
+describe("buildPublicSignReportContext — report type for the customer-facing PDF", () => {
+  it.each([
+    ["wftype-commissioning", "Commissioning", "Commissioning"],
+    ["wftype-repair", "Repair", "Repair"],
+    ["wftype-other", "Other", "Other"],
+    ["custom-sat", "Site Acceptance Test", "Site Acceptance Test"],
+  ])("server-resolved type %s (%s) → documentType %s", async (workflowTypeId, workflowTypeName, expected) => {
+    const ctx = await buildPublicSignReportContext(sampleSummary({ workflowTypeId, workflowTypeName }));
+    expect(ctx.documentType).toBe(expected);
+  });
+
+  it("legacy config with only configType text", async () => {
+    const ctx = await buildPublicSignReportContext(sampleSummary({ workflowConfigType: "inspection" }));
+    expect(ctx.documentType).toBe("Inspection");
+  });
+
+  it("seeded id without a name (catalog row missing) still resolves", async () => {
+    const ctx = await buildPublicSignReportContext(sampleSummary({ workflowTypeId: "wftype-commissioning", workflowTypeName: null }));
+    expect(ctx.documentType).toBe("Commissioning");
+  });
+
+  it("older API build without type fields → neutral 'Workflow', never a guessed 'Installation'", async () => {
+    const ctx = await buildPublicSignReportContext(sampleSummary());
+    expect(ctx.documentType).toBe("Workflow");
+  });
+});

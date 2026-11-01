@@ -198,6 +198,20 @@ public class PublicSignController : ControllerBase
             }
         }
 
+        // Report identity for the customer-facing PDF (read-only lookups; no schema change).
+        var wfConfig = string.IsNullOrEmpty(run.WorkflowConfigId)
+            ? null
+            : await _db.WorkflowConfigs.AsNoTracking()
+                .Where(c => c.Id == run.WorkflowConfigId)
+                .Select(c => new { c.WorkflowTypeId, c.ConfigType })
+                .FirstOrDefaultAsync();
+        var wfTypeName = string.IsNullOrEmpty(wfConfig?.WorkflowTypeId)
+            ? null
+            : await _db.WorkflowTypes.AsNoTracking()
+                .Where(t => t.Id == wfConfig.WorkflowTypeId)
+                .Select(t => t.Name)
+                .FirstOrDefaultAsync();
+
         return Ok(new PublicRunSummaryDto(
             run.Id,
             asset?.AssetName ?? asset?.AssetTag ?? "Asset",
@@ -241,7 +255,10 @@ public class PublicSignController : ControllerBase
             customerLogo,
             companyName,
             productFeaturesJson,
-            OtpRequired: !string.IsNullOrWhiteSpace(token.OtpHash)
+            OtpRequired: !string.IsNullOrWhiteSpace(token.OtpHash),
+            WorkflowTypeId: wfConfig?.WorkflowTypeId,
+            WorkflowTypeName: wfTypeName,
+            WorkflowConfigType: wfConfig?.ConfigType
         ));
     }
 
