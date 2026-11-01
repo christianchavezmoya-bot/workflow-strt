@@ -2562,12 +2562,16 @@ public class AssetWorkflowRunsController : ControllerBase
         var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
 
-        // Authorize before revealing anything about the run's state.
-        if (!CustomerWaiverPolicy.IsAllowed(User, asset, project, run))
+        // Authorize before revealing anything about the run's state. A denial writes only the
+        // audit row: nothing is tracked as modified at this point.
+        if (!CustomerWaiverPolicy.IsAllowed(User, asset, project))
         {
             CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.DeniedAction, run, asset, project, "waive-customer-signature", request?.Reason, ip);
             await _db.SaveChangesAsync();
-            return Forbid();
+            // Admin/PM pass the role check, so for them the only reason is a missing/deleted asset or project.
+            return CustomerWaiverPolicy.IsPrivileged(User)
+                ? Conflict(new { message = "The run's asset or project no longer exists; a customer signature cannot be waived." })
+                : Forbid();
         }
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before waiving customer signature." });
         if (run.SignatureStatus != "PendingCustomer")

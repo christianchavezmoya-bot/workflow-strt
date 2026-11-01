@@ -11,10 +11,18 @@ namespace Commtrac.Api.Authorization;
 /// A waiver is a customer-facing sign-off decision, so it is limited to:
 ///   - Admin and Project Manager (the roles that already manage sign-off: e-sign links and paper
 ///     completion are [Authorize(Roles = "Admin,Project Manager")]), or
-///   - a user connected to that specific work: the asset's assigned user, the run's technician,
-///     the project's manager, or a project team member. This keeps the field flow working
-///     (the installer who completes a run is offered "Close without customer signature").
-/// Anyone else — e.g. an Installer on an unrelated project — is refused.
+///   - a member of that project's team, or the user named as its project manager. Both are set
+///     only through Admin/PM-restricted endpoints (POST/PUT api/projects) or admin-only backup
+///     recovery, so a user cannot grant them to themselves.
+///
+/// Deliberately NOT sufficient on their own, because a non-privileged user can set them:
+///   - the asset's AssignedUserId (PATCH api/project-assets/{id}/assignment lets any user take
+///     an asset over by assigning it to themselves; POST api/asset-workflow-assignments
+///     auto-assigns an unassigned asset to the caller);
+///   - the run's TechnicianUserId (taken from the client in POST api/asset-workflow-runs).
+///
+/// A waiver also requires a live asset and project: a missing or soft-deleted asset or project,
+/// or a run whose asset belongs to another project, is refused for every role (no override).
 /// </summary>
 public static class CustomerWaiverPolicy
 {
@@ -29,17 +37,20 @@ public static class CustomerWaiverPolicy
     private static string ActorEmail(ClaimsPrincipal user) =>
         user.FindFirst("email")?.Value ?? user.FindFirst(ClaimTypes.Email)?.Value ?? "unknown";
 
-    public static bool IsAllowed(ClaimsPrincipal user, ProjectAssetEntity? asset, ProjectEntity? project, AssetWorkflowRunEntity? run)
+    public static bool IsPrivileged(ClaimsPrincipal user) => user.IsInRole("Admin") || user.IsInRole("Project Manager");
+
+    /// <summary>True when the asset and project exist, are not deleted and belong together.</summary>
+    public static bool HasLiveRelationship(ProjectAssetEntity? asset, ProjectEntity? project) =>
+        asset is not null && project is not null && !asset.IsDeleted && !project.IsDeleted && asset.ProjectId == project.Id;
+
+    public static bool IsAllowed(ClaimsPrincipal user, ProjectAssetEntity? asset, ProjectEntity? project)
     {
-        if (user.IsInRole("Admin") || user.IsInRole("Project Manager")) return true;
+        if (!HasLiveRelationship(asset, project)) return false;
+        if (IsPrivileged(user)) return true;
 
         var id = ActorId(user);
         if (string.IsNullOrWhiteSpace(id)) return false;
-        if (asset is not null && asset.AssignedUserId == id) return true;
-        if (run is not null && run.TechnicianUserId == id) return true;
-        if (project is null) return false;
-        if (project.ProjectManager == id) return true;
-        return TeamMemberIds(project).Contains(id);
+        return string.Equals(project!.ProjectManager, id, StringComparison.Ordinal) || TeamMemberIds(project).Contains(id);
     }
 
     private static HashSet<string> TeamMemberIds(ProjectEntity project)

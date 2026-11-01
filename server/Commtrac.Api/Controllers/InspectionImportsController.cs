@@ -298,7 +298,7 @@ public class InspectionImportsController : ControllerBase
         var guardAsset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
         var via = $"inspection-import:{entity.Id}";
         var ip = HttpContext?.Connection.RemoteIpAddress?.ToString();
-        if (!CustomerWaiverPolicy.IsAllowed(User, guardAsset, project, null))
+        if (!CustomerWaiverPolicy.IsAllowed(User, guardAsset, project))
         {
             CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.DeniedAction, null, guardAsset, project, via,
                 "auto-complete skipped: caller not authorized for this asset", ip);
@@ -343,6 +343,16 @@ public class InspectionImportsController : ControllerBase
                 .Where(r => r.AssetId == entity.AssetId && !r.IsLocked)
                 .OrderByDescending(r => r.StartedAt)
                 .ToListAsync();
+        }
+
+        // Auto-completion replaces the runs' and the asset's issue lists and locks the runs. Never
+        // let that erase an unresolved blocking issue: the same rule CompleteRun enforces (422).
+        // The import stays recorded (NEEDS_ASSIGNMENT) for an Admin/PM to resolve and reprocess.
+        if (HasOpenBlockingIssue(asset.IssuesJson) || openRuns.Any(r => HasOpenBlockingIssue(r.IssuesJson)))
+        {
+            CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.DeniedAction, openRuns.FirstOrDefault(), asset, project, via,
+                "auto-complete skipped: unresolved blocking issue would be overwritten", ip);
+            return;
         }
 
         if (openRuns.Count == 0)
@@ -402,6 +412,32 @@ public class InspectionImportsController : ControllerBase
         asset.InstalledAt = now;
         asset.InstalledBy = actorName;
         asset.UpdatedAt = now;
+    }
+
+    /// <summary>
+    /// Unresolved blocking issue present (isBlocking && !resolved, as CompleteRun checks)? Unreadable
+    /// non-empty JSON counts as "yes": never overwrite data that can't be inspected.
+    /// </summary>
+    internal static bool HasOpenBlockingIssue(string? issuesJson)
+    {
+        if (string.IsNullOrWhiteSpace(issuesJson)) return false;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(issuesJson);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array) return true;
+            foreach (var i in doc.RootElement.EnumerateArray())
+            {
+                if (i.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
+                var blocking = i.TryGetProperty("isBlocking", out var b) && b.ValueKind == System.Text.Json.JsonValueKind.True;
+                var resolved = i.TryGetProperty("resolved", out var r) && r.ValueKind == System.Text.Json.JsonValueKind.True;
+                if (blocking && !resolved) return true;
+            }
+            return false;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return true;
+        }
     }
 
     private async Task<AssetWorkflowRunEntity> CreateSyntheticInspectionRunAsync(
