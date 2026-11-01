@@ -1,3 +1,4 @@
+using Commtrac.Api.Authorization;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Schemas;
@@ -291,6 +292,19 @@ public class InspectionImportsController : ControllerBase
         var project = await _db.Projects.FirstOrDefaultAsync(p => p.Id == entity.ProjectId);
         if (project?.WorkflowMode != "INSPECTION_ONLY") return;
 
+        // Auto-completion closes the asset's runs with the customer signature waived, so it is
+        // held to the same policy as the explicit waiver. Otherwise the import stays recorded
+        // (NEEDS_ASSIGNMENT) for an Admin/Project Manager to assign, which re-runs this step.
+        var guardAsset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
+        var via = $"inspection-import:{entity.Id}";
+        var ip = HttpContext?.Connection.RemoteIpAddress?.ToString();
+        if (!CustomerWaiverPolicy.IsAllowed(User, guardAsset, project, null))
+        {
+            CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.DeniedAction, null, guardAsset, project, via,
+                "auto-complete skipped: caller not authorized for this asset", ip);
+            return;
+        }
+
         var now = DateTime.UtcNow;
         var actorName = ResolveActorName();
 
@@ -307,7 +321,7 @@ public class InspectionImportsController : ControllerBase
             return;
         }
 
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == entity.AssetId);
+        var asset = guardAsset;
         if (asset is null) return;
 
         var inspectionConfigIds = await _db.WorkflowConfigs
@@ -343,6 +357,7 @@ public class InspectionImportsController : ControllerBase
             run.Status = "Complete";
             run.IsLocked = true;
             run.SignatureStatus = "WaivedCustomer";
+            CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.WaivedAction, run, asset, project, via, "inspection import auto-complete", ip);
             run.CompletedByName = actorName;
             run.CompletedAt = now;
             run.UpdatedAt = now;

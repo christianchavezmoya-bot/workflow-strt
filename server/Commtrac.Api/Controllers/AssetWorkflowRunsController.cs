@@ -2,7 +2,9 @@ using System.Globalization;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.EntityFrameworkCore;
+using Commtrac.Api.Authorization;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
@@ -2548,18 +2550,32 @@ public class AssetWorkflowRunsController : ControllerBase
     }
 
     // POST api/asset-workflow-runs/{id}/waive-customer-signature
+    // Body optional ({ "reason": "..." }); the current clients post none.
     [HttpPost("{id}/waive-customer-signature")]
-    public async Task<ActionResult<AssetWorkflowRunDto>> WaiveCustomerSignature(string id)
+    public async Task<ActionResult<AssetWorkflowRunDto>> WaiveCustomerSignature(
+        string id,
+        [FromBody(EmptyBodyBehavior = EmptyBodyBehavior.Allow)] WaiveCustomerSignatureRequest? request = null)
     {
         var run = await _db.AssetWorkflowRuns.FindAsync(id);
         if (run is null) return NotFound();
+        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        var project = asset is null ? null : await _db.Projects.FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
+
+        // Authorize before revealing anything about the run's state.
+        if (!CustomerWaiverPolicy.IsAllowed(User, asset, project, run))
+        {
+            CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.DeniedAction, run, asset, project, "waive-customer-signature", request?.Reason, ip);
+            await _db.SaveChangesAsync();
+            return Forbid();
+        }
         if (!run.IsLocked) return BadRequest(new { message = "Run must be completed before waiving customer signature." });
         if (run.SignatureStatus != "PendingCustomer")
             return UnprocessableEntity(new { message = "Run is not currently awaiting customer signature." });
 
         run.SignatureStatus = "WaivedCustomer";
         run.UpdatedAt = DateTime.UtcNow;
-        var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
+        CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.WaivedAction, run, asset, project, "waive-customer-signature", request?.Reason, ip);
         if (asset is not null)
         {
             asset.Status = "Closed";

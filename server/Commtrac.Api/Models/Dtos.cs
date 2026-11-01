@@ -1996,6 +1996,9 @@ public record InspectionImportDto(
     string? UploadedBy
 );
 
+/// <summary>Optional body for POST asset-workflow-runs/{id}/waive-customer-signature; recorded in the audit log.</summary>
+public record WaiveCustomerSignatureRequest([System.ComponentModel.DataAnnotations.MaxLength(300)] string? Reason);
+
 public record CreateInspectionImportRequest(
     string Source,
     string? FileName,
