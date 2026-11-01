@@ -37,6 +37,9 @@ import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/gener
 import { resolveReportTimeZone } from "../../utils/datetime";
 import type { WorkflowReportExportContext } from "../../utils/workflowReportExport";
 import { workflowReportBaseFileName } from "../../utils/workflowReportExport";
+import { loadWorkflowReportType } from "../../utils/workflowReportType";
+import { workflowConfigService } from "../../services/workflowConfigService";
+import { workflowTypeService } from "../../services/workflowTypeService";
 
 type UserLite = {
   id: string;
@@ -172,10 +175,15 @@ export default function ClosedSignedAssetsDialog({
       }
     }
 
-    const [brandSettings, signatureEvents, productFeatures] = await Promise.all([
+    const [brandSettings, signatureEvents, productFeatures, documentType] = await Promise.all([
       brandSettingsService.get(),
       signatureService.listEvents(run.id).catch(() => []),
       asset.productId ? featureService.getByProduct(asset.productId).catch(() => []) : Promise.resolve([]),
+      // Same resolved type for the PDF title, the saved filename and the export metadata.
+      loadWorkflowReportType(run.workflowConfigId, {
+        getConfig: (id) => workflowConfigService.getById(id),
+        listTypes: () => workflowTypeService.list(),
+      }),
     ]);
 
     const [businessLogoBase64, customerLogoBase64] = await Promise.all([
@@ -209,6 +217,7 @@ export default function ClosedSignedAssetsDialog({
       timeZoneId: resolveReportTimeZone({ timeZoneId: projectTimeZoneId }),
       signatureEvents,
       productFeatures,
+      documentType,
     };
   }, [projectCustomer, projectCustomerId, projectJobNumber, projectSite, projectTimeZoneId, users]);
 

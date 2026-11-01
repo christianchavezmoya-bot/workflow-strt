@@ -1649,7 +1649,13 @@ public record PublicRunSummaryDto(
     // first render instead of only after the customer voluntarily triggers a request in this
     // session — see PublicSignController.GetSummary. Submit's own OTP enforcement (TryValidateOtp)
     // is unrelated and unchanged: it re-validates independently of anything this flag drives.
-    bool OtpRequired = false
+    bool OtpRequired = false,
+    // The run's workflow type, so the customer's PDF title/filename name the real type
+    // (Commissioning, Repair, custom…) — the public page can't read the authenticated catalog.
+    // Catalog id + catalog name, plus the legacy free-form ConfigType for older configs.
+    string? WorkflowTypeId = null,
+    string? WorkflowTypeName = null,
+    string? WorkflowConfigType = null
 );
 
 public record PublicSubmitSignatureRequest(

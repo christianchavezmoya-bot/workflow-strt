@@ -77,6 +77,7 @@ import { workflowConfigService } from "../../services/workflowConfigService";
 import { assetWorkflowAssignmentService } from "../../services/assetWorkflowAssignmentService";
 import { WorkflowAssignmentRepository } from "../../repositories/WorkflowAssignmentRepository";
 import { workflowTypeService } from "../../services/workflowTypeService";
+import { loadWorkflowReportType } from "../../utils/workflowReportType";
 import type { MissingMediaFlag as PhotoMissingMediaFlag, PhotoUpdateNotification } from "./photoUploadTypes";
 import IssueDetailDialog from "../../components/ui/IssueDetailDialog";
 import WorkflowSignatureFlowHost, { type WorkflowSignatureFlowTarget } from "../../components/ui/WorkflowSignatureFlowHost";
@@ -1363,10 +1364,15 @@ const Dashboard = () => {
       const reportRun = isMobileNativePlatform()
         ? await mediaStore.resolveUploadPayload(latestRun)
         : latestRun;
+      const documentType = await loadWorkflowReportType(latestRun.workflowConfigId, {
+        getConfig: (id) => workflowConfigService.getById(id),
+        listTypes: () => workflowTypeService.list(),
+      });
       await generateWorkflowReport({
         run: reportRun,
         asset,
         workflowConfigName: configName,
+        documentType,
         businessLogoBase64: bizLogoResolved,
         customerName: projects.find((project) => project.id === asset.projectId)?.customerName,
         jobNumber: projects.find((project) => project.id === asset.projectId)?.jobNumber,

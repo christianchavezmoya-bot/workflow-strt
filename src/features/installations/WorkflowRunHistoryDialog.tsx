@@ -64,6 +64,9 @@ import { featureService } from "../../services/featureService";
 import { mediaStore } from "../../services/mediaStore";
 import { isMobileNativePlatform } from "../../utils/platform";
 import { generateWorkflowReport, resolveImageToDataUrl } from "../../utils/generateWorkflowReport";
+import { loadWorkflowReportType } from "../../utils/workflowReportType";
+import { workflowConfigService } from "../../services/workflowConfigService";
+import { workflowTypeService } from "../../services/workflowTypeService";
 import { countMissingWorkflowItems, getMissingWorkflowItems } from "../../utils/workflowCompleteness";
 import type { AssetWorkflowRun, RunIssue, RunTimeEntry, StepResult } from "../../types/assetWorkflowRun";
 import TimeEntriesEditorDialog from "../../components/ui/TimeEntriesEditorDialog";
@@ -477,10 +480,15 @@ export default function WorkflowRunHistoryDialog({
       const reportRun = isMobileNativePlatform()
         ? await mediaStore.resolveUploadPayload(run)
         : run;
+      const documentType = await loadWorkflowReportType(run.workflowConfigId, {
+        getConfig: (id) => workflowConfigService.getById(id),
+        listTypes: () => workflowTypeService.list(),
+      });
       await generateWorkflowReport({
         run: reportRun,
         asset,
         workflowConfigName,
+        documentType,
         businessLogoBase64: bizLogoResolved,
         customerLogoBase64: resolvedCustLogo,
         customerName: project?.customerName,

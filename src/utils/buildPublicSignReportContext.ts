@@ -6,6 +6,7 @@ import { normalizeCapturedValueForDisplay, isRenderableImageValue } from "./capt
 import { resolveReportTimeZone } from "./datetime";
 import { resolveImageToDataUrl, resolvePhotoForPdf, type GenerateReportParams } from "./generateWorkflowReport";
 import { normalizeBinaryDataUrl } from "./reportMediaResolve";
+import { resolveWorkflowReportType } from "./workflowReportType";
 
 function parseProductFeatures(json?: string | null): Feature[] {
   if (!json) return [];
@@ -153,6 +154,12 @@ export async function buildPublicSignReportContext(
     run,
     asset,
     workflowConfigName: summary.workflowName,
+    // Same type resolution as the internal export paths (title + filename).
+    documentType: resolveWorkflowReportType({
+      workflowTypeId: summary.workflowTypeId,
+      workflowTypeName: summary.workflowTypeName,
+      configType: summary.workflowConfigType,
+    }),
     businessLogoBase64,
     customerLogoBase64,
     companyName: summary.companyName ?? undefined,

@@ -56,6 +56,11 @@ export interface PublicRunSummary {
   tokenValid: boolean;
   /** True when this token already has an OTP hash (a code was already issued for it). */
   otpRequired?: boolean;
+  /** The run's workflow type (catalog id/name + legacy configType) — names the real report type
+   *  on the customer-facing PDF. Absent on older API builds. */
+  workflowTypeId?: string | null;
+  workflowTypeName?: string | null;
+  workflowConfigType?: string | null;
   // Report generation fields
   workflowSnapshotJson: string;
   stepResultsJson: string;

@@ -1971,12 +1971,13 @@ const AssetInstallationPage = () => {
     (asset: ProjectAsset): BuildAssetReportContextParams => ({
       runsMap,
       wfConfigMap,
+      workflowTypes,
       users,
       projects,
       asset,
       ...reportExportServices,
     }),
-    [runsMap, wfConfigMap, users, projects, reportExportServices],
+    [runsMap, wfConfigMap, workflowTypes, users, projects, reportExportServices],
   );
 
   const openReportExportDialogForAsset = useCallback(

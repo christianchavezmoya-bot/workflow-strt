@@ -13,11 +13,13 @@ import type { Project } from "../../types/project";
 import type { ProjectAsset } from "../../types/projectAsset";
 import type { User } from "../../types/user";
 import type { WorkflowConfig } from "../../types/workflowConfig";
+import type { WorkflowType } from "../../types/workflowType";
 import type { pickCaptureRun } from "../../utils/captureSpreadsheet";
 import type { resolveProjectTimeZoneForReport } from "../../utils/projectTimeZone";
 import type { isMobileNativePlatform } from "../../utils/platform";
 import { downloadBlob } from "../../utils/bulkWorkflowReportDownload";
 import type { WorkflowReportExportContext } from "../../utils/workflowReportExport";
+import { resolveWorkflowReportType } from "../../utils/workflowReportType";
 
 export type AssetReportExportServices = {
   assetWorkflowRunService: typeof assetWorkflowRunService;
@@ -35,6 +37,9 @@ export type AssetReportExportServices = {
 export type BuildAssetReportContextParams = {
   runsMap: Record<string, AssetWorkflowRun[]>;
   wfConfigMap: ReadonlyMap<string, WorkflowConfig>;
+  /** Live workflow-types catalog (Settings) — resolves the report type by the config's
+   *  workflowTypeId, including custom types. Optional: seeded ids still resolve without it. */
+  workflowTypes?: readonly WorkflowType[];
   users: User[];
   projects: Project[];
   asset: ProjectAsset;
@@ -55,6 +60,7 @@ export function useAssetInstallationReportExport() {
     async ({
       runsMap,
       wfConfigMap,
+      workflowTypes,
       users,
       projects,
       asset,
@@ -107,8 +113,10 @@ export function useAssetInstallationReportExport() {
       const configId = effectiveRun.workflowConfigId || asset.productConfigId;
       const wfCfg = configId ? wfConfigMap.get(configId) : null;
       const configName = wfCfg?.displayName ?? wfCfg?.name ?? "Installation Record";
-      const cfgType = (wfCfg?.configType ?? "").trim().toLowerCase();
-      const docType = cfgType === "inspection" || cfgType === "wftype-inspection" ? "inspection" as const : "installation" as const;
+      // One resolved type drives the PDF title, the filename and the export metadata. Every
+      // catalog type resolves (Commissioning/Repair/Other/custom), not just Inspection vs
+      // "everything else is Installation".
+      const docType = resolveWorkflowReportType(wfCfg, workflowTypes ?? []);
       const tech = users.find((u) => u.id === asset.assignedUserId);
       const proj = projects.find((p) => p.id === asset.projectId);
 
