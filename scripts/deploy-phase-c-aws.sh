@@ -1,11 +1,15 @@
 #!/usr/bin/env bash
-# Phase C — DEV DNS deploy (staging.strata-ngo.com canonical web host).
+# Phase C — staging deploy (staging.strata-ngo.com web + api.staging.strata-ngo.com API).
 # Requires: AWS CLI profile strata-agent, Docker, npm, git on Mac agent.
 #
+# www.strata-ngo.com is PRODUCTION (CloudFront E1AYVTSTERUCZP, see docs/PROD_WEB_DEPLOY.md). This
+# script never deploys to or verifies www; the staging distribution E1YN5XTWDWRHYP serves staging only.
+#
 # Usage:
-#   ./scripts/deploy-phase-c-aws.sh
-#   SKIP_CLOUDFRONT=1 ./scripts/deploy-phase-c-aws.sh   # API + web only
-#   SKIP_API=1 ./scripts/deploy-phase-c-aws.sh          # CloudFront + web only
+#   EXPECTED_SHA=<release sha> ./scripts/deploy-phase-c-aws.sh   # API + web (routine release)
+#   SKIP_API=1 ./scripts/deploy-phase-c-aws.sh                    # web only
+#   RUN_CLOUDFRONT_SETUP=1 ./scripts/deploy-phase-c-aws.sh        # ALSO (re)apply CloudFront alias + ACM
+#                                                                 # (one-time infra setup; off by default)
 #
 # See docs/MAC_AGENT_PHASE_C_DEV_DNS_PROMPT.md
 set -euo pipefail
@@ -25,9 +29,8 @@ ECS_CLUSTER="default"
 ECS_SERVICE="commtrac-api-ae2c"
 S3_BUCKET="strata-ngo-web-staging"
 STAGING_WEB="https://staging.strata-ngo.com"
-WWW_WEB="https://www.strata-ngo.com"
 STAGING_API="https://api.staging.strata-ngo.com/api"
-EXPECTED_SHA="${EXPECTED_SHA:-96e4e7972ad8836f879c005779fb7f77582c483b}"
+EXPECTED_SHA="${EXPECTED_SHA:-}"   # the release SHA you intend to deploy (strongly recommended)
 
 pass() { echo "PASS: $*"; }
 fail() { echo "FAIL: $*"; exit 1; }
@@ -42,12 +45,14 @@ git checkout main
 git pull origin main
 MAIN_SHA="$(git rev-parse HEAD)"
 info "MAIN_SHA=$MAIN_SHA"
-if [[ "$MAIN_SHA" != "$EXPECTED_SHA" && "${ALLOW_SHA_MISMATCH:-}" != "1" ]]; then
-  echo "WARN: HEAD ($MAIN_SHA) != expected ($EXPECTED_SHA). Set ALLOW_SHA_MISMATCH=1 to continue."
+if [[ -z "$EXPECTED_SHA" ]]; then
+  info "EXPECTED_SHA not set — deploying origin/main HEAD $MAIN_SHA"
+elif [[ "$MAIN_SHA" != "$EXPECTED_SHA" && "${ALLOW_SHA_MISMATCH:-}" != "1" ]]; then
+  fail "HEAD ($MAIN_SHA) != EXPECTED_SHA ($EXPECTED_SHA). Set ALLOW_SHA_MISMATCH=1 to override."
 fi
 
-# ── Step 1: CloudFront alternate domain + ACM ────────────────────────────────
-if [[ "${SKIP_CLOUDFRONT:-}" != "1" ]]; then
+# ── Step 1: CloudFront alternate domain + ACM (one-time setup; opt-in) ───────
+if [[ "${RUN_CLOUDFRONT_SETUP:-}" == "1" && "${SKIP_CLOUDFRONT:-}" != "1" ]]; then
   info "Step 1 — CloudFront alternate domain + ACM (us-east-1)"
 
   CERT_ARN="$(aws acm list-certificates --region "$CF_REGION" --profile "$PROFILE" \
@@ -73,8 +78,7 @@ with open(path) as f:
     cfg = json.load(f)
 aliases = cfg.setdefault("Aliases", {"Quantity": 0, "Items": []})
 items = set(aliases.get("Items") or [])
-items.add("staging.strata-ngo.com")
-items.add("www.strata-ngo.com")
+items.add("staging.strata-ngo.com")  # www is production (E1AYVTSTERUCZP) — never alias it here
 aliases["Items"] = sorted(items)
 aliases["Quantity"] = len(aliases["Items"])
 cfg["ViewerCertificate"] = {
@@ -105,14 +109,11 @@ PY
   aws cloudfront wait distribution-deployed --id "$CF_DIST_ID" --profile "$PROFILE"
 
   STAGING_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$STAGING_WEB/" || echo 000)"
-  WWW_CODE="$(curl -sS -o /dev/null -w '%{http_code}' "$WWW_WEB/" || echo 000)"
-  info "staging HTTP $STAGING_CODE · www HTTP $WWW_CODE"
+  info "staging HTTP $STAGING_CODE"
   [[ "$STAGING_CODE" == "200" ]] && pass "staging.strata-ngo.com HTTPS 200" \
     || fail "staging.strata-ngo.com HTTP $STAGING_CODE (expected 200 after CF deploy)"
-  [[ "$WWW_CODE" == "200" ]] && pass "www.strata-ngo.com HTTPS 200" \
-    || fail "www.strata-ngo.com HTTP $WWW_CODE"
 else
-  info "Step 1 skipped (SKIP_CLOUDFRONT=1)"
+  info "Step 1 skipped (CloudFront setup is opt-in: RUN_CLOUDFRONT_SETUP=1)"
 fi
 
 # ── Step 2: Docker build + ECR push ──────────────────────────────────────────
@@ -132,12 +133,15 @@ if [[ "${SKIP_API:-}" != "1" ]]; then
 
   aws ecr get-login-password --region "$REGION" --profile "$PROFILE" \
     | docker login --username AWS --password-stdin "$ECR_REPO"
+  # Immutable release identity: the git SHA tag. ":staging" is only a moving convenience tag.
+  docker tag commtrac-api:staging "$ECR:$MAIN_SHA"
   docker tag commtrac-api:staging "$ECR:staging"
+  docker push "$ECR:$MAIN_SHA"
   docker push "$ECR:staging"
-  pass "ECR push"
+  pass "ECR push ($MAIN_SHA)"
 
   IMAGE_DIGEST="$(aws ecr describe-images --repository-name commtrac-api --region "$REGION" \
-    --profile "$PROFILE" --image-ids imageTag=staging \
+    --profile "$PROFILE" --image-ids imageTag="$MAIN_SHA" \
     --query 'imageDetails[0].imageDigest' --output text)"
   info "IMAGE_DIGEST=$IMAGE_DIGEST"
 
@@ -226,19 +230,14 @@ aws cloudfront wait invalidation-completed --distribution-id "$CF_DIST_ID" \
 pass "CloudFront invalidation complete"
 
 STAGING_BUNDLE="$(curl -sS "$STAGING_WEB/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1 || true)"
-WWW_BUNDLE="$(curl -sS "$WWW_WEB/" | grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' | head -1 || true)"
 STAGING_MANIFEST="$(curl -sS "$STAGING_WEB/build-manifest.json")"
-WWW_MANIFEST="$(curl -sS "$WWW_WEB/build-manifest.json")"
-info "staging bundle: $STAGING_BUNDLE"
-info "www bundle:     $WWW_BUNDLE"
+EXPECTED_BUNDLE="$(grep -oE 'assets/index-[A-Za-z0-9_-]+\.js' dist/index.html | head -1)"
+info "staging bundle: $STAGING_BUNDLE (built: $EXPECTED_BUNDLE)"
 echo "$STAGING_MANIFEST"
-echo "$WWW_MANIFEST"
-[[ -n "$STAGING_BUNDLE" && "$STAGING_BUNDLE" == "$WWW_BUNDLE" ]] && pass "both hosts same bundle" \
-  || fail "bundle mismatch staging=$STAGING_BUNDLE www=$WWW_BUNDLE"
+[[ -n "$STAGING_BUNDLE" && "$STAGING_BUNDLE" == "$EXPECTED_BUNDLE" ]] && pass "staging serves the new bundle" \
+  || fail "staging bundle=$STAGING_BUNDLE (expected $EXPECTED_BUNDLE)"
 echo "$STAGING_MANIFEST" | grep -q "$MAIN_SHA" && pass "staging manifest buildSha" \
   || fail "staging manifest buildSha"
-echo "$WWW_MANIFEST" | grep -q "$MAIN_SHA" && pass "www manifest buildSha" \
-  || fail "www manifest buildSha"
 
 # ── Step 5: L1–L5 (API-assisted where possible) ────────────────────────────
 info "Step 5 — L1–L5 link checks (requires ADMIN_PASS from Secrets Manager if set)"
@@ -263,6 +262,5 @@ echo "ECS revision:    $TASK_FAMILY:$NEW_REV"
 echo "IMAGE_DIGEST:    ${IMAGE_DIGEST:-skipped}"
 echo "CloudFront:      $CF_DIST_ID ($CF_DOMAIN)"
 echo "staging bundle:  $STAGING_BUNDLE"
-echo "www bundle:      $WWW_BUNDLE"
 echo "Phase C:         PASS (automated checks)"
 echo "L2–L5:           Manual — invite email, QR, signature link on $STAGING_WEB"
