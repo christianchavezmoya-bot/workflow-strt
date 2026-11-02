@@ -1,4 +1,5 @@
 ﻿using System.Text.Json;
+using Commtrac.Api.Authorization;
 using Commtrac.Api.Data;
 using Commtrac.Api.Models;
 using Commtrac.Api.Services;
@@ -112,6 +113,14 @@ public class ProjectAssetsController : ControllerBase
         }
 
         var asset = await _db.ProjectAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Id == id);
+        if (result.Result.SignatureStatus == "WaivedCustomer")
+        {
+            var waivedRun = await _db.AssetWorkflowRuns.AsNoTracking().FirstOrDefaultAsync(r => r.Id == result.Result.RunId);
+            var waivedProject = asset is null ? null : await _db.Projects.AsNoTracking().FirstOrDefaultAsync(p => p.Id == asset.ProjectId);
+            CustomerWaiverPolicy.Audit(_db, User, CustomerWaiverPolicy.WaivedAction, waivedRun, asset, waivedProject,
+                "record-paper-completion", request.Notes, HttpContext.Connection.RemoteIpAddress?.ToString());
+            await _db.SaveChangesAsync();
+        }
         if (asset is not null)
         {
             var patchUserId = User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
