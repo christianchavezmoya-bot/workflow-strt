@@ -1135,12 +1135,32 @@ public class AssetWorkflowRunsController : ControllerBase
             i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
             i.TryGetProperty("resolved",   out var r) && !r.GetBoolean());
 
-        if (blockingOpen > 0 && !IsFieldSyncForce())
+        // Applies to offline field sync too. X-Field-Sync: force is client-asserted, so it must not
+        // waive this rule: the runner never locks a run with an unresolved blocking issue, so a
+        // legitimate offline replay can't carry one. 422 keeps the phone's queued work (the sync
+        // engine retries it rather than dropping it) while the server refuses to lock the run.
+        if (blockingOpen > 0)
+        {
+            if (IsFieldSyncForce())
+            {
+                var actorId = CustomerWaiverPolicy.ActorId(User) ?? "unknown";
+                var actorEmail = User.FindFirst("email")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "unknown";
+                _db.AuditLogs.Add(new AuditLogEntity
+                {
+                    UserId = actorId.Length <= 80 ? actorId : actorId[..80],
+                    UserEmail = actorEmail.Length <= 200 ? actorEmail : actorEmail[..200],
+                    Action = "field_sync_force_blocking_rejected",
+                    Details = $"run={run.Id}; asset={run.AssetId}; blockingOpen={blockingOpen}",
+                    IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+                });
+                await _db.SaveChangesAsync();
+            }
             return UnprocessableEntity(new
             {
                 message = $"Cannot complete: {blockingOpen} blocking issue(s) must be resolved first.",
                 blockingCount = blockingOpen
             });
+        }
 
         // Required photos/videos must be captured before the run locks — the same rule the
         // runner's Lock button enforces. Without it, callers that bypass the UI could lock a
