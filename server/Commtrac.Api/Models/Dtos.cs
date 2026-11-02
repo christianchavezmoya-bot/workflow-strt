@@ -960,7 +960,8 @@ public record BulkCreateProjectAssetsRequest(
     List<UpsertProjectAssetRequest> Assets
 );
 
-public record PatchIssuesRequest(string? IssuesJson);
+/// <summary>DeletedIssueIds: explicit deletions (run issues only) — omission from IssuesJson never deletes.</summary>
+public record PatchIssuesRequest(string? IssuesJson, List<string>? DeletedIssueIds = null);
 public record PatchAssignmentRequest(string? AssignedUserId);
 
 // ─── v2 Workflow Config Unification DTOs ──────────────────────────────────────
@@ -1356,7 +1357,9 @@ public record StartRunRequest(
 public record SaveRunProgressRequest(
     string StepResultsJson,
     string? IssuesJson,
-    string? Status
+    string? Status,
+    /// Issues to delete explicitly; omission from IssuesJson never deletes (see RunIssueMerge).
+    List<string>? DeletedIssueIds = null
 );
 
 public record CompleteRunRequest(
@@ -1369,7 +1372,9 @@ public record CompleteRunRequest(
     // sync time (which would inflate it). Online callers omit it and fall back to now.
     string? CompletedAtUtc = null,
     /// When true, use StepResultsJson already persisted on the run row (web perf F4).
-    bool UseStoredStepResults = false
+    bool UseStoredStepResults = false,
+    /// Issues to delete explicitly; omission from IssuesJson never deletes (see RunIssueMerge).
+    List<string>? DeletedIssueIds = null
 );
 
 public record SyncRunBundleSignatureRequest(
@@ -1384,7 +1389,8 @@ public record SyncRunBundleRequest(
     string? CompletedAtUtc,
     string? BomActualJson,
     List<SyncRunBundleSignatureRequest>? Signatures,
-    string? IdempotencyKey
+    string? IdempotencyKey,
+    List<string>? DeletedIssueIds = null
 );
 
 public record SyncRunBundleResponse(

@@ -127,6 +127,33 @@ public class AssetWorkflowRunProgressTests : IClassFixture<ApiTestFactory>
     [Fact]
     public async Task PatchIssues_closing_last_issue_on_active_run_clears_asset_Issue_status()
     {
+        // Removing an issue is explicit (deletedIssueIds) since RunIssueMerge: omission alone keeps it
+        // (see PatchIssues_omitting_an_open_issue_keeps_it_and_the_asset_Issue_status). The seeded
+        // admin may delete an open blocking issue.
+        var client = await WorkflowRunTestHelpers.CreateAuthenticatedClientAsync(_factory);
+        var openIssues = JsonSerializer.Serialize(new[]
+        {
+            new { id = "issue-1", isBlocking = true, resolved = false, title = "Blocking fault" },
+        });
+        var fixture = await WorkflowRunTestHelpers.SeedRunAsync(
+            _factory,
+            assetStatus: "Issue",
+            issuesJson: openIssues);
+
+        var resp = await client.PatchAsJsonAsync($"/api/asset-workflow-runs/{fixture.RunId}/issues", new
+        {
+            issuesJson = "[]",
+            deletedIssueIds = new[] { "issue-1" },
+        });
+
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var assetStatus = await WorkflowRunTestHelpers.GetAssetStatusAsync(_factory, fixture.AssetId);
+        Assert.Equal("InProgress", assetStatus);
+    }
+
+    [Fact]
+    public async Task PatchIssues_omitting_an_open_issue_keeps_it_and_the_asset_Issue_status()
+    {
         var client = await WorkflowRunTestHelpers.CreateAuthenticatedClientAsync(_factory);
         var openIssues = JsonSerializer.Serialize(new[]
         {
@@ -143,8 +170,7 @@ public class AssetWorkflowRunProgressTests : IClassFixture<ApiTestFactory>
         });
 
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        var assetStatus = await WorkflowRunTestHelpers.GetAssetStatusAsync(_factory, fixture.AssetId);
-        Assert.Equal("InProgress", assetStatus);
+        Assert.Equal("Issue", await WorkflowRunTestHelpers.GetAssetStatusAsync(_factory, fixture.AssetId));
     }
 
     [Fact]

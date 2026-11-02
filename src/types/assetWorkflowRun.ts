@@ -12,6 +12,8 @@ export interface RunTimeEntry {
 
 export interface RunIssue {
   id: string;
+  /** Set by the server when the issue is first recorded (never by a client). */
+  createdByUserId?: string;
   description: string;
   /** "blocking" | "observation" | "scope-deviation" */
   issueType: "blocking" | "observation" | "scope-deviation";

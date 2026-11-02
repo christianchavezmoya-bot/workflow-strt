@@ -1048,20 +1048,32 @@ public class AssetWorkflowRunsController : ControllerBase
         var previousIssuesJson = run.IssuesJson;
         var previousStepResultsJson = run.StepResultsJson;
 
+        RunIssueMergeResult? issueMerge = null;
+        if (req.IssuesJson is not null)
+        {
+            var (merge, issueError) = await MergeClientIssuesAsync(run, req.IssuesJson, req.DeletedIssueIds, "save-progress");
+            if (issueError is not null) return issueError;
+            issueMerge = merge;
+        }
+
         run.StepResultsJson = req.StepResultsJson;
-        if (req.IssuesJson is not null) run.IssuesJson = req.IssuesJson;
+        if (issueMerge is not null)
+        {
+            run.IssuesJson = issueMerge.Json;
+            AddIssueChangeAudits(run, issueMerge, "save-progress");
+        }
         if (req.Status is not null)     run.Status     = req.Status;
         run.UpdatedAt = DateTime.UtcNow;
         ApplyStatusDrivenTimeTracking(run, req.Status, run.UpdatedAt);
         RecomputeRunTimeMetrics(run, run.UpdatedAt);
 
         // Update asset status based on current open issues in this run
-        if (req.IssuesJson is not null)
+        if (issueMerge is not null)
         {
             var asset = await _db.ProjectAssets.FirstOrDefaultAsync(a => a.Id == run.AssetId);
             if (asset is not null && asset.Status != "NotStarted")
             {
-                var issues = ParseIssues(req.IssuesJson);
+                var issues = ParseIssues(run.IssuesJson);
                 var hasOpenIssues = issues.Any(i =>
                     i.TryGetProperty("resolved", out var r) && !r.GetBoolean());
                 asset.Status    = hasOpenIssues ? "Issue" : "InProgress";
@@ -1129,11 +1141,12 @@ public class AssetWorkflowRunsController : ControllerBase
         if (run.IsLocked && !IsFieldSyncForce())
             return BadRequest(new { message = "This run is already locked." });
 
-        // Check for unresolved BLOCKING issues
-        var issues = ParseIssues(req.IssuesJson);
-        var blockingOpen = issues.Count(i =>
-            i.TryGetProperty("isBlocking", out var b) && b.GetBoolean() &&
-            i.TryGetProperty("resolved",   out var r) && !r.GetBoolean());
+        // Merge with the issues already recorded (omission never deletes; see RunIssueMerge), then
+        // check for unresolved BLOCKING issues on the result, so a payload that leaves out a
+        // recorded blocking issue can't complete past it.
+        var (issueMerge, issueError) = await MergeClientIssuesAsync(run, req.IssuesJson, req.DeletedIssueIds, "complete");
+        if (issueError is not null) return issueError;
+        var blockingOpen = issueMerge!.OpenBlockingCount;
 
         // Applies to offline field sync too. X-Field-Sync: force is client-asserted, so it must not
         // waive this rule: the runner never locks a run with an unresolved blocking issue, so a
@@ -1190,7 +1203,8 @@ public class AssetWorkflowRunsController : ControllerBase
             return BadRequest(new { message = "StepResultsJson is required when UseStoredStepResults is false." });
 
         run.StepResultsJson  = stepResultsJson;
-        run.IssuesJson       = req.IssuesJson;
+        run.IssuesJson       = issueMerge.Json;
+        AddIssueChangeAudits(run, issueMerge, "complete");
         run.Status           = "Complete";
         run.IsLocked         = true;
         run.CompletedByName  = req.CompletedByName;
@@ -1321,7 +1335,8 @@ public class AssetWorkflowRunsController : ControllerBase
             req.CompletedByName,
             req.BomActualJson,
             req.CompletedAtUtc,
-            UseStoredStepResults: false);
+            UseStoredStepResults: false,
+            DeletedIssueIds: req.DeletedIssueIds);
 
         if (!run.IsLocked)
         {
@@ -1450,7 +1465,10 @@ public class AssetWorkflowRunsController : ControllerBase
         var run = await _db.AssetWorkflowRuns.FirstOrDefaultAsync(r => r.Id == id);
         if (run is null) return NotFound();
 
-        run.IssuesJson = req.IssuesJson ?? "[]";
+        var (issueMerge, issueError) = await MergeClientIssuesAsync(run, req.IssuesJson ?? "[]", req.DeletedIssueIds, "patch-issues");
+        if (issueError is not null) return issueError;
+        run.IssuesJson = issueMerge!.Json;
+        AddIssueChangeAudits(run, issueMerge, "patch-issues");
         run.UpdatedAt  = DateTime.UtcNow;
 
         // Recalculate asset status now that issues may have changed
@@ -1460,7 +1478,7 @@ public class AssetWorkflowRunsController : ControllerBase
             var allRuns = await _db.AssetWorkflowRuns.Where(r => r.AssetId == run.AssetId).ToListAsync();
             // Any open issue (blocking OR non-blocking) keeps the asset in "Issue" state
             var anyOpenIssue = allRuns.Any(r => {
-                var json = r.Id == id ? (req.IssuesJson ?? "[]") : r.IssuesJson;
+                var json = r.Id == id ? run.IssuesJson : r.IssuesJson;
                 return ParseIssues(json).Any(i =>
                     i.TryGetProperty("resolved", out var rv) && !rv.GetBoolean());
             });
@@ -2622,6 +2640,87 @@ public class AssetWorkflowRunsController : ControllerBase
                 runId: run.Id);
         }
         return Ok(ToDto(run));
+    }
+
+    /// <summary>
+    /// Combines a client issue list with the run's recorded one (RunIssueMerge). Nothing is written
+    /// to the run here; on any rejection the run is left untouched:
+    ///   - 400: the client's list is malformed (not an array of objects with unique string ids, or
+    ///     non-boolean isBlocking/resolved);
+    ///   - 422: the recorded list can't be read (fail closed — it is never replaced), or the caller
+    ///     may not delete / downgrade an unresolved blocking issue.
+    /// Both 400 and 422 keep queued offline work on the phone (retried, not dropped). 422s are
+    /// audited (identical repeats within 10 minutes, e.g. offline retries, are recorded once).
+    /// Call <see cref="AddIssueChangeAudits"/> where the endpoint applies the merged list.
+    /// </summary>
+    private async Task<(RunIssueMergeResult? Merge, IActionResult? Error)> MergeClientIssuesAsync(
+        AssetWorkflowRunEntity run, string? clientIssuesJson, List<string>? deletedIssueIds, string via)
+    {
+        var merge = RunIssueMerge.Merge(run.IssuesJson, clientIssuesJson, deletedIssueIds,
+            CustomerWaiverPolicy.ActorId(User), CustomerWaiverPolicy.IsPrivileged(User));
+        if (merge.ClientInvalidReason is not null)
+            return (null, BadRequest(new { message = merge.ClientInvalidReason, code = "issues_invalid" }));
+        if (merge.StoredUnreadable)
+        {
+            await AuditOnceAsync("run_issues_stored_unreadable", $"via={via}; run={run.Id}; asset={run.AssetId}");
+            return (null, UnprocessableEntity(new
+            {
+                message = "The issues recorded on this run can't be read, so they can't be updated safely. Ask an administrator to repair the run.",
+                code = "stored_issues_unreadable",
+            }));
+        }
+        if (merge.Refusals.Count == 0) return (merge, null);
+
+        var refused = merge.Refusals.Select(r => r.IssueId).ToArray();
+        await AuditOnceAsync("run_issue_change_refused", $"via={via}; run={run.Id}; asset={run.AssetId}; refused={string.Join(",", refused)}");
+        return (null, UnprocessableEntity(new
+        {
+            message = merge.Refusals[0].Reason,
+            code = "issue_change_refused",
+            refusedIssueIds = refused,
+        }));
+    }
+
+    /// <summary>
+    /// One durable audit row per issue actually deleted or downgraded from blocking (actor id/email,
+    /// UTC timestamp, operation, run, asset, issue). Added to the same SaveChanges as the run update,
+    /// so a request that ends up rejected records nothing. A replay or duplicate submission finds
+    /// the change already applied and records nothing new.
+    /// </summary>
+    private void AddIssueChangeAudits(AssetWorkflowRunEntity run, RunIssueMergeResult merge, string via)
+    {
+        foreach (var id in merge.DeletedIds) AddAudit("run_issue_deleted", $"via={via}; run={run.Id}; asset={run.AssetId}; issue={id}");
+        foreach (var id in merge.DowngradedIds) AddAudit("run_issue_downgraded", $"via={via}; run={run.Id}; asset={run.AssetId}; issue={id}");
+    }
+
+    private void AddAudit(string action, string details)
+    {
+        var actorId = CustomerWaiverPolicy.ActorId(User) ?? "unknown";
+        var actorEmail = User.FindFirst("email")?.Value ?? User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? "unknown";
+        _db.AuditLogs.Add(new AuditLogEntity
+        {
+            UserId = actorId.Length <= 80 ? actorId : actorId[..80],
+            UserEmail = actorEmail.Length <= 200 ? actorEmail : actorEmail[..200],
+            Action = action,
+            Details = details.Length <= 500 ? details : details[..500],
+            IpAddress = HttpContext.Connection.RemoteIpAddress?.ToString(),
+            Timestamp = DateTime.UtcNow,
+        });
+    }
+
+    /// <summary>Audits a rejection unless the same actor got the identical rejection in the last 10 minutes.</summary>
+    private async Task AuditOnceAsync(string action, string details)
+    {
+        var actorId = CustomerWaiverPolicy.ActorId(User) ?? "unknown";
+        var since = DateTime.UtcNow.AddMinutes(-10);
+        var truncated = details.Length <= 500 ? details : details[..500];
+        var recent = await _db.AuditLogs.AsNoTracking()
+            .Where(a => a.Action == action && a.UserId == actorId && a.Details == truncated)
+            .Select(a => a.Timestamp)
+            .ToListAsync();
+        if (recent.Any(t => t >= since)) return;
+        AddAudit(action, details);
+        await _db.SaveChangesAsync();
     }
 
     private bool IsFieldSyncForce()

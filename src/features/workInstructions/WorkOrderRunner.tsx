@@ -66,6 +66,7 @@ import DiagnosticClockBar from "../../components/ui/DiagnosticClockBar";
 import SignaturePad from "../../components/ui/SignaturePad";
 import { CameraCaptureAction } from "../../components/capture/CameraCaptureAction";
 import { useAuth } from "../../hooks/useAuth";
+import { canRemoveOrDowngradeIssue as canRemoveOrDowngradeIssuePolicy } from "../../utils/issueRemovalPolicy";
 import { useIsKeyboardOpen } from "../../hooks/useIsKeyboardOpen";
 import { useOfflineTimeQueue } from "../../hooks/useOfflineTimeQueue";
 import { useProjectTimeZone } from "../../hooks/useProjectTimeZone";
@@ -293,6 +294,12 @@ function WorkOrderRunner({
 
   // Run tracking
   const { user } = useAuth();
+  // Issues the user explicitly deleted in this run. Sent with every save/complete: the server never
+  // treats an issue that is merely missing from issuesJson as deleted (RunIssueMerge).
+  const deletedIssueIdsRef = useRef<Set<string>>(new Set());
+  // Issues flagged on this device in this session (the server stamps createdByUserId on save,
+  // but the runner's local copy doesn't carry it until the run is reloaded).
+  const sessionCreatedIssueIdsRef = useRef<Set<string>>(new Set());
   const [activeRunId, setActiveRunId] = useState<string | null>(existingRunId ?? null);
   const [activeRun, setActiveRun] = useState<AssetWorkflowRun | null>(null);
   const [timeEditorOpen, setTimeEditorOpen] = useState(false);
@@ -565,6 +572,8 @@ function WorkOrderRunner({
 
   function cancelFlagDialog() {
     if (flagSessionIssueIds.length > 0) {
+      // These may already have been autosaved, so their removal must be explicit.
+      flagSessionIssueIds.forEach((issueId) => deletedIssueIdsRef.current.add(issueId));
       setIssues((prev) => prev.filter((issue) => !flagSessionIssueIds.includes(issue.id)));
       scheduleAutosave();
     }
@@ -597,13 +606,29 @@ function WorkOrderRunner({
       }),
     };
     setIssues((prev) => [...prev, issue]);
+    sessionCreatedIssueIdsRef.current.add(issueId);
     setFlagSessionIssueIds((prev) => [...prev, issueId]);
     resetFlagForm();
     setFlagSubmitted(true);
     scheduleAutosave();
   }
 
+  /** See utils/issueRemovalPolicy (mirrors the server rule in RunIssueMerge). */
+  function canRemoveOrDowngradeIssue(issue: RunIssue): boolean {
+    return canRemoveOrDowngradeIssuePolicy(issue, user, sessionCreatedIssueIdsRef.current);
+  }
+
+  const editingIssue = editingIssueId ? issues.find((i) => i.id === editingIssueId) : undefined;
+  const editingIssueLocksSeverity = Boolean(editingIssue && !canRemoveOrDowngradeIssue(editingIssue));
+
+  function deletedIssueIdsForSave(): string[] {
+    return [...deletedIssueIdsRef.current];
+  }
+
   function deleteIssue(id: string) {
+    const target = issues.find((i) => i.id === id);
+    if (target && !canRemoveOrDowngradeIssue(target)) return;
+    deletedIssueIdsRef.current.add(id);
     setIssues((prev) => prev.filter((i) => i.id !== id));
     setFlagSessionIssueIds((prev) => prev.filter((issueId) => issueId !== id));
     scheduleAutosave();
@@ -617,10 +642,13 @@ function WorkOrderRunner({
 
   function saveEditIssue() {
     if (!editingIssueId || !editIssueDesc.trim()) return;
-    const isBlocking = editIssueSeverity === "high";
+    const original = issues.find((i) => i.id === editingIssueId);
+    // A blocking issue the user may not downgrade keeps its severity (description edits still apply).
+    const severity = original && !canRemoveOrDowngradeIssue(original) ? original.severity : editIssueSeverity;
+    const isBlocking = severity === "high";
     setIssues((prev) => prev.map((i) =>
       i.id === editingIssueId
-        ? { ...i, description: editIssueDesc.trim(), severity: editIssueSeverity, isBlocking,
+        ? { ...i, description: editIssueDesc.trim(), severity, isBlocking,
             issueType: i.issueType === "scope-deviation" ? "scope-deviation" : isBlocking ? "blocking" : "observation" }
         : i,
     ));
@@ -653,7 +681,7 @@ function WorkOrderRunner({
               // ignore — snapshot save below is authoritative
             }
           }
-          await assetWorkflowRunService.saveProgress(runId, stepsJson, issuesJson);
+          await assetWorkflowRunService.saveProgress(runId, stepsJson, issuesJson, undefined, deletedIssueIdsForSave());
         } catch {
           // silent — not critical for dismiss
         }
@@ -725,7 +753,7 @@ function WorkOrderRunner({
           }
         }
         await assetWorkflowRunService.trackTimeEntry(runId, "StopAll");
-        await assetWorkflowRunService.saveProgress(runId, stepsJson, issuesJson, "Paused");
+        await assetWorkflowRunService.saveProgress(runId, stepsJson, issuesJson, "Paused", deletedIssueIdsForSave());
       } catch {
         // silent — offline queue handles persistence inside saveProgress
       }
@@ -1220,6 +1248,7 @@ function WorkOrderRunner({
         JSON.stringify(buildStepsData(navStepId, navHistory)),
         JSON.stringify(issues),
         status,
+        deletedIssueIdsForSave(),
       );
     } catch {
       // silent â€" not critical
@@ -1327,7 +1356,7 @@ function WorkOrderRunner({
         await flushTimeQueue();
         // Persist latest step captures, then lock without re-uploading the full blob (web F4).
         await flushAutosave();
-        const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson);
+        const lockedRun = await assetWorkflowRunService.completeRun(activeRunId, stepsJson, issuesJson, currentUserName, bomJson, deletedIssueIdsForSave());
         transitionToLockedRunStage(lockedRun);
 
         // Flag runs with missing required photo/video only (optional media never counts).
@@ -2458,8 +2487,8 @@ function WorkOrderRunner({
                               <InputLabel shrink>Severity</InputLabel>
                               <Select label="Severity" value={editIssueSeverity}
                                 onChange={(e) => setEditIssueSeverity(e.target.value as "low" | "medium" | "high")}>
-                                <MenuItem value="low">Low - observation only</MenuItem>
-                                <MenuItem value="medium">Medium - attention needed</MenuItem>
+                                <MenuItem value="low" disabled={editingIssueLocksSeverity}>Low - observation only</MenuItem>
+                                <MenuItem value="medium" disabled={editingIssueLocksSeverity}>Medium - attention needed</MenuItem>
                                 <MenuItem value="high">High - blocks completion</MenuItem>
                               </Select>
                             </FormControl>
@@ -2488,7 +2517,7 @@ function WorkOrderRunner({
                                   </IconButton>
                                 </Tooltip>
                                 <Tooltip title="Edit issue" {...nativeTooltipTouchProps()}><IconButton size="small" onClick={() => startEditIssue(issue)} sx={{ p: 0.25 }}><EditOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
-                                <Tooltip title="Delete issue" {...nativeTooltipTouchProps()}><IconButton size="small" color="error" onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></Tooltip>
+                                <Tooltip title={canRemoveOrDowngradeIssue(issue) ? "Delete issue" : "Only a PM or whoever recorded it can delete an open blocking issue - close it instead"} {...nativeTooltipTouchProps()}><span><IconButton size="small" color="error" disabled={!canRemoveOrDowngradeIssue(issue)} onClick={() => deleteIssue(issue.id)} sx={{ p: 0.25 }}><DeleteOutlineOutlined sx={{ fontSize: 14 }} /></IconButton></span></Tooltip>
                               </Stack>
                             </Stack>
                             <Typography variant="caption" sx={issue.resolved ? { textDecoration: "line-through", color: "text.disabled" } : undefined}>{issue.description}</Typography>
