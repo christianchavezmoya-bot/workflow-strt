@@ -21,6 +21,8 @@ export interface SyncRunBundleRequestBody {
   bomActualJson?: string;
   signatures: SyncRunBundleSignature[];
   idempotencyKey: string;
+  /** Explicit issue deletions (the API never treats omission from issuesJson as deletion). */
+  deletedIssueIds?: string[];
 }
 
 export interface BuiltRunSyncBundle {
@@ -70,7 +72,15 @@ export async function buildRunSyncBundleRequest(runEntityId: string): Promise<Bu
     completedByName?: string;
     completedAtUtc?: string;
     bomActualJson?: string;
+    deletedIssueIds?: string[];
   } | undefined;
+
+  // Deletions recorded by any still-queued op for this run (the completion carries the runner's
+  // cumulative list; earlier progress saves are included defensively).
+  const deletedIssueIds = [...new Set(
+    pending.flatMap((op) => (op.body as { deletedIssueIds?: unknown } | undefined)?.deletedIssueIds)
+      .filter((id): id is string => typeof id === "string" && id.length > 0),
+  )];
 
   const mappedRunId = await offlineStore.getMappedId("workflow-run", runEntityId) ?? runEntityId;
 
@@ -97,6 +107,7 @@ export async function buildRunSyncBundleRequest(runEntityId: string): Promise<Bu
       bomActualJson: completeBody?.bomActualJson,
       signatures,
       idempotencyKey: `bundle:${mappedRunId}:${completeOp.id}`,
+      ...(deletedIssueIds.length > 0 ? { deletedIssueIds } : {}),
     },
   };
 }

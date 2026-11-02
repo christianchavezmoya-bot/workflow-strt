@@ -1462,12 +1462,18 @@ export const assetWorkflowRunService = {
     }
   },
 
-  async saveProgress(runId: string, stepResultsJson: string, issuesJson?: string, status?: string): Promise<AssetWorkflowRun> {
+  /**
+   * `deletedIssueIds`: issues the user explicitly deleted. The server never treats an issue that is
+   * merely missing from `issuesJson` as deleted (see RunIssueMerge on the API).
+   */
+  async saveProgress(runId: string, stepResultsJson: string, issuesJson?: string, status?: string, deletedIssueIds?: string[]): Promise<AssetWorkflowRun> {
+    const deletions = deletedIssueIds && deletedIssueIds.length > 0 ? { deletedIssueIds } : {};
     if (!isMobileNativePlatform()) {
       const requestBody = await mediaStore.resolveUploadPayload({
         stepResultsJson,
         issuesJson: issuesJson ?? null,
         status: status ?? null,
+        ...deletions,
       });
       const res = await api.put<AssetWorkflowRun>(`/asset-workflow-runs/${runId}`, requestBody, {
         timeout: RUN_MUTATION_TIMEOUT_MS,
@@ -1482,6 +1488,7 @@ export const assetWorkflowRunService = {
       stepResultsJson,
       issuesJson: issuesJson ?? null,
       status: status ?? null,
+      ...deletions,
     };
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");
@@ -1532,6 +1539,7 @@ export const assetWorkflowRunService = {
           stepResultsJson: persistedStepResults,
           issuesJson: persistedIssues ?? null,
           status: status ?? null,
+          ...deletions,
         },
         optimisticPatch: {
           stepResultsJson: persistedStepResults,
@@ -1617,7 +1625,8 @@ export const assetWorkflowRunService = {
     }
   },
 
-  async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string, bomActualJson?: string): Promise<AssetWorkflowRun> {
+  async completeRun(runId: string, stepResultsJson: string, issuesJson: string, completedByName?: string, bomActualJson?: string, deletedIssueIds?: string[]): Promise<AssetWorkflowRun> {
+    const deletions = deletedIssueIds && deletedIssueIds.length > 0 ? { deletedIssueIds } : {};
     if (!isMobileNativePlatform()) {
       const body = {
         useStoredStepResults: false,
@@ -1625,6 +1634,7 @@ export const assetWorkflowRunService = {
         issuesJson,
         completedByName: completedByName ?? null,
         bomActualJson: bomActualJson ?? null,
+        ...deletions,
       };
       const requestBody = await mediaStore.resolveUploadPayload(body);
       const res = await api.post<AssetWorkflowRun>(`/asset-workflow-runs/${runId}/complete`, requestBody, {
@@ -1645,6 +1655,7 @@ export const assetWorkflowRunService = {
       issuesJson,
       completedByName: completedByName ?? null,
       bomActualJson: bomActualJson ?? null,
+      ...deletions,
     };
     try {
       if (shouldSkipRunMutation()) throw new Error("skip-network-offline");

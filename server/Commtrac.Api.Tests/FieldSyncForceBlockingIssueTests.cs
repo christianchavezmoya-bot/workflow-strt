@@ -107,6 +107,18 @@ public class FieldSyncForceBlockingIssueTests : IClassFixture<ApiTestFactory>
         return (run, audits);
     }
 
+    /// <summary>The phone's issues as sent, apart from the server-stamped createdByUserId (RunIssueMerge).</summary>
+    private static void AssertSameIssues(string expected, string actual)
+    {
+        static string Normalize(string json)
+        {
+            var arr = (System.Text.Json.Nodes.JsonArray)System.Text.Json.Nodes.JsonNode.Parse(json)!;
+            foreach (var o in arr.OfType<System.Text.Json.Nodes.JsonObject>()) o.Remove(Commtrac.Api.Services.RunIssueMerge.CreatedByUserIdKey);
+            return arr.ToJsonString();
+        }
+        Assert.Equal(Normalize(expected), Normalize(actual));
+    }
+
     private static string State(AssetWorkflowRunEntity r) => $"{r.Status}|{r.IsLocked}|{r.SignatureStatus}|{r.IssuesJson}|{r.StepResultsJson}|{r.UpdatedAt:O}";
 
     public enum Force { None, Header, QueryString }
@@ -209,7 +221,7 @@ public class FieldSyncForceBlockingIssueTests : IClassFixture<ApiTestFactory>
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var (run, audits) = await ReadAsync(runId);
         Assert.True(run.IsLocked);
-        Assert.Equal(issues, run.IssuesJson);
+        AssertSameIssues(issues, run.IssuesJson);
         Assert.Equal(0, audits);
     }
 
@@ -232,7 +244,7 @@ public class FieldSyncForceBlockingIssueTests : IClassFixture<ApiTestFactory>
         var runId = await SeedRunAsync(locked: true, issuesJson: "[]");
         var resp = await client.SendAsync(Complete(runId, OpenObservation, Force.Header));
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        Assert.Equal(OpenObservation, (await ReadAsync(runId)).Run.IssuesJson);
+        AssertSameIssues(OpenObservation, (await ReadAsync(runId)).Run.IssuesJson);
     }
 
     [Fact]
@@ -244,7 +256,7 @@ public class FieldSyncForceBlockingIssueTests : IClassFixture<ApiTestFactory>
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var (run, _) = await ReadAsync(runId);
         Assert.True(run.IsLocked);
-        Assert.Equal(ResolvedBlocking, run.IssuesJson);
+        AssertSameIssues(ResolvedBlocking, run.IssuesJson);
     }
 
     [Fact]
