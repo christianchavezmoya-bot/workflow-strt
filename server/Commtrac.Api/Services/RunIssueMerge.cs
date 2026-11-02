@@ -10,9 +10,16 @@ public sealed record RunIssueMergeResult(
     string Json,
     IReadOnlyList<string> PreservedOmittedIds,
     IReadOnlyList<string> DeletedIds,
+    IReadOnlyList<string> DowngradedIds,
     IReadOnlyList<RunIssueRefusal> Refusals,
     int OpenBlockingCount,
-    bool ClientUnreadable);
+    /// <summary>Why the client's list was rejected (null when valid). Nothing was merged.</summary>
+    string? ClientInvalidReason,
+    /// <summary>The recorded list can't be read. Fail closed: nothing was merged or replaced.</summary>
+    bool StoredUnreadable)
+{
+    public bool Rejected => ClientInvalidReason is not null || StoredUnreadable;
+}
 
 /// <summary>
 /// Combines the issue list a client sends for a run (save progress, complete, sync bundle, patch
@@ -39,17 +46,23 @@ public static class RunIssueMerge
     public static RunIssueMergeResult Merge(
         string? serverJson, string? clientJson, IEnumerable<string>? deletedIssueIds, string? actorUserId, bool callerManagesBlocking)
     {
-        var client = ParseArray(clientJson);
-        if (client is null)
-        {
-            return new RunIssueMergeResult(serverJson ?? "[]", Array.Empty<string>(), Array.Empty<string>(), Array.Empty<RunIssueRefusal>(),
-                CountOpenBlocking(serverJson), ClientUnreadable: true);
-        }
+        RunIssueMergeResult Reject(string? clientReason, bool storedUnreadable) =>
+            new(serverJson ?? "[]", Array.Empty<string>(), Array.Empty<string>(), Array.Empty<string>(), Array.Empty<RunIssueRefusal>(),
+                0, clientReason, storedUnreadable);
 
-        // A server list that can't be read can't be preserved either; keep the previous behaviour
-        // (the client's list) rather than block every save of the run.
-        var server = ParseArray(serverJson) ?? new JsonArray();
-        var deleted = new HashSet<string>(deletedIssueIds ?? Array.Empty<string>(), StringComparer.Ordinal);
+        var client = ParseArray(clientJson);
+        var clientReason = client is null ? "IssuesJson must be a JSON array." : ValidateClientIssues(client);
+        var deletedList = (deletedIssueIds ?? Array.Empty<string>()).ToList();
+        if (clientReason is null && deletedList.Any(string.IsNullOrWhiteSpace))
+            clientReason = "deletedIssueIds must contain non-empty issue ids.";
+        if (clientReason is not null) return Reject(clientReason, storedUnreadable: false);
+
+        // Fail closed: a recorded list that can't be read can't be preserved, and must never be
+        // silently replaced by the client's list.
+        var server = ParseArray(serverJson);
+        if (server is null) return Reject(null, storedUnreadable: true);
+
+        var deleted = new HashSet<string>(deletedList, StringComparer.Ordinal);
         var serverById = new Dictionary<string, JsonObject>(StringComparer.Ordinal);
         foreach (var node in server)
         {
@@ -62,29 +75,26 @@ public static class RunIssueMerge
 
         var result = new JsonArray();
         var refusals = new List<RunIssueRefusal>();
+        var downgraded = new List<string>();
         var seen = new HashSet<string>(StringComparer.Ordinal);
 
-        foreach (var node in client)
+        // ValidateClientIssues guarantees: every entry is an object with a unique non-empty id.
+        foreach (var incoming in client.Cast<JsonObject>())
         {
-            if (node is not JsonObject incoming)
+            var id = IdOf(incoming)!;
+            seen.Add(id);
+            if (serverById.TryGetValue(id, out var recorded))
             {
-                result.Add(node?.DeepClone());
-                continue;
-            }
-            var id = IdOf(incoming);
-            if (id is not null && serverById.TryGetValue(id, out var recorded))
-            {
-                if (!seen.Add(id)) continue; // duplicate id in the payload: first one wins
                 var merged = MergeSameIssue(recorded, incoming);
-                if (IsOpenBlocking(recorded) && !IsBlocking(merged) && !IsResolved(merged) && !MayRemoveOrDowngrade(recorded))
+                if (IsOpenBlocking(recorded) && !IsBlocking(merged) && !IsResolved(merged))
                 {
-                    refusals.Add(new RunIssueRefusal(id, "An unresolved blocking issue can't be downgraded to non-blocking; resolve it instead."));
+                    if (MayRemoveOrDowngrade(recorded)) downgraded.Add(id);
+                    else refusals.Add(new RunIssueRefusal(id, "An unresolved blocking issue can't be downgraded to non-blocking; resolve it instead."));
                 }
                 result.Add(merged);
             }
             else
             {
-                if (id is not null && !seen.Add(id)) continue;
                 var added = (JsonObject)incoming.DeepClone();
                 added.Remove(CreatedByUserIdKey);
                 if (!string.IsNullOrWhiteSpace(actorUserId)) added[CreatedByUserIdKey] = actorUserId;
@@ -126,7 +136,29 @@ public static class RunIssueMerge
         }
 
         var json = result.ToJsonString();
-        return new RunIssueMergeResult(json, preserved, removed, refusals, CountOpenBlocking(json), ClientUnreadable: false);
+        return new RunIssueMergeResult(json, preserved, removed, downgraded, refusals, CountOpenBlocking(json), ClientInvalidReason: null, StoredUnreadable: false);
+    }
+
+    /// <summary>
+    /// A client issue list must be an array of objects, each with a unique non-empty string id, and
+    /// with isBlocking / resolved (when present) as JSON booleans — the fields the blocking gate reads.
+    /// </summary>
+    private static string? ValidateClientIssues(JsonArray client)
+    {
+        var ids = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var node in client)
+        {
+            if (node is not JsonObject o) return "Every issue must be a JSON object.";
+            var id = IdOf(o);
+            if (id is null) return "Every issue needs a non-empty string id.";
+            if (!ids.Add(id)) return $"Duplicate issue id '{id}'.";
+            foreach (var key in new[] { "isBlocking", "resolved" })
+            {
+                if (o[key] is { } v && v.GetValueKind() is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
+                    return $"Issue '{id}': {key} must be true or false.";
+            }
+        }
+        return null;
     }
 
     /// <summary>Unresolved blocking issues (isBlocking && !resolved), as CompleteRun's gate counts them.</summary>

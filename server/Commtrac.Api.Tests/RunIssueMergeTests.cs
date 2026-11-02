@@ -106,12 +106,49 @@ public class RunIssueMergeTests
 
     [Theory]
     [InlineData("not json")]
-    [InlineData("""{"id":"x"}""")]
-    public void An_unreadable_client_list_is_flagged_and_changes_nothing(string payload)
+    [InlineData("""{"id":"x"}""")]                                   // not an array
+    [InlineData("""["just a string"]""")]                           // entry not an object
+    [InlineData("""[{"description":"no id"}]""")]                    // missing id
+    [InlineData("""[{"id":""}]""")]                                  // empty id
+    [InlineData("""[{"id":7}]""")]                                   // id not a string
+    [InlineData("""[{"id":"a"},{"id":"a"}]""")]                      // duplicate id
+    [InlineData("""[{"id":"a","isBlocking":"true"}]""")]             // isBlocking not boolean
+    [InlineData("""[{"id":"a","isBlocking":true,"resolved":1}]""")]  // resolved not boolean
+    public void A_malformed_client_list_is_rejected_and_nothing_is_merged(string payload)
     {
-        var r = RunIssueMerge.Merge(RecordedBlocking, payload, null, Installer, false);
-        Assert.True(r.ClientUnreadable);
+        var r = RunIssueMerge.Merge(RecordedBlocking, payload, null, Installer, true);
+        Assert.True(r.Rejected);
+        Assert.NotNull(r.ClientInvalidReason);
         Assert.Equal(RecordedBlocking, r.Json);
+        Assert.Empty(r.DeletedIds);
+    }
+
+    [Fact]
+    public void Blank_deleted_ids_are_rejected()
+    {
+        var r = RunIssueMerge.Merge(RecordedBlocking, "[]", new[] { "" }, Pm, true);
+        Assert.NotNull(r.ClientInvalidReason);
+    }
+
+    [Theory]
+    [InlineData("not json")]
+    [InlineData("""{"id":"b1"}""")]
+    public void An_unreadable_recorded_list_fails_closed_and_is_never_replaced(string stored)
+    {
+        // Even an Admin/PM with a valid payload can't overwrite it.
+        var r = RunIssueMerge.Merge(stored, """[{"id":"n1","isBlocking":false,"resolved":false}]""", new[] { "b1" }, Pm, true);
+        Assert.True(r.StoredUnreadable);
+        Assert.True(r.Rejected);
+        Assert.Equal(stored, r.Json);
+        Assert.Empty(r.DeletedIds);
+    }
+
+    [Fact]
+    public void An_allowed_downgrade_is_reported_for_auditing()
+    {
+        var r = RunIssueMerge.Merge(RecordedBlocking, """[{"id":"b1","isBlocking":false,"resolved":false,"severity":"low"}]""", null, Pm, false);
+        Assert.Empty(r.Refusals);
+        Assert.Equal(new[] { "b1" }, r.DowngradedIds);
     }
 
     [Fact]
