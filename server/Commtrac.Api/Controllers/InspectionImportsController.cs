@@ -315,7 +315,7 @@ public class InspectionImportsController : ControllerBase
             if (existingMappedRun is not null)
             {
                 existingMappedRun.StepResultsJson = BuildStepResultsJson(canonical);
-                existingMappedRun.IssuesJson = BuildIssuesJson(canonical);
+                existingMappedRun.IssuesJson = MergeIssuesJson(existingMappedRun.IssuesJson, BuildIssuesJson(canonical));
                 existingMappedRun.UpdatedAt = now;
             }
             return;
@@ -372,14 +372,12 @@ public class InspectionImportsController : ControllerBase
             run.CompletedAt = now;
             run.UpdatedAt = now;
 
+            // Never replace or clear issues already recorded on the run (field-reported issues,
+            // resolutions, comments, media): the import's failed checks are merged in.
             if (canonical is not null)
             {
                 run.StepResultsJson = BuildStepResultsJson(canonical);
-                run.IssuesJson = BuildIssuesJson(canonical);
-            }
-            else
-            {
-                run.IssuesJson = "[]";
+                run.IssuesJson = MergeIssuesJson(run.IssuesJson, BuildIssuesJson(canonical));
             }
 
             if (entity.MappedRunId is null)
@@ -408,7 +406,7 @@ public class InspectionImportsController : ControllerBase
         }
 
         asset.Status = "Complete";
-        asset.IssuesJson = "[]";
+        // asset.IssuesJson is left as recorded (it used to be cleared here, silently dropping issues).
         asset.InstalledAt = now;
         asset.InstalledBy = actorName;
         asset.UpdatedAt = now;
@@ -520,13 +518,74 @@ public class InspectionImportsController : ControllerBase
         return JsonSerializer.Serialize(results);
     }
 
+    internal const string ImportedIssueIdPrefix = "inspection-import:";
+
+    /// <summary>
+    /// Existing issues are kept exactly as recorded (including resolution, comments and media);
+    /// imported issues are appended unless an issue with the same id already exists (the recorded
+    /// one wins, so a resolved imported issue stays resolved when the inspection is reprocessed).
+    /// If the existing value is not a readable JSON array it is returned unchanged rather than
+    /// risk losing data.
+    /// </summary>
+    internal static string MergeIssuesJson(string? existingJson, string? importedJson)
+    {
+        System.Text.Json.Nodes.JsonArray existing;
+        if (string.IsNullOrWhiteSpace(existingJson))
+        {
+            existing = new System.Text.Json.Nodes.JsonArray();
+        }
+        else
+        {
+            try
+            {
+                if (System.Text.Json.Nodes.JsonNode.Parse(existingJson) is not System.Text.Json.Nodes.JsonArray parsed) return existingJson;
+                existing = parsed;
+            }
+            catch (JsonException)
+            {
+                return existingJson;
+            }
+        }
+
+        System.Text.Json.Nodes.JsonArray imported;
+        try
+        {
+            imported = string.IsNullOrWhiteSpace(importedJson)
+                ? new System.Text.Json.Nodes.JsonArray()
+                : System.Text.Json.Nodes.JsonNode.Parse(importedJson) as System.Text.Json.Nodes.JsonArray ?? new System.Text.Json.Nodes.JsonArray();
+        }
+        catch (JsonException)
+        {
+            imported = new System.Text.Json.Nodes.JsonArray();
+        }
+
+        static string? IdOf(System.Text.Json.Nodes.JsonNode? n) =>
+            n is System.Text.Json.Nodes.JsonObject o && o["id"] is System.Text.Json.Nodes.JsonValue v && v.TryGetValue<string>(out var id) ? id : null;
+
+        var ids = existing.Select(IdOf).Where(id => id is not null).ToHashSet();
+        var added = 0;
+        foreach (var issue in imported.ToList())
+        {
+            var id = IdOf(issue);
+            if (id is not null && !ids.Add(id)) continue;
+            imported.Remove(issue);
+            existing.Add(issue);
+            added++;
+        }
+        // Nothing new: hand back the recorded JSON byte-for-byte.
+        if (added == 0 && !string.IsNullOrWhiteSpace(existingJson)) return existingJson;
+        return existing.ToJsonString();
+    }
+
     private static string BuildIssuesJson(CanonicalInspection canonical)
     {
         var issues = canonical.Results
             .Where(r => r.Pass == false)
             .Select(r => new
             {
-                id = Guid.NewGuid().ToString(),
+                // Stable per check, so reprocessing the same inspection doesn't duplicate its issues
+                // when they are merged into the run (see MergeIssuesJson).
+                id = string.IsNullOrWhiteSpace(r.CheckId) ? Guid.NewGuid().ToString() : $"{ImportedIssueIdPrefix}{r.CheckId}",
                 description = $"{r.Label ?? r.CheckId}: {r.Value ?? "Failed"}",
                 issueType = "observation",
                 severity = "medium",
